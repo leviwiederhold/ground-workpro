@@ -1,0 +1,147 @@
+@import "@fortawesome/fontawesome-free/css/all.min.css";
+@import "leaflet/dist/leaflet.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Dozer";
+  src: url("/fonts/Dozer.ttf") format("truetype");
+  font-weight: normal;
+  font-style: normal;
+}
+
+.font-dozer {
+  font-family: "Dozer", sans-serif;
+}
+
+h1,
+h2,
+h3,
+.text-5xl,
+.text-6xl,
+.text-4xl,
+.text-3xl,
+.text-2xl {
+  font-family: "Dozer", sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.stat-value {
+  font-family: "Dozer", sans-serif;
+}
+
+nav button span {
+  font-family: "Dozer", sans-serif;
+  letter-spacing: 0.03em;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 2px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #aaa;
+}
+
+.drag-over {
+  background: #fff7ed !important;
+  border: 2px dashed #f97316 !important;
+}
+
+.dragging {
+  opacity: 0.5;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse-dot {
+  animation: pulse-dot 2s infinite;
+}
+
+.rounded-lg {
+  border-radius: 0.5rem !important;
+}
+
+.rounded-xl {
+  border-radius: 0.625rem !important;
+}
+
+.rounded-2xl {
+  border-radius: 0.75rem !important;
+}
+
+.rounded-full {
+  border-radius: 9999px !important;
+}
+
+@media (max-width: 768px) {
+  .app-shell .mobile-tap-target {
+    min-height: 44px;
+  }
+
+  .app-shell .grid-cols-2 {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+
+  .app-shell table {
+    width: 100%;
+  }
+
+  .app-shell table thead {
+    display: none;
+  }
+
+  .app-shell table tbody,
+  .app-shell table tr,
+  .app-shell table td {
+    display: block;
+    width: 100%;
+  }
+
+  .app-shell table tr {
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    margin-bottom: 0.75rem;
+    background: #fff;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .app-shell table td {
+    border: 0 !important;
+    padding: 0.4rem 0 !important;
+    white-space: normal;
+  }
+
+  .app-shell table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.7rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.12rem;
+    font-weight: 600;
+  }
+}

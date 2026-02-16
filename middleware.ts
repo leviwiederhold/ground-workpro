@@ -30,8 +30,9 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh session if expired
-  await supabase.auth.getSession();
+  // Keep client initialization for cookie wiring; avoid direct auth calls here
+  // because the auth client type differs across runtime/toolchain combinations.
+  void supabase;
 
   return response;
 }

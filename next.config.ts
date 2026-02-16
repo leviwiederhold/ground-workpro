@@ -8,8 +8,8 @@ const requiredEnv = [
 const missingEnv = requiredEnv.filter((key) => !process.env[key]);
 
 if (missingEnv.length > 0) {
-  throw new Error(
-    `Missing required environment variables: ${missingEnv.join(", ")}`
+  console.warn(
+    `Warning: Missing Supabase environment variables at build time: ${missingEnv.join(", ")}`
   );
 }
 

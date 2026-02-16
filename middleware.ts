@@ -11,28 +11,38 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  const supabase = createServerClient(
-    url,
-    anonKey,
-    {
-      cookies: {
-        getAll: () => request.cookies.getAll(),
-        setAll: (cookiesToSet) => {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
-      },
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return response;
     }
-  );
 
-  // Keep client initialization for cookie wiring; avoid direct auth calls here
-  // because the auth client type differs across runtime/toolchain combinations.
-  void supabase;
+    const supabase = createServerClient(
+      parsed.toString().replace(/\/$/, ""),
+      anonKey,
+      {
+        cookies: {
+          getAll: () => request.cookies.getAll(),
+          setAll: (cookiesToSet) => {
+            cookiesToSet.forEach(({ name, value }) =>
+              request.cookies.set(name, value)
+            );
+            response = NextResponse.next({ request });
+            cookiesToSet.forEach(({ name, value, options }) => {
+              response.cookies.set(name, value, options);
+            });
+          },
+        },
+      }
+    );
+
+    // Keep client initialization for cookie wiring; avoid direct auth calls here
+    // because the auth client type differs across runtime/toolchain combinations.
+    void supabase;
+  } catch {
+    // Fail open so middleware never takes down the app.
+    return response;
+  }
 
   return response;
 }

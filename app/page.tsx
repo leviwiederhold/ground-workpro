@@ -4,7 +4,6 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
-import Chart from 'chart.js/auto';
 import { supabaseBrowser } from '@/lib/supabase/client';
 
 
@@ -116,7 +115,12 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
 
     const formatCurrency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
-    const formatDate = (dateStr) => new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const formatDate = (dateStr) => {
+      if (!dateStr) return 'TBD';
+      const parsedDate = new Date(dateStr);
+      if (Number.isNaN(parsedDate.getTime())) return 'TBD';
+      return parsedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    };
     const formatTime = (date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
     const getDaysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24));
 
@@ -344,6 +348,207 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       </div>
     );
 
+    const AttachmentPanel = ({ entityType, entityId }) => {
+      const [attachments, setAttachments] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [uploading, setUploading] = useState(false);
+      const [error, setError] = useState('');
+      const fileInputRef = useRef(null);
+
+      const loadAttachments = useCallback(async () => {
+        if (entityId === null || entityId === undefined || entityId === '') {
+          setAttachments([]);
+          return;
+        }
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch(`/api/attachments?entity_type=${encodeURIComponent(entityType)}&entity_id=${encodeURIComponent(String(entityId))}`, { cache: 'no-store' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok) {
+            setError(payload?.error || raw || 'Failed to load attachments');
+            setLoading(false);
+            return;
+          }
+          setAttachments(payload?.attachments || []);
+        } catch {
+          setError('Failed to load attachments');
+        } finally {
+          setLoading(false);
+        }
+      }, [entityType, entityId]);
+
+      useEffect(() => {
+        loadAttachments();
+      }, [loadAttachments]);
+
+      const handleUpload = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file || entityId === null || entityId === undefined || entityId === '') return;
+
+        setUploading(true);
+        setError('');
+        try {
+          const uploadUrlResponse = await fetch('/api/attachments/upload-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              entity_type: entityType,
+              entity_id: entityId,
+              file_name: file.name,
+              content_type: file.type || 'application/octet-stream',
+            }),
+          });
+
+          const uploadUrlRaw = await uploadUrlResponse.text();
+          let uploadUrlPayload = null;
+          try {
+            uploadUrlPayload = uploadUrlRaw ? JSON.parse(uploadUrlRaw) : null;
+          } catch {
+            uploadUrlPayload = null;
+          }
+
+          if (!uploadUrlResponse.ok || !uploadUrlPayload?.signedUploadUrl || !uploadUrlPayload?.path) {
+            setError(uploadUrlPayload?.error || uploadUrlRaw || 'Failed to initialize upload');
+            setUploading(false);
+            return;
+          }
+
+          const putResponse = await fetch(uploadUrlPayload.signedUploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || uploadUrlPayload.contentType || 'application/octet-stream' },
+            body: file,
+          });
+
+          if (!putResponse.ok) {
+            const putRaw = await putResponse.text();
+            setError(putRaw || 'Failed to upload file');
+            setUploading(false);
+            return;
+          }
+
+          const confirmResponse = await fetch('/api/attachments/confirm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              entity_type: entityType,
+              entity_id: entityId,
+              bucket: uploadUrlPayload.bucket,
+              path: uploadUrlPayload.path,
+              file_name: file.name,
+              content_type: file.type || 'application/octet-stream',
+              file_size: file.size,
+            }),
+          });
+
+          const confirmRaw = await confirmResponse.text();
+          let confirmPayload = null;
+          try {
+            confirmPayload = confirmRaw ? JSON.parse(confirmRaw) : null;
+          } catch {
+            confirmPayload = null;
+          }
+
+          if (!confirmResponse.ok) {
+            setError(confirmPayload?.error || confirmRaw || 'Failed to confirm upload');
+            setUploading(false);
+            return;
+          }
+
+          await loadAttachments();
+        } catch {
+          setError('Failed to upload file');
+        } finally {
+          setUploading(false);
+        }
+      };
+
+      const handleDelete = async (attachmentId) => {
+        const confirmed = window.confirm('Delete this attachment? This cannot be undone.');
+        if (!confirmed) return;
+        setError('');
+        try {
+          const response = await fetch(`/api/attachments/${attachmentId}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.success) {
+            setError(payload?.error || raw || 'Failed to delete attachment');
+            return;
+          }
+          setAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
+        } catch {
+          setError('Failed to delete attachment');
+        }
+      };
+
+      return (
+        <div className="pt-4 border-t border-gray-200">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-500">Attachments</p>
+            <div className="flex items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handleUpload}
+              />
+              <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                <Icon name="paperclip" className="mr-1" />
+                {uploading ? 'Uploading...' : 'Upload'}
+              </Button>
+            </div>
+          </div>
+
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading attachments...</p>
+          ) : attachments.length === 0 ? (
+            <p className="text-sm text-gray-400">No attachments yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {attachments.map((attachment) => (
+                <div key={attachment.id} className="p-2 bg-gray-50 rounded-lg flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-gray-800 truncate">{attachment.fileName}</p>
+                    <p className="text-xs text-gray-500">{attachment.contentType || 'file'}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {attachment.signedDownloadUrl ? (
+                      <a
+                        href={attachment.signedDownloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs px-2 py-1 rounded bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
+                      >
+                        Download
+                      </a>
+                    ) : (
+                      <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-500 border border-gray-200">No link</span>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => handleDelete(attachment.id)}>
+                      <Icon name="trash" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+        </div>
+      );
+    };
+
     // ============================================
     // MAIN APPLICATION
     // ============================================
@@ -384,7 +589,8 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const [employees, setEmployees] = useState(EMPLOYEES);
       const [workOrders, setWorkOrders] = useState([]);
       const [workOrdersLoading, setWorkOrdersLoading] = useState(true);
-      const [dailyReports, setDailyReports] = useState(DAILY_REPORTS);
+      const [dailyReports, setDailyReports] = useState([]);
+      const [dailyReportsLoading, setDailyReportsLoading] = useState(true);
       const [timeEntries, setTimeEntries] = useState([]);
       const [scheduleData, setScheduleData] = useState({});
 
@@ -420,6 +626,38 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         };
 
         loadJobs();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadDailyReports = async () => {
+          try {
+            setDailyReportsLoading(true);
+            const response = await fetch('/api/daily-reports', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load daily reports');
+            }
+            if (isMounted) {
+              setDailyReports(payload.dailyReports || []);
+            }
+          } catch {
+            if (isMounted) {
+              setDailyReports([]);
+            }
+          } finally {
+            if (isMounted) {
+              setDailyReportsLoading(false);
+            }
+          }
+        };
+
+        loadDailyReports();
 
         return () => {
           isMounted = false;
@@ -568,7 +806,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} />;
           case 'bids': return <BidsView bids={bids} setBids={setBids} />;
           case 'vendors': return <VendorsView vendors={vendors} setVendors={setVendors} />;
-          case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} />;
+          case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} />;
           case 'costing': return <JobCostingView jobs={jobs} />;
           case 'finance': return <FinanceView jobs={jobs} />;
           case 'marketing': return <MarketingView />;
@@ -818,6 +1056,8 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const mapRef = useRef(null);
       const mapInstanceRef = useRef(null);
       const [mapLoadError, setMapLoadError] = useState(false);
+      const hasValidCoords = (lat, lng) =>
+        Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
 
       useEffect(() => {
         let isMounted = true;
@@ -843,9 +1083,9 @@ import { supabaseBrowser } from '@/lib/supabase/client';
             });
 
             // Add equipment markers
-            equipment.filter(e => e.status === 'active').forEach(eq => {
+            equipment.filter(e => e.status === 'active' && hasValidCoords(e.lat, e.lng)).forEach(eq => {
               const job = jobs.find(j => j.id === eq.jobId);
-              L.marker([eq.lat, eq.lng], { icon: equipIcon })
+              L.marker([Number(eq.lat), Number(eq.lng)], { icon: equipIcon })
                 .addTo(mapInstanceRef.current)
                 .bindPopup(`<b>${eq.name}</b><br/>${eq.type}<br/>Job: ${job?.name || 'Unassigned'}<br/>Hours: ${eq.hours.toLocaleString()}`);
             });
@@ -858,8 +1098,8 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               iconAnchor: [10, 10],
             });
 
-            jobs.filter(j => j.status === 'active').forEach(job => {
-              L.marker([job.lat, job.lng], { icon: jobIcon })
+            jobs.filter(j => j.status === 'active' && hasValidCoords(j.lat, j.lng)).forEach(job => {
+              L.marker([Number(job.lat), Number(job.lng)], { icon: jobIcon })
                 .addTo(mapInstanceRef.current)
                 .bindPopup(`<b>${job.name}</b><br/>${job.client}<br/>${job.address}`);
             });
@@ -1442,14 +1682,14 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       return (
         <div className="space-y-6">
           {/* Filters */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
+              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
                 {['all', 'active', 'bidding', 'completed'].map(status => (
                   <button
                     key={status}
                     onClick={() => setFilter(status)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                       filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -1457,9 +1697,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   </button>
                 ))}
               </div>
-              <SearchInput value={search} onChange={setSearch} placeholder="Search jobs..." />
+              <div className="w-full sm:w-72 lg:w-80">
+                <SearchInput value={search} onChange={setSearch} placeholder="Search jobs..." />
+              </div>
             </div>
-            <Button variant="brand" onClick={handleCreateJob}>
+            <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateJob}>
               <Icon name="plus" className="mr-2" /> New Job
             </Button>
           </div>
@@ -1614,6 +1856,8 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       {jobEmployees.length === 0 && <p className="text-sm text-gray-400">No crew assigned</p>}
                     </div>
                   </div>
+
+                  <AttachmentPanel entityType="job" entityId={selectedJob.id} />
 
                   {jobActionError && (
                     <p className="text-sm text-red-600">{jobActionError}</p>
@@ -1825,14 +2069,14 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           </div>
 
           {/* Filters & Actions */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
+              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
                 {['all', 'active', 'idle', 'maintenance'].map(status => (
                   <button
                     key={status}
                     onClick={() => setFilter(status)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                       filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -1840,7 +2084,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   </button>
                 ))}
               </div>
-              <div className="flex bg-gray-100 rounded-lg p-1">
+              <div className="flex bg-gray-100 rounded-lg p-1 w-fit">
                 <button onClick={() => setViewMode('grid')} className={`p-2 rounded ${viewMode === 'grid' ? 'bg-white shadow' : ''}`}>
                   <Icon name="grip" />
                 </button>
@@ -1849,11 +2093,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 </button>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setShowModal({ type: 'equipment-checkin' })}>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'equipment-checkin' })}>
                 <Icon name="clipboard-check" className="mr-2" /> Check In/Out
               </Button>
-              <Button variant="brand" onClick={handleCreateEquipment}>
+              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEquipment}>
                 <Icon name="plus" className="mr-2" /> Add Equipment
               </Button>
             </div>
@@ -2421,14 +2665,14 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           </div>
 
           {/* Filters */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
                 {['all', 'in-progress', 'scheduled', 'repair', 'preventive'].map(f => (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                       filter === f ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -2437,7 +2681,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 ))}
               </div>
             </div>
-            <Button variant="brand" onClick={() => setShowModal({ type: 'work-order' })}>
+            <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'work-order' })}>
               <Icon name="plus" className="mr-2" /> New Work Order
             </Button>
           </div>
@@ -2612,6 +2856,8 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <p className="text-sm font-medium">{selectedWO.laborHours} hours</p>
                   </div>
 
+                  <AttachmentPanel entityType="work_order" entityId={selectedWO.id} />
+
                   {woActionError && (
                     <p className="text-sm text-red-600">{woActionError}</p>
                   )}
@@ -2640,62 +2886,95 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // REPORTS VIEW (with Charts)
     // ============================================
-    const ReportsView = ({ jobs, equipment, employees, dailyReports }) => {
+    const ReportsView = ({ jobs, equipment, employees, dailyReports, dailyReportsLoading, setDailyReports, setShowModal }) => {
       const chartRef = useRef(null);
       const pieChartRef = useRef(null);
       const [activeTab, setActiveTab] = useState('overview');
+      const [chartsUnavailable, setChartsUnavailable] = useState(false);
+      const [editingReportId, setEditingReportId] = useState(null);
+      const [reportActionLoading, setReportActionLoading] = useState(false);
+      const [reportActionError, setReportActionError] = useState('');
+      const [reportForm, setReportForm] = useState({ jobId: '', date: '', notes: '' });
 
       useEffect(() => {
-        // Revenue Chart
-        if (chartRef.current) {
-          const ctx = chartRef.current.getContext('2d');
-          const existingChart = Chart.getChart(ctx);
-          if (existingChart) existingChart.destroy();
+        let revenueChart = null;
+        let utilizationChart = null;
+        let cancelled = false;
 
-          new Chart(ctx, {
-            type: 'bar',
-            data: {
-              labels: jobs.filter(j => j.status !== 'bidding').map(j => j.name.split(' ').slice(0, 2).join(' ')),
-              datasets: [
-                { label: 'Budget', data: jobs.filter(j => j.status !== 'bidding').map(j => j.budget), backgroundColor: '#e5e7eb' },
-                { label: 'Spent', data: jobs.filter(j => j.status !== 'bidding').map(j => j.spent), backgroundColor: '#f97316' },
-              ]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: { legend: { position: 'bottom' } },
-              scales: { y: { beginAtZero: true, ticks: { callback: (v) => '$' + (v/1000) + 'k' } } }
+        const setupCharts = async () => {
+          try {
+            const chartModule = await import('chart.js/auto');
+            const Chart = chartModule.default;
+
+            if (cancelled) return;
+            setChartsUnavailable(false);
+
+            if (chartRef.current) {
+              const ctx = chartRef.current.getContext('2d');
+              if (ctx) {
+                const existingChart = Chart.getChart(ctx);
+                if (existingChart) existingChart.destroy();
+
+                revenueChart = new Chart(ctx, {
+                  type: 'bar',
+                  data: {
+                    labels: jobs.filter(j => j.status !== 'bidding').map(j => j.name.split(' ').slice(0, 2).join(' ')),
+                    datasets: [
+                      { label: 'Budget', data: jobs.filter(j => j.status !== 'bidding').map(j => j.budget), backgroundColor: '#e5e7eb' },
+                      { label: 'Spent', data: jobs.filter(j => j.status !== 'bidding').map(j => j.spent), backgroundColor: '#f97316' },
+                    ]
+                  },
+                  options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } },
+                    scales: { y: { beginAtZero: true, ticks: { callback: (v) => '$' + (v / 1000) + 'k' } } }
+                  }
+                });
+              }
             }
-          });
-        }
 
-        // Equipment Utilization Pie
-        if (pieChartRef.current) {
-          const ctx = pieChartRef.current.getContext('2d');
-          const existingChart = Chart.getChart(ctx);
-          if (existingChart) existingChart.destroy();
+            if (pieChartRef.current) {
+              const ctx = pieChartRef.current.getContext('2d');
+              if (ctx) {
+                const existingChart = Chart.getChart(ctx);
+                if (existingChart) existingChart.destroy();
 
-          new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-              labels: ['Active', 'Idle', 'Maintenance'],
-              datasets: [{
-                data: [
-                  equipment.filter(e => e.status === 'active').length,
-                  equipment.filter(e => e.status === 'idle').length,
-                  equipment.filter(e => e.status === 'maintenance').length,
-                ],
-                backgroundColor: ['#22c55e', '#eab308', '#ef4444'],
-              }]
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              plugins: { legend: { position: 'bottom' } }
+                utilizationChart = new Chart(ctx, {
+                  type: 'doughnut',
+                  data: {
+                    labels: ['Active', 'Idle', 'Maintenance'],
+                    datasets: [{
+                      data: [
+                        equipment.filter(e => e.status === 'active').length,
+                        equipment.filter(e => e.status === 'idle').length,
+                        equipment.filter(e => e.status === 'maintenance').length,
+                      ],
+                      backgroundColor: ['#22c55e', '#eab308', '#ef4444'],
+                    }]
+                  },
+                  options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'bottom' } }
+                  }
+                });
+              }
             }
-          });
-        }
+          } catch {
+            if (!cancelled) {
+              setChartsUnavailable(true);
+            }
+          }
+        };
+
+        setupCharts();
+
+        return () => {
+          cancelled = true;
+          if (revenueChart) revenueChart.destroy();
+          if (utilizationChart) utilizationChart.destroy();
+        };
       }, [jobs, equipment]);
 
       return (
@@ -2717,13 +2996,25 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 <Card className="p-4">
                   <h3 className="font-semibold text-gray-900 mb-4">Budget vs Spent by Job</h3>
                   <div className="h-64">
-                    <canvas ref={chartRef}></canvas>
+                    {chartsUnavailable ? (
+                      <div className="h-full rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
+                        Chart unavailable
+                      </div>
+                    ) : (
+                      <canvas ref={chartRef}></canvas>
+                    )}
                   </div>
                 </Card>
                 <Card className="p-4">
                   <h3 className="font-semibold text-gray-900 mb-4">Fleet Utilization</h3>
                   <div className="h-64">
-                    <canvas ref={pieChartRef}></canvas>
+                    {chartsUnavailable ? (
+                      <div className="h-full rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
+                        Chart unavailable
+                      </div>
+                    ) : (
+                      <canvas ref={pieChartRef}></canvas>
+                    )}
                   </div>
                 </Card>
               </div>
@@ -2750,9 +3041,107 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 
           {activeTab === 'daily' && (
             <div className="space-y-4">
-              {dailyReports.map(report => {
+              <div className="flex justify-end">
+                <Button variant="brand" size="sm" onClick={() => setShowModal({ type: 'daily-report' })}>
+                  <Icon name="plus" className="mr-2" /> New Report
+                </Button>
+              </div>
+              {dailyReportsLoading ? (
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500">Loading daily reports...</p>
+                </Card>
+              ) : dailyReports.length === 0 ? (
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500 mb-3">No daily reports yet.</p>
+                  <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'daily-report' })}>
+                    Create your first report
+                  </Button>
+                </Card>
+              ) : dailyReports.map(report => {
                 const job = jobs.find(j => j.id === report.jobId);
                 const submitter = employees.find(e => e.id === report.submittedBy);
+                const isEditing = editingReportId === report.id;
+
+                const startEdit = () => {
+                  setEditingReportId(report.id);
+                  setReportForm({
+                    jobId: report.jobId ? String(report.jobId) : '',
+                    date: report.date || '',
+                    notes: report.notes || report.workAccomplished || '',
+                  });
+                  setReportActionError('');
+                };
+
+                const cancelEdit = () => {
+                  setEditingReportId(null);
+                  setReportActionError('');
+                };
+
+                const saveReport = async () => {
+                  setReportActionLoading(true);
+                  setReportActionError('');
+                  try {
+                    const response = await fetch(`/api/daily-reports/${report.id}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        jobId: reportForm.jobId ? Number(reportForm.jobId) || reportForm.jobId : null,
+                        date: reportForm.date,
+                        notes: reportForm.notes,
+                        workAccomplished: reportForm.notes,
+                      }),
+                    });
+                    const raw = await response.text();
+                    let payload = null;
+                    try {
+                      payload = raw ? JSON.parse(raw) : null;
+                    } catch {
+                      payload = null;
+                    }
+                    if (!response.ok || !payload?.dailyReport) {
+                      setReportActionError(payload?.error || raw || 'Failed to update report');
+                      setReportActionLoading(false);
+                      return;
+                    }
+                    setDailyReports((prev) => prev.map((item) => (item.id === report.id ? payload.dailyReport : item)));
+                    setEditingReportId(null);
+                  } catch {
+                    setReportActionError('Failed to update report');
+                  } finally {
+                    setReportActionLoading(false);
+                  }
+                };
+
+                const deleteReport = async () => {
+                  const confirmed = window.confirm('Delete this daily report? This cannot be undone.');
+                  if (!confirmed) return;
+                  setReportActionLoading(true);
+                  setReportActionError('');
+                  try {
+                    const response = await fetch(`/api/daily-reports/${report.id}`, { method: 'DELETE' });
+                    const raw = await response.text();
+                    let payload = null;
+                    try {
+                      payload = raw ? JSON.parse(raw) : null;
+                    } catch {
+                      payload = null;
+                    }
+                    if (!response.ok || !payload?.success) {
+                      setReportActionError(payload?.error || raw || 'Failed to delete report');
+                      setReportActionLoading(false);
+                      return;
+                    }
+                    setDailyReports((prev) => prev.filter((item) => item.id !== report.id));
+                    if (editingReportId === report.id) {
+                      setEditingReportId(null);
+                    }
+                  } catch {
+                    setReportActionError('Failed to delete report');
+                  } finally {
+                    setReportActionLoading(false);
+                  }
+                };
+
                 return (
                   <Card key={report.id} className="p-4">
                     <div className="flex items-start justify-between mb-3">
@@ -2765,6 +3154,60 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                         <p className="text-gray-500">Crew: {report.crewSize}</p>
                       </div>
                     </div>
+                    <div className="flex flex-wrap items-center gap-2 mb-3">
+                      {isEditing ? (
+                        <>
+                          <Button variant="brand" size="sm" onClick={saveReport} disabled={reportActionLoading}>
+                            {reportActionLoading ? 'Saving...' : 'Save'}
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={reportActionLoading}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button variant="secondary" size="sm" onClick={startEdit} disabled={reportActionLoading}>
+                            Edit
+                          </Button>
+                          <Button variant="danger" size="sm" onClick={deleteReport} disabled={reportActionLoading}>
+                            Delete
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    {isEditing && (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Job</label>
+                          <select
+                            value={reportForm.jobId}
+                            onChange={(e) => setReportForm((prev) => ({ ...prev, jobId: e.target.value }))}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                          >
+                            <option value="">Select Job</option>
+                            {jobs.map(jobOption => <option key={jobOption.id} value={jobOption.id}>{jobOption.name}</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">Date</label>
+                          <input
+                            type="date"
+                            value={reportForm.date}
+                            onChange={(e) => setReportForm((prev) => ({ ...prev, date: e.target.value }))}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                          />
+                        </div>
+                        <div className="md:col-span-1">
+                          <label className="block text-xs text-gray-500 mb-1">Notes</label>
+                          <input
+                            type="text"
+                            value={reportForm.notes}
+                            onChange={(e) => setReportForm((prev) => ({ ...prev, notes: e.target.value }))}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                          />
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-3">
                       <div>
                         <p className="text-xs text-gray-500 mb-1">Work Accomplished</p>
@@ -2787,6 +3230,10 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                         </div>
                       )}
                     </div>
+                    <AttachmentPanel entityType="daily_report" entityId={report.id} />
+                    {reportActionError && isEditing && (
+                      <p className="text-sm text-red-600 mt-3">{reportActionError}</p>
+                    )}
                   </Card>
                 );
               })}
@@ -5097,17 +5544,53 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     const DailyReportModal = ({ isOpen, onClose, jobs, employees, dailyReports, setDailyReports }) => {
       const [form, setForm] = useState({ jobId: '', weather: '', tempHigh: '', tempLow: '', crewSize: '', workAccomplished: '', issues: '', tomorrowPlan: '' });
       const [materials, setMaterials] = useState([{ item: '', qty: '', unit: 'CY' }]);
+      const [submitLoading, setSubmitLoading] = useState(false);
+      const [submitError, setSubmitError] = useState('');
 
-      const handleSubmit = () => {
-        setDailyReports(prev => [...prev, {
-          id: Date.now(),
-          ...form,
-          jobId: Number(form.jobId),
-          date: new Date().toISOString().split('T')[0],
-          submittedBy: 1,
-          materialsUsed: materials.filter(m => m.item),
-        }]);
-        onClose();
+      const handleSubmit = async () => {
+        setSubmitError('');
+
+        setSubmitLoading(true);
+        try {
+          const response = await fetch('/api/daily-reports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jobId: form.jobId ? Number(form.jobId) || form.jobId : null,
+              date: new Date().toISOString().split('T')[0],
+              weather: form.weather,
+              tempHigh: Number(form.tempHigh) || 0,
+              tempLow: Number(form.tempLow) || 0,
+              crewSize: Number(form.crewSize) || 0,
+              workAccomplished: form.workAccomplished,
+              materialsUsed: materials.filter(m => m.item),
+              issues: form.issues,
+              tomorrowPlan: form.tomorrowPlan,
+              notes: form.workAccomplished,
+            }),
+          });
+
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.dailyReport) {
+            setSubmitError(payload?.error || raw || 'Failed to create daily report');
+            setSubmitLoading(false);
+            return;
+          }
+
+          setDailyReports(prev => [payload.dailyReport, ...prev]);
+          onClose();
+        } catch {
+          setSubmitError('Failed to create daily report');
+        } finally {
+          setSubmitLoading(false);
+        }
       };
 
       return (
@@ -5117,7 +5600,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Job Site</label>
                 <select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                  <option value="">Select Job</option>
+                  <option value="">Unassigned</option>
                   {jobs.filter(j => j.status === 'active').map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
                 </select>
               </div>
@@ -5172,8 +5655,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
             </div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={onClose}>Cancel</Button>
-              <Button variant="brand" onClick={handleSubmit}>Submit Report</Button>
+              <Button variant="brand" onClick={handleSubmit} disabled={submitLoading}>
+                {submitLoading ? 'Submitting...' : 'Submit Report'}
+              </Button>
             </div>
+            {submitError && <p className="text-sm text-red-600">{submitError}</p>}
           </div>
         </Modal>
       );
@@ -5457,11 +5943,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           <nav className="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-md z-50 border-b border-gray-100">
             <div className="max-w-7xl mx-auto px-6 py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 bg-brand-500 rounded-lg flex items-center justify-center">
                     <Icon name="mountain" className="text-white text-lg" />
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <span className="font-dozer text-2xl text-gray-900 tracking-wide">GROUNDWORK</span>
                     <span className="text-brand-500 font-dozer text-2xl tracking-wide">PRO</span>
                   </div>
@@ -5471,16 +5957,16 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   <a href="#pricing" className="text-gray-600 hover:text-gray-900 font-medium">Pricing</a>
                   <a href="#testimonials" className="text-gray-600 hover:text-gray-900 font-medium">Testimonials</a>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                   <button
                     onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
-                    className="px-4 py-2 text-gray-700 font-medium hover:text-gray-900"
+                    className="px-2 sm:px-4 py-2 text-gray-700 font-medium hover:text-gray-900 whitespace-nowrap"
                   >
                     Log In
                   </button>
                   <button
                     onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
-                    className="px-5 py-2.5 bg-brand-500 text-white font-medium rounded-lg hover:bg-brand-600 transition-colors"
+                    className="hidden sm:inline-flex px-5 py-2.5 bg-brand-500 text-white font-medium rounded-lg hover:bg-brand-600 transition-colors whitespace-nowrap"
                   >
                     Start Free Trial
                   </button>

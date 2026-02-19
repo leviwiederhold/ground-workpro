@@ -91,15 +91,6 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       { id: 8, title: 'Underground Utility Awareness', category: 'Site Safety', duration: '30 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300', required: true, dueDate: '2026-02-28', completedBy: [1, 4] },
     ];
 
-    // BIDS DATA
-    const BIDS = [
-      { id: 1, projectName: 'Westside Connector Road', client: 'City of Cincinnati', bidDate: '2026-02-15', amount: 2450000, status: 'pending', probability: 65, estimator: 'John Doe', notes: 'Strong relationship with city. Competitive pricing.' },
-      { id: 2, projectName: 'Amazon Distribution Center', client: 'Turner Construction', bidDate: '2026-02-08', amount: 890000, status: 'submitted', probability: 40, estimator: 'John Doe', notes: 'Sub to Turner. Heavy competition expected.' },
-      { id: 3, projectName: 'Oakwood Estates Phase 3', client: 'Ryan Homes', bidDate: '2026-01-20', amount: 1150000, status: 'won', probability: 100, estimator: 'John Doe', notes: 'Repeat customer. Start date TBD.' },
-      { id: 4, projectName: 'I-75 Bridge Approach', client: 'ODOT', bidDate: '2026-01-10', amount: 3200000, status: 'lost', probability: 0, estimator: 'John Doe', notes: 'Lost to ABC Excavating by 4%.' },
-      { id: 5, projectName: 'Mercy Hospital Expansion', client: 'Messer Construction', bidDate: '2026-02-20', amount: 675000, status: 'pending', probability: 55, estimator: 'John Doe', notes: 'Tight schedule. Premium pricing.' },
-    ];
-
     // VENDORS DATA
     const VENDORS = [
       { id: 1, name: 'Martin Marietta Materials', category: 'Aggregates', contact: 'Bob Stevens', phone: '(513) 555-0201', email: 'bstevens@martinmarietta.com', rating: 5, activeOrders: 2 },
@@ -396,68 +387,26 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         setUploading(true);
         setError('');
         try {
-          const uploadUrlResponse = await fetch('/api/attachments/upload-url', {
+          const formData = new FormData();
+          formData.append('entity_type', entityType);
+          formData.append('entity_id', String(entityId));
+          formData.append('file', file);
+
+          const response = await fetch('/api/attachments', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              entity_type: entityType,
-              entity_id: entityId,
-              file_name: file.name,
-              content_type: file.type || 'application/octet-stream',
-            }),
+            body: formData,
           });
 
-          const uploadUrlRaw = await uploadUrlResponse.text();
-          let uploadUrlPayload = null;
+          const raw = await response.text();
+          let payload = null;
           try {
-            uploadUrlPayload = uploadUrlRaw ? JSON.parse(uploadUrlRaw) : null;
+            payload = raw ? JSON.parse(raw) : null;
           } catch {
-            uploadUrlPayload = null;
+            payload = null;
           }
 
-          if (!uploadUrlResponse.ok || !uploadUrlPayload?.signedUploadUrl || !uploadUrlPayload?.path) {
-            setError(uploadUrlPayload?.error || uploadUrlRaw || 'Failed to initialize upload');
-            setUploading(false);
-            return;
-          }
-
-          const putResponse = await fetch(uploadUrlPayload.signedUploadUrl, {
-            method: 'PUT',
-            headers: { 'Content-Type': file.type || uploadUrlPayload.contentType || 'application/octet-stream' },
-            body: file,
-          });
-
-          if (!putResponse.ok) {
-            const putRaw = await putResponse.text();
-            setError(putRaw || 'Failed to upload file');
-            setUploading(false);
-            return;
-          }
-
-          const confirmResponse = await fetch('/api/attachments/confirm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              entity_type: entityType,
-              entity_id: entityId,
-              bucket: uploadUrlPayload.bucket,
-              path: uploadUrlPayload.path,
-              file_name: file.name,
-              content_type: file.type || 'application/octet-stream',
-              file_size: file.size,
-            }),
-          });
-
-          const confirmRaw = await confirmResponse.text();
-          let confirmPayload = null;
-          try {
-            confirmPayload = confirmRaw ? JSON.parse(confirmRaw) : null;
-          } catch {
-            confirmPayload = null;
-          }
-
-          if (!confirmResponse.ok) {
-            setError(confirmPayload?.error || confirmRaw || 'Failed to confirm upload');
+          if (!response.ok || !payload?.attachment) {
+            setError(payload?.error || raw || 'Failed to upload file');
             setUploading(false);
             return;
           }
@@ -586,7 +535,8 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const [jobsLoading, setJobsLoading] = useState(true);
       const [equipment, setEquipment] = useState([]);
       const [equipmentLoading, setEquipmentLoading] = useState(true);
-      const [employees, setEmployees] = useState(EMPLOYEES);
+      const [employees, setEmployees] = useState([]);
+      const [employeesLoading, setEmployeesLoading] = useState(true);
       const [workOrders, setWorkOrders] = useState([]);
       const [workOrdersLoading, setWorkOrdersLoading] = useState(true);
       const [dailyReports, setDailyReports] = useState([]);
@@ -595,9 +545,14 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const [scheduleData, setScheduleData] = useState({});
 
       // Additional State
-      const [inventory, setInventory] = useState(INVENTORY);
-      const [bids, setBids] = useState(BIDS);
-      const [vendors, setVendors] = useState(VENDORS);
+      const [inventory, setInventory] = useState([]);
+      const [inventoryLoading, setInventoryLoading] = useState(true);
+      const [bids, setBids] = useState([]);
+      const [bidsLoading, setBidsLoading] = useState(true);
+      const [vendors, setVendors] = useState([]);
+      const [vendorsLoading, setVendorsLoading] = useState(true);
+      const [costCodes, setCostCodes] = useState([]);
+      const [costCodesLoading, setCostCodesLoading] = useState(true);
       const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
 
       useEffect(() => {
@@ -626,6 +581,166 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         };
 
         loadJobs();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadCostCodes = async () => {
+          try {
+            setCostCodesLoading(true);
+            const response = await fetch('/api/cost-codes', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load cost codes');
+            }
+            if (isMounted) {
+              setCostCodes(payload.cost_codes || []);
+            }
+          } catch {
+            if (isMounted) {
+              setCostCodes([]);
+            }
+          } finally {
+            if (isMounted) {
+              setCostCodesLoading(false);
+            }
+          }
+        };
+
+        loadCostCodes();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadBids = async () => {
+          try {
+            setBidsLoading(true);
+            const response = await fetch('/api/bids', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load bids');
+            }
+            if (isMounted) {
+              setBids(payload.bids || []);
+            }
+          } catch {
+            if (isMounted) {
+              setBids([]);
+            }
+          } finally {
+            if (isMounted) {
+              setBidsLoading(false);
+            }
+          }
+        };
+
+        loadBids();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadVendors = async () => {
+          try {
+            setVendorsLoading(true);
+            const response = await fetch('/api/vendors', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load vendors');
+            }
+            if (isMounted) {
+              setVendors(payload.vendors || []);
+            }
+          } catch {
+            if (isMounted) {
+              setVendors([]);
+            }
+          } finally {
+            if (isMounted) {
+              setVendorsLoading(false);
+            }
+          }
+        };
+
+        loadVendors();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadInventory = async () => {
+          try {
+            setInventoryLoading(true);
+            const response = await fetch('/api/inventory', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load inventory');
+            }
+            if (isMounted) {
+              setInventory(payload.inventory || []);
+            }
+          } catch {
+            if (isMounted) {
+              setInventory([]);
+            }
+          } finally {
+            if (isMounted) {
+              setInventoryLoading(false);
+            }
+          }
+        };
+
+        loadInventory();
+
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadEmployees = async () => {
+          try {
+            setEmployeesLoading(true);
+            const response = await fetch('/api/employees', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load employees');
+            }
+            if (isMounted) {
+              setEmployees(payload.employees || []);
+            }
+          } catch {
+            if (isMounted) {
+              setEmployees([]);
+            }
+          } finally {
+            if (isMounted) {
+              setEmployeesLoading(false);
+            }
+          }
+        };
+
+        loadEmployees();
 
         return () => {
           isMounted = false;
@@ -797,17 +912,17 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} />;
           case 'messages': return <MessagesView employees={employees} />;
           case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} />;
-          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setSelectedJob={setSelectedJob} setShowModal={setShowModal} />;
+          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} setSelectedJob={setSelectedJob} setShowModal={setShowModal} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} />;
-          case 'team': return <TeamView employees={employees} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} />;
-          case 'inventory': return <InventoryView inventory={inventory} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
+          case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} />;
+          case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} />;
           case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} />;
-          case 'bids': return <BidsView bids={bids} setBids={setBids} />;
-          case 'vendors': return <VendorsView vendors={vendors} setVendors={setVendors} />;
+          case 'bids': return <BidsView bids={bids} bidsLoading={bidsLoading} setBids={setBids} jobs={jobs} />;
+          case 'vendors': return <VendorsView vendors={vendors} vendorsLoading={vendorsLoading} setVendors={setVendors} jobs={jobs} inventory={inventory} />;
           case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} />;
-          case 'costing': return <JobCostingView jobs={jobs} />;
+          case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} />;
           case 'finance': return <FinanceView jobs={jobs} />;
           case 'marketing': return <MarketingView />;
           case 'integrations': return <IntegrationsView />;
@@ -1549,7 +1664,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // JOBS VIEW
     // ============================================
-    const JobsView = ({ jobs, jobsLoading, setJobs, equipment, employees, setSelectedJob, setShowModal }) => {
+    const JobsView = ({ jobs, jobsLoading, setJobs, equipment, employees, setEmployees, setSelectedJob, setShowModal }) => {
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [selectedJobId, setSelectedJobId] = useState(null);
@@ -1557,6 +1672,16 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const [saveLoading, setSaveLoading] = useState(false);
       const [deleteLoading, setDeleteLoading] = useState(false);
       const [jobActionError, setJobActionError] = useState('');
+      const [jobEquipment, setJobEquipment] = useState([]);
+      const [jobEquipmentLoading, setJobEquipmentLoading] = useState(false);
+      const [equipmentToAssign, setEquipmentToAssign] = useState('');
+      const [jobEmployees, setJobEmployees] = useState([]);
+      const [jobEmployeesLoading, setJobEmployeesLoading] = useState(false);
+      const [employeeToAssign, setEmployeeToAssign] = useState('');
+      const [crewActionLoading, setCrewActionLoading] = useState(false);
+      const [crewActionError, setCrewActionError] = useState('');
+      const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
+      const [equipmentActionError, setEquipmentActionError] = useState('');
 
       const handleCreateJob = async () => {
         try {
@@ -1599,8 +1724,16 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       });
 
       const selectedJob = jobs.find(j => j.id === selectedJobId);
-      const jobEquipment = selectedJob ? equipment.filter(e => e.jobId === selectedJob.id) : [];
-      const jobEmployees = selectedJob ? employees.filter(e => e.jobId === selectedJob.id) : [];
+      const availableEmployees = selectedJob
+        ? employees.filter(
+            (employee) => !jobEmployees.some((assigned) => String(assigned.id) === String(employee.id))
+          )
+        : [];
+      const availableEquipment = selectedJob
+        ? equipment.filter(
+            (item) => !jobEquipment.some((assigned) => String(assigned.id) === String(item.id))
+          )
+        : [];
 
       useEffect(() => {
         if (!selectedJob) return;
@@ -1612,6 +1745,216 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         });
         setJobActionError('');
       }, [selectedJob]);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadJobEquipment = async () => {
+          if (!selectedJob) {
+            if (isMounted) {
+              setJobEquipment([]);
+              setEquipmentToAssign('');
+              setEquipmentActionError('');
+            }
+            return;
+          }
+
+          try {
+            setJobEquipmentLoading(true);
+            const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load assigned equipment');
+            }
+            if (isMounted) {
+              setJobEquipment(payload.equipment || []);
+            }
+          } catch {
+            if (isMounted) {
+              setJobEquipment([]);
+            }
+          } finally {
+            if (isMounted) {
+              setJobEquipmentLoading(false);
+            }
+          }
+        };
+
+        const loadJobEmployees = async () => {
+          if (!selectedJob) {
+            if (isMounted) {
+              setJobEmployees([]);
+              setEmployeeToAssign('');
+              setCrewActionError('');
+            }
+            return;
+          }
+
+          try {
+            setJobEmployeesLoading(true);
+            const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load assigned crew');
+            }
+            if (isMounted) {
+              setJobEmployees(payload.employees || []);
+            }
+          } catch {
+            if (isMounted) {
+              setJobEmployees([]);
+            }
+          } finally {
+            if (isMounted) {
+              setJobEmployeesLoading(false);
+            }
+          }
+        };
+
+        loadJobEquipment();
+        loadJobEmployees();
+        return () => {
+          isMounted = false;
+        };
+      }, [selectedJob]);
+
+      const handleAssignEmployee = async () => {
+        if (!selectedJob || !employeeToAssign) return;
+        setCrewActionLoading(true);
+        setCrewActionError('');
+        try {
+          const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ employee_id: employeeToAssign }),
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.employee) {
+            setCrewActionError(payload?.error || raw || 'Failed to assign employee');
+            setCrewActionLoading(false);
+            return;
+          }
+
+          setJobEmployees((prev) => [payload.employee, ...prev]);
+          setEmployees((prev) =>
+            prev.map((employee) =>
+              String(employee.id) === String(payload.employee.id) ? payload.employee : employee
+            )
+          );
+          setEmployeeToAssign('');
+        } catch {
+          setCrewActionError('Failed to assign employee');
+        } finally {
+          setCrewActionLoading(false);
+        }
+      };
+
+      const handleUnassignEmployee = async (employeeId) => {
+        if (!selectedJob) return;
+        setCrewActionLoading(true);
+        setCrewActionError('');
+        try {
+          const response = await fetch(`/api/jobs/${selectedJob.id}/employees/${employeeId}`, {
+            method: 'DELETE',
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.success) {
+            setCrewActionError(payload?.error || raw || 'Failed to remove employee');
+            setCrewActionLoading(false);
+            return;
+          }
+
+          setJobEmployees((prev) => prev.filter((employee) => String(employee.id) !== String(employeeId)));
+          setEmployees((prev) =>
+            prev.map((employee) =>
+              String(employee.id) === String(employeeId) ? { ...employee, jobId: null } : employee
+            )
+          );
+        } catch {
+          setCrewActionError('Failed to remove employee');
+        } finally {
+          setCrewActionLoading(false);
+        }
+      };
+
+      const handleAssignEquipment = async () => {
+        if (!selectedJob || !equipmentToAssign) return;
+        setEquipmentActionLoading(true);
+        setEquipmentActionError('');
+        try {
+          const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ equipment_id: equipmentToAssign }),
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.equipment) {
+            setEquipmentActionError(payload?.error || raw || 'Failed to assign equipment');
+            setEquipmentActionLoading(false);
+            return;
+          }
+
+          setJobEquipment((prev) => [payload.equipment, ...prev]);
+          setEquipmentToAssign('');
+        } catch {
+          setEquipmentActionError('Failed to assign equipment');
+        } finally {
+          setEquipmentActionLoading(false);
+        }
+      };
+
+      const handleUnassignEquipment = async (equipmentId) => {
+        if (!selectedJob) return;
+        setEquipmentActionLoading(true);
+        setEquipmentActionError('');
+        try {
+          const response = await fetch(`/api/jobs/${selectedJob.id}/equipment/${equipmentId}`, {
+            method: 'DELETE',
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.success) {
+            setEquipmentActionError(payload?.error || raw || 'Failed to remove equipment');
+            setEquipmentActionLoading(false);
+            return;
+          }
+
+          setJobEquipment((prev) =>
+            prev.filter((item) => String(item.id) !== String(equipmentId))
+          );
+        } catch {
+          setEquipmentActionError('Failed to remove equipment');
+        } finally {
+          setEquipmentActionLoading(false);
+        }
+      };
 
       const handleSaveJob = async () => {
         if (!selectedJob) return;
@@ -1833,28 +2176,88 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 
                   <div>
                     <p className="text-xs text-gray-500 mb-2">Assigned Equipment ({jobEquipment.length})</p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <select
+                        value={equipmentToAssign}
+                        onChange={(e) => setEquipmentToAssign(e.target.value)}
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">Select equipment</option>
+                        {availableEquipment.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name} - {item.type}
+                          </option>
+                        ))}
+                      </select>
+                      <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || !equipmentToAssign}>
+                        Add
+                      </Button>
+                    </div>
                     <div className="space-y-1">
-                      {jobEquipment.map(eq => (
+                      {jobEquipmentLoading ? (
+                        <p className="text-sm text-gray-400">Loading equipment...</p>
+                      ) : jobEquipment.map(eq => (
                         <div key={eq.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
                           <span>{eq.name}</span>
-                          <Badge variant="success" className="text-xs">Active</Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="success" className="text-xs">Active</Badge>
+                            <button
+                              type="button"
+                              onClick={() => handleUnassignEquipment(eq.id)}
+                              className="text-xs text-red-600 hover:text-red-700"
+                              disabled={equipmentActionLoading}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       ))}
-                      {jobEquipment.length === 0 && <p className="text-sm text-gray-400">No equipment assigned</p>}
+                      {!jobEquipmentLoading && jobEquipment.length === 0 && <p className="text-sm text-gray-400">No equipment assigned</p>}
                     </div>
+                    {equipmentActionError && <p className="text-sm text-red-600 mt-2">{equipmentActionError}</p>}
                   </div>
 
                   <div>
                     <p className="text-xs text-gray-500 mb-2">Assigned Crew ({jobEmployees.length})</p>
+                    <div className="flex items-center gap-2 mb-2">
+                      <select
+                        value={employeeToAssign}
+                        onChange={(e) => setEmployeeToAssign(e.target.value)}
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        <option value="">Select employee</option>
+                        {availableEmployees.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.name} - {employee.role}
+                          </option>
+                        ))}
+                      </select>
+                      <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || !employeeToAssign}>
+                        Add
+                      </Button>
+                    </div>
                     <div className="space-y-1">
-                      {jobEmployees.map(emp => (
+                      {jobEmployeesLoading ? (
+                        <p className="text-sm text-gray-400">Loading crew...</p>
+                      ) : jobEmployees.map(emp => (
                         <div key={emp.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
                           <span>{emp.name}</span>
-                          <span className="text-xs text-gray-500">{emp.role}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500">{emp.role}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleUnassignEmployee(emp.id)}
+                              className="text-xs text-red-600 hover:text-red-700"
+                              disabled={crewActionLoading}
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       ))}
-                      {jobEmployees.length === 0 && <p className="text-sm text-gray-400">No crew assigned</p>}
+                      {!jobEmployeesLoading && jobEmployees.length === 0 && <p className="text-sm text-gray-400">No crew assigned</p>}
                     </div>
+                    {crewActionError && <p className="text-sm text-red-600 mt-2">{crewActionError}</p>}
                   </div>
 
                   <AttachmentPanel entityType="job" entityId={selectedJob.id} />
@@ -2368,9 +2771,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // TEAM VIEW
     // ============================================
-    const TeamView = ({ employees, setEmployees, jobs, setShowModal }) => {
+    const TeamView = ({ employees, employeesLoading, setEmployees, jobs, setShowModal }) => {
       const [filter, setFilter] = useState('all');
       const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
+      const [employeeActionLoading, setEmployeeActionLoading] = useState(false);
+      const [employeeActionError, setEmployeeActionError] = useState('');
 
       const filteredEmployees = employees.filter(emp => {
         if (filter === 'all') return true;
@@ -2389,6 +2794,85 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       };
 
       const expiringCerts = selectedEmployee?.certifications.filter(c => getDaysUntil(c.expires) < 90) || [];
+
+      useEffect(() => {
+        if (!selectedEmployeeId) return;
+        if (!employees.some((employee) => employee.id === selectedEmployeeId)) {
+          setSelectedEmployeeId(null);
+        }
+      }, [employees, selectedEmployeeId]);
+
+      const handleCreateEmployee = async () => {
+        const name = window.prompt('Employee name');
+        if (!name || !name.trim()) return;
+        const role = window.prompt('Role', 'Laborer') || 'Laborer';
+        setEmployeeActionLoading(true);
+        setEmployeeActionError('');
+        try {
+          const response = await fetch('/api/employees', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim(), role: role.trim() || 'Laborer' }),
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.employee) {
+            setEmployeeActionError(payload?.error || raw || 'Failed to create employee');
+            setEmployeeActionLoading(false);
+            return;
+          }
+          setEmployees((prev) => [payload.employee, ...prev]);
+          setSelectedEmployeeId(payload.employee.id);
+        } catch {
+          setEmployeeActionError('Failed to create employee');
+        } finally {
+          setEmployeeActionLoading(false);
+        }
+      };
+
+      const handleEditEmployee = async () => {
+        if (!selectedEmployee) return;
+        const nextName = window.prompt('Employee name', selectedEmployee.name || '');
+        if (!nextName || !nextName.trim()) return;
+        const nextRole = window.prompt('Role', selectedEmployee.role || 'Laborer');
+        if (!nextRole || !nextRole.trim()) return;
+        setEmployeeActionLoading(true);
+        setEmployeeActionError('');
+        try {
+          const response = await fetch(`/api/employees/${selectedEmployee.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: nextName.trim(),
+              role: nextRole.trim(),
+            }),
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.employee) {
+            setEmployeeActionError(payload?.error || raw || 'Failed to update employee');
+            setEmployeeActionLoading(false);
+            return;
+          }
+          setEmployees((prev) =>
+            prev.map((employee) => (employee.id === selectedEmployee.id ? payload.employee : employee))
+          );
+        } catch {
+          setEmployeeActionError('Failed to update employee');
+        } finally {
+          setEmployeeActionLoading(false);
+        }
+      };
 
       return (
         <div className="space-y-6">
@@ -2421,7 +2905,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               <Button variant="secondary" onClick={() => setShowModal({ type: 'time-clock' })}>
                 <Icon name="clock" className="mr-2" /> Time Clock
               </Button>
-              <Button variant="brand">
+              <Button variant="brand" onClick={handleCreateEmployee} disabled={employeeActionLoading}>
                 <Icon name="user-plus" className="mr-2" /> Add Employee
               </Button>
             </div>
@@ -2430,9 +2914,13 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Employee List */}
             <div className="lg:col-span-2 space-y-3">
-              {filteredEmployees.map(emp => {
+              {employeesLoading ? (
+                <Card className="p-6 text-sm text-gray-500">Loading employees...</Card>
+              ) : filteredEmployees.length === 0 ? (
+                <Card className="p-6 text-sm text-gray-500">No employees yet.</Card>
+              ) : filteredEmployees.map(emp => {
                 const job = jobs.find(j => j.id === emp.jobId);
-                const expiringSoon = emp.certifications.filter(c => getDaysUntil(c.expires) < 60);
+                const expiringSoon = (emp.certifications || []).filter(c => getDaysUntil(c.expires) < 60);
 
                 return (
                   <Card
@@ -2514,7 +3002,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   <div className="pt-4 border-t border-gray-200">
                     <p className="text-xs text-gray-500 mb-2">Certifications</p>
                     <div className="space-y-2">
-                      {selectedEmployee.certifications.map((cert, i) => {
+                      {(selectedEmployee.certifications || []).map((cert, i) => {
                         const daysLeft = getDaysUntil(cert.expires);
                         const isExpiring = daysLeft < 60;
                         const isExpired = daysLeft < 0;
@@ -2538,10 +3026,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <Button variant="secondary" size="sm" className="flex-1">
                       <Icon name="clock-rotate-left" className="mr-1" /> Timesheet
                     </Button>
-                    <Button variant="secondary" size="sm" className="flex-1">
+                    <Button variant="secondary" size="sm" className="flex-1" onClick={handleEditEmployee} disabled={employeeActionLoading}>
                       <Icon name="pen-to-square" className="mr-1" /> Edit
                     </Button>
                   </div>
+                  {employeeActionError && <p className="text-sm text-red-600">{employeeActionError}</p>}
                 </div>
               </Card>
             ) : (
@@ -2895,6 +3384,170 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const [reportActionLoading, setReportActionLoading] = useState(false);
       const [reportActionError, setReportActionError] = useState('');
       const [reportForm, setReportForm] = useState({ jobId: '', date: '', notes: '' });
+      const [entriesByReport, setEntriesByReport] = useState({});
+      const [entriesLoadingByReport, setEntriesLoadingByReport] = useState({});
+      const [entryActionLoadingByReport, setEntryActionLoadingByReport] = useState({});
+      const [entryActionErrorByReport, setEntryActionErrorByReport] = useState({});
+      const [entryFormByReport, setEntryFormByReport] = useState({});
+
+      const ensureEntryForm = (reportId) => {
+        setEntryFormByReport((prev) => ({
+          ...prev,
+          [reportId]: prev[reportId] || {
+            laborEmployeeId: '',
+            laborHours: '',
+            equipmentId: '',
+            equipmentHours: '',
+            materialDescription: '',
+            materialQuantity: '',
+          },
+        }));
+      };
+
+      const updateEntryForm = (reportId, updates) => {
+        setEntryFormByReport((prev) => ({
+          ...prev,
+          [reportId]: {
+            laborEmployeeId: '',
+            laborHours: '',
+            equipmentId: '',
+            equipmentHours: '',
+            materialDescription: '',
+            materialQuantity: '',
+            ...(prev[reportId] || {}),
+            ...updates,
+          },
+        }));
+      };
+
+      const loadReportEntries = useCallback(async (reportId) => {
+        if (!reportId) return;
+        setEntriesLoadingByReport((prev) => ({ ...prev, [reportId]: true }));
+        setEntryActionErrorByReport((prev) => ({ ...prev, [reportId]: '' }));
+        try {
+          const response = await fetch(`/api/daily-reports/${reportId}/entries`, { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload?.error || 'Failed to load entries');
+          }
+          setEntriesByReport((prev) => ({ ...prev, [reportId]: payload.entries || [] }));
+          ensureEntryForm(reportId);
+        } catch {
+          setEntriesByReport((prev) => ({ ...prev, [reportId]: [] }));
+        } finally {
+          setEntriesLoadingByReport((prev) => ({ ...prev, [reportId]: false }));
+        }
+      }, []);
+
+      useEffect(() => {
+        if (activeTab !== 'daily') return;
+        dailyReports.forEach((report) => {
+          loadReportEntries(report.id);
+        });
+      }, [activeTab, dailyReports, loadReportEntries]);
+
+      const createEntry = async (reportId, entryType) => {
+        const form = entryFormByReport[reportId] || {};
+        let body = null;
+
+        if (entryType === 'labor') {
+          if (!form.laborEmployeeId || !form.laborHours) return;
+          body = {
+            entry_type: 'labor',
+            employee_id: form.laborEmployeeId,
+            hours: Number(form.laborHours),
+          };
+        } else if (entryType === 'equipment') {
+          if (!form.equipmentId || !form.equipmentHours) return;
+          body = {
+            entry_type: 'equipment',
+            equipment_id: form.equipmentId,
+            hours: Number(form.equipmentHours),
+          };
+        } else if (entryType === 'material') {
+          if (!form.materialDescription && !form.materialQuantity) return;
+          body = {
+            entry_type: 'material',
+            description: form.materialDescription,
+            ...(form.materialQuantity ? { quantity: Number(form.materialQuantity) } : {}),
+          };
+        } else {
+          if (!form.materialDescription) return;
+          body = {
+            entry_type: 'note',
+            description: form.materialDescription,
+          };
+        }
+
+        setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: true }));
+        setEntryActionErrorByReport((prev) => ({ ...prev, [reportId]: '' }));
+        try {
+          const response = await fetch(`/api/daily-reports/${reportId}/entries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.entry) {
+            setEntryActionErrorByReport((prev) => ({
+              ...prev,
+              [reportId]: payload?.error || raw || 'Failed to add entry',
+            }));
+            setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: false }));
+            return;
+          }
+
+          setEntriesByReport((prev) => ({
+            ...prev,
+            [reportId]: [payload.entry, ...(prev[reportId] || [])],
+          }));
+
+          if (entryType === 'labor') updateEntryForm(reportId, { laborEmployeeId: '', laborHours: '' });
+          if (entryType === 'equipment') updateEntryForm(reportId, { equipmentId: '', equipmentHours: '' });
+          if (entryType === 'material') updateEntryForm(reportId, { materialDescription: '', materialQuantity: '' });
+        } catch {
+          setEntryActionErrorByReport((prev) => ({ ...prev, [reportId]: 'Failed to add entry' }));
+        } finally {
+          setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: false }));
+        }
+      };
+
+      const deleteEntry = async (reportId, entryId) => {
+        setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: true }));
+        setEntryActionErrorByReport((prev) => ({ ...prev, [reportId]: '' }));
+        try {
+          const response = await fetch(`/api/daily-reports/${reportId}/entries/${entryId}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.success) {
+            setEntryActionErrorByReport((prev) => ({
+              ...prev,
+              [reportId]: payload?.error || raw || 'Failed to delete entry',
+            }));
+            setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: false }));
+            return;
+          }
+          setEntriesByReport((prev) => ({
+            ...prev,
+            [reportId]: (prev[reportId] || []).filter((entry) => String(entry.id) !== String(entryId)),
+          }));
+        } catch {
+          setEntryActionErrorByReport((prev) => ({ ...prev, [reportId]: 'Failed to delete entry' }));
+        } finally {
+          setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: false }));
+        }
+      };
 
       useEffect(() => {
         let revenueChart = null;
@@ -3061,6 +3714,18 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 const job = jobs.find(j => j.id === report.jobId);
                 const submitter = employees.find(e => e.id === report.submittedBy);
                 const isEditing = editingReportId === report.id;
+                const reportEntries = entriesByReport[report.id] || [];
+                const form = entryFormByReport[report.id] || {
+                  laborEmployeeId: '',
+                  laborHours: '',
+                  equipmentId: '',
+                  equipmentHours: '',
+                  materialDescription: '',
+                  materialQuantity: '',
+                };
+                const laborEntries = reportEntries.filter((entry) => entry.entry_type === 'labor');
+                const equipmentEntries = reportEntries.filter((entry) => entry.entry_type === 'equipment');
+                const materialEntries = reportEntries.filter((entry) => entry.entry_type === 'material' || entry.entry_type === 'note');
 
                 const startEdit = () => {
                   setEditingReportId(report.id);
@@ -3230,6 +3895,127 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                         </div>
                       )}
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                      <div className="border border-gray-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-gray-600 mb-2">Labor</p>
+                        <div className="flex gap-2 mb-2">
+                          <select
+                            value={form.laborEmployeeId}
+                            onChange={(e) => updateEntryForm(report.id, { laborEmployeeId: e.target.value })}
+                            className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Employee</option>
+                            {employees.map((employee) => (
+                              <option key={employee.id} value={employee.id}>{employee.name}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            value={form.laborHours}
+                            onChange={(e) => updateEntryForm(report.id, { laborHours: e.target.value })}
+                            placeholder="Hours"
+                            className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                          />
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'labor')} disabled={entryActionLoadingByReport[report.id]}>
+                            Add
+                          </Button>
+                        </div>
+                        <div className="space-y-1">
+                          {laborEntries.map((entry) => {
+                            const employee = employees.find((item) => String(item.id) === String(entry.employee_id));
+                            return (
+                              <div key={entry.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
+                                <span>{employee?.name || 'Employee'} ({entry.hours || 0}h)</span>
+                                <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600">Delete</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="border border-gray-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-gray-600 mb-2">Equipment</p>
+                        <div className="flex gap-2 mb-2">
+                          <select
+                            value={form.equipmentId}
+                            onChange={(e) => updateEntryForm(report.id, { equipmentId: e.target.value })}
+                            className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Equipment</option>
+                            {equipment.map((item) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min="0"
+                            value={form.equipmentHours}
+                            onChange={(e) => updateEntryForm(report.id, { equipmentHours: e.target.value })}
+                            placeholder="Hours"
+                            className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                          />
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'equipment')} disabled={entryActionLoadingByReport[report.id]}>
+                            Add
+                          </Button>
+                        </div>
+                        <div className="space-y-1">
+                          {equipmentEntries.map((entry) => {
+                            const item = equipment.find((eq) => String(eq.id) === String(entry.equipment_id));
+                            return (
+                              <div key={entry.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
+                                <span>{item?.name || 'Equipment'} ({entry.hours || 0}h)</span>
+                                <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600">Delete</button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="border border-gray-200 rounded-lg p-3">
+                        <p className="text-xs font-medium text-gray-600 mb-2">Materials / Notes</p>
+                        <div className="flex gap-2 mb-2">
+                          <input
+                            type="text"
+                            value={form.materialDescription}
+                            onChange={(e) => updateEntryForm(report.id, { materialDescription: e.target.value })}
+                            placeholder="Description"
+                            className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={form.materialQuantity}
+                            onChange={(e) => updateEntryForm(report.id, { materialQuantity: e.target.value })}
+                            placeholder="Qty"
+                            className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                          />
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'material')} disabled={entryActionLoadingByReport[report.id]}>
+                            Add Material
+                          </Button>
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'note')} disabled={entryActionLoadingByReport[report.id]}>
+                            Add Note
+                          </Button>
+                        </div>
+                        <div className="space-y-1">
+                          {materialEntries.map((entry) => (
+                            <div key={entry.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
+                              <span>
+                                {entry.entry_type === 'note' ? 'Note: ' : ''}
+                                {entry.description}
+                                {entry.entry_type === 'material' ? ` (${entry.quantity || 0})` : ''}
+                              </span>
+                              <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600">Delete</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                    {entriesLoadingByReport[report.id] && <p className="text-xs text-gray-400 mt-2">Loading entries...</p>}
+                    {entryActionErrorByReport[report.id] && <p className="text-sm text-red-600 mt-2">{entryActionErrorByReport[report.id]}</p>}
                     <AttachmentPanel entityType="daily_report" entityId={report.id} />
                     {reportActionError && isEditing && (
                       <p className="text-sm text-red-600 mt-3">{reportActionError}</p>
@@ -3279,30 +4065,152 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // JOB COSTING VIEW
     // ============================================
-    const JobCostingView = ({ jobs }) => {
-      const [selectedJobId, setSelectedJobId] = useState(jobs.find(j => j.status === 'active')?.id);
-      const selectedJob = jobs.find(j => j.id === selectedJobId);
+    const JobCostingView = ({ jobs, costCodes, costCodesLoading, setCostCodes }) => {
+      const [selectedJobId, setSelectedJobId] = useState(jobs.find(j => j.status === 'active')?.id || jobs[0]?.id || '');
+      const [showCostCodeModal, setShowCostCodeModal] = useState(false);
+      const [editingCostCodeId, setEditingCostCodeId] = useState(null);
+      const [saveLoading, setSaveLoading] = useState(false);
+      const [deleteLoadingId, setDeleteLoadingId] = useState(null);
+      const [costCodeError, setCostCodeError] = useState('');
+      const [costCodeForm, setCostCodeForm] = useState({
+        code: '',
+        name: '',
+        status: 'active',
+        budgeted: 0,
+      });
 
-      const costData = COST_CODES.map(cc => ({
-        ...cc,
-        actual: Math.round(cc.budgeted * (0.3 + Math.random() * 0.8)),
-        variance: 0,
-      }));
-      costData.forEach(c => c.variance = c.budgeted - c.actual);
+      const selectedJob = jobs.find(j => String(j.id) === String(selectedJobId));
 
-      const totalBudget = costData.reduce((s, c) => s + c.budgeted, 0);
-      const totalActual = costData.reduce((s, c) => s + c.actual, 0);
+      const costData = costCodes.map(cc => {
+        const actual = Math.round(Number(cc.budgeted || 0) * 0.65);
+        return {
+          ...cc,
+          actual,
+          variance: Number(cc.budgeted || 0) - actual,
+        };
+      });
+
+      const totalBudget = costData.reduce((s, c) => s + Number(c.budgeted || 0), 0);
+      const totalActual = costData.reduce((s, c) => s + Number(c.actual || 0), 0);
       const totalVariance = totalBudget - totalActual;
+
+      const openCreateModal = () => {
+        setEditingCostCodeId(null);
+        setCostCodeError('');
+        setCostCodeForm({
+          code: '',
+          name: '',
+          status: 'active',
+          budgeted: 0,
+        });
+        setShowCostCodeModal(true);
+      };
+
+      const openEditModal = (item) => {
+        setEditingCostCodeId(item.id);
+        setCostCodeError('');
+        setCostCodeForm({
+          code: item.code || '',
+          name: item.name || item.description || '',
+          status: item.status || 'active',
+          budgeted: Number(item.budgeted || 0),
+        });
+        setShowCostCodeModal(true);
+      };
+
+      const closeModal = () => {
+        setShowCostCodeModal(false);
+        setEditingCostCodeId(null);
+        setCostCodeError('');
+      };
+
+      const handleSaveCostCode = async () => {
+        if (!costCodeForm.code.trim() || !costCodeForm.name.trim()) {
+          setCostCodeError('Code and name are required');
+          return;
+        }
+
+        setSaveLoading(true);
+        setCostCodeError('');
+        try {
+          const response = await fetch(editingCostCodeId ? `/api/cost-codes/${editingCostCodeId}` : '/api/cost-codes', {
+            method: editingCostCodeId ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              code: costCodeForm.code,
+              name: costCodeForm.name,
+              status: costCodeForm.status,
+              budgeted: Number(costCodeForm.budgeted || 0),
+            }),
+          });
+
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.cost_code) {
+            setCostCodeError(payload?.error || raw || 'Failed to save cost code');
+            setSaveLoading(false);
+            return;
+          }
+
+          setCostCodes((prev) => {
+            if (editingCostCodeId) {
+              return prev.map((row) => (String(row.id) === String(editingCostCodeId) ? payload.cost_code : row));
+            }
+            return [...prev, payload.cost_code].sort((a, b) => String(a.code).localeCompare(String(b.code)));
+          });
+
+          closeModal();
+        } catch {
+          setCostCodeError('Failed to save cost code');
+        } finally {
+          setSaveLoading(false);
+        }
+      };
+
+      const handleDeleteCostCode = async (id) => {
+        const confirmed = window.confirm('Delete this cost code? This cannot be undone.');
+        if (!confirmed) return;
+
+        setDeleteLoadingId(id);
+        setCostCodeError('');
+        try {
+          const response = await fetch(`/api/cost-codes/${id}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.success) {
+            setCostCodeError(payload?.error || raw || 'Failed to delete cost code');
+            setDeleteLoadingId(null);
+            return;
+          }
+
+          setCostCodes((prev) => prev.filter((row) => String(row.id) !== String(id)));
+        } catch {
+          setCostCodeError('Failed to delete cost code');
+        } finally {
+          setDeleteLoadingId(null);
+        }
+      };
 
       return (
         <div className="space-y-6">
-          {/* Job Selector */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <label className="text-sm font-medium text-gray-700">Select Job:</label>
               <select
                 value={selectedJobId || ''}
-                onChange={(e) => setSelectedJobId(Number(e.target.value))}
+                onChange={(e) => setSelectedJobId(e.target.value)}
                 className="border border-gray-300 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
               >
                 {jobs.filter(j => j.status !== 'bidding').map(job => (
@@ -3314,7 +4222,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               <Button variant="secondary">
                 <Icon name="file-export" className="mr-2" /> Export
               </Button>
-              <Button variant="brand">
+              <Button variant="brand" onClick={openCreateModal}>
                 <Icon name="plus" className="mr-2" /> Add Cost Entry
               </Button>
             </div>
@@ -3322,7 +4230,6 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 
           {selectedJob && (
             <>
-              {/* Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <Card className="p-4">
                   <p className="text-sm text-gray-500">Contract Value</p>
@@ -3344,7 +4251,6 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 </Card>
               </div>
 
-              {/* Cost Code Breakdown */}
               <Card className="p-0 overflow-hidden">
                 <div className="p-4 border-b border-gray-200">
                   <h3 className="font-semibold text-gray-900">Cost Code Breakdown</h3>
@@ -3358,15 +4264,24 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actual</th>
                       <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Variance</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">% Used</th>
+                      <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {costData.map((cc, i) => {
-                      const pctUsed = Math.round((cc.actual / cc.budgeted) * 100);
+                    {costCodesLoading ? (
+                      <tr>
+                        <td className="px-4 py-4 text-sm text-gray-500" colSpan={7}>Loading cost codes...</td>
+                      </tr>
+                    ) : costData.length === 0 ? (
+                      <tr>
+                        <td className="px-4 py-4 text-sm text-gray-500" colSpan={7}>No cost codes yet.</td>
+                      </tr>
+                    ) : costData.map((cc) => {
+                      const pctUsed = cc.budgeted > 0 ? Math.round((cc.actual / cc.budgeted) * 100) : 0;
                       return (
-                        <tr key={i} className="hover:bg-gray-50">
+                        <tr key={cc.id || cc.code} className="hover:bg-gray-50">
                           <td className="px-4 py-3 text-sm font-mono text-gray-600">{cc.code}</td>
-                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{cc.description}</td>
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{cc.name || cc.description}</td>
                           <td className="px-4 py-3 text-sm text-right">{formatCurrency(cc.budgeted)}</td>
                           <td className="px-4 py-3 text-sm text-right">{formatCurrency(cc.actual)}</td>
                           <td className={`px-4 py-3 text-sm text-right font-medium ${cc.variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -3380,6 +4295,19 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                               <span className="text-xs text-gray-500 w-10">{pctUsed}%</span>
                             </div>
                           </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button variant="ghost" size="sm" onClick={() => openEditModal(cc)}>
+                              <Icon name="pen-to-square" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDeleteCostCode(cc.id)}
+                              disabled={deleteLoadingId === cc.id}
+                            >
+                              <Icon name={deleteLoadingId === cc.id ? 'spinner' : 'trash'} className={deleteLoadingId === cc.id ? 'animate-spin' : ''} />
+                            </Button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -3392,12 +4320,62 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       <td className={`px-4 py-3 text-sm text-right ${totalVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {totalVariance >= 0 ? '+' : ''}{formatCurrency(totalVariance)}
                       </td>
-                      <td className="px-4 py-3 text-sm">{Math.round((totalActual / totalBudget) * 100)}%</td>
+                      <td className="px-4 py-3 text-sm">{totalBudget > 0 ? Math.round((totalActual / totalBudget) * 100) : 0}%</td>
+                      <td className="px-4 py-3 text-sm"></td>
                     </tr>
                   </tfoot>
                 </table>
               </Card>
+
+              {costCodeError && <p className="text-sm text-red-600">{costCodeError}</p>}
             </>
+          )}
+
+          {showCostCodeModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close cost code modal" />
+              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">{editingCostCodeId ? 'Edit Cost Code' : 'Add Cost Code'}</h3>
+                  <button className="text-gray-500 hover:text-gray-700" onClick={closeModal}>
+                    <Icon name="xmark" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Code</p>
+                    <input type="text" value={costCodeForm.code} onChange={(e) => setCostCodeForm({ ...costCodeForm, code: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Status</p>
+                    <select value={costCodeForm.status} onChange={(e) => setCostCodeForm({ ...costCodeForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                      <option value="archived">archived</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-gray-500 mb-1">Name</p>
+                    <input type="text" value={costCodeForm.name} onChange={(e) => setCostCodeForm({ ...costCodeForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Budgeted</p>
+                    <input type="number" min="0" step="1" value={costCodeForm.budgeted} onChange={(e) => setCostCodeForm({ ...costCodeForm, budgeted: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+
+                {costCodeError && <p className="text-sm text-red-600 mt-4">{costCodeError}</p>}
+
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveCostCode} disabled={saveLoading}>
+                    <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                    {editingCostCodeId ? 'Save Cost Code' : 'Create Cost Code'}
+                  </Button>
+                </div>
+              </Card>
+            </div>
           )}
         </div>
       );
@@ -3616,10 +4594,157 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // INVENTORY VIEW
     // ============================================
-    const InventoryView = ({ inventory, setInventory, jobs, vendors, setShowModal }) => {
+    const InventoryView = ({ inventory, inventoryLoading, setInventory, jobs, vendors, setShowModal }) => {
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [showAddModal, setShowAddModal] = useState(false);
+      const [saveLoading, setSaveLoading] = useState(false);
+      const [deleteLoadingId, setDeleteLoadingId] = useState(null);
+      const [formError, setFormError] = useState('');
+      const [editingId, setEditingId] = useState(null);
+      const [itemForm, setItemForm] = useState({
+        name: '',
+        category: 'Materials',
+        unit: 'EA',
+        qtyOnHand: 0,
+        qtyReserved: 0,
+        reorderPoint: 0,
+        unitCost: 0,
+        location: '',
+        jobId: '',
+        status: 'active',
+      });
+
+      const resetForm = () => {
+        setItemForm({
+          name: '',
+          category: 'Materials',
+          unit: 'EA',
+          qtyOnHand: 0,
+          qtyReserved: 0,
+          reorderPoint: 0,
+          unitCost: 0,
+          location: '',
+          jobId: '',
+          status: 'active',
+        });
+        setEditingId(null);
+        setFormError('');
+      };
+
+      const openCreateModal = () => {
+        resetForm();
+        setShowAddModal(true);
+      };
+
+      const openEditModal = (item) => {
+        setEditingId(item.id);
+        setFormError('');
+        setItemForm({
+          name: item.name || '',
+          category: item.category || 'Materials',
+          unit: item.unit || 'EA',
+          qtyOnHand: Number(item.qtyOnHand || 0),
+          qtyReserved: Number(item.qtyReserved || 0),
+          reorderPoint: Number(item.reorderPoint || 0),
+          unitCost: Number(item.unitCost || 0),
+          location: item.location || '',
+          jobId: item.jobId ?? '',
+          status: item.status || 'active',
+        });
+        setShowAddModal(true);
+      };
+
+      const closeModal = () => {
+        setShowAddModal(false);
+        resetForm();
+      };
+
+      const handleSaveItem = async () => {
+        if (!itemForm.name.trim()) {
+          setFormError('Name is required');
+          return;
+        }
+
+        setSaveLoading(true);
+        setFormError('');
+
+        const payload = {
+          name: itemForm.name.trim(),
+          category: itemForm.category || 'Materials',
+          unit: itemForm.unit || 'EA',
+          quantity_on_hand: Number(itemForm.qtyOnHand || 0),
+          qty_reserved: Number(itemForm.qtyReserved || 0),
+          reorder_point: Number(itemForm.reorderPoint || 0),
+          unit_cost: Number(itemForm.unitCost || 0),
+          location: itemForm.location || '',
+          job_id: itemForm.jobId === '' ? null : itemForm.jobId,
+          status: itemForm.status || 'active',
+        };
+
+        try {
+          const response = await fetch(editingId ? `/api/inventory/${editingId}` : '/api/inventory', {
+            method: editingId ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const raw = await response.text();
+          let parsed = null;
+          try {
+            parsed = raw ? JSON.parse(raw) : null;
+          } catch {
+            parsed = null;
+          }
+
+          const savedItem = parsed?.item;
+          if (!response.ok || !savedItem) {
+            setFormError(parsed?.error || raw || 'Failed to save inventory item');
+            setSaveLoading(false);
+            return;
+          }
+
+          setInventory((prev) => {
+            if (editingId) {
+              return prev.map((item) => (String(item.id) === String(editingId) ? savedItem : item));
+            }
+            return [savedItem, ...prev];
+          });
+          closeModal();
+        } catch {
+          setFormError('Failed to save inventory item');
+        } finally {
+          setSaveLoading(false);
+        }
+      };
+
+      const handleDeleteItem = async (itemId) => {
+        const confirmed = window.confirm('Delete this inventory item? This cannot be undone.');
+        if (!confirmed) return;
+
+        setDeleteLoadingId(itemId);
+        try {
+          const response = await fetch(`/api/inventory/${itemId}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let parsed = null;
+          try {
+            parsed = raw ? JSON.parse(raw) : null;
+          } catch {
+            parsed = null;
+          }
+
+          if (!response.ok || !parsed?.success) {
+            setFormError(parsed?.error || raw || 'Failed to delete inventory item');
+            setDeleteLoadingId(null);
+            return;
+          }
+
+          setInventory((prev) => prev.filter((item) => String(item.id) !== String(itemId)));
+        } catch {
+          setFormError('Failed to delete inventory item');
+        } finally {
+          setDeleteLoadingId(null);
+        }
+      };
 
       const categories = [...new Set(inventory.map(i => i.category))];
       const filteredInventory = inventory.filter(item => {
@@ -3650,7 +4775,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
             </div>
             <div className="flex gap-2">
               <Button variant="secondary"><Icon name="file-export" className="mr-2" />Export</Button>
-              <Button variant="brand" onClick={() => setShowAddModal(true)}><Icon name="plus" className="mr-2" />Add Item</Button>
+              <Button variant="brand" onClick={openCreateModal}><Icon name="plus" className="mr-2" />Add Item</Button>
             </div>
           </div>
 
@@ -3681,7 +4806,15 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredInventory.map(item => {
+                {inventoryLoading ? (
+                  <tr>
+                    <td className="px-4 py-4 text-sm text-gray-500" colSpan={9}>Loading inventory...</td>
+                  </tr>
+                ) : filteredInventory.length === 0 ? (
+                  <tr>
+                    <td className="px-4 py-4 text-sm text-gray-500" colSpan={9}>No inventory items yet.</td>
+                  </tr>
+                ) : filteredInventory.map(item => {
                   const job = jobs.find(j => j.id === item.jobId);
                   const isLow = item.qtyOnHand <= item.reorderPoint;
                   return (
@@ -3700,8 +4833,15 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       <td className="px-4 py-3 text-sm text-gray-600">{item.location}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{job?.name || 'General'}</td>
                       <td className="px-4 py-3 text-right">
-                        <Button variant="ghost" size="sm"><Icon name="pen-to-square" /></Button>
-                        <Button variant="ghost" size="sm"><Icon name="truck-ramp-box" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEditModal(item)}><Icon name="pen-to-square" /></Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDeleteItem(item.id)}
+                          disabled={deleteLoadingId === item.id}
+                        >
+                          <Icon name={deleteLoadingId === item.id ? 'spinner' : 'trash'} className={deleteLoadingId === item.id ? 'animate-spin' : ''} />
+                        </Button>
                       </td>
                     </tr>
                   );
@@ -3709,6 +4849,83 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               </tbody>
             </table>
           </Card>
+
+          {showAddModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close inventory modal" />
+              <Card className="relative z-10 w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">{editingId ? 'Edit Item' : 'Add Item'}</h3>
+                  <button className="text-gray-500 hover:text-gray-700" onClick={closeModal}>
+                    <Icon name="xmark" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-gray-500 mb-1">Name</p>
+                    <input type="text" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Category</p>
+                    <input type="text" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Unit</p>
+                    <input type="text" value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">On Hand</p>
+                    <input type="number" value={itemForm.qtyOnHand} onChange={(e) => setItemForm({ ...itemForm, qtyOnHand: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Reserved</p>
+                    <input type="number" value={itemForm.qtyReserved} onChange={(e) => setItemForm({ ...itemForm, qtyReserved: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Reorder Point</p>
+                    <input type="number" value={itemForm.reorderPoint} onChange={(e) => setItemForm({ ...itemForm, reorderPoint: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Unit Cost</p>
+                    <input type="number" step="0.01" value={itemForm.unitCost} onChange={(e) => setItemForm({ ...itemForm, unitCost: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Location</p>
+                    <input type="text" value={itemForm.location} onChange={(e) => setItemForm({ ...itemForm, location: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Job</p>
+                    <select value={itemForm.jobId} onChange={(e) => setItemForm({ ...itemForm, jobId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="">General</option>
+                      {jobs.map(job => (
+                        <option key={job.id} value={job.id}>{job.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Status</p>
+                    <select value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="active">active</option>
+                      <option value="low_stock">low_stock</option>
+                      <option value="out_of_stock">out_of_stock</option>
+                      <option value="inactive">inactive</option>
+                    </select>
+                  </div>
+                </div>
+
+                {formError && <p className="text-sm text-red-600 mt-4">{formError}</p>}
+
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveItem} disabled={saveLoading}>
+                    <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                    {editingId ? 'Save Item' : 'Create Item'}
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
         </div>
       );
     };
@@ -3852,30 +5069,434 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // BIDS VIEW
     // ============================================
-    const BidsView = ({ bids, setBids }) => {
+    const BidsView = ({ bids, bidsLoading, setBids, jobs }) => {
       const [filter, setFilter] = useState('all');
+      const [search, setSearch] = useState('');
+      const [selectedBidId, setSelectedBidId] = useState(null);
+      const [showBidModal, setShowBidModal] = useState(false);
+      const [editingBidId, setEditingBidId] = useState(null);
+      const [showItemModal, setShowItemModal] = useState(false);
+      const [editingItemId, setEditingItemId] = useState(null);
+      const [saveLoading, setSaveLoading] = useState(false);
+      const [deleteLoading, setDeleteLoading] = useState(false);
+      const [itemSaveLoading, setItemSaveLoading] = useState(false);
+      const [itemDeleteLoading, setItemDeleteLoading] = useState(false);
+      const [formError, setFormError] = useState('');
+      const [itemError, setItemError] = useState('');
+      const [bidItems, setBidItems] = useState([]);
+      const [bidItemsLoading, setBidItemsLoading] = useState(false);
+      const [bidSummary, setBidSummary] = useState(null);
+      const [bidSummaryLoading, setBidSummaryLoading] = useState(false);
+      const [bidSummaryError, setBidSummaryError] = useState('');
+      const [bidForm, setBidForm] = useState({
+        title: '',
+        status: 'draft',
+        job_id: '',
+        client: '',
+        bid_date: '',
+        probability: 0,
+        notes: '',
+      });
+      const [itemForm, setItemForm] = useState({
+        item_type: 'custom',
+        description: '',
+        quantity: 1,
+        unit_cost: 0,
+      });
 
-      const filteredBids = bids.filter(b => filter === 'all' || b.status === filter);
-      const totalPending = bids.filter(b => b.status === 'pending' || b.status === 'submitted').reduce((sum, b) => sum + b.amount, 0);
-      const winRate = Math.round((bids.filter(b => b.status === 'won').length / bids.filter(b => b.status === 'won' || b.status === 'lost').length) * 100) || 0;
+      const selectedBid = bids.find((bid) => String(bid.id) === String(selectedBidId)) || null;
+
+      const filteredBids = bids.filter((bid) => {
+        if (filter !== 'all' && bid.status !== filter) return false;
+        if (!search) return true;
+        const query = search.toLowerCase();
+        return (
+          (bid.projectName || bid.title || '').toLowerCase().includes(query) ||
+          (bid.client || '').toLowerCase().includes(query)
+        );
+      });
+
+      const totalPending = bids
+        .filter((bid) => bid.status === 'pending' || bid.status === 'submitted')
+        .reduce((sum, bid) => sum + (Number(bid.amount) || 0), 0);
+      const wonCount = bids.filter((bid) => bid.status === 'won').length;
+      const closedCount = bids.filter((bid) => bid.status === 'won' || bid.status === 'lost').length;
+      const winRate = Math.round((wonCount / closedCount) * 100) || 0;
+      const pendingBids = bids.filter((bid) => bid.status === 'pending');
+      const avgProbability = Math.round(
+        pendingBids.reduce((sum, bid) => sum + (Number(bid.probability) || 0), 0) / (pendingBids.length || 1)
+      ) || 0;
 
       const getStatusIcon = (status) => {
-        const icons = { pending: 'clock', submitted: 'paper-plane', won: 'trophy', lost: 'xmark' };
+        const icons = { draft: 'file', pending: 'clock', submitted: 'paper-plane', won: 'trophy', lost: 'xmark', canceled: 'ban' };
         return icons[status] || 'file';
+      };
+
+      const resetBidForm = () => {
+        setBidForm({
+          title: '',
+          status: 'draft',
+          job_id: '',
+          client: '',
+          bid_date: '',
+          probability: 0,
+          notes: '',
+        });
+        setEditingBidId(null);
+        setFormError('');
+      };
+
+      const resetItemForm = () => {
+        setItemForm({
+          item_type: 'custom',
+          description: '',
+          quantity: 1,
+          unit_cost: 0,
+        });
+        setEditingItemId(null);
+        setItemError('');
+      };
+
+      const refreshBids = async ({ preserveSelection = true } = {}) => {
+        const response = await fetch('/api/bids', { cache: 'no-store' });
+        const raw = await response.text();
+        let parsed = {};
+        try {
+          parsed = raw ? JSON.parse(raw) : {};
+        } catch {
+          parsed = {};
+        }
+        if (!response.ok) {
+          throw new Error(parsed?.error || raw || 'Failed to load bids');
+        }
+        const nextBids = parsed?.bids || [];
+        setBids(nextBids);
+        if (!preserveSelection) {
+          setSelectedBidId(nextBids[0]?.id || null);
+          return;
+        }
+        if (!selectedBidId && nextBids.length > 0) {
+          setSelectedBidId(nextBids[0].id);
+          return;
+        }
+        if (selectedBidId && !nextBids.some((bid) => String(bid.id) === String(selectedBidId))) {
+          setSelectedBidId(nextBids[0]?.id || null);
+        }
+      };
+
+      const loadBidItems = async (bidId) => {
+        if (!bidId) {
+          setBidItems([]);
+          return;
+        }
+        const response = await fetch(`/api/bids/${bidId}/items`, { cache: 'no-store' });
+        const raw = await response.text();
+        let parsed = {};
+        try {
+          parsed = raw ? JSON.parse(raw) : {};
+        } catch {
+          parsed = {};
+        }
+        if (!response.ok) {
+          throw new Error(parsed?.error || raw || 'Failed to load bid items');
+        }
+        setBidItems(parsed?.items || []);
+      };
+
+      const loadBidSummary = async (bidId) => {
+        if (!bidId) {
+          setBidSummary(null);
+          setBidSummaryError('');
+          return;
+        }
+        const response = await fetch(`/api/bids/${bidId}/summary`, { cache: 'no-store' });
+        const raw = await response.text();
+        let parsed = {};
+        try {
+          parsed = raw ? JSON.parse(raw) : {};
+        } catch {
+          parsed = {};
+        }
+        if (!response.ok) {
+          throw new Error(parsed?.error || raw || 'Failed to load bid summary');
+        }
+        setBidSummary(parsed?.summary || null);
+        setBidSummaryError('');
+      };
+
+      useEffect(() => {
+        if (!selectedBidId && bids.length > 0) {
+          setSelectedBidId(bids[0].id);
+          return;
+        }
+        if (selectedBidId && !bids.some((bid) => String(bid.id) === String(selectedBidId))) {
+          setSelectedBidId(bids[0]?.id || null);
+        }
+      }, [bids, selectedBidId]);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const load = async () => {
+          if (!selectedBidId) {
+            if (isMounted) {
+              setBidItems([]);
+              setBidSummary(null);
+              setBidSummaryError('');
+            }
+            return;
+          }
+          try {
+            setBidItemsLoading(true);
+            setBidSummaryLoading(true);
+            await Promise.all([loadBidItems(selectedBidId), loadBidSummary(selectedBidId)]);
+          } catch {
+            if (isMounted) {
+              setBidItems([]);
+              setBidSummary(null);
+              setBidSummaryError('Failed to load bid summary');
+            }
+          } finally {
+            if (isMounted) {
+              setBidItemsLoading(false);
+              setBidSummaryLoading(false);
+            }
+          }
+        };
+
+        load();
+        return () => {
+          isMounted = false;
+        };
+      }, [selectedBidId]);
+
+      const openCreateBid = () => {
+        resetBidForm();
+        setShowBidModal(true);
+      };
+
+      const openEditBid = (bid) => {
+        setBidForm({
+          title: bid.projectName || bid.title || '',
+          status: bid.status || 'draft',
+          job_id: bid.job_id || bid.jobId || '',
+          client: bid.client || '',
+          bid_date: bid.bid_date || bid.bidDate || '',
+          probability: Number(bid.probability) || 0,
+          notes: bid.notes || '',
+        });
+        setEditingBidId(bid.id);
+        setFormError('');
+        setShowBidModal(true);
+      };
+
+      const closeBidModal = () => {
+        if (saveLoading) return;
+        setShowBidModal(false);
+        resetBidForm();
+      };
+
+      const handleSaveBid = async () => {
+        if (!bidForm.title.trim()) {
+          setFormError('Project name is required.');
+          return;
+        }
+
+        try {
+          setSaveLoading(true);
+          setFormError('');
+
+          const payload = {
+            title: bidForm.title.trim(),
+            status: bidForm.status,
+            job_id: bidForm.job_id || null,
+            client: bidForm.client.trim(),
+            bid_date: bidForm.bid_date || null,
+            probability: Number(bidForm.probability) || 0,
+            notes: bidForm.notes.trim(),
+          };
+
+          const response = await fetch(editingBidId ? `/api/bids/${editingBidId}` : '/api/bids', {
+            method: editingBidId ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+
+          if (!response.ok) {
+            setFormError(parsed?.error || raw || 'Failed to save bid');
+            return;
+          }
+
+          await refreshBids({ preserveSelection: true });
+          if (!editingBidId && parsed?.bid?.id) {
+            setSelectedBidId(parsed.bid.id);
+          }
+          setShowBidModal(false);
+          resetBidForm();
+        } catch {
+          setFormError('Failed to save bid');
+        } finally {
+          setSaveLoading(false);
+        }
+      };
+
+      const handleDeleteBid = async (bidId) => {
+        const confirmed = window.confirm('Delete this bid? This cannot be undone.');
+        if (!confirmed) return;
+
+        try {
+          setDeleteLoading(true);
+          setFormError('');
+
+          const response = await fetch(`/api/bids/${bidId}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) {
+            setFormError(parsed?.error || raw || 'Failed to delete bid');
+            return;
+          }
+
+          setBids((prev) => prev.filter((bid) => String(bid.id) !== String(bidId)));
+          if (String(selectedBidId) === String(bidId)) {
+            setSelectedBidId(null);
+            setBidItems([]);
+          }
+        } catch {
+          setFormError('Failed to delete bid');
+        } finally {
+          setDeleteLoading(false);
+        }
+      };
+
+      const openCreateItem = () => {
+        resetItemForm();
+        setShowItemModal(true);
+      };
+
+      const openEditItem = (item) => {
+        setItemForm({
+          item_type: item.item_type || 'custom',
+          description: item.description || '',
+          quantity: Number(item.quantity) || 1,
+          unit_cost: Number(item.unit_cost) || 0,
+        });
+        setEditingItemId(item.id);
+        setItemError('');
+        setShowItemModal(true);
+      };
+
+      const closeItemModal = () => {
+        if (itemSaveLoading) return;
+        setShowItemModal(false);
+        resetItemForm();
+      };
+
+      const handleSaveItem = async () => {
+        if (!selectedBidId) {
+          setItemError('Select a bid first.');
+          return;
+        }
+        if (!itemForm.description.trim()) {
+          setItemError('Description is required.');
+          return;
+        }
+
+        try {
+          setItemSaveLoading(true);
+          setItemError('');
+          const payload = {
+            item_type: itemForm.item_type,
+            description: itemForm.description.trim(),
+            quantity: Number(itemForm.quantity) || 0,
+            unit_cost: Number(itemForm.unit_cost) || 0,
+          };
+
+          const response = await fetch(
+            editingItemId
+              ? `/api/bids/${selectedBidId}/items/${editingItemId}`
+              : `/api/bids/${selectedBidId}/items`,
+            {
+              method: editingItemId ? 'PATCH' : 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            }
+          );
+
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) {
+            setItemError(parsed?.error || raw || 'Failed to save bid item');
+            return;
+          }
+
+          await Promise.all([refreshBids({ preserveSelection: true }), loadBidItems(selectedBidId), loadBidSummary(selectedBidId)]);
+          setShowItemModal(false);
+          resetItemForm();
+        } catch {
+          setItemError('Failed to save bid item');
+        } finally {
+          setItemSaveLoading(false);
+        }
+      };
+
+      const handleDeleteItem = async (itemId) => {
+        if (!selectedBidId) return;
+        const confirmed = window.confirm('Delete this bid item? This cannot be undone.');
+        if (!confirmed) return;
+
+        try {
+          setItemDeleteLoading(true);
+          setItemError('');
+          const response = await fetch(`/api/bids/${selectedBidId}/items/${itemId}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) {
+            setItemError(parsed?.error || raw || 'Failed to delete bid item');
+            return;
+          }
+          await Promise.all([refreshBids({ preserveSelection: true }), loadBidItems(selectedBidId), loadBidSummary(selectedBidId)]);
+        } catch {
+          setItemError('Failed to delete bid item');
+        } finally {
+          setItemDeleteLoading(false);
+        }
       };
 
       return (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <StatCard icon="file-invoice-dollar" label="Active Bids" value={bids.filter(b => b.status === 'pending' || b.status === 'submitted').length} color="brand" />
+            <StatCard icon="file-invoice-dollar" label="Active Bids" value={bids.filter((bid) => bid.status === 'pending' || bid.status === 'submitted').length} color="brand" />
             <StatCard icon="dollar-sign" label="Pending Value" value={formatCurrency(totalPending)} color="blue" />
             <StatCard icon="trophy" label="Win Rate" value={`${winRate}%`} color="green" />
-            <StatCard icon="chart-line" label="Avg Probability" value={`${Math.round(bids.filter(b => b.status === 'pending').reduce((sum, b) => sum + b.probability, 0) / bids.filter(b => b.status === 'pending').length) || 0}%`} color="yellow" />
+            <StatCard icon="chart-line" label="Avg Probability" value={`${avgProbability}%`} color="yellow" />
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex bg-gray-100 rounded-lg p-1">
-              {['all', 'pending', 'submitted', 'won', 'lost'].map(status => (
+          <div className="flex flex-wrap items-center gap-3 justify-between">
+            <div className="flex flex-wrap bg-gray-100 rounded-lg p-1">
+              {['all', 'draft', 'pending', 'submitted', 'won', 'lost', 'canceled'].map((status) => (
                 <button
                   key={status}
                   onClick={() => setFilter(status)}
@@ -3885,39 +5506,374 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 </button>
               ))}
             </div>
-            <Button variant="brand"><Icon name="plus" className="mr-2" />New Bid</Button>
+            <div className="flex items-center gap-2">
+              <div className="w-56 max-w-[60vw]">
+                <SearchInput value={search} onChange={setSearch} placeholder="Search bids..." />
+              </div>
+              <Button variant="brand" onClick={openCreateBid}><Icon name="plus" className="mr-2" />New Bid</Button>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            {filteredBids.map(bid => (
-              <Card key={bid.id} className="p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-4">
-                    <div className={`p-3 rounded-lg ${bid.status === 'won' ? 'bg-green-100' : bid.status === 'lost' ? 'bg-red-100' : 'bg-blue-100'}`}>
-                      <Icon name={getStatusIcon(bid.status)} className={`text-lg ${bid.status === 'won' ? 'text-green-600' : bid.status === 'lost' ? 'text-red-600' : 'text-blue-600'}`} />
+          {formError && (
+            <Card className="p-3 border border-red-200 bg-red-50 text-red-700 text-sm">
+              {formError}
+            </Card>
+          )}
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              {bidsLoading ? (
+                <Card className="p-4 text-sm text-gray-500">Loading bids...</Card>
+              ) : filteredBids.length === 0 ? (
+                <Card className="p-4 text-sm text-gray-500">No bids found.</Card>
+              ) : (
+                filteredBids.map((bid) => (
+                  <Card
+                    key={bid.id}
+                    className={`p-4 cursor-pointer ${String(selectedBidId) === String(bid.id) ? 'ring-2 ring-brand-orange border-brand-orange' : ''}`}
+                    onClick={() => setSelectedBidId(bid.id)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-4">
+                        <div className={`p-3 rounded-lg ${bid.status === 'won' ? 'bg-green-100' : bid.status === 'lost' ? 'bg-red-100' : 'bg-blue-100'}`}>
+                          <Icon name={getStatusIcon(bid.status)} className={`text-lg ${bid.status === 'won' ? 'text-green-600' : bid.status === 'lost' ? 'text-red-600' : 'text-blue-600'}`} />
+                        </div>
+                        <div>
+                          <h4 className="font-semibold text-gray-900">{bid.projectName || bid.title}</h4>
+                          <p className="text-sm text-gray-500">{bid.client || 'No client'}</p>
+                          <p className="text-xs text-gray-400 mt-1">Bid Date: {formatDate(bid.bidDate || bid.bid_date)}</p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xl font-bold text-gray-900">{formatCurrency(bid.amount || 0)}</p>
+                        <Badge className={getStatusColor(bid.status)}>{bid.status}</Badge>
+                        {(bid.status === 'pending' || bid.status === 'submitted') && (
+                          <p className="text-sm text-gray-500 mt-1">{bid.probability || 0}% probability</p>
+                        )}
+                      </div>
                     </div>
+                    {bid.notes && (
+                      <div className="mt-3 pt-3 border-t border-gray-100">
+                        <p className="text-sm text-gray-600"><Icon name="sticky-note" className="mr-2 text-gray-400" />{bid.notes}</p>
+                      </div>
+                    )}
+                  </Card>
+                ))
+              )}
+            </div>
+
+            <Card className="p-4">
+              {selectedBid ? (
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h4 className="font-semibold text-gray-900">{bid.projectName}</h4>
-                      <p className="text-sm text-gray-500">{bid.client}</p>
-                      <p className="text-xs text-gray-400 mt-1">Bid Date: {formatDate(bid.bidDate)} • Estimator: {bid.estimator}</p>
+                      <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
+                      <p className="text-sm text-gray-500">{selectedBid.client || 'No client selected'}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
+                        <Icon name="pen" className="mr-2" />Edit
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => handleDeleteBid(selectedBid.id)}
+                        disabled={deleteLoading}
+                      >
+                        <Icon name="trash" className="mr-2" />Delete
+                      </Button>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xl font-bold text-gray-900">{formatCurrency(bid.amount)}</p>
-                    <Badge className={getStatusColor(bid.status)}>{bid.status}</Badge>
-                    {bid.status === 'pending' && (
-                      <p className="text-sm text-gray-500 mt-1">{bid.probability}% probability</p>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-gray-500">Status</p>
+                      <p className="font-semibold text-gray-900 capitalize">{selectedBid.status}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Bid Date</p>
+                      <p className="font-semibold text-gray-900">{formatDate(selectedBid.bidDate || selectedBid.bid_date)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Probability</p>
+                      <p className="font-semibold text-gray-900">{selectedBid.probability || 0}%</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Total</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(selectedBid.amount || 0)}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm pt-2 border-t border-gray-200">
+                    <div>
+                      <p className="text-gray-500">Revenue</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.revenue || 0))}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Cost</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.subtotalCost || 0))}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Profit</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.profit || 0))}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Margin %</p>
+                      <p className="font-semibold text-gray-900">
+                        {Number(bidSummary?.marginPercent || 0).toFixed(2)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  {bidSummaryLoading && (
+                    <p className="text-xs text-gray-500">Loading summary...</p>
+                  )}
+                  {bidSummaryError && (
+                    <p className="text-xs text-red-600">{bidSummaryError}</p>
+                  )}
+                  {bidSummary?.isBelowTarget && (
+                    <Card className="p-3 border border-yellow-300 bg-yellow-50 text-yellow-800 text-sm">
+                      <Icon name="triangle-exclamation" className="mr-2" />
+                      {bidSummary.warnings?.[0] || 'Margin is below target.'}
+                    </Card>
+                  )}
+
+                  <div className="pt-2 border-t border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h5 className="font-semibold text-gray-900">Line Items</h5>
+                      <Button variant="brand" onClick={openCreateItem}>
+                        <Icon name="plus" className="mr-2" />Add Item
+                      </Button>
+                    </div>
+
+                    {itemError && (
+                      <p className="text-sm text-red-600 mb-2">{itemError}</p>
+                    )}
+
+                    {bidItemsLoading ? (
+                      <p className="text-sm text-gray-500">Loading items...</p>
+                    ) : bidItems.length === 0 ? (
+                      <p className="text-sm text-gray-500">No bid items yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {bidItems.map((item) => (
+                          <div key={item.id} className="border border-gray-200 rounded-lg p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-medium text-gray-900">{item.description}</p>
+                                <p className="text-xs text-gray-500 capitalize">
+                                  {item.item_type} • {item.quantity} × {formatCurrency(item.unit_cost)}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-semibold text-gray-900">{formatCurrency(item.total_cost)}</p>
+                                <div className="mt-1 flex gap-1 justify-end">
+                                  <button
+                                    type="button"
+                                    className="text-xs text-blue-600 hover:text-blue-700"
+                                    onClick={() => openEditItem(item)}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="text-xs text-red-600 hover:text-red-700"
+                                    disabled={itemDeleteLoading}
+                                    onClick={() => handleDeleteItem(item.id)}
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>
-                {bid.notes && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-sm text-gray-600"><Icon name="sticky-note" className="mr-2 text-gray-400" />{bid.notes}</p>
-                  </div>
-                )}
-              </Card>
-            ))}
+              ) : (
+                <div className="p-8 text-center text-gray-500">
+                  <Icon name="file-invoice-dollar" className="text-4xl mb-2 text-gray-300" />
+                  <p>Select a bid to view details</p>
+                </div>
+              )}
+            </Card>
           </div>
+
+          {showBidModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+              <button className="absolute inset-0 bg-black/40" onClick={closeBidModal} aria-label="Close bid modal" />
+              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-900">{editingBidId ? 'Edit Bid' : 'Create Bid'}</h3>
+                  <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeBidModal}>
+                    <Icon name="xmark" className="text-lg" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
+                    <input
+                      type="text"
+                      value={bidForm.title}
+                      onChange={(e) => setBidForm({ ...bidForm, title: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <select
+                        value={bidForm.status}
+                        onChange={(e) => setBidForm({ ...bidForm, status: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        {['draft', 'pending', 'submitted', 'won', 'lost', 'canceled'].map((status) => (
+                          <option key={status} value={status}>
+                            {status.charAt(0).toUpperCase() + status.slice(1)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Bid Date</label>
+                      <input
+                        type="date"
+                        value={bidForm.bid_date || ''}
+                        onChange={(e) => setBidForm({ ...bidForm, bid_date: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Related Job (Optional)</label>
+                    <select
+                      value={bidForm.job_id || ''}
+                      onChange={(e) => setBidForm({ ...bidForm, job_id: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="">None</option>
+                      {jobs.map((job) => (
+                        <option key={job.id} value={job.id}>
+                          {job.name || job.projectName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
+                    <input
+                      type="text"
+                      value={bidForm.client}
+                      onChange={(e) => setBidForm({ ...bidForm, client: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Probability (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={bidForm.probability}
+                      onChange={(e) => setBidForm({ ...bidForm, probability: Number(e.target.value) })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                    <textarea
+                      rows={3}
+                      value={bidForm.notes}
+                      onChange={(e) => setBidForm({ ...bidForm, notes: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                  {formError && <p className="text-sm text-red-600">{formError}</p>}
+                </div>
+
+                <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
+                  <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading}>
+                    {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {showItemModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+              <button className="absolute inset-0 bg-black/40" onClick={closeItemModal} aria-label="Close bid item modal" />
+              <Card className="relative z-10 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-gray-900">{editingItemId ? 'Edit Bid Item' : 'Add Bid Item'}</h3>
+                  <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeItemModal}>
+                    <Icon name="xmark" className="text-lg" />
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                    <select
+                      value={itemForm.item_type}
+                      onChange={(e) => setItemForm({ ...itemForm, item_type: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    >
+                      {['custom', 'labor', 'equipment', 'material', 'subcontract'].map((type) => (
+                        <option key={type} value={type}>
+                          {type.charAt(0).toUpperCase() + type.slice(1)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <input
+                      type="text"
+                      value={itemForm.description}
+                      onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={itemForm.quantity}
+                        onChange={(e) => setItemForm({ ...itemForm, quantity: Number(e.target.value) })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={itemForm.unit_cost}
+                        onChange={(e) => setItemForm({ ...itemForm, unit_cost: Number(e.target.value) })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                  {itemError && <p className="text-sm text-red-600">{itemError}</p>}
+                </div>
+
+                <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
+                  <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading}>
+                    {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
         </div>
       );
     };
@@ -3925,13 +5881,57 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // ============================================
     // VENDORS VIEW
     // ============================================
-    const VendorsView = ({ vendors, setVendors }) => {
+    const VendorsView = ({ vendors, vendorsLoading, setVendors, jobs, inventory }) => {
       const [search, setSearch] = useState('');
-      const [selectedVendor, setSelectedVendor] = useState(null);
+      const [selectedVendorId, setSelectedVendorId] = useState(null);
+      const [showVendorModal, setShowVendorModal] = useState(false);
+      const [editingVendorId, setEditingVendorId] = useState(null);
+      const [saveLoading, setSaveLoading] = useState(false);
+      const [deleteLoading, setDeleteLoading] = useState(false);
+      const [formError, setFormError] = useState('');
+      const [vendorForm, setVendorForm] = useState({
+        name: '',
+        status: 'active',
+        category: '',
+        contact_name: '',
+        phone: '',
+        email: '',
+        rating: 0,
+        active_orders: 0,
+      });
+      const [purchaseOrders, setPurchaseOrders] = useState([]);
+      const [purchaseOrdersLoading, setPurchaseOrdersLoading] = useState(true);
+      const [selectedPoId, setSelectedPoId] = useState(null);
+      const [poItems, setPoItems] = useState([]);
+      const [poItemsLoading, setPoItemsLoading] = useState(false);
+      const [poError, setPoError] = useState('');
+      const [poLoading, setPoLoading] = useState(false);
+      const [poItemLoading, setPoItemLoading] = useState(false);
+      const [showPoModal, setShowPoModal] = useState(false);
+      const [editingPoId, setEditingPoId] = useState(null);
+      const [editingPoItemId, setEditingPoItemId] = useState(null);
+      const [poForm, setPoForm] = useState({
+        vendor_id: '',
+        job_id: '',
+        status: 'draft',
+        notes: '',
+      });
+      const [poItemForm, setPoItemForm] = useState({
+        inventory_id: '',
+        description: '',
+        quantity: 1,
+        unit_cost: 0,
+      });
 
       const categories = [...new Set(vendors.map(v => v.category))];
+      const selectedVendor = vendors.find((vendor) => String(vendor.id) === String(selectedVendorId)) || null;
+      const selectedPO = purchaseOrders.find((po) => String(po.id) === String(selectedPoId)) || null;
+
       const filteredVendors = vendors.filter(v =>
-        !search || v.name.toLowerCase().includes(search.toLowerCase()) || v.category.toLowerCase().includes(search.toLowerCase())
+        !search ||
+        v.name.toLowerCase().includes(search.toLowerCase()) ||
+        (v.category || '').toLowerCase().includes(search.toLowerCase()) ||
+        (v.contact || '').toLowerCase().includes(search.toLowerCase())
       );
 
       const renderStars = (rating) => (
@@ -3942,27 +5942,418 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         </div>
       );
 
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadPurchaseOrders = async () => {
+          try {
+            setPurchaseOrdersLoading(true);
+            const response = await fetch('/api/purchase-orders', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load purchase orders');
+            }
+            if (isMounted) {
+              setPurchaseOrders(payload.purchase_orders || []);
+            }
+          } catch {
+            if (isMounted) {
+              setPurchaseOrders([]);
+            }
+          } finally {
+            if (isMounted) {
+              setPurchaseOrdersLoading(false);
+            }
+          }
+        };
+
+        loadPurchaseOrders();
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let isMounted = true;
+        const loadPoItems = async () => {
+          if (!selectedPoId) {
+            if (isMounted) setPoItems([]);
+            return;
+          }
+          try {
+            setPoItemsLoading(true);
+            const response = await fetch(`/api/purchase-orders/${selectedPoId}/items`, { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load purchase order items');
+            }
+            if (isMounted) setPoItems(payload.items || []);
+          } catch {
+            if (isMounted) setPoItems([]);
+          } finally {
+            if (isMounted) setPoItemsLoading(false);
+          }
+        };
+
+        loadPoItems();
+        return () => {
+          isMounted = false;
+        };
+      }, [selectedPoId]);
+
+      const resetForm = () => {
+        setVendorForm({
+          name: '',
+          status: 'active',
+          category: '',
+          contact_name: '',
+          phone: '',
+          email: '',
+          rating: 0,
+          active_orders: 0,
+        });
+        setEditingVendorId(null);
+        setFormError('');
+      };
+
+      const openCreateModal = () => {
+        resetForm();
+        setShowVendorModal(true);
+      };
+
+      const openEditModal = (vendor) => {
+        setEditingVendorId(vendor.id);
+        setFormError('');
+        setVendorForm({
+          name: vendor.name || '',
+          status: vendor.status || 'active',
+          category: vendor.category || '',
+          contact_name: vendor.contact_name || vendor.contact || '',
+          phone: vendor.phone || '',
+          email: vendor.email || '',
+          rating: Number(vendor.rating || 0),
+          active_orders: Number(vendor.active_orders ?? vendor.activeOrders ?? 0),
+        });
+        setShowVendorModal(true);
+      };
+
+      const closeModal = () => {
+        setShowVendorModal(false);
+        resetForm();
+      };
+
+      const openCreatePoModal = () => {
+        setEditingPoId(null);
+        setPoError('');
+        setPoForm({
+          vendor_id: selectedVendor?.id || vendors[0]?.id || '',
+          job_id: '',
+          status: 'draft',
+          notes: '',
+        });
+        setShowPoModal(true);
+      };
+
+      const openEditPoModal = (po) => {
+        setEditingPoId(po.id);
+        setPoError('');
+        setPoForm({
+          vendor_id: po.vendor_id || '',
+          job_id: po.job_id || '',
+          status: po.status || 'draft',
+          notes: po.notes || '',
+        });
+        setShowPoModal(true);
+      };
+
+      const closePoModal = () => {
+        setShowPoModal(false);
+        setEditingPoId(null);
+        setPoError('');
+      };
+
+      const handleSaveVendor = async () => {
+        if (!vendorForm.name.trim()) {
+          setFormError('Name is required');
+          return;
+        }
+
+        setSaveLoading(true);
+        setFormError('');
+
+        try {
+          const response = await fetch(editingVendorId ? `/api/vendors/${editingVendorId}` : '/api/vendors', {
+            method: editingVendorId ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: vendorForm.name.trim(),
+              status: vendorForm.status,
+              category: vendorForm.category,
+              contact_name: vendorForm.contact_name,
+              phone: vendorForm.phone,
+              email: vendorForm.email,
+              rating: Number(vendorForm.rating || 0),
+              active_orders: Number(vendorForm.active_orders || 0),
+            }),
+          });
+
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.vendor) {
+            setFormError(payload?.error || raw || 'Failed to save vendor');
+            setSaveLoading(false);
+            return;
+          }
+
+          setVendors((prev) => {
+            if (editingVendorId) {
+              return prev.map((vendor) => (String(vendor.id) === String(editingVendorId) ? payload.vendor : vendor));
+            }
+            return [payload.vendor, ...prev];
+          });
+          setSelectedVendorId(payload.vendor.id);
+          closeModal();
+        } catch {
+          setFormError('Failed to save vendor');
+        } finally {
+          setSaveLoading(false);
+        }
+      };
+
+      const handleDeleteVendor = async () => {
+        if (!selectedVendor) return;
+        const confirmed = window.confirm('Delete this vendor? This cannot be undone.');
+        if (!confirmed) return;
+
+        setDeleteLoading(true);
+        setFormError('');
+        try {
+          const response = await fetch(`/api/vendors/${selectedVendor.id}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.success) {
+            setFormError(payload?.error || raw || 'Failed to delete vendor');
+            setDeleteLoading(false);
+            return;
+          }
+
+          setVendors((prev) => prev.filter((vendor) => String(vendor.id) !== String(selectedVendor.id)));
+          setSelectedVendorId(null);
+        } catch {
+          setFormError('Failed to delete vendor');
+        } finally {
+          setDeleteLoading(false);
+        }
+      };
+
+      const handleSavePO = async () => {
+        if (!poForm.vendor_id) {
+          setPoError('Vendor is required');
+          return;
+        }
+        setPoLoading(true);
+        setPoError('');
+        try {
+          const response = await fetch(editingPoId ? `/api/purchase-orders/${editingPoId}` : '/api/purchase-orders', {
+            method: editingPoId ? 'PATCH' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              vendor_id: poForm.vendor_id,
+              job_id: poForm.job_id || null,
+              status: poForm.status,
+              notes: poForm.notes,
+            }),
+          });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.purchase_order) {
+            setPoError(payload?.error || raw || 'Failed to save purchase order');
+            setPoLoading(false);
+            return;
+          }
+
+          setPurchaseOrders((prev) => {
+            if (editingPoId) {
+              return prev.map((po) => (String(po.id) === String(editingPoId) ? payload.purchase_order : po));
+            }
+            return [payload.purchase_order, ...prev];
+          });
+          setSelectedPoId(payload.purchase_order.id);
+          closePoModal();
+        } catch {
+          setPoError('Failed to save purchase order');
+        } finally {
+          setPoLoading(false);
+        }
+      };
+
+      const handleDeletePO = async () => {
+        if (!selectedPO) return;
+        const confirmed = window.confirm('Delete this purchase order? This cannot be undone.');
+        if (!confirmed) return;
+        setPoLoading(true);
+        setPoError('');
+        try {
+          const response = await fetch(`/api/purchase-orders/${selectedPO.id}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.success) {
+            setPoError(payload?.error || raw || 'Failed to delete purchase order');
+            setPoLoading(false);
+            return;
+          }
+          setPurchaseOrders((prev) => prev.filter((po) => String(po.id) !== String(selectedPO.id)));
+          setSelectedPoId(null);
+          setPoItems([]);
+        } catch {
+          setPoError('Failed to delete purchase order');
+        } finally {
+          setPoLoading(false);
+        }
+      };
+
+      const handleSavePoItem = async () => {
+        if (!selectedPO) return;
+        if (!poItemForm.quantity || Number(poItemForm.quantity) <= 0) {
+          setPoError('Quantity must be greater than 0');
+          return;
+        }
+        setPoItemLoading(true);
+        setPoError('');
+        try {
+          const response = await fetch(
+            editingPoItemId
+              ? `/api/purchase-orders/${selectedPO.id}/items/${editingPoItemId}`
+              : `/api/purchase-orders/${selectedPO.id}/items`,
+            {
+              method: editingPoItemId ? 'PATCH' : 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                inventory_id: poItemForm.inventory_id || null,
+                description: poItemForm.description || '',
+                quantity: Number(poItemForm.quantity || 0),
+                unit_cost: Number(poItemForm.unit_cost || 0),
+              }),
+            }
+          );
+
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.item) {
+            setPoError(payload?.error || raw || 'Failed to save line item');
+            setPoItemLoading(false);
+            return;
+          }
+
+          setPoItems((prev) => {
+            if (editingPoItemId) {
+              return prev.map((item) => (String(item.id) === String(editingPoItemId) ? payload.item : item));
+            }
+            return [payload.item, ...prev];
+          });
+          setEditingPoItemId(null);
+          setPoItemForm({ inventory_id: '', description: '', quantity: 1, unit_cost: 0 });
+        } catch {
+          setPoError('Failed to save line item');
+        } finally {
+          setPoItemLoading(false);
+        }
+      };
+
+      const handleEditPoItem = (item) => {
+        setEditingPoItemId(item.id);
+        setPoItemForm({
+          inventory_id: item.inventory_id || '',
+          description: item.description || '',
+          quantity: Number(item.quantity || 1),
+          unit_cost: Number(item.unit_cost || 0),
+        });
+      };
+
+      const handleDeletePoItem = async (itemId) => {
+        if (!selectedPO) return;
+        setPoItemLoading(true);
+        setPoError('');
+        try {
+          const response = await fetch(`/api/purchase-orders/${selectedPO.id}/items/${itemId}`, { method: 'DELETE' });
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.success) {
+            setPoError(payload?.error || raw || 'Failed to delete line item');
+            setPoItemLoading(false);
+            return;
+          }
+          setPoItems((prev) => prev.filter((item) => String(item.id) !== String(itemId)));
+        } catch {
+          setPoError('Failed to delete line item');
+        } finally {
+          setPoItemLoading(false);
+        }
+      };
+
       return (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <StatCard icon="building" label="Total Vendors" value={vendors.length} color="brand" />
             <StatCard icon="star" label="Top Rated" value={vendors.filter(v => v.rating === 5).length} color="yellow" />
-            <StatCard icon="clipboard-list" label="Active Orders" value={vendors.reduce((sum, v) => sum + v.activeOrders, 0)} color="blue" />
+            <StatCard icon="clipboard-list" label="Active Orders" value={vendors.reduce((sum, v) => sum + (v.activeOrders ?? v.active_orders ?? 0), 0)} color="blue" />
             <StatCard icon="tags" label="Categories" value={categories.length} color="green" />
           </div>
 
           <div className="flex items-center justify-between">
             <SearchInput value={search} onChange={setSearch} placeholder="Search vendors..." />
-            <Button variant="brand"><Icon name="plus" className="mr-2" />Add Vendor</Button>
+            <Button variant="brand" onClick={openCreateModal}><Icon name="plus" className="mr-2" />Add Vendor</Button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-3">
-              {filteredVendors.map(vendor => (
+              {vendorsLoading ? (
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500">Loading vendors...</p>
+                </Card>
+              ) : filteredVendors.length === 0 ? (
+                <Card className="p-4">
+                  <p className="text-sm text-gray-500">No vendors found.</p>
+                </Card>
+              ) : filteredVendors.map(vendor => (
                 <Card
                   key={vendor.id}
-                  className={`p-4 cursor-pointer transition-all ${selectedVendor?.id === vendor.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                  onClick={() => setSelectedVendor(vendor)}
+                  className={`p-4 cursor-pointer transition-all ${selectedVendorId === vendor.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
+                  onClick={() => setSelectedVendorId(vendor.id)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -3978,9 +6369,6 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <div className="text-right">
                       <p className="text-sm text-gray-600">{vendor.contact}</p>
                       <p className="text-sm text-gray-500">{vendor.phone}</p>
-                      {vendor.activeOrders > 0 && (
-                        <Badge variant="info" className="mt-1">{vendor.activeOrders} active order{vendor.activeOrders > 1 ? 's' : ''}</Badge>
-                      )}
                     </div>
                   </div>
                 </Card>
@@ -3996,6 +6384,9 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   <h3 className="font-semibold text-gray-900">{selectedVendor.name}</h3>
                   <p className="text-sm text-gray-500">{selectedVendor.category}</p>
                   <div className="flex justify-center mt-2">{renderStars(selectedVendor.rating)}</div>
+                  <div className="mt-2">
+                    <Badge className={getStatusColor(selectedVendor.status || 'active')}>{selectedVendor.status || 'active'}</Badge>
+                  </div>
                 </div>
                 <div className="space-y-4">
                   <div>
@@ -4010,11 +6401,23 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <p className="text-xs text-gray-500 mb-1">Email</p>
                     <p className="text-sm text-brand-600">{selectedVendor.email}</p>
                   </div>
+                  {formError && <p className="text-sm text-red-600">{formError}</p>}
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" className="flex-1" onClick={() => openEditModal(selectedVendor)}>
+                      <Icon name="pen-to-square" className="mr-1" />Edit
+                    </Button>
+                    <Button variant="danger" size="sm" className="flex-1" onClick={handleDeleteVendor} disabled={deleteLoading}>
+                      <Icon name={deleteLoading ? 'spinner' : 'trash'} className={`mr-1 ${deleteLoading ? 'animate-spin' : ''}`} />
+                      Delete
+                    </Button>
+                  </div>
                   <div className="flex gap-2 pt-4">
                     <Button variant="secondary" size="sm" className="flex-1"><Icon name="phone" className="mr-1" />Call</Button>
                     <Button variant="secondary" size="sm" className="flex-1"><Icon name="envelope" className="mr-1" />Email</Button>
                   </div>
-                  <Button variant="brand" className="w-full"><Icon name="file-invoice" className="mr-2" />New Order</Button>
+                  <Button variant="brand" className="w-full" onClick={openCreatePoModal}>
+                    <Icon name="file-invoice" className="mr-2" />New Order
+                  </Button>
                 </div>
               </Card>
             ) : (
@@ -4024,6 +6427,259 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               </Card>
             )}
           </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-900">Purchase Orders</h3>
+                <Button variant="brand" size="sm" onClick={openCreatePoModal}>
+                  <Icon name="plus" className="mr-2" />New PO
+                </Button>
+              </div>
+              {purchaseOrdersLoading ? (
+                <Card className="p-4"><p className="text-sm text-gray-500">Loading purchase orders...</p></Card>
+              ) : purchaseOrders.length === 0 ? (
+                <Card className="p-4"><p className="text-sm text-gray-500">No purchase orders yet.</p></Card>
+              ) : (
+                purchaseOrders.map((po) => {
+                  const vendor = vendors.find((v) => String(v.id) === String(po.vendor_id));
+                  const job = jobs.find((j) => String(j.id) === String(po.job_id));
+                  return (
+                    <Card
+                      key={po.id}
+                      className={`p-4 cursor-pointer transition-all ${selectedPoId === po.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
+                      onClick={() => setSelectedPoId(po.id)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <p className="font-semibold text-gray-900">PO #{String(po.id).slice(0, 8)}</p>
+                          <p className="text-sm text-gray-500">{vendor?.name || 'Unknown Vendor'}</p>
+                          <p className="text-xs text-gray-500">{job?.name || 'No Job'}</p>
+                        </div>
+                        <Badge className={getStatusColor(po.status || 'draft')}>{po.status || 'draft'}</Badge>
+                      </div>
+                    </Card>
+                  );
+                })
+              )}
+            </div>
+
+            {selectedPO ? (
+              <Card className="p-4 h-fit sticky top-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">PO Details</h3>
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => openEditPoModal(selectedPO)}>
+                      <Icon name="pen-to-square" />
+                    </Button>
+                    <Button variant="danger" size="sm" onClick={handleDeletePO} disabled={poLoading}>
+                      <Icon name={poLoading ? 'spinner' : 'trash'} className={poLoading ? 'animate-spin' : ''} />
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">{selectedPO.notes || 'No notes'}</p>
+
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">Line Items</p>
+                  <div className="space-y-2 max-h-52 overflow-y-auto">
+                    {poItemsLoading ? (
+                      <p className="text-sm text-gray-500">Loading items...</p>
+                    ) : poItems.length === 0 ? (
+                      <p className="text-sm text-gray-500">No items yet.</p>
+                    ) : poItems.map((item) => {
+                      const inv = inventory.find((row) => String(row.id) === String(item.inventory_id));
+                      return (
+                        <div key={item.id} className="border border-gray-200 rounded-lg p-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-medium text-gray-900">{inv?.name || item.description || 'Line item'}</p>
+                              <p className="text-xs text-gray-500">{item.quantity} x {formatCurrency(item.unit_cost)}</p>
+                            </div>
+                            <div className="flex gap-1">
+                              <Button variant="ghost" size="sm" onClick={() => handleEditPoItem(item)}><Icon name="pen-to-square" /></Button>
+                              <Button variant="ghost" size="sm" onClick={() => handleDeletePoItem(item.id)}><Icon name="trash" /></Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-gray-200">
+                  <p className="text-xs text-gray-500">{editingPoItemId ? 'Edit Line Item' : 'Add Line Item'}</p>
+                  <select
+                    value={poItemForm.inventory_id}
+                    onChange={(e) => setPoItemForm({ ...poItemForm, inventory_id: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  >
+                    <option value="">Select inventory (optional)</option>
+                    {inventory.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={poItemForm.description}
+                    onChange={(e) => setPoItemForm({ ...poItemForm, description: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    placeholder="Description"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={poItemForm.quantity}
+                      onChange={(e) => setPoItemForm({ ...poItemForm, quantity: Number(e.target.value) })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      placeholder="Qty"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={poItemForm.unit_cost}
+                      onChange={(e) => setPoItemForm({ ...poItemForm, unit_cost: Number(e.target.value) })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      placeholder="Unit Cost"
+                    />
+                  </div>
+                  {poError && <p className="text-sm text-red-600">{poError}</p>}
+                  <Button variant="brand" size="sm" onClick={handleSavePoItem} disabled={poItemLoading}>
+                    <Icon name={poItemLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${poItemLoading ? 'animate-spin' : ''}`} />
+                    {editingPoItemId ? 'Save Item' : 'Add Item'}
+                  </Button>
+                </div>
+              </Card>
+            ) : (
+              <Card className="p-8 text-center text-gray-500">
+                <Icon name="file-invoice" className="text-4xl mb-2 text-gray-300" />
+                <p>Select a purchase order to view details</p>
+              </Card>
+            )}
+          </div>
+
+          {showVendorModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close vendor modal" />
+              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">{editingVendorId ? 'Edit Vendor' : 'Add Vendor'}</h3>
+                  <button className="text-gray-500 hover:text-gray-700" onClick={closeModal}>
+                    <Icon name="xmark" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-gray-500 mb-1">Name</p>
+                    <input type="text" value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Status</p>
+                    <select value={vendorForm.status} onChange={(e) => setVendorForm({ ...vendorForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                      <option value="preferred">preferred</option>
+                      <option value="blocked">blocked</option>
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Category</p>
+                    <input type="text" value={vendorForm.category} onChange={(e) => setVendorForm({ ...vendorForm, category: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Contact</p>
+                    <input type="text" value={vendorForm.contact_name} onChange={(e) => setVendorForm({ ...vendorForm, contact_name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Phone</p>
+                    <input type="text" value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Email</p>
+                    <input type="email" value={vendorForm.email} onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Rating</p>
+                    <input type="number" min="0" max="5" step="1" value={vendorForm.rating} onChange={(e) => setVendorForm({ ...vendorForm, rating: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Active Orders</p>
+                    <input type="number" min="0" step="1" value={vendorForm.active_orders} onChange={(e) => setVendorForm({ ...vendorForm, active_orders: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  </div>
+                </div>
+
+                {formError && <p className="text-sm text-red-600 mt-4">{formError}</p>}
+
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveVendor} disabled={saveLoading}>
+                    <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                    {editingVendorId ? 'Save Vendor' : 'Create Vendor'}
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {showPoModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <button className="absolute inset-0 bg-black/40" onClick={closePoModal} aria-label="Close purchase order modal" />
+              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">{editingPoId ? 'Edit Purchase Order' : 'Create Purchase Order'}</h3>
+                  <button className="text-gray-500 hover:text-gray-700" onClick={closePoModal}>
+                    <Icon name="xmark" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Vendor</p>
+                    <select value={poForm.vendor_id} onChange={(e) => setPoForm({ ...poForm, vendor_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="">Select vendor</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Job (optional)</p>
+                    <select value={poForm.job_id} onChange={(e) => setPoForm({ ...poForm, job_id: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="">No job</option>
+                      {jobs.map((job) => (
+                        <option key={job.id} value={job.id}>{job.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Status</p>
+                    <select value={poForm.status} onChange={(e) => setPoForm({ ...poForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <option value="draft">draft</option>
+                      <option value="submitted">submitted</option>
+                      <option value="approved">approved</option>
+                      <option value="ordered">ordered</option>
+                      <option value="received">received</option>
+                      <option value="canceled">canceled</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <p className="text-xs text-gray-500 mb-1">Notes</p>
+                    <textarea value={poForm.notes} onChange={(e) => setPoForm({ ...poForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" />
+                  </div>
+                </div>
+                {poError && <p className="text-sm text-red-600 mt-4">{poError}</p>}
+                <div className="flex justify-end gap-2 mt-6">
+                  <Button variant="secondary" onClick={closePoModal}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSavePO} disabled={poLoading}>
+                    <Icon name={poLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${poLoading ? 'animate-spin' : ''}`} />
+                    {editingPoId ? 'Save PO' : 'Create PO'}
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
         </div>
       );
     };
@@ -4034,6 +6690,19 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     const FinanceView = ({ jobs }) => {
       const [connected, setConnected] = useState(false);
       const [syncing, setSyncing] = useState(false);
+      const [pricingLoading, setPricingLoading] = useState(true);
+      const [pricingSaving, setPricingSaving] = useState(false);
+      const [pricingError, setPricingError] = useState('');
+      const [pricingSuccess, setPricingSuccess] = useState('');
+      const [pricingSettings, setPricingSettings] = useState({
+        operator_labor_rate: 0,
+        labor_burden_percent: 0,
+        hauling_rate_per_hour: 0,
+        dump_fee_per_load: 0,
+        target_margin_percent: 0,
+        contingency_percent: 0,
+        markup_percent: 0,
+      });
 
       const mockFinancials = {
         revenue: { current: 2847500, previous: 2150000, change: 32.4 },
@@ -4050,6 +6719,97 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         { id: 4, date: '2026-02-02', description: 'CAT - Parts & Service', type: 'expense', amount: 12850, status: 'pending' },
         { id: 5, date: '2026-02-01', description: 'Kaufman Dev - Invoice #1082', type: 'income', amount: 185000, status: 'pending' },
       ];
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadPricingSettings = async () => {
+          try {
+            setPricingLoading(true);
+            const response = await fetch('/api/pricing-settings', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load pricing settings');
+            }
+
+            if (isMounted && payload?.pricing_settings) {
+              setPricingSettings({
+                operator_labor_rate: Number(payload.pricing_settings.operator_labor_rate) || 0,
+                labor_burden_percent: Number(payload.pricing_settings.labor_burden_percent) || 0,
+                hauling_rate_per_hour: Number(payload.pricing_settings.hauling_rate_per_hour) || 0,
+                dump_fee_per_load: Number(payload.pricing_settings.dump_fee_per_load) || 0,
+                target_margin_percent: Number(payload.pricing_settings.target_margin_percent) || 0,
+                contingency_percent: Number(payload.pricing_settings.contingency_percent) || 0,
+                markup_percent: Number(payload.pricing_settings.markup_percent) || 0,
+              });
+            }
+          } catch (error) {
+            if (isMounted) {
+              setPricingError(error instanceof Error ? error.message : 'Failed to load pricing settings');
+            }
+          } finally {
+            if (isMounted) {
+              setPricingLoading(false);
+            }
+          }
+        };
+
+        loadPricingSettings();
+        return () => {
+          isMounted = false;
+        };
+      }, []);
+
+      const handleSavePricingSettings = async () => {
+        try {
+          setPricingSaving(true);
+          setPricingError('');
+          setPricingSuccess('');
+
+          const response = await fetch('/api/pricing-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              operator_labor_rate: Number(pricingSettings.operator_labor_rate) || 0,
+              labor_burden_percent: Number(pricingSettings.labor_burden_percent) || 0,
+              hauling_rate_per_hour: Number(pricingSettings.hauling_rate_per_hour) || 0,
+              dump_fee_per_load: Number(pricingSettings.dump_fee_per_load) || 0,
+              target_margin_percent: Number(pricingSettings.target_margin_percent) || 0,
+              contingency_percent: Number(pricingSettings.contingency_percent) || 0,
+              markup_percent: Number(pricingSettings.markup_percent) || 0,
+            }),
+          });
+
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+
+          if (!response.ok || !payload?.pricing_settings) {
+            setPricingError(payload?.error || raw || 'Failed to save pricing settings');
+            setPricingSaving(false);
+            return;
+          }
+
+          setPricingSettings({
+            operator_labor_rate: Number(payload.pricing_settings.operator_labor_rate) || 0,
+            labor_burden_percent: Number(payload.pricing_settings.labor_burden_percent) || 0,
+            hauling_rate_per_hour: Number(payload.pricing_settings.hauling_rate_per_hour) || 0,
+            dump_fee_per_load: Number(payload.pricing_settings.dump_fee_per_load) || 0,
+            target_margin_percent: Number(payload.pricing_settings.target_margin_percent) || 0,
+            contingency_percent: Number(payload.pricing_settings.contingency_percent) || 0,
+            markup_percent: Number(payload.pricing_settings.markup_percent) || 0,
+          });
+          setPricingSuccess('Pricing settings saved.');
+        } catch {
+          setPricingError('Failed to save pricing settings');
+        } finally {
+          setPricingSaving(false);
+        }
+      };
 
       return (
         <div className="space-y-6">
@@ -4092,6 +6852,104 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               </div>
             </Card>
           )}
+
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900">
+                <Icon name="sliders" className="mr-2 text-brand-500" />
+                Pricing Settings
+              </h3>
+              <Button variant="brand" size="sm" onClick={handleSavePricingSettings} disabled={pricingSaving || pricingLoading}>
+                <Icon name={pricingSaving ? 'spinner' : 'floppy-disk'} className={`mr-2 ${pricingSaving ? 'animate-spin' : ''}`} />
+                {pricingSaving ? 'Saving...' : 'Save Rates'}
+              </Button>
+            </div>
+            {pricingLoading ? (
+              <p className="text-sm text-gray-500">Loading pricing settings...</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Operator Labor Rate</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.operator_labor_rate}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, operator_labor_rate: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Labor Burden %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.labor_burden_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, labor_burden_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Hauling Rate / Hour</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.hauling_rate_per_hour}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, hauling_rate_per_hour: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Dump Fee / Load</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.dump_fee_per_load}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, dump_fee_per_load: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Target Margin %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.target_margin_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, target_margin_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Contingency %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.contingency_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, contingency_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Markup %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.markup_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, markup_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            )}
+            {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
+            {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
+          </Card>
 
           {/* Financial KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

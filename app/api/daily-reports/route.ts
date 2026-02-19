@@ -114,7 +114,12 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ dailyReports: (data ?? []).map(mapReport) });
+    const mapped = (data ?? []).map(mapReport);
+    return NextResponse.json({
+      dailyReports: mapped,
+      daily_reports: mapped,
+      reports: mapped,
+    });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -15,6 +15,33 @@ type Props = {
   bidId: string | null;
 };
 
+const parseJson = (raw: string): Record<string, unknown> => {
+  try {
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+};
+
+const getErrorMessage = (parsed: Record<string, unknown>, fallback: string) => {
+  const error = parsed.error;
+  return typeof error === 'string' && error ? error : fallback;
+};
+
+const toActiveShareLink = (value: unknown): ActiveShareLink => {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.url !== 'string' || typeof row.token !== 'string') return null;
+
+  return {
+    token: row.token,
+    url: row.url,
+    expires_at: typeof row.expires_at === 'string' ? row.expires_at : null,
+    revoked_at: typeof row.revoked_at === 'string' ? row.revoked_at : null,
+    created_at: typeof row.created_at === 'string' ? row.created_at : null,
+  };
+};
+
 export function BidShareLinkPanel({ bidId }: Props) {
   const [activeShareLink, setActiveShareLink] = useState<ActiveShareLink>(null);
   const [activeShareLoading, setActiveShareLoading] = useState(false);
@@ -31,18 +58,13 @@ export function BidShareLinkPanel({ bidId }: Props) {
 
     const response = await fetch(`/api/bids/${id}/share/active`, { cache: 'no-store' });
     const raw = await response.text();
-    let parsed: any = {};
-    try {
-      parsed = raw ? JSON.parse(raw) : {};
-    } catch {
-      parsed = {};
-    }
+    const parsed = parseJson(raw);
 
     if (!response.ok) {
-      throw new Error(parsed?.error || raw || 'Failed to load proposal link');
+      throw new Error(getErrorMessage(parsed, raw || 'Failed to load proposal link'));
     }
 
-    setActiveShareLink(parsed?.item || null);
+    setActiveShareLink(toActiveShareLink(parsed.item));
     setActiveShareError('');
   };
 
@@ -87,14 +109,9 @@ export function BidShareLinkPanel({ bidId }: Props) {
       setActiveShareError('');
       const response = await fetch(`/api/bids/${bidId}/share`, { method: 'POST' });
       const raw = await response.text();
-      let parsed: any = {};
-      try {
-        parsed = raw ? JSON.parse(raw) : {};
-      } catch {
-        parsed = {};
-      }
+      const parsed = parseJson(raw);
       if (!response.ok) {
-        setActiveShareError(parsed?.error || raw || 'Failed to create proposal link');
+        setActiveShareError(getErrorMessage(parsed, raw || 'Failed to create proposal link'));
         return;
       }
       await loadActiveShareLink(bidId);
@@ -112,14 +129,9 @@ export function BidShareLinkPanel({ bidId }: Props) {
       setActiveShareError('');
       const response = await fetch(`/api/bids/${bidId}/share/revoke`, { method: 'POST' });
       const raw = await response.text();
-      let parsed: any = {};
-      try {
-        parsed = raw ? JSON.parse(raw) : {};
-      } catch {
-        parsed = {};
-      }
+      const parsed = parseJson(raw);
       if (!response.ok) {
-        setActiveShareError(parsed?.error || raw || 'Failed to revoke proposal link');
+        setActiveShareError(getErrorMessage(parsed, raw || 'Failed to revoke proposal link'));
         return;
       }
       await loadActiveShareLink(bidId);

@@ -289,7 +289,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
         yellow: 'bg-yellow-100 text-yellow-600',
       };
       return (
-        <Card className="p-4">
+        <Card className="p-3 sm:p-4">
           <div className="flex items-start justify-between">
             <div className={`p-2 rounded-lg ${iconBg[color]}`}>
               <Icon name={icon} className="text-lg" />
@@ -302,8 +302,8 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             )}
           </div>
           <div className="mt-3">
-            <p className="text-2xl font-dozer text-gray-900">{value}</p>
-            <p className="text-sm text-gray-500 font-medium">{label}</p>
+            <p className="text-xl sm:text-2xl font-dozer text-gray-900">{value}</p>
+            <p className="text-sm text-gray-500 font-medium leading-tight">{label}</p>
             {subValue && <p className="text-xs text-gray-400 mt-1">{subValue}</p>}
           </div>
         </Card>
@@ -1277,7 +1277,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* KPI Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard icon="briefcase" label="Active Jobs" value={activeJobs.length} subValue={`${formatCurrency(totalRevenue)} total contract value`} color="brand" />
             <StatCard icon="truck-monster" label="Fleet Utilization" value={`${utilizationRate}%`} subValue={`${activeEquipment.length} of ${equipment.length} active`} trend={5} color="green" />
             <StatCard icon="users" label="Crew On-Site" value={clockedInEmployees.length} subValue={`of ${employees.length} total employees`} color="blue" />
@@ -1524,8 +1524,8 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Header */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
               <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w - 1)}>
                 <Icon name="chevron-left" />
               </Button>
@@ -1535,13 +1535,13 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
               <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w + 1)}>
                 <Icon name="chevron-right" />
               </Button>
-              <Button variant="ghost" size="sm" onClick={() => setCurrentWeek(0)}>Today</Button>
             </div>
+            <Button variant="ghost" size="sm" onClick={() => setCurrentWeek(0)}>Today</Button>
           </div>
 
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
             {/* Resource Pool */}
-            <div className="space-y-4">
+            <div className="space-y-4 xl:col-span-1">
               <Card className="p-4">
                 <h3 className="font-semibold text-gray-900 mb-3">
                   <Icon name="truck-monster" className="mr-2 text-brand-500" />
@@ -1591,7 +1591,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             </div>
 
             {/* Schedule Grid */}
-            <div className="col-span-3 overflow-x-auto">
+            <div className="xl:col-span-3 overflow-x-auto">
               <Card className="p-0 min-w-[700px]">
                 {/* Days Header */}
                 <div className="grid grid-cols-7 border-b border-gray-200">
@@ -2484,7 +2484,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <StatCard icon="truck-monster" label="Total Fleet" value={stats.total} color="brand" />
             <StatCard icon="circle-check" label="Active" value={stats.active} color="green" />
             <StatCard icon="clock" label="Idle" value={stats.idle} color="yellow" />
@@ -2529,7 +2529,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Equipment Grid/List */}
-            <div className={`lg:col-span-2 ${viewMode === 'grid' ? 'grid grid-cols-2 gap-4' : 'space-y-3'}`}>
+            <div className={`lg:col-span-2 ${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3'}`}>
               {equipmentLoading ? (
                 <Card className="p-4">
                   <p className="text-sm text-gray-500">Loading equipment...</p>
@@ -2898,7 +2898,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="users" label="Total Employees" value={stats.total} color="brand" />
             <StatCard icon="user-check" label="On Site Today" value={stats.onSite} color="green" />
             <StatCard icon="hard-hat" label="Foremen" value={employees.filter(e => e.role === 'Foreman').length} color="blue" />
@@ -2906,14 +2906,14 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
           </div>
 
           {/* Filters */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex bg-gray-100 rounded-lg p-1">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
                 {['all', 'on-site', 'off'].map(status => (
                   <button
                     key={status}
                     onClick={() => setFilter(status)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                       filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
@@ -2922,11 +2922,11 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                 ))}
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => setShowModal({ type: 'time-clock' })}>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
                 <Icon name="clock" className="mr-2" /> Time Clock
               </Button>
-              <Button variant="brand" onClick={handleCreateEmployee} disabled={employeeActionLoading}>
+              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={employeeActionLoading}>
                 <Icon name="user-plus" className="mr-2" /> Add Employee
               </Button>
             </div>
@@ -3167,7 +3167,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="clipboard-list" label="Open Work Orders" value={workOrders.filter(w => w.status !== 'completed').length} color="brand" />
             <StatCard icon="circle-exclamation" label="High Priority" value={workOrders.filter(w => w.priority === 'high' && w.status !== 'completed').length} color="red" />
             <StatCard icon="calendar-check" label="Scheduled PM" value={workOrders.filter(w => w.type === 'preventive').length} color="blue" />
@@ -4251,7 +4251,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
           {selectedJob && (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Card className="p-4">
                   <p className="text-sm text-gray-500">Contract Value</p>
                   <p className="text-2xl font-bold text-gray-900">{formatCurrency(selectedJob.budget)}</p>
@@ -4425,7 +4425,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="shield-halved" label="Safety Logs (30d)" value={safetyLogs.length} color="green" />
             <StatCard icon="clipboard-check" label="Toolbox Talks" value={safetyLogs.filter(s => s.type === 'Toolbox Talk').length} color="blue" />
             <StatCard icon="triangle-exclamation" label="Expiring Certs" value={expiringCerts.length} color="yellow" />
@@ -4556,7 +4556,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             </Button>
           </div>
 
-          <Card className="p-0 overflow-hidden">
+          <Card className="p-0 overflow-x-auto">
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
@@ -4779,24 +4779,26 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="boxes-stacked" label="Total Items" value={inventory.length} color="brand" />
             <StatCard icon="triangle-exclamation" label="Low Stock Alerts" value={lowStock.length} color="red" />
             <StatCard icon="dollar-sign" label="Inventory Value" value={formatCurrency(totalValue)} color="green" />
             <StatCard icon="truck-ramp-box" label="Reserved Items" value={inventory.filter(i => i.qtyReserved > 0).length} color="blue" />
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 min-w-0">
+              <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full sm:w-auto">
                 <option value="all">All Categories</option>
                 {categories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
-              <SearchInput value={search} onChange={setSearch} placeholder="Search inventory..." />
+              <div className="w-full sm:w-72">
+                <SearchInput value={search} onChange={setSearch} placeholder="Search inventory..." />
+              </div>
             </div>
             <div className="flex gap-2">
-              <Button variant="secondary"><Icon name="file-export" className="mr-2" />Export</Button>
-              <Button variant="brand" onClick={openCreateModal}><Icon name="plus" className="mr-2" />Add Item</Button>
+              <Button variant="secondary" className="flex-1 sm:flex-none"><Icon name="file-export" className="mr-2" />Export</Button>
+              <Button variant="brand" className="flex-1 sm:flex-none" onClick={openCreateModal}><Icon name="plus" className="mr-2" />Add Item</Button>
             </div>
           </div>
 
@@ -4968,7 +4970,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="graduation-cap" label="Total Courses" value={trainingData.length} color="brand" />
             <StatCard icon="circle-check" label="Completion Rate" value={`${Math.round((totalCompleted / totalRequired) * 100)}%`} color="green" />
             <StatCard icon="clock" label="Required Incomplete" value={requiredIncomplete.length} color="red" />
@@ -5583,7 +5585,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="file-invoice-dollar" label="Active Bids" value={bids.filter((bid) => bid.status === 'pending' || bid.status === 'submitted').length} color="brand" />
             <StatCard icon="dollar-sign" label="Pending Value" value={formatCurrency(totalPending)} color="blue" />
             <StatCard icon="trophy" label="Win Rate" value={`${winRate}%`} color="green" />
@@ -6475,7 +6477,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard icon="building" label="Total Vendors" value={vendors.length} color="brand" />
             <StatCard icon="star" label="Top Rated" value={vendors.filter(v => v.rating === 5).length} color="yellow" />
             <StatCard icon="clipboard-list" label="Active Orders" value={vendors.reduce((sum, v) => sum + (v.activeOrders ?? v.active_orders ?? 0), 0)} color="blue" />
@@ -7338,9 +7340,9 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       const currentMessages = activeConversation ? (conversationMessages[activeConversation.id] || []) : [];
 
       return (
-        <div className="flex h-[calc(100vh-140px)] bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="flex flex-col md:flex-row h-[calc(100vh-140px)] max-md:h-[calc(100vh-170px)] bg-white rounded-lg border border-gray-200 overflow-hidden">
           {/* Sidebar - Conversations List */}
-          <div className="w-80 border-r border-gray-200 flex flex-col">
+          <div className={`${activeConversation ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-gray-200 flex-col min-h-0`}>
             {/* Header */}
             <div className="p-4 border-b border-gray-200">
               <div className="flex items-center justify-between mb-4">
@@ -7365,7 +7367,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             </div>
 
             {/* Tabs */}
-            <div className="flex border-b border-gray-200 px-2">
+            <div className="flex border-b border-gray-200 px-2 overflow-x-auto">
               {[
                 { id: 'all', label: 'All' },
                 { id: 'channels', label: 'Channels' },
@@ -7375,7 +7377,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 py-2 text-sm font-medium transition-colors ${
+                  className={`flex-1 min-w-[88px] py-2 text-sm font-medium transition-colors whitespace-nowrap ${
                     activeTab === tab.id
                       ? 'text-brand-600 border-b-2 border-brand-500'
                       : 'text-gray-500 hover:text-gray-700'
@@ -7460,10 +7462,16 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
           {/* Main Chat Area */}
           {activeConversation ? (
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-0">
               {/* Chat Header */}
-              <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setActiveConversation(null)}
+                    className="md:hidden p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                  >
+                    <Icon name="chevron-left" />
+                  </button>
                   {activeConversation.type === 'channel' ? (
                     <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
                       <Icon name={activeConversation.icon} className="text-gray-600" />
@@ -7488,7 +7496,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="hidden sm:flex items-center gap-2">
                   <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
                     <Icon name="phone" />
                   </button>
@@ -7502,7 +7510,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
                 {currentMessages.map((msg, idx) => {
                   const showDate = idx === 0 || currentMessages[idx - 1]?.date !== msg.date;
                   return (
@@ -7520,7 +7528,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                             {msg.initials}
                           </div>
                         )}
-                        <div className={`max-w-[70%] ${msg.isOwn ? 'items-end' : ''}`}>
+                        <div className={`max-w-[85%] sm:max-w-[70%] ${msg.isOwn ? 'items-end' : ''}`}>
                           {!msg.isOwn && (
                             <div className="flex items-center gap-2 mb-1">
                               <span className="text-sm font-medium text-gray-900">{msg.sender}</span>
@@ -7575,13 +7583,13 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
               </div>
 
               {/* Message Input */}
-              <div className="px-6 py-4 border-t border-gray-200">
+              <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200">
                 <div className="flex items-end gap-3">
                   <div className="flex gap-1">
                     <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
                       <Icon name="paperclip" />
                     </button>
-                    <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+                    <button className="hidden sm:inline-flex p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
                       <Icon name="image" />
                     </button>
                   </div>
@@ -7601,7 +7609,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                     />
                   </div>
                   <div className="flex gap-1">
-                    <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
+                    <button className="hidden sm:inline-flex p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
                       <Icon name="face-smile" />
                     </button>
                     <button
@@ -7618,7 +7626,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             </div>
           ) : (
             /* No Conversation Selected */
-            <div className="flex-1 flex items-center justify-center bg-gray-50">
+            <div className="hidden md:flex flex-1 items-center justify-center bg-gray-50">
               <div className="text-center">
                 <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Icon name="comments" className="text-3xl text-gray-400" />
@@ -8176,7 +8184,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
           {/* Creative Assets Tab */}
           {activeTab === 'creative' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {creativeAssets.map(asset => (
                 <Card key={asset.id} className="p-4 hover:shadow-lg transition-shadow cursor-pointer">
                   <div className="w-12 h-12 bg-brand-100 rounded-xl flex items-center justify-center mb-4">

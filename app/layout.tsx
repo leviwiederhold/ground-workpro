@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { validateEnv } from "@/lib/env/validateEnv";
+
+validateEnv();
 
 export const metadata: Metadata = {
   title: "Groundwork Pro - Excavation Management Platform",

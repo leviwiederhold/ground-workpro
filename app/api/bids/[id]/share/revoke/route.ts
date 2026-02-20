@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -49,6 +50,10 @@ export async function POST(
 
     const { supabase, companyId } = await getCompanyId();
     const bidId = parsedParams.data.id;
+    const subscriptionError = await requireActiveSubscription(supabase, companyId);
+    if (subscriptionError) {
+      return subscriptionError;
+    }
 
     const { data: bid, error: bidError } = await supabase
       .from("bids")

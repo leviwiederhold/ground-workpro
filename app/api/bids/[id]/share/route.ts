@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { generateShareToken } from "@/lib/tokens";
+import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -86,6 +87,11 @@ export async function POST(
       await requireRole(["admin", "pm"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const subscriptionError = await requireActiveSubscription(supabase, companyId);
+    if (subscriptionError) {
+      return subscriptionError;
     }
 
     // Ensure profile exists for created_by FK on bid_share_links.

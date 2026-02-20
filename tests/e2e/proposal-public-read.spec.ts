@@ -1,5 +1,5 @@
 import { expect, request as playwrightRequest, test } from '@playwright/test';
-import { loginViaUI } from './helpers';
+import { E2E_BASE_URL, loginViaUI } from './helpers';
 
 test('proposal share token returns sanitized public payload', async ({ page }) => {
   await loginViaUI(page);
@@ -42,8 +42,7 @@ test('proposal share token returns sanitized public payload', async ({ page }) =
   const token = shareJson?.item?.token;
   expect(token).toBeTruthy();
 
-  const baseURL = process.env.E2E_BASE_URL || 'http://localhost:3000';
-  const anon = await playwrightRequest.newContext({ baseURL });
+  const anon = await playwrightRequest.newContext({ baseURL: E2E_BASE_URL });
   const proposalRes = await anon.get(`/api/proposals/${token}`);
   expect(proposalRes.status()).toBe(200);
 
@@ -52,7 +51,7 @@ test('proposal share token returns sanitized public payload', async ({ page }) =
   expect(payload?.proposal?.bid_id).toBe(bidId);
   expect(payload?.items?.length).toBeGreaterThan(0);
 
-  const sum = payload.items.reduce((acc: number, row: any) => acc + Number(row.total || 0), 0);
+  const sum = payload.items.reduce((acc: number, row: { total?: number | string }) => acc + Number(row.total || 0), 0);
   expect(Number(payload.summary.total)).toBe(sum);
 
   const text = JSON.stringify(proposalJson);

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
+import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
 const allowedEntityTypes = ["job", "daily_report", "work_order"] as const;
 type EntityType = (typeof allowedEntityTypes)[number];
@@ -123,6 +124,10 @@ export async function POST(request: Request) {
     }
 
     const { supabase, companyId, userId } = await getCompanyId();
+    const subscriptionError = await requireActiveSubscription(supabase, companyId);
+    if (subscriptionError) {
+      return subscriptionError;
+    }
     const supabaseAdmin = getSupabaseAdmin();
     const storageClient = supabaseAdmin ?? supabase;
 

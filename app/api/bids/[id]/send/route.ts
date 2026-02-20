@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { calcBid } from "@/lib/pricing/calcBid";
+import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
 const sendSchema = z.object({
   override: z.boolean().optional().default(false),
@@ -43,6 +44,10 @@ export async function POST(
 
     const { override, override_note } = parsed.data;
     const { supabase, companyId } = await getCompanyId();
+    const subscriptionError = await requireActiveSubscription(supabase, companyId);
+    if (subscriptionError) {
+      return subscriptionError;
+    }
 
     const { data: bidRow, error: bidError } = await supabase
       .from("bids")

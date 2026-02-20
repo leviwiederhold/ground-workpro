@@ -1,5 +1,5 @@
 import { expect, request as playwrightRequest, test } from '@playwright/test';
-import { loginViaUI } from './helpers';
+import { E2E_BASE_URL, loginViaUI } from './helpers';
 
 test('share link can be revoked and token stops resolving publicly', async ({ page }) => {
   await loginViaUI(page);
@@ -42,8 +42,7 @@ test('share link can be revoked and token stops resolving publicly', async ({ pa
   const token = shareJson?.item?.token;
   expect(token).toBeTruthy();
 
-  const baseURL = process.env.E2E_BASE_URL || 'http://localhost:3000';
-  const anonContext = await playwrightRequest.newContext({ baseURL });
+  const anonContext = await playwrightRequest.newContext({ baseURL: E2E_BASE_URL });
 
   const beforeRevoke = await anonContext.get(`/api/proposals/${token}`);
   expect(beforeRevoke.status()).toBe(200);

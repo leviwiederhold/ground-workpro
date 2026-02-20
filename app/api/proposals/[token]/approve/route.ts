@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getPublicProposalByToken } from "@/lib/proposals/publicProposal";
+import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
 const paramsSchema = z.object({
   token: z.string().min(24),
@@ -32,17 +33,22 @@ export async function POST(
       return NextResponse.json({ error: proposalResult.error }, { status: proposalResult.status });
     }
 
+    const supabase = getSupabaseAdmin();
+    if (!supabase) {
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+
+    const subscriptionError = await requireActiveSubscription(supabase, proposalResult.companyId);
+    if (subscriptionError) {
+      return subscriptionError;
+    }
+
     const status = String(proposalResult.status || "").toLowerCase();
     if (status === "accepted") {
       return NextResponse.json({ error: "Proposal already accepted" }, { status: 409 });
     }
     if (status !== "sent") {
       return NextResponse.json({ error: "Bid must be sent before approval" }, { status: 409 });
-    }
-
-    const supabase = getSupabaseAdmin();
-    if (!supabase) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const now = new Date().toISOString();

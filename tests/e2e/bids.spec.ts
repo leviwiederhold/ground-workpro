@@ -1,8 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { loginViaUI } from './helpers';
+
+async function setSubscriptionStatus(page: Page, subscriptionStatus: 'inactive' | 'active') {
+  const response = await page.request.post('/api/test/set-subscription', {
+    data: { subscription_status: subscriptionStatus },
+  });
+  expect(response.status()).toBe(200);
+}
 
 test('bids create + add item + summary renders + delete persists', async ({ page }) => {
   await loginViaUI(page);
+  await setSubscriptionStatus(page, 'active');
 
   await page.getByTestId('nav-bids').click();
   await expect(page.getByTestId('bids-create')).toBeVisible();
@@ -46,6 +54,7 @@ test('bids create + add item + summary renders + delete persists', async ({ page
 
 test('send flow blocks below target margin, then allows override', async ({ page }) => {
   await loginViaUI(page);
+  await setSubscriptionStatus(page, 'active');
 
   await page.getByTestId('nav-bids').click();
   await expect(page.getByTestId('bids-create')).toBeVisible();

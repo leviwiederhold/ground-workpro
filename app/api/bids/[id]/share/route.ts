@@ -5,6 +5,7 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { generateShareToken } from "@/lib/tokens";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -154,11 +155,25 @@ export async function POST(
     }
 
     const origin = getOrigin(request);
+    const shareUrl = `${origin}/proposal/${inserted.token}`;
+
+    await logAuditEvent({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      eventType: "bid.share.created",
+      entityType: "bid",
+      entityId: parsedParams.data.id,
+      metadata: {
+        token: inserted.token,
+        url: shareUrl,
+      },
+    });
 
     return NextResponse.json({
       item: {
         token: inserted.token,
-        url: `${origin}/proposal/${inserted.token}`,
+        url: shareUrl,
         expires_at: null,
       },
     });

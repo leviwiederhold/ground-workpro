@@ -1,26 +1,34 @@
-import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth/requireRole";
 import { isBillingEnabled } from "@/lib/billing/isBillingEnabled";
 import { isStripeConfigured } from "@/lib/billing/isStripeConfigured";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit } from "@/lib/http/rateLimit";
 
-export async function POST() {
+export async function POST(request: Request) {
+  const rateLimited = enforceRateLimit(request, {
+    keyPrefix: "billing-portal",
+    limit: 60,
+    windowMs: 60_000,
+  });
+  if (rateLimited) return rateLimited;
+
   try {
     try {
       await requireRole(["admin"]);
     } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return errorResponse("Forbidden", 403);
     }
 
     if (!isBillingEnabled()) {
-      return NextResponse.json({ error: "Billing not enabled" }, { status: 501 });
+      return errorResponse("Billing not enabled", 501);
     }
 
     if (!isStripeConfigured()) {
-      return NextResponse.json({ error: "Stripe not configured" }, { status: 501 });
+      return errorResponse("Stripe not configured", 501);
     }
 
-    return NextResponse.json({ error: "Not implemented" }, { status: 501 });
+    return errorResponse("Not implemented", 501);
   } catch {
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return errorResponse("Internal server error", 500);
   }
 }

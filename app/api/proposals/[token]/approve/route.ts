@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getPublicProposalByToken } from "@/lib/proposals/publicProposal";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit } from "@/lib/http/rateLimit";
 
 const paramsSchema = z.object({
   token: z.string().min(24),
@@ -18,24 +20,33 @@ const toValidationError = (error: any) => ({
 });
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const rateLimited = enforceRateLimit(request, {
+    keyPrefix: "proposal-approve",
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (rateLimited) return rateLimited;
+
   try {
     const rawParams = await params;
     const parsedParams = paramsSchema.safeParse(rawParams);
     if (!parsedParams.success) {
-      return NextResponse.json(toValidationError(parsedParams.error), { status: 422 });
+      return errorResponse("Validation error", 422, {
+        details: toValidationError(parsedParams.error).details,
+      });
     }
 
     const proposalResult = await getPublicProposalByToken(parsedParams.data.token);
     if (!proposalResult.ok) {
-      return NextResponse.json({ error: proposalResult.error }, { status: proposalResult.status });
+      return errorResponse(proposalResult.error, proposalResult.status);
     }
 
     const supabase = getSupabaseAdmin();
     if (!supabase) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return errorResponse("Internal server error", 500);
     }
 
     const subscriptionError = await requireActiveSubscription(supabase, proposalResult.companyId);
@@ -45,10 +56,10 @@ export async function POST(
 
     const status = String(proposalResult.status || "").toLowerCase();
     if (status === "accepted") {
-      return NextResponse.json({ error: "Proposal already accepted" }, { status: 409 });
+      return errorResponse("Proposal already accepted", 409);
     }
     if (status !== "sent") {
-      return NextResponse.json({ error: "Bid must be sent before approval" }, { status: 409 });
+      return errorResponse("Bid must be sent before approval", 409);
     }
 
     const now = new Date().toISOString();
@@ -79,20 +90,35 @@ export async function POST(
     }
 
     if (updateResult?.error) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return errorResponse("Internal server error", 500);
     }
 
     if (!updateResult?.data) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return errorResponse("Internal server error", 500);
+    }
+
+    if (proposalResult.shareCreatedByUserId) {
+      await logAuditEvent({
+        supabase,
+        companyId: proposalResult.companyId,
+        actorUserId: proposalResult.shareCreatedByUserId,
+        eventType: "proposal.approved",
+        entityType: "bid",
+        entityId: proposalResult.bidId,
+        metadata: {
+          token: parsedParams.data.token,
+          approval_source: "public_proposal_token",
+        },
+      });
     }
 
     const refreshed = await getPublicProposalByToken(parsedParams.data.token);
     if (!refreshed.ok) {
-      return NextResponse.json({ error: refreshed.error }, { status: refreshed.status });
+      return errorResponse(refreshed.error, refreshed.status);
     }
 
-    return NextResponse.json({ item: refreshed.item });
+    return Response.json({ item: refreshed.item });
   } catch {
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return errorResponse("Internal server error", 500);
   }
 }

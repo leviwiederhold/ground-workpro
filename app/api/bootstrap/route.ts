@@ -1,13 +1,21 @@
-import { NextResponse } from "next/server";
 import { supabaseServer } from "@/lib/supabase/server";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit } from "@/lib/http/rateLimit";
 
-export async function POST() {
+export async function POST(request: Request) {
+  const rateLimited = enforceRateLimit(request, {
+    keyPrefix: "auth-bootstrap",
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (rateLimited) return rateLimited;
+
   const supabase = await supabaseServer();
 
   // Get current user
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    return errorResponse("Not authenticated", 401);
   }
 
   const user = userData.user;
@@ -26,7 +34,7 @@ export async function POST() {
     .single();
 
   if (companyError) {
-    return NextResponse.json({ error: companyError.message }, { status: 400 });
+    return errorResponse(companyError.message, 400);
   }
 
   // 3) Create membership as admin
@@ -37,9 +45,8 @@ export async function POST() {
   });
 
   if (membershipError) {
-    return NextResponse.json({ error: membershipError.message }, { status: 400 });
+    return errorResponse(membershipError.message, 400);
   }
 
-  return NextResponse.json({ success: true, company });
+  return Response.json({ success: true, company });
 }
-

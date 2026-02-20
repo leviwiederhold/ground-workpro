@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -48,7 +49,7 @@ export async function POST(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const bidId = parsedParams.data.id;
     const subscriptionError = await requireActiveSubscription(supabase, companyId);
     if (subscriptionError) {
@@ -93,6 +94,16 @@ export async function POST(
     if (!updated) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
+
+    await logAuditEvent({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      eventType: "bid.share.revoked",
+      entityType: "bid",
+      entityId: bidId,
+      metadata: { share_link_id: shareLink.id },
+    });
 
     return NextResponse.json({ item: { success: true } });
   } catch (error) {

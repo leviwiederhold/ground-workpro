@@ -105,6 +105,16 @@ nav button span {
     grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
   }
 
+  .app-shell .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .app-shell input,
+  .app-shell select,
+  .app-shell textarea {
+    font-size: 16px !important;
+  }
+
   .app-shell table {
     width: 100%;
   }

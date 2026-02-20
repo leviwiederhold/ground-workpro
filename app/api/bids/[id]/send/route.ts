@@ -5,6 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { calcBid } from "@/lib/pricing/calcBid";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const sendSchema = z.object({
   override: z.boolean().optional().default(false),
@@ -43,7 +44,7 @@ export async function POST(
     }
 
     const { override, override_note } = parsed.data;
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const subscriptionError = await requireActiveSubscription(supabase, companyId);
     if (subscriptionError) {
       return subscriptionError;
@@ -123,6 +124,21 @@ export async function POST(
     if (updateResult?.error) {
       return NextResponse.json({ error: updateResult.error.message }, { status: 400 });
     }
+
+    await logAuditEvent({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      eventType: "bid.sent",
+      entityType: "bid",
+      entityId: bidId,
+      metadata: {
+        override: !!override,
+        override_note: override ? (override_note || "") : null,
+        marginPercent: summary.marginPercent,
+        targetMarginPercent: summary.targetMarginPercent,
+      },
+    });
 
     return NextResponse.json({ bid: updateResult.data, summary });
   } catch (error) {

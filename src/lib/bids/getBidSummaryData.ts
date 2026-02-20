@@ -1,11 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
-import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { calcBid } from "@/lib/pricing/calcBid";
 
-const normalizeRouteId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
-const paramsSchema = z.object({ id: z.string().min(1) });
 const EXCAVATION_NOTES_MARKER = "__excavation_inputs_json__:";
 
 const normalizeNumber = (value: unknown, fallback = 0) => {
@@ -121,81 +116,54 @@ function readExcavationInputsFromNotes(notesValue: unknown) {
   }
 }
 
-export async function GET(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+export async function getBidSummaryData(
+  supabase: any,
+  companyId: string,
+  bidId: string | number
 ) {
-  try {
-    const routeParams = await params;
-    const parsedParams = paramsSchema.safeParse(routeParams);
-    if (!parsedParams.success) {
-      return NextResponse.json(
-        {
-          error: "Validation error",
-          details: parsedParams.error.issues.map((issue: { path: Array<string | number>; message: string }) => ({
-            path: issue.path.join("."),
-            message: issue.message,
-          })),
-        },
-        { status: 422 }
-      );
-    }
+  const { data: bidRow, error: bidError } = await fetchBidRow(supabase, companyId, bidId);
+  if (bidError) return { error: bidError.message, status: 400 as const };
+  if (!bidRow) return { error: "Bid not found", status: 404 as const };
 
-    const { id } = parsedParams.data;
-    const bidId = normalizeRouteId(id);
-    const { supabase, companyId } = await getCompanyId();
+  const { data: pricingSettings, error: pricingError } = await supabase
+    .from("pricing_settings")
+    .select("*")
+    .eq("company_id", companyId)
+    .maybeSingle();
 
-    const { data: bidRow, error: bidError } = await fetchBidRow(supabase, companyId, bidId);
-
-    if (bidError) {
-      return NextResponse.json({ error: bidError.message }, { status: 400 });
-    }
-    if (!bidRow) {
-      return NextResponse.json({ error: "Bid not found" }, { status: 404 });
-    }
-
-    const { data: pricingSettings, error: pricingError } = await supabase
-      .from("pricing_settings")
-      .select("*")
-      .eq("company_id", companyId)
-      .maybeSingle();
-
-    const safePricingSettings =
-      pricingError && !pricingError.message.toLowerCase().includes("does not exist")
-        ? null
-        : (pricingSettings ?? null);
-
-    const { data: bidItems, error: itemsError } = await fetchBidItems(supabase, companyId, bidId);
-
-    const safeBidItems = itemsError ? [] : (bidItems ?? []);
-
-    const equipmentIds = safeBidItems
-      .filter((item: any) => (item?.item_type ?? "").toLowerCase() === "equipment")
-      .map((item: any) => item?.equipment_id)
-      .filter((idValue: unknown) => idValue !== null && idValue !== undefined && idValue !== "")
-      .map((idValue: unknown) => (typeof idValue === "string" && /^\d+$/.test(idValue) ? Number(idValue) : idValue));
-
-    const equipmentRatesResult = await fetchEquipmentRates(
-      supabase,
-      companyId,
-      Array.from(new Set(equipmentIds))
-    );
-    const equipmentRates = "error" in equipmentRatesResult ? {} : equipmentRatesResult.rates;
-
-    const notesExcavation = readExcavationInputsFromNotes(bidRow?.notes);
-    const excavation = { ...notesExcavation, ...bidRow };
-
-    const summary = calcBid(safePricingSettings, safeBidItems, {
-      excavation,
-      equipmentHourlyRates: equipmentRates,
-    });
-
-    return NextResponse.json({ summary });
-  } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message || "Unexpected server error" }, { status: 500 });
+  if (pricingError && !pricingError.message.toLowerCase().includes("does not exist")) {
+    return { error: pricingError.message, status: 400 as const };
   }
+
+  const { data: bidItems, error: itemsError } = await fetchBidItems(supabase, companyId, bidId);
+  if (itemsError) return { error: itemsError.message, status: 400 as const };
+
+  const equipmentIds = (bidItems ?? [])
+    .filter((item: any) => (item?.item_type ?? "").toLowerCase() === "equipment")
+    .map((item: any) => item?.equipment_id)
+    .filter((idValue: unknown) => idValue !== null && idValue !== undefined && idValue !== "")
+    .map((idValue: unknown) => (typeof idValue === "string" && /^\d+$/.test(idValue) ? Number(idValue) : idValue));
+
+  const equipmentRatesResult = await fetchEquipmentRates(
+    supabase,
+    companyId,
+    Array.from(new Set(equipmentIds))
+  );
+  if ("error" in equipmentRatesResult) {
+    return { error: equipmentRatesResult.error, status: 400 as const };
+  }
+
+  const notesExcavation = readExcavationInputsFromNotes(bidRow?.notes);
+  const excavation = { ...notesExcavation, ...bidRow };
+
+  const summary = calcBid(pricingSettings ?? null, bidItems ?? [], {
+    excavation,
+    equipmentHourlyRates: equipmentRatesResult.rates,
+  });
+
+  return {
+    bid: bidRow,
+    items: bidItems ?? [],
+    summary,
+  };
 }

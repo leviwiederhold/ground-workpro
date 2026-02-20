@@ -35,7 +35,14 @@ export type PublicProposalItem = {
 };
 
 export type PublicProposalResult =
-  | { ok: true; item: PublicProposalItem; bidId: string; companyId: string; status: string }
+  | {
+      ok: true;
+      item: PublicProposalItem;
+      bidId: string;
+      companyId: string;
+      status: string;
+      shareCreatedByUserId: string | null;
+    }
   | { ok: false; status: number; error: string };
 
 export async function getPublicProposalByToken(token: string): Promise<PublicProposalResult> {
@@ -131,6 +138,7 @@ export async function getPublicProposalByToken(token: string): Promise<PublicPro
     bidId: String(bid.id),
     companyId: String(share.company_id),
     status: String(bid.status ?? "draft"),
+    shareCreatedByUserId: share.created_by ? String(share.created_by) : null,
     item: {
       proposal: {
         bid_id: bid.id,

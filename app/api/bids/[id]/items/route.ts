@@ -12,9 +12,16 @@ const createBidItemSchema = z.object({
   description: z.string().min(1),
   quantity: z.number().positive(),
   unit_cost: z.number().nonnegative(),
+  equipment_id: z.union([z.string(), z.number()]).optional(),
 });
 
 const normalizeRouteId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
+const normalizeId = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return value;
+};
 const normalizeNumber = (value: unknown, fallback = 0) => {
   if (value === null || value === undefined || value === "") return fallback;
   const parsed = Number(value);
@@ -25,6 +32,7 @@ const mapBidItem = (row: any) => ({
   id: row.id,
   bid_id: row.bid_id,
   item_type: row.item_type ?? "custom",
+  equipment_id: normalizeId(row.equipment_id ?? row.equipmentId),
   description: row.description ?? "",
   quantity: normalizeNumber(row.quantity),
   unit_cost: normalizeNumber(row.unit_cost),
@@ -46,14 +54,44 @@ async function verifyBidExists(supabase: any, companyId: string, bidId: string |
 }
 
 async function recalcBidTotal(supabase: any, companyId: string, bidId: string | number) {
-  const { data: items, error: itemsError } = await supabase
+  let itemsResult = await supabase
     .from("bid_items")
-    .select("item_type, quantity, unit_cost, total_cost")
+    .select("*")
     .eq("company_id", companyId)
     .eq("bid_id", bidId);
 
-  if (itemsError) return { ok: false, error: itemsError.message };
+  if (itemsResult.error?.message?.toLowerCase().includes("company_id")) {
+    itemsResult = await supabase
+      .from("bid_items")
+      .select("*")
+      .eq("bid_id", bidId);
+  }
 
+  if (itemsResult.error?.message?.toLowerCase().includes("bid_id")) {
+    itemsResult = await supabase
+      .from("bid_items")
+      .select("*")
+      .eq("bidId", bidId);
+    if (!itemsResult.error) return finalizeRecalcBidTotal(supabase, companyId, bidId, itemsResult.data ?? []);
+
+    if (itemsResult.error?.message?.toLowerCase().includes("company_id")) {
+      itemsResult = await supabase
+        .from("bid_items")
+        .select("*")
+        .eq("bidId", bidId);
+    }
+  }
+
+  if (itemsResult.error) return { ok: false, error: itemsResult.error.message };
+  return finalizeRecalcBidTotal(supabase, companyId, bidId, itemsResult.data ?? []);
+}
+
+async function finalizeRecalcBidTotal(
+  supabase: any,
+  companyId: string,
+  bidId: string | number,
+  items: any[]
+) {
   const { data: pricingSettings, error: pricingError } = await supabase
     .from("pricing_settings")
     .select("*")
@@ -64,7 +102,7 @@ async function recalcBidTotal(supabase: any, companyId: string, bidId: string | 
     return { ok: false, error: pricingError.message };
   }
 
-  const summary = calcBid(pricingSettings ?? null, items ?? []);
+  const summary = calcBid(pricingSettings ?? null, items);
   const updatePayload: Record<string, unknown> = {
     subtotal: summary.subtotalCost,
     total: summary.revenue,
@@ -126,6 +164,8 @@ export async function GET(
       return NextResponse.json({ error: verify.error }, { status: (verify as any).status || 400 });
     }
 
+    let usesBidId = false;
+    let usesCompanyFilter = true;
     let result = await supabase
       .from("bid_items")
       .select("*")
@@ -133,13 +173,48 @@ export async function GET(
       .eq("bid_id", bidId)
       .order("created_at", { ascending: false });
 
-    if (result.error?.message?.toLowerCase().includes("created_at")) {
+    if (result.error?.message?.toLowerCase().includes("company_id")) {
+      usesCompanyFilter = false;
       result = await supabase
         .from("bid_items")
         .select("*")
-        .eq("company_id", companyId)
         .eq("bid_id", bidId)
-        .order("id", { ascending: false });
+        .order("created_at", { ascending: false });
+    }
+
+    if (result.error?.message?.toLowerCase().includes("bid_id")) {
+      usesBidId = true;
+      if (usesCompanyFilter) {
+        result = await supabase
+          .from("bid_items")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq("bidId", bidId)
+          .order("created_at", { ascending: false });
+      } else {
+        result = await supabase
+          .from("bid_items")
+          .select("*")
+          .eq("bidId", bidId)
+          .order("created_at", { ascending: false });
+      }
+    }
+
+    if (result.error?.message?.toLowerCase().includes("created_at")) {
+      if (usesCompanyFilter) {
+        result = await supabase
+          .from("bid_items")
+          .select("*")
+          .eq("company_id", companyId)
+          .eq(usesBidId ? "bidId" : "bid_id", bidId)
+          .order("id", { ascending: false });
+      } else {
+        result = await supabase
+          .from("bid_items")
+          .select("*")
+          .eq(usesBidId ? "bidId" : "bid_id", bidId)
+          .order("id", { ascending: false });
+      }
     }
 
     const { data, error } = result;
@@ -202,6 +277,7 @@ export async function POST(
       company_id: companyId,
       bid_id: bidId,
       item_type: payload.item_type ?? "custom",
+      equipment_id: normalizeId(payload.equipment_id),
       description: payload.description,
       quantity,
       unit_cost: unitCost,

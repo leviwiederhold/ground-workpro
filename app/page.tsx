@@ -6,6 +6,8 @@
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
+import { StatGrid } from '@/app/components/ui/StatGrid';
+import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
 
 
     // ============================================
@@ -522,15 +524,8 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       const [showRoleSelector, setShowRoleSelector] = useState(false);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
-
-      // Sample notifications
-      const notifications = [
-        { id: 1, type: 'alert', icon: 'triangle-exclamation', color: 'yellow', title: 'Equipment Maintenance Due', message: 'CAT 320 Excavator - Service in 45 hours', time: '10 min ago', unread: true },
-        { id: 2, type: 'success', icon: 'check-circle', color: 'green', title: 'Daily Report Submitted', message: 'Highway 42 Expansion - Feb 6 report approved', time: '1 hour ago', unread: true },
-        { id: 3, type: 'info', icon: 'cloud-rain', color: 'blue', title: 'Weather Alert', message: 'Rain expected Sunday - consider rescheduling outdoor work', time: '2 hours ago', unread: true },
-        { id: 4, type: 'warning', icon: 'id-card', color: 'red', title: 'Certification Expiring', message: 'Mike Rodriguez - CDL expires in 28 days', time: '3 hours ago', unread: false },
-        { id: 5, type: 'info', icon: 'file-lines', color: 'brand', title: 'New Bid Request', message: 'Downtown Plaza - RFP received from Anderson Corp', time: '5 hours ago', unread: false },
-      ];
+      const [alerts, setAlerts] = useState([]);
+      const [alertsLoading, setAlertsLoading] = useState(false);
 
       // Data State
       const [jobs, setJobs] = useState([]);
@@ -556,6 +551,76 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       const [costCodes, setCostCodes] = useState([]);
       const [costCodesLoading, setCostCodesLoading] = useState(true);
       const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
+      const unreadAlertsCount = alerts.filter((alert) => !alert.is_read).length;
+
+      const alertVisuals = {
+        low_inventory: {
+          icon: 'triangle-exclamation',
+          containerClass: 'bg-red-100',
+          iconClass: 'text-red-600',
+        },
+        overdue_maintenance: {
+          icon: 'screwdriver-wrench',
+          containerClass: 'bg-yellow-100',
+          iconClass: 'text-yellow-700',
+        },
+        margin_drift: {
+          icon: 'chart-line',
+          containerClass: 'bg-red-100',
+          iconClass: 'text-red-700',
+        },
+        default: {
+          icon: 'bell',
+          containerClass: 'bg-gray-100',
+          iconClass: 'text-gray-600',
+        },
+      };
+
+      const formatAlertTime = (value) => {
+        if (!value) return '';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '';
+        return date.toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+      };
+
+      const loadAlerts = useCallback(async () => {
+        try {
+          setAlertsLoading(true);
+          const response = await fetch('/api/alerts', { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load alerts');
+          setAlerts(payload.items || []);
+        } catch {
+          setAlerts([]);
+        } finally {
+          setAlertsLoading(false);
+        }
+      }, []);
+
+      const handleMarkAlertRead = async (alertId) => {
+        try {
+          const response = await fetch(`/api/alerts/${alertId}/read`, { method: 'POST' });
+          if (!response.ok) return;
+          setAlerts((prev) =>
+            prev.map((alert) =>
+              String(alert.id) === String(alertId) ? { ...alert, is_read: true } : alert
+            )
+          );
+        } catch {
+          // no-op
+        }
+      };
+
+      const handleMarkAllAlertsRead = async () => {
+        const unreadIds = alerts.filter((alert) => !alert.is_read).map((alert) => alert.id);
+        if (unreadIds.length === 0) return;
+        await Promise.all(unreadIds.map((id) => handleMarkAlertRead(id)));
+      };
 
       useEffect(() => {
         let isMounted = true;
@@ -588,6 +653,10 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
           isMounted = false;
         };
       }, []);
+
+      useEffect(() => {
+        loadAlerts();
+      }, [loadAlerts]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1059,13 +1128,17 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                   {/* Notifications */}
                   <div className="relative">
                     <button
-                      onClick={() => setShowNotifications(!showNotifications)}
+                      onClick={() => {
+                        const nextValue = !showNotifications;
+                        setShowNotifications(nextValue);
+                        if (nextValue) loadAlerts();
+                      }}
                       className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
                     >
                       <Icon name="bell" />
-                      {notifications.filter(n => n.unread).length > 0 && (
+                      {unreadAlertsCount > 0 && (
                         <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-medium">
-                          {notifications.filter(n => n.unread).length}
+                          {unreadAlertsCount}
                         </span>
                       )}
                     </button>
@@ -1073,29 +1146,50 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                       <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden">
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                           <h3 className="font-semibold text-gray-900">Notifications</h3>
-                          <button className="text-xs text-brand-600 hover:text-brand-700 font-medium">Mark all read</button>
+                          <button
+                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                            onClick={handleMarkAllAlertsRead}
+                          >
+                            Mark all read
+                          </button>
                         </div>
                         <div className="max-h-96 overflow-y-auto">
-                          {notifications.map(notif => (
-                            <div key={notif.id} className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${notif.unread ? 'bg-brand-50/30' : ''}`}>
-                              <div className="flex gap-3">
-                                <div className={`w-10 h-10 rounded-full bg-${notif.color}-100 flex items-center justify-center flex-shrink-0`}>
-                                  <Icon name={notif.icon} className={`text-${notif.color}-600`} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <p className="font-medium text-gray-900 text-sm">{notif.title}</p>
-                                    {notif.unread && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
+                          {alertsLoading ? (
+                            <div className="px-4 py-3 text-sm text-gray-500">Loading alerts...</div>
+                          ) : alerts.length === 0 ? (
+                            <div className="px-4 py-3 text-sm text-gray-500">No alerts</div>
+                          ) : (
+                            alerts.map((alert) => {
+                              const visual = alertVisuals[alert.alert_type] || alertVisuals.default;
+                              return (
+                                <div key={alert.id} className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${!alert.is_read ? 'bg-brand-50/30' : ''}`}>
+                                  <div className="flex gap-3">
+                                    <div className={`w-10 h-10 rounded-full ${visual.containerClass} flex items-center justify-center flex-shrink-0`}>
+                                      <Icon name={visual.icon} className={visual.iconClass} />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-medium text-gray-900 text-sm">{alert.title}</p>
+                                        {!alert.is_read && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
+                                      </div>
+                                      <p className="text-sm text-gray-600">{alert.message}</p>
+                                      <div className="mt-1 flex items-center justify-between gap-3">
+                                        <p className="text-xs text-gray-400">{formatAlertTime(alert.created_at)}</p>
+                                        {!alert.is_read && (
+                                          <button
+                                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                                            onClick={() => handleMarkAlertRead(alert.id)}
+                                          >
+                                            Mark read
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
                                   </div>
-                                  <p className="text-sm text-gray-600 truncate">{notif.message}</p>
-                                  <p className="text-xs text-gray-400 mt-1">{notif.time}</p>
                                 </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="px-4 py-3 bg-gray-50 text-center border-t border-gray-100">
-                          <button className="text-sm text-brand-600 hover:text-brand-700 font-medium">View all notifications</button>
+                              );
+                            })
+                          )}
                         </div>
                       </div>
                     )}
@@ -1149,7 +1243,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             </header>
 
             {/* Content Area */}
-            <div className="flex-1 overflow-y-auto px-3 sm:px-4 md:px-6 py-4 md:py-6">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
               <div className="max-w-screen-2xl mx-auto">
                 {renderView()}
               </div>
@@ -1277,12 +1371,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-2 lg:grid-cols-4" testId="stats-grid">
             <StatCard icon="briefcase" label="Active Jobs" value={activeJobs.length} subValue={`${formatCurrency(totalRevenue)} total contract value`} color="brand" />
             <StatCard icon="truck-monster" label="Fleet Utilization" value={`${utilizationRate}%`} subValue={`${activeEquipment.length} of ${equipment.length} active`} trend={5} color="green" />
             <StatCard icon="users" label="Crew On-Site" value={clockedInEmployees.length} subValue={`of ${employees.length} total employees`} color="blue" />
             <StatCard icon="dollar-sign" label="Month Revenue" value={formatCurrency(847500)} subValue="vs. budget: +12%" trend={12} color="green" />
-          </div>
+          </StatGrid>
 
           {/* Main Content Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -1592,7 +1686,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
             {/* Schedule Grid */}
             <div className="xl:col-span-3 overflow-x-auto">
-              <Card className="p-0 min-w-[700px]">
+              <Card className="p-0 min-w-0 md:min-w-[700px]">
                 {/* Days Header */}
                 <div className="grid grid-cols-7 border-b border-gray-200">
                   {weekDates.map((date, i) => {
@@ -2484,13 +2578,13 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-5" testId="stats-grid">
             <StatCard icon="truck-monster" label="Total Fleet" value={stats.total} color="brand" />
             <StatCard icon="circle-check" label="Active" value={stats.active} color="green" />
             <StatCard icon="clock" label="Idle" value={stats.idle} color="yellow" />
             <StatCard icon="wrench" label="In Maintenance" value={stats.maintenance} color="red" />
             <StatCard icon="dollar-sign" label="Fleet Value" value={formatCurrency(stats.totalValue)} color="blue" />
-          </div>
+          </StatGrid>
 
           {/* Filters & Actions */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2531,13 +2625,9 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             {/* Equipment Grid/List */}
             <div className={`lg:col-span-2 ${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3'}`}>
               {equipmentLoading ? (
-                <Card className="p-4">
-                  <p className="text-sm text-gray-500">Loading equipment...</p>
-                </Card>
+                <LoadingBlock testId="fleet-loading">Loading equipment...</LoadingBlock>
               ) : filteredEquipment.length === 0 ? (
-                <Card className="p-4">
-                  <p className="text-sm text-gray-500">No equipment yet.</p>
-                </Card>
+                <EmptyState testId="fleet-empty">No equipment yet.</EmptyState>
               ) : filteredEquipment.map(eq => {
                 const job = jobs.find(j => j.id === eq.jobId);
                 const hoursToService = eq.nextService - eq.hours;
@@ -2762,7 +2852,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                   )}
 
                   {equipmentActionError && (
-                    <p className="text-sm text-red-600">{equipmentActionError}</p>
+                    <InlineError>{equipmentActionError}</InlineError>
                   )}
 
                   <div className="flex gap-2 pt-4">
@@ -2898,12 +2988,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="users" label="Total Employees" value={stats.total} color="brand" />
             <StatCard icon="user-check" label="On Site Today" value={stats.onSite} color="green" />
             <StatCard icon="hard-hat" label="Foremen" value={employees.filter(e => e.role === 'Foreman').length} color="blue" />
             <StatCard icon="id-card" label="Expiring Certs" value={employees.flatMap(e => e.certifications.filter(c => getDaysUntil(c.expires) < 60)).length} color="red" />
-          </div>
+          </StatGrid>
 
           {/* Filters */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -2936,9 +3026,9 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             {/* Employee List */}
             <div className="lg:col-span-2 space-y-3">
               {employeesLoading ? (
-                <Card className="p-6 text-sm text-gray-500">Loading employees...</Card>
+                <LoadingBlock testId="team-loading">Loading employees...</LoadingBlock>
               ) : filteredEmployees.length === 0 ? (
-                <Card className="p-6 text-sm text-gray-500">No employees yet.</Card>
+                <EmptyState testId="team-empty">No employees yet.</EmptyState>
               ) : filteredEmployees.map(emp => {
                 const job = jobs.find(j => j.id === emp.jobId);
                 const expiringSoon = (emp.certifications || []).filter(c => getDaysUntil(c.expires) < 60);
@@ -3051,7 +3141,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                       <Icon name="pen-to-square" className="mr-1" /> Edit
                     </Button>
                   </div>
-                  {employeeActionError && <p className="text-sm text-red-600">{employeeActionError}</p>}
+                  {employeeActionError && <InlineError>{employeeActionError}</InlineError>}
                 </div>
               </Card>
             ) : (
@@ -3167,12 +3257,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="clipboard-list" label="Open Work Orders" value={workOrders.filter(w => w.status !== 'completed').length} color="brand" />
             <StatCard icon="circle-exclamation" label="High Priority" value={workOrders.filter(w => w.priority === 'high' && w.status !== 'completed').length} color="red" />
             <StatCard icon="calendar-check" label="Scheduled PM" value={workOrders.filter(w => w.type === 'preventive').length} color="blue" />
             <StatCard icon="triangle-exclamation" label="PM Due Soon" value={upcomingPM.length} color="yellow" />
-          </div>
+          </StatGrid>
 
           {/* Filters */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -3200,13 +3290,9 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
             {/* Work Orders List */}
             <div className="lg:col-span-2 space-y-3">
               {workOrdersLoading ? (
-                <Card className="p-4">
-                  <p className="text-sm text-gray-500">Loading work orders...</p>
-                </Card>
+                <LoadingBlock testId="maintenance-loading">Loading work orders...</LoadingBlock>
               ) : filteredWOs.length === 0 ? (
-                <Card className="p-4">
-                  <p className="text-sm text-gray-500">No work orders yet.</p>
-                </Card>
+                <EmptyState testId="maintenance-empty">No work orders yet.</EmptyState>
               ) : filteredWOs.map(wo => {
                 const eq = equipment.find(e => e.id === wo.equipmentId);
                 const tech = employees.find(e => e.id === wo.assignedTo);
@@ -3369,7 +3455,7 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                   <AttachmentPanel entityType="work_order" entityId={selectedWO.id} />
 
                   {woActionError && (
-                    <p className="text-sm text-red-600">{woActionError}</p>
+                    <InlineError>{woActionError}</InlineError>
                   )}
 
                   <div className="flex gap-2 pt-4">
@@ -4093,6 +4179,9 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       const [saveLoading, setSaveLoading] = useState(false);
       const [deleteLoadingId, setDeleteLoadingId] = useState(null);
       const [costCodeError, setCostCodeError] = useState('');
+      const [costSummary, setCostSummary] = useState(null);
+      const [costSummaryLoading, setCostSummaryLoading] = useState(false);
+      const [costSummaryError, setCostSummaryError] = useState('');
       const [costCodeForm, setCostCodeForm] = useState({
         code: '',
         name: '',
@@ -4114,6 +4203,38 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       const totalBudget = costData.reduce((s, c) => s + Number(c.budgeted || 0), 0);
       const totalActual = costData.reduce((s, c) => s + Number(c.actual || 0), 0);
       const totalVariance = totalBudget - totalActual;
+      const rollupEstimated = Number(costSummary?.estimatedCost || totalBudget);
+      const rollupActual = Number(costSummary?.actualCost || totalActual);
+      const rollupVariance = Number(costSummary?.varianceAmount ?? (rollupActual - rollupEstimated));
+
+      useEffect(() => {
+        let isMounted = true;
+        const loadCostSummary = async () => {
+          if (!selectedJobId) {
+            if (isMounted) setCostSummary(null);
+            return;
+          }
+          try {
+            setCostSummaryLoading(true);
+            setCostSummaryError('');
+            const response = await fetch(`/api/jobs/${selectedJobId}/cost-summary`, { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload?.error || 'Failed to load cost summary');
+            if (isMounted) setCostSummary(payload.item || null);
+          } catch (error) {
+            if (isMounted) {
+              setCostSummary(null);
+              setCostSummaryError(error instanceof Error ? error.message : 'Failed to load cost summary');
+            }
+          } finally {
+            if (isMounted) setCostSummaryLoading(false);
+          }
+        };
+        loadCostSummary();
+        return () => {
+          isMounted = false;
+        };
+      }, [selectedJobId]);
 
       const openCreateModal = () => {
         setEditingCostCodeId(null);
@@ -4257,20 +4378,31 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
                   <p className="text-2xl font-bold text-gray-900">{formatCurrency(selectedJob.budget)}</p>
                 </Card>
                 <Card className="p-4">
-                  <p className="text-sm text-gray-500">Total Budget</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalBudget)}</p>
+                  <p className="text-sm text-gray-500">Estimated Cost</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(rollupEstimated)}</p>
                 </Card>
                 <Card className="p-4">
                   <p className="text-sm text-gray-500">Actual Cost</p>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(totalActual)}</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(rollupActual)}</p>
                 </Card>
                 <Card className="p-4">
                   <p className="text-sm text-gray-500">Variance</p>
-                  <p className={`text-2xl font-bold ${totalVariance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {totalVariance >= 0 ? '+' : ''}{formatCurrency(totalVariance)}
+                  <p className={`text-2xl font-bold ${rollupVariance <= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {rollupVariance >= 0 ? '+' : ''}{formatCurrency(rollupVariance)}
                   </p>
                 </Card>
               </div>
+
+              {costSummaryLoading && <p className="text-sm text-gray-500">Loading cost rollup...</p>}
+              {costSummaryError && <p className="text-sm text-red-600">{costSummaryError}</p>}
+              {costSummary?.isOverBudget && (
+                <Card className="p-4 border-red-200 bg-red-50">
+                  <p className="text-sm font-semibold text-red-700">Margin drift detected</p>
+                  <p className="text-sm text-red-600 mt-1">
+                    Actual cost is {Number(costSummary.variancePercent || 0).toFixed(2)}% over estimate.
+                  </p>
+                </Card>
+              )}
 
               <Card className="p-0 overflow-hidden">
                 <div className="p-4 border-b border-gray-200">
@@ -4425,12 +4557,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       return (
         <div className="space-y-6">
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="shield-halved" label="Safety Logs (30d)" value={safetyLogs.length} color="green" />
             <StatCard icon="clipboard-check" label="Toolbox Talks" value={safetyLogs.filter(s => s.type === 'Toolbox Talk').length} color="blue" />
             <StatCard icon="triangle-exclamation" label="Expiring Certs" value={expiringCerts.length} color="yellow" />
             <StatCard icon="calendar-xmark" label="Expired Certs" value={expiringCerts.filter(c => c.daysLeft < 0).length} color="red" />
-          </div>
+          </StatGrid>
 
           <div className="flex justify-end">
             <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })}>
@@ -4779,12 +4911,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="boxes-stacked" label="Total Items" value={inventory.length} color="brand" />
             <StatCard icon="triangle-exclamation" label="Low Stock Alerts" value={lowStock.length} color="red" />
             <StatCard icon="dollar-sign" label="Inventory Value" value={formatCurrency(totalValue)} color="green" />
             <StatCard icon="truck-ramp-box" label="Reserved Items" value={inventory.filter(i => i.qtyReserved > 0).length} color="blue" />
-          </div>
+          </StatGrid>
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 min-w-0">
@@ -4970,12 +5102,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="graduation-cap" label="Total Courses" value={trainingData.length} color="brand" />
             <StatCard icon="circle-check" label="Completion Rate" value={`${Math.round((totalCompleted / totalRequired) * 100)}%`} color="green" />
             <StatCard icon="clock" label="Required Incomplete" value={requiredIncomplete.length} color="red" />
             <StatCard icon="play-circle" label="Total Watch Time" value={`${trainingData.reduce((sum, t) => sum + parseInt(t.duration), 0)} min`} color="blue" />
-          </div>
+          </StatGrid>
 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -5585,12 +5717,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="file-invoice-dollar" label="Active Bids" value={bids.filter((bid) => bid.status === 'pending' || bid.status === 'submitted').length} color="brand" />
             <StatCard icon="dollar-sign" label="Pending Value" value={formatCurrency(totalPending)} color="blue" />
             <StatCard icon="trophy" label="Win Rate" value={`${winRate}%`} color="green" />
             <StatCard icon="chart-line" label="Avg Probability" value={`${avgProbability}%`} color="yellow" />
-          </div>
+          </StatGrid>
 
           <div className="flex flex-wrap items-center gap-3 justify-between">
             <div className="flex flex-wrap bg-gray-100 rounded-lg p-1">
@@ -6477,12 +6609,12 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
       return (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="building" label="Total Vendors" value={vendors.length} color="brand" />
             <StatCard icon="star" label="Top Rated" value={vendors.filter(v => v.rating === 5).length} color="yellow" />
             <StatCard icon="clipboard-list" label="Active Orders" value={vendors.reduce((sum, v) => sum + (v.activeOrders ?? v.active_orders ?? 0), 0)} color="blue" />
             <StatCard icon="tags" label="Categories" value={categories.length} color="green" />
-          </div>
+          </StatGrid>
 
           <div className="flex items-center justify-between">
             <SearchInput value={search} onChange={setSearch} placeholder="Search vendors..." />
@@ -7340,9 +7472,9 @@ import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
       const currentMessages = activeConversation ? (conversationMessages[activeConversation.id] || []) : [];
 
       return (
-        <div className="flex flex-col md:flex-row h-[calc(100vh-140px)] max-md:h-[calc(100vh-170px)] bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] max-md:h-[calc(100vh-170px)] bg-white rounded-lg border border-gray-200 overflow-hidden">
           {/* Sidebar - Conversations List */}
-          <div className={`${activeConversation ? 'hidden md:flex' : 'flex'} w-full md:w-80 border-r border-gray-200 flex-col min-h-0`}>
+          <div className={`${activeConversation ? 'hidden lg:flex' : 'flex'} w-full lg:w-80 border-r border-gray-200 flex-col min-h-0`}>
             {/* Header */}
             <div className="p-4 border-b border-gray-200">
               <div className="flex items-center justify-between mb-4">

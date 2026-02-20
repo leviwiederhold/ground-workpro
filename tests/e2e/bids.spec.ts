@@ -36,6 +36,7 @@ test('bids create + add item + summary renders + delete persists', async ({ page
   await page.getByTestId('bid-item-quantity').fill('2');
   await page.getByTestId('bid-item-unit-cost').fill('150');
   await page.getByTestId('bids-item-save').click();
+  await expect(page.getByLabel('Close bid item modal')).toHaveCount(0, { timeout: 10_000 });
 
   await expect(page.getByTestId('bids-summary-margin')).toBeVisible();
   await expect(page.getByTestId('bids-summary-margin')).toContainText('%');
@@ -79,6 +80,7 @@ test('send flow blocks below target margin, then allows override', async ({ page
   await page.getByTestId('bid-item-quantity').fill('1');
   await page.getByTestId('bid-item-unit-cost').fill('1000');
   await page.getByTestId('bids-item-save').click();
+  await expect(page.getByLabel('Close bid item modal')).toHaveCount(0, { timeout: 10_000 });
 
   await page.getByTestId('bids-send').click();
   await expect(page.getByTestId('bids-send-warning')).toContainText('Margin below target');

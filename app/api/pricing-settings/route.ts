@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const pricingSettingsSchema = z
   .object({
@@ -123,6 +124,16 @@ export async function PUT(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
+
+    await logAuditEvent({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      eventType: "pricing.settings.updated",
+      entityType: "pricing_settings",
+      entityId: data?.id ?? null,
+      metadata: payload,
+    });
 
     return NextResponse.json({ pricing_settings: mapPricingSettings(data) });
   } catch (error) {

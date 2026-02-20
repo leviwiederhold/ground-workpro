@@ -47,6 +47,7 @@ export default function LoginPage() {
             </label>
             <input
               type="email"
+              data-testid="login-email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -60,6 +61,7 @@ export default function LoginPage() {
             </label>
             <input
               type="password"
+              data-testid="login-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -68,13 +70,14 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <p className="text-sm text-red-600" role="alert">
+            <p className="text-sm text-red-600" role="alert" data-testid="login-error">
               {error}
             </p>
           )}
 
           <button
             type="submit"
+            data-testid="login-submit"
             disabled={loading}
             className="w-full bg-dark-900 hover:bg-dark-800 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -85,4 +88,3 @@ export default function LoginPage() {
     </main>
   );
 }
-

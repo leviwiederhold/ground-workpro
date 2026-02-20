@@ -2,8 +2,20 @@
 import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireRole } from "@/lib/auth/requireRole";
 
-const bidStatusSchema = z.enum(["draft", "pending", "submitted", "won", "lost", "canceled"]);
+const bidStatusSchema = z.enum([
+  "draft",
+  "pending",
+  "submitted",
+  "sent",
+  "accepted",
+  "rejected",
+  "archived",
+  "won",
+  "lost",
+  "canceled",
+]);
 
 const createBidSchema = z.object({
   title: z.string().min(1),
@@ -104,6 +116,12 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     let body: unknown;
     try {
       body = await request.json();

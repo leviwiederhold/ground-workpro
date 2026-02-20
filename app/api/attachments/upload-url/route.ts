@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order"]);
 
@@ -33,6 +34,12 @@ const getAttachmentsBucket = () =>
 
 export async function POST(request: Request) {
   try {
+    try {
+      await requireRole(["admin", "pm", "foreman", "mechanic"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     let body: unknown;
     try {
       body = await request.json();

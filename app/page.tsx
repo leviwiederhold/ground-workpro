@@ -5,6 +5,7 @@
 
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
+import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 
 
     // ============================================
@@ -148,13 +149,13 @@ import { supabaseBrowser } from '@/lib/supabase/client';
     // SHARED COMPONENTS
     // ============================================
 
-    const Card = ({ children, className = '', onClick }) => (
-      <div className={`bg-white rounded-lg border border-gray-200 shadow-sm ${className}`} onClick={onClick}>
+    const Card = ({ children, className = '', onClick, ...props }) => (
+      <div className={`bg-white rounded-lg border border-gray-200 shadow-sm ${className}`} onClick={onClick} {...props}>
         {children}
       </div>
     );
 
-    const Button = ({ children, variant = 'primary', size = 'md', onClick, disabled, className = '' }) => {
+    const Button = ({ children, variant = 'primary', size = 'md', onClick, disabled, className = '', ...props }) => {
       const variants = {
         primary: 'bg-dark-900 hover:bg-dark-800 text-white',
         secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300',
@@ -172,6 +173,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           className={`${variants[variant]} ${sizes[size]} rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed mobile-tap-target ${className}`}
           onClick={onClick}
           disabled={disabled}
+          {...props}
         >
           {children}
         </button>
@@ -392,7 +394,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           formData.append('entity_id', String(entityId));
           formData.append('file', file);
 
-          const response = await fetch('/api/attachments', {
+          const response = await fetch('/api/attachments/upload', {
             method: 'POST',
             body: formData,
           });
@@ -473,9 +475,9 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <p className="text-xs text-gray-500">{attachment.contentType || 'file'}</p>
                   </div>
                   <div className="flex items-center gap-1">
-                    {attachment.signedDownloadUrl ? (
+                    {(attachment.download_url || attachment.signedDownloadUrl) ? (
                       <a
-                        href={attachment.signedDownloadUrl}
+                        href={attachment.download_url || attachment.signedDownloadUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="text-xs px-2 py-1 rounded bg-white border border-gray-300 text-gray-700 hover:bg-gray-100"
@@ -965,6 +967,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               {navItems.map(item => (
                 <button
                   key={item.id}
+                  data-testid={`nav-${item.id}`}
                   onClick={() => {
                     setCurrentView(item.id);
                     setMobileSidebarOpen(false);
@@ -2044,7 +2047,12 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 <SearchInput value={search} onChange={setSearch} placeholder="Search jobs..." />
               </div>
             </div>
-            <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateJob}>
+            <Button
+              variant="brand"
+              className="w-full sm:w-auto whitespace-nowrap"
+              onClick={handleCreateJob}
+              data-testid="jobs-create"
+            >
               <Icon name="plus" className="mr-2" /> New Job
             </Button>
           </div>
@@ -2064,6 +2072,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 filteredJobs.map(job => (
                   <Card
                     key={job.id}
+                    data-testid={`job-row-${job.id}`}
                     className={`p-4 cursor-pointer transition-all ${selectedJobId === job.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
                     onClick={() => setSelectedJobId(job.id)}
                   >
@@ -2267,10 +2276,22 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   )}
 
                   <div className="flex items-center gap-2 pt-2">
-                    <Button variant="brand" size="sm" onClick={handleSaveJob} disabled={saveLoading || deleteLoading}>
+                    <Button
+                      variant="brand"
+                      size="sm"
+                      onClick={handleSaveJob}
+                      disabled={saveLoading || deleteLoading}
+                      data-testid="jobs-save"
+                    >
                       {saveLoading ? 'Saving...' : 'Save'}
                     </Button>
-                    <Button variant="danger" size="sm" onClick={handleDeleteJob} disabled={saveLoading || deleteLoading}>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={handleDeleteJob}
+                      disabled={saveLoading || deleteLoading}
+                      data-testid="jobs-delete"
+                    >
                       {deleteLoading ? 'Deleting...' : 'Delete'}
                     </Button>
                   </div>
@@ -5088,6 +5109,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       const [bidSummary, setBidSummary] = useState(null);
       const [bidSummaryLoading, setBidSummaryLoading] = useState(false);
       const [bidSummaryError, setBidSummaryError] = useState('');
+      const [sendLoading, setSendLoading] = useState(false);
+      const [sendError, setSendError] = useState('');
+      const [showSendOverride, setShowSendOverride] = useState(false);
+      const [sendOverrideChecked, setSendOverrideChecked] = useState(false);
+      const [sendOverrideNote, setSendOverrideNote] = useState('');
       const [bidForm, setBidForm] = useState({
         title: '',
         status: 'draft',
@@ -5117,7 +5143,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       });
 
       const totalPending = bids
-        .filter((bid) => bid.status === 'pending' || bid.status === 'submitted')
+        .filter((bid) => bid.status === 'pending' || bid.status === 'submitted' || bid.status === 'sent')
         .reduce((sum, bid) => sum + (Number(bid.amount) || 0), 0);
       const wonCount = bids.filter((bid) => bid.status === 'won').length;
       const closedCount = bids.filter((bid) => bid.status === 'won' || bid.status === 'lost').length;
@@ -5128,7 +5154,18 @@ import { supabaseBrowser } from '@/lib/supabase/client';
       ) || 0;
 
       const getStatusIcon = (status) => {
-        const icons = { draft: 'file', pending: 'clock', submitted: 'paper-plane', won: 'trophy', lost: 'xmark', canceled: 'ban' };
+        const icons = {
+          draft: 'file',
+          pending: 'clock',
+          submitted: 'paper-plane',
+          sent: 'paper-plane',
+          accepted: 'trophy',
+          rejected: 'xmark',
+          archived: 'box-archive',
+          won: 'trophy',
+          lost: 'xmark',
+          canceled: 'ban',
+        };
         return icons[status] || 'file';
       };
 
@@ -5249,7 +5286,10 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           try {
             setBidItemsLoading(true);
             setBidSummaryLoading(true);
-            await Promise.all([loadBidItems(selectedBidId), loadBidSummary(selectedBidId)]);
+            await Promise.all([
+              loadBidItems(selectedBidId),
+              loadBidSummary(selectedBidId),
+            ]);
           } catch {
             if (isMounted) {
               setBidItems([]);
@@ -5268,6 +5308,13 @@ import { supabaseBrowser } from '@/lib/supabase/client';
         return () => {
           isMounted = false;
         };
+      }, [selectedBidId]);
+
+      useEffect(() => {
+        setSendError('');
+        setShowSendOverride(false);
+        setSendOverrideChecked(false);
+        setSendOverrideNote('');
       }, [selectedBidId]);
 
       const openCreateBid = () => {
@@ -5378,6 +5425,55 @@ import { supabaseBrowser } from '@/lib/supabase/client';
           setFormError('Failed to delete bid');
         } finally {
           setDeleteLoading(false);
+        }
+      };
+
+      const handleSendBid = async ({ override = false } = {}) => {
+        if (!selectedBid) return;
+
+        try {
+          setSendLoading(true);
+          setSendError('');
+
+          const response = await fetch(`/api/bids/${selectedBid.id}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              override,
+              override_note: override ? sendOverrideNote.trim() : undefined,
+            }),
+          });
+
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+
+          if (response.status === 409) {
+            setSendError(parsed?.error || 'Margin below target');
+            if (parsed?.summary) {
+              setBidSummary(parsed.summary);
+            }
+            setShowSendOverride(true);
+            return;
+          }
+
+          if (!response.ok) {
+            setSendError(parsed?.error || raw || 'Failed to send bid');
+            return;
+          }
+
+          setShowSendOverride(false);
+          setSendOverrideChecked(false);
+          setSendOverrideNote('');
+          await Promise.all([refreshBids({ preserveSelection: true }), loadBidSummary(selectedBid.id)]);
+        } catch {
+          setSendError('Failed to send bid');
+        } finally {
+          setSendLoading(false);
         }
       };
 
@@ -5496,7 +5592,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 
           <div className="flex flex-wrap items-center gap-3 justify-between">
             <div className="flex flex-wrap bg-gray-100 rounded-lg p-1">
-              {['all', 'draft', 'pending', 'submitted', 'won', 'lost', 'canceled'].map((status) => (
+              {['all', 'draft', 'pending', 'submitted', 'sent', 'accepted', 'rejected', 'archived', 'won', 'lost', 'canceled'].map((status) => (
                 <button
                   key={status}
                   onClick={() => setFilter(status)}
@@ -5510,7 +5606,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
               <div className="w-56 max-w-[60vw]">
                 <SearchInput value={search} onChange={setSearch} placeholder="Search bids..." />
               </div>
-              <Button variant="brand" onClick={openCreateBid}><Icon name="plus" className="mr-2" />New Bid</Button>
+              <Button variant="brand" onClick={openCreateBid} data-testid="bids-create"><Icon name="plus" className="mr-2" />New Bid</Button>
             </div>
           </div>
 
@@ -5530,6 +5626,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                 filteredBids.map((bid) => (
                   <Card
                     key={bid.id}
+                    data-testid={`bid-row-${bid.id}`}
                     className={`p-4 cursor-pointer ${String(selectedBidId) === String(bid.id) ? 'ring-2 ring-brand-orange border-brand-orange' : ''}`}
                     onClick={() => setSelectedBidId(bid.id)}
                   >
@@ -5547,7 +5644,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       <div className="text-right">
                         <p className="text-xl font-bold text-gray-900">{formatCurrency(bid.amount || 0)}</p>
                         <Badge className={getStatusColor(bid.status)}>{bid.status}</Badge>
-                        {(bid.status === 'pending' || bid.status === 'submitted') && (
+                        {(bid.status === 'pending' || bid.status === 'submitted' || bid.status === 'sent') && (
                           <p className="text-sm text-gray-500 mt-1">{bid.probability || 0}% probability</p>
                         )}
                       </div>
@@ -5575,9 +5672,19 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                         <Icon name="pen" className="mr-2" />Edit
                       </Button>
                       <Button
+                        variant="brand"
+                        onClick={() => handleSendBid({ override: false })}
+                        disabled={sendLoading || selectedBid.status === 'sent'}
+                        data-testid="bids-send"
+                      >
+                        <Icon name="paper-plane" className="mr-2" />
+                        {sendLoading ? 'Sending...' : (selectedBid.status === 'sent' ? 'Sent' : 'Send')}
+                      </Button>
+                      <Button
                         variant="danger"
                         onClick={() => handleDeleteBid(selectedBid.id)}
                         disabled={deleteLoading}
+                        data-testid="bids-delete"
                       >
                         <Icon name="trash" className="mr-2" />Delete
                       </Button>
@@ -5587,7 +5694,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-gray-500">Status</p>
-                      <p className="font-semibold text-gray-900 capitalize">{selectedBid.status}</p>
+                      <p className="font-semibold text-gray-900 capitalize" data-testid="bid-status-value">{selectedBid.status}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Bid Date</p>
@@ -5618,7 +5725,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     </div>
                     <div>
                       <p className="text-gray-500">Margin %</p>
-                      <p className="font-semibold text-gray-900">
+                      <p className="font-semibold text-gray-900" data-testid="bids-summary-margin">
                         {Number(bidSummary?.marginPercent || 0).toFixed(2)}%
                       </p>
                     </div>
@@ -5636,11 +5743,48 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       {bidSummary.warnings?.[0] || 'Margin is below target.'}
                     </Card>
                   )}
+                  {sendError && (
+                    <Card className="p-3 border border-red-200 bg-red-50 text-red-700 text-sm" data-testid="bids-send-warning">
+                      {sendError}
+                    </Card>
+                  )}
+                  {showSendOverride && (
+                    <Card className="p-3 border border-yellow-300 bg-yellow-50 text-yellow-900 space-y-3">
+                      <label className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={sendOverrideChecked}
+                          onChange={(e) => setSendOverrideChecked(e.target.checked)}
+                          data-testid="bids-send-override-checkbox"
+                        />
+                        <span>I understand, send anyway</span>
+                      </label>
+                      <textarea
+                        value={sendOverrideNote}
+                        onChange={(e) => setSendOverrideNote(e.target.value)}
+                        placeholder="Override note (optional)"
+                        className="w-full border border-yellow-300 rounded-lg px-3 py-2 text-sm bg-white"
+                        data-testid="bids-send-override-note"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          variant="brand"
+                          onClick={() => handleSendBid({ override: true })}
+                          disabled={!sendOverrideChecked || sendLoading}
+                          data-testid="bids-send-confirm-override"
+                        >
+                          {sendLoading ? 'Sending...' : 'Send Anyway'}
+                        </Button>
+                      </div>
+                    </Card>
+                  )}
+
+                  <BidShareLinkPanel bidId={selectedBid ? String(selectedBid.id) : null} />
 
                   <div className="pt-2 border-t border-gray-200">
                     <div className="flex items-center justify-between mb-3">
                       <h5 className="font-semibold text-gray-900">Line Items</h5>
-                      <Button variant="brand" onClick={openCreateItem}>
+                      <Button variant="brand" onClick={openCreateItem} data-testid="bids-add-item">
                         <Icon name="plus" className="mr-2" />Add Item
                       </Button>
                     </div>
@@ -5716,6 +5860,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
                     <input
                       type="text"
+                      data-testid="bids-title-input"
                       value={bidForm.title}
                       onChange={(e) => setBidForm({ ...bidForm, title: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
@@ -5729,7 +5874,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                         onChange={(e) => setBidForm({ ...bidForm, status: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       >
-                        {['draft', 'pending', 'submitted', 'won', 'lost', 'canceled'].map((status) => (
+                        {['draft', 'pending', 'submitted', 'sent', 'accepted', 'rejected', 'archived', 'won', 'lost', 'canceled'].map((status) => (
                           <option key={status} value={status}>
                             {status.charAt(0).toUpperCase() + status.slice(1)}
                           </option>
@@ -5795,7 +5940,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 
                 <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
                   <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading}>
+                  <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading} data-testid="bids-save">
                     {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
                   </Button>
                 </div>
@@ -5833,6 +5978,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                     <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
                     <input
                       type="text"
+                      data-testid="bid-item-description"
                       value={itemForm.description}
                       onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
@@ -5843,6 +5989,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
                       <input
                         type="number"
+                        data-testid="bid-item-quantity"
                         min="0.01"
                         step="0.01"
                         value={itemForm.quantity}
@@ -5854,6 +6001,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
                       <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost</label>
                       <input
                         type="number"
+                        data-testid="bid-item-unit-cost"
                         min="0"
                         step="0.01"
                         value={itemForm.unit_cost}
@@ -5867,7 +6015,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 
                 <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
                   <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading}>
+                  <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading} data-testid="bids-item-save">
                     {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
                   </Button>
                 </div>

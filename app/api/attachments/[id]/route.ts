@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
 
@@ -10,6 +11,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireRole(["admin", "pm", "foreman", "mechanic"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { id } = await params;
     const { supabase, companyId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();

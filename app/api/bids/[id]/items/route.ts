@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { calcBid } from "@/lib/pricing/calcBid";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const bidItemTypeSchema = z.enum(["custom", "labor", "equipment", "material", "subcontract"]);
 
@@ -161,6 +162,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { id } = await params;
     const bidId = normalizeRouteId(id);
 

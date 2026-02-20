@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const normalizeId = (id: unknown): string | number | null => {
   if (id === null || id === undefined || id === "") return null;
@@ -15,6 +16,12 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; entryId: string }> }
 ) {
   try {
+    try {
+      await requireRole(["admin", "pm", "foreman"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { id, entryId } = await params;
     const { supabase, companyId } = await getCompanyId();
     const reportId = normalizeId(id);

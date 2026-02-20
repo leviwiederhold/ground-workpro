@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order"]);
 
@@ -47,10 +48,11 @@ const sanitizeFileName = (value: string) =>
     .replace(/_+/g, "_")
     .slice(0, 180);
 
-const getAttachmentsBucket = () =>
-  process.env.SUPABASE_ATTACHMENTS_BUCKET ||
-  process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET ||
-  "attachments";
+const getBucketForEntityType = (entityType: "job" | "daily_report" | "work_order") => {
+  if (entityType === "job") return "job-photos";
+  if (entityType === "daily_report") return "report-attachments";
+  return "work-order-attachments";
+};
 
 const normalizeEntityIdForPath = (id: unknown) => {
   if (typeof id === "number") return String(id);
@@ -175,9 +177,13 @@ export async function GET(request: Request) {
           .from(attachment.bucket)
           .createSignedUrl(attachment.path, 60 * 60);
         if (signedError || !signedData?.signedUrl) {
-          return { ...attachment, signedDownloadUrl: null };
+          return { ...attachment, signedDownloadUrl: null, download_url: null };
         }
-        return { ...attachment, signedDownloadUrl: signedData.signedUrl };
+        return {
+          ...attachment,
+          signedDownloadUrl: signedData.signedUrl,
+          download_url: signedData.signedUrl,
+        };
       })
     );
 
@@ -193,6 +199,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    try {
+      await requireRole(["admin", "pm", "foreman", "mechanic"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { supabase, companyId, userId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
     const storageClient = supabaseAdmin ?? supabase;
@@ -249,7 +261,7 @@ export async function POST(request: Request) {
     }
 
     const safeFileName = sanitizeFileName(fileName);
-    const bucket = getAttachmentsBucket();
+    const bucket = getBucketForEntityType(entityType);
     const path = `${companyId}/${entityType}/${normalizeEntityIdForPath(entityId)}/${Date.now()}-${safeFileName}`;
 
     const { error: uploadError } = await storageClient.storage
@@ -295,6 +307,7 @@ export async function POST(request: Request) {
       attachment: {
         ...mapped,
         signedDownloadUrl: signedData?.signedUrl ?? null,
+        download_url: signedData?.signedUrl ?? null,
       },
     });
   } catch (error) {

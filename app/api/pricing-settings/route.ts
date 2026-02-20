@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const pricingSettingsSchema = z
   .object({
@@ -87,6 +88,12 @@ export async function GET() {
 
 export async function PUT(request: Request) {
   try {
+    try {
+      await requireRole(["admin"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     let body: unknown;
     try {
       body = await request.json();

@@ -8,6 +8,8 @@ type AuditPayload = {
   eventType: string;
   entityType?: string | null;
   entityId?: string | number | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -24,6 +26,8 @@ export async function logAuditEvent(payload: AuditPayload): Promise<void> {
     eventType,
     entityType = null,
     entityId = null,
+    before = null,
+    after = null,
     metadata = null,
   } = payload;
 
@@ -34,9 +38,12 @@ export async function logAuditEvent(payload: AuditPayload): Promise<void> {
   const insertPayload: Record<string, unknown> = {
     company_id: companyId,
     actor_user_id: actorUserId,
+    action: eventType,
     event_type: eventType,
     entity_type: entityType,
     entity_id: entityId === null || entityId === undefined ? null : String(entityId),
+    before_data: asJson(before),
+    after_data: asJson(after),
     metadata: asJson(metadata),
   };
 
@@ -44,9 +51,12 @@ export async function logAuditEvent(payload: AuditPayload): Promise<void> {
   const fallbackPayload = {
     company_id: companyId,
     actor_user_id: actorUserId,
+    action: eventType,
     event_type: eventType,
     entity_type: entityType,
     entity_id: entityId === null || entityId === undefined ? null : String(entityId),
+    before_data: asJson(before),
+    after_data: asJson(after),
     metadata: asJson(metadata),
   };
   for (let i = 0; i < 20; i += 1) {

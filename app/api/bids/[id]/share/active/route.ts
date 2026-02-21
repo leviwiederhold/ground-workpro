@@ -3,18 +3,18 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { okItem } from "@/lib/http/json";
+import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
 });
 
-const toValidationError = (error: any) => ({
-  error: "Validation error",
-  details: error.issues.map((issue: any) => ({
+const toValidationDetails = (error: any) =>
+  error.issues.map((issue: any) => ({
     path: issue.path.join("."),
     message: issue.message,
-  })),
-});
+  }));
 
 const getOrigin = (request: Request) => {
   const host = request.headers.get("x-forwarded-host");
@@ -47,13 +47,13 @@ export async function GET(
     const rawParams = await params;
     const parsedParams = paramsSchema.safeParse(rawParams);
     if (!parsedParams.success) {
-      return NextResponse.json(toValidationError(parsedParams.error), { status: 422 });
+      return validationError(toValidationDetails(parsedParams.error));
     }
 
     try {
       await requireRole(["admin", "pm"]);
     } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return forbidden();
     }
 
     const { supabase, companyId } = await getCompanyId();
@@ -68,34 +68,34 @@ export async function GET(
       .maybeSingle();
 
     if (bidError) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return serverError();
     }
     if (!bid) {
-      return NextResponse.json({ error: "Bid not found" }, { status: 404 });
+      return notFound("Bid not found");
     }
 
     const { data: shareLink, error: shareError } = await loadLatestActiveShareLink(supabase, companyId, bidId);
     if (shareError) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return serverError();
     }
 
     if (!shareLink) {
-      return NextResponse.json({ item: null });
+      return okItem(null);
     }
 
-    return NextResponse.json({
-      item: {
+    return okItem({
         token: shareLink.token,
         url: `${origin}/proposal/${shareLink.token}`,
         expires_at: shareLink.expires_at ?? null,
         revoked_at: shareLink.revoked_at ?? null,
         created_at: shareLink.created_at ?? null,
-      },
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {
+      if (error.status === 404) return notFound(error.message);
+      if (error.status === 403) return forbidden(error.message);
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return serverError();
   }
 }

@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const jobStatusSchema = z.enum([
   "draft",
@@ -37,20 +39,24 @@ const mapJob = (row: any) => ({
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("jobs")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(from, to);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ jobs: (data ?? []).map(mapJob) });
+    const jobs = (data ?? []).map(mapJob);
+    return NextResponse.json({ jobs, ...getPaginationMeta(count ?? jobs.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -82,7 +88,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
     const { data: userData } = await supabase.auth.getUser();
 
@@ -120,7 +126,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ job: mapJob(data) });
+    const job = mapJob(data);
+    await logAuditEvent({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      eventType: "job.created",
+      entityType: "job",
+      entityId: job.id,
+      after: job,
+    });
+
+    return NextResponse.json({ job });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

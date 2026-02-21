@@ -4,6 +4,9 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { errorResponse } from "@/lib/http/errorResponse";
+
+const ROUTE = "/api/pricing-settings";
 
 const pricingSettingsSchema = z
   .object({
@@ -62,8 +65,10 @@ async function upsertWithColumnFallback(supabase: any, payload: Record<string, u
 }
 
 export async function GET() {
+  let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    context = { companyId, userId, role: "member" };
 
     const { data, error } = await supabase
       .from("pricing_settings")
@@ -72,7 +77,7 @@ export async function GET() {
       .maybeSingle();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return errorResponse(error.message, 400);
     }
 
     return NextResponse.json({
@@ -80,26 +85,30 @@ export async function GET() {
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return errorResponse(error.message, error.status);
     }
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message || "Unexpected server error" }, { status: 500 });
+    return errorResponse(message || "Unexpected server error", 500, {
+      context: { route: ROUTE, ...context },
+    });
   }
 }
 
 export async function PUT(request: Request) {
+  let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
     try {
-      await requireRole(["admin"]);
+      const access = await requireRole(["admin"]);
+      context = { companyId: access.companyId, userId: access.userId, role: access.role };
     } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return errorResponse("Forbidden", 403);
     }
 
     let body: unknown;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+      return errorResponse("Invalid JSON body", 400);
     }
 
     const parsed = pricingSettingsSchema.safeParse(body);
@@ -122,7 +131,7 @@ export async function PUT(request: Request) {
     const { data, error } = await upsertWithColumnFallback(supabase, upsertPayload);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return errorResponse(error.message, 400);
     }
 
     await logAuditEvent({
@@ -138,9 +147,11 @@ export async function PUT(request: Request) {
     return NextResponse.json({ pricing_settings: mapPricingSettings(data) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return errorResponse(error.message, error.status);
     }
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message || "Unexpected server error" }, { status: 500 });
+    return errorResponse(message || "Unexpected server error", 500, {
+      context: { route: ROUTE, ...context },
+    });
   }
 }

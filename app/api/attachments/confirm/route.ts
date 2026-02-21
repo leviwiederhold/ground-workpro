@@ -4,7 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 
-const entityTypeSchema = z.enum(["job", "daily_report", "work_order"]);
+const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document"]);
 
 const confirmSchema = z.object({
   entity_type: entityTypeSchema,

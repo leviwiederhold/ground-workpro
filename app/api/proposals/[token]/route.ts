@@ -3,6 +3,7 @@ import { z } from "next/dist/compiled/zod";
 import { getPublicProposalByToken } from "@/lib/proposals/publicProposal";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
+const ROUTE = "/api/proposals/[token]";
 
 const paramsSchema = z.object({
   token: z.string().min(24),
@@ -43,6 +44,8 @@ export async function GET(
 
     return Response.json({ item: result.item });
   } catch {
-    return errorResponse("Internal server error", 500);
+    return errorResponse("Internal server error", 500, {
+      context: { route: ROUTE, role: "public_token" },
+    });
   }
 }

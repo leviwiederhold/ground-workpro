@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -80,20 +81,23 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   return lastResult;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
-    const { data, error } = await supabase
+    const { data, error, count } = await supabase
       .from("work_orders")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ workOrders: (data ?? []).map(mapWorkOrder) });
+    const workOrders = (data ?? []).map(mapWorkOrder);
+    return NextResponse.json({ workOrders, ...getPaginationMeta(count ?? workOrders.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

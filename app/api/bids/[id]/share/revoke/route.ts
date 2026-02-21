@@ -5,18 +5,19 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { okItem } from "@/lib/http/json";
+import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
+const ROUTE = "/api/bids/[id]/share/revoke";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
 });
 
-const toValidationError = (error: any) => ({
-  error: "Validation error",
-  details: error.issues.map((issue: any) => ({
+const toValidationDetails = (error: any) =>
+  error.issues.map((issue: any) => ({
     path: issue.path.join("."),
     message: issue.message,
-  })),
-});
+  }));
 
 async function loadLatestActiveShareLink(supabase: any, companyId: string, bidId: string) {
   const nowIso = new Date().toISOString();
@@ -36,17 +37,19 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
     const rawParams = await params;
     const parsedParams = paramsSchema.safeParse(rawParams);
     if (!parsedParams.success) {
-      return NextResponse.json(toValidationError(parsedParams.error), { status: 422 });
+      return validationError(toValidationDetails(parsedParams.error));
     }
 
     try {
-      await requireRole(["admin", "pm"]);
+      const access = await requireRole(["admin", "pm"]);
+      context = { companyId: access.companyId, userId: access.userId, role: access.role };
     } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return forbidden();
     }
 
     const { supabase, companyId, userId } = await getCompanyId();
@@ -64,18 +67,18 @@ export async function POST(
       .maybeSingle();
 
     if (bidError) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return serverError("Internal server error", undefined, { route: ROUTE, ...context });
     }
     if (!bid) {
-      return NextResponse.json({ error: "Bid not found" }, { status: 404 });
+      return notFound("Bid not found");
     }
 
     const { data: shareLink, error: shareError } = await loadLatestActiveShareLink(supabase, companyId, bidId);
     if (shareError) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return serverError("Internal server error", undefined, { route: ROUTE, ...context });
     }
     if (!shareLink) {
-      return NextResponse.json({ error: "Share link not found" }, { status: 404 });
+      return notFound("Share link not found");
     }
 
     const revokedAt = new Date().toISOString();
@@ -89,10 +92,10 @@ export async function POST(
       .maybeSingle();
 
     if (updateError) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return serverError("Internal server error", undefined, { route: ROUTE, ...context });
     }
     if (!updated) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return serverError("Internal server error", undefined, { route: ROUTE, ...context });
     }
 
     await logAuditEvent({
@@ -105,11 +108,13 @@ export async function POST(
       metadata: { share_link_id: shareLink.id },
     });
 
-    return NextResponse.json({ item: { success: true } });
+    return okItem({ success: true });
   } catch (error) {
     if (error instanceof TenantResolverError) {
+      if (error.status === 404) return notFound(error.message);
+      if (error.status === 403) return forbidden(error.message);
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return serverError("Internal server error", undefined, { route: ROUTE, ...context });
   }
 }

@@ -46,6 +46,50 @@ pnpm verify
 pnpm verify
 ```
 
+## Testing Workflow
+
+- Default (most PRs): `pnpm check:fast`
+- Feature/module changes: `pnpm check:fast` + `pnpm test:e2e:spec tests/e2e/<spec>.spec.ts`
+- Run full suite (`pnpm test:e2e:full`) only for:
+  - auth/RLS/RBAC
+  - pricing or money math
+  - storage/uploads
+  - cross-module APIs
+  - DB schema changes
+- Full suite is optional for UI-only changes, refactors, and docs-only PRs.
+
+## Performance checks
+
+- Lightweight perf/load smoke: `pnpm test:e2e:spec tests/e2e/perf-smoke.spec.ts`
+- Baseline metrics are tracked in `docs/perf-baseline.md`
+
+## Observability
+
+- Sentry is enabled for client/server error capture with route and tenant context tags.
+- Golden signals and alert-ready thresholds are documented in `docs/golden-signals.md`.
+
+## PR output format (default)
+
+For normal PRs, use this output format:
+
+1. List of changed files
+2. Short summary
+3. Raw successful logs from:
+   - `pnpm lint`
+   - `pnpm build`
+   - `pnpm test:e2e`
+
+Do **not** require full diffs by default.
+
+### When diffs are required
+
+Include diffs only for:
+
+- RLS/Auth/RBAC changes
+- Pricing or money-math changes
+- DB migrations or schema changes
+- Large refactors (for example, `app/page.tsx` extraction)
+
 ## Code quality commands
 
 ```bash
@@ -85,6 +129,19 @@ pnpm format:check
 
    - `STRIPE_SECRET_KEY`
    - `STRIPE_WEBHOOK_SECRET`
+
+## Operations: Backups, Restore Rehearsal, and Incident Runbooks
+
+See the ops runbook for production backup/restore and outage handling:
+
+- `docs/ops-backup-restore-runbooks.md`
+
+This includes:
+
+- Supabase backup approach (database + storage + config)
+- Storage bucket recovery notes
+- Verified restore rehearsal checklist
+- Incident runbooks for auth outage, DB outage, and storage outage
 
 ## Tech Stack
 

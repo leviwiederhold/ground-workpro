@@ -4,18 +4,18 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
+const isDocumentAttachment = (attachment: Record<string, unknown>, companyId: string) => {
+  const entityType = String(attachment.entity_type ?? "");
+  if (entityType === "document") return true;
+  const path = String(attachment.storage_path ?? attachment.path ?? attachment.file_path ?? "");
+  return path.includes(`/${companyId}/document/`);
+};
 
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    try {
-      await requireRole(["admin", "pm", "foreman", "mechanic"]);
-    } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const { id } = await params;
     const { supabase, companyId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
@@ -32,6 +32,16 @@ export async function DELETE(
         { error: existingError?.message || "Attachment not found" },
         { status: 404 }
       );
+    }
+
+    try {
+      if (isDocumentAttachment(existing, companyId)) {
+        await requireRole(["admin", "pm"]);
+      } else {
+        await requireRole(["admin", "pm", "foreman", "mechanic"]);
+      }
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const bucket = existing.storage_bucket ?? existing.bucket;

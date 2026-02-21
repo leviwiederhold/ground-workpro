@@ -17,10 +17,79 @@ const normalizeId = (value: unknown): string | number | null => {
   return String(value);
 };
 
+const pick = (row: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = row[key];
+    if (value !== undefined && value !== null && value !== "") return value;
+  }
+  return undefined;
+};
+
+const isMissingColumnError = (message: string) => {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("could not find the") ||
+    normalized.includes("column") && normalized.includes("does not exist") ||
+    normalized.includes("schema cache")
+  );
+};
+
+type QueryVariant = {
+  table: string;
+  select?: string;
+  filters?: Array<{ column: string; value: unknown; op?: "eq" | "in" }>;
+  order?: { column: string; ascending?: boolean };
+  limit?: number;
+};
+
+async function queryVariants(supabase: any, variants: QueryVariant[]) {
+  let lastNonMissingError: string | null = null;
+
+  for (const variant of variants) {
+    let query = supabase.from(variant.table).select(variant.select ?? "*");
+
+    for (const filter of variant.filters ?? []) {
+      if (filter.op === "in") {
+        query = query.in(filter.column, filter.value as any[]);
+      } else {
+        query = query.eq(filter.column, filter.value);
+      }
+    }
+
+    if (variant.order) {
+      query = query.order(variant.order.column, { ascending: variant.order.ascending ?? true });
+    }
+
+    if (typeof variant.limit === "number") {
+      query = query.limit(variant.limit);
+    }
+
+    const result = await query;
+    if (!result.error) return { data: result.data ?? [], error: null as string | null };
+
+    if (isMissingColumnError(String(result.error.message || ""))) {
+      continue;
+    }
+
+    lastNonMissingError = result.error.message || "Unexpected query error";
+    break;
+  }
+
+  if (lastNonMissingError) {
+    return { data: [] as any[], error: lastNonMissingError };
+  }
+
+  return { data: [] as any[], error: null as string | null };
+}
+
 type JobCostSummary = {
   jobId: string | number;
   estimatedCost: number;
   estimatedRevenue: number;
+  actualLaborCost: number;
+  actualEquipmentCost: number;
+  actualMaterialCost: number;
+  actualTotalCost: number;
   actualCost: number;
   varianceAmount: number;
   variancePercent: number;
@@ -40,124 +109,101 @@ type JobCostSummary = {
 };
 
 async function fetchBidEstimate(supabase: any, companyId: string, jobId: string | number) {
-  let bidResult = await supabase
-    .from("bids")
-    .select("*")
-    .eq("company_id", companyId)
-    .eq("job_id", jobId)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const bidRowsResult = await queryVariants(supabase, [
+    {
+      table: "bids",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "job_id", value: jobId },
+      ],
+      order: { column: "created_at", ascending: false },
+      limit: 1,
+    },
+    {
+      table: "bids",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "jobId", value: jobId },
+      ],
+      order: { column: "created_at", ascending: false },
+      limit: 1,
+    },
+    {
+      table: "bids",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "job_id", value: jobId },
+      ],
+      order: { column: "id", ascending: false },
+      limit: 1,
+    },
+    {
+      table: "bids",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "jobId", value: jobId },
+      ],
+      order: { column: "id", ascending: false },
+      limit: 1,
+    },
+  ]);
 
-  if (bidResult.error?.message?.toLowerCase().includes("job_id")) {
-    bidResult = await supabase
-      .from("bids")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("jobId", jobId)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-  }
-
-  if (bidResult.error?.message?.toLowerCase().includes("created_at")) {
-    bidResult = await supabase
-      .from("bids")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("job_id", jobId)
-      .order("id", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (bidResult.error?.message?.toLowerCase().includes("job_id")) {
-      bidResult = await supabase
-        .from("bids")
-        .select("*")
-        .eq("company_id", companyId)
-        .eq("jobId", jobId)
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-    }
-  }
-
-  if (bidResult.error) {
-    return { error: bidResult.error.message };
-  }
-  if (!bidResult.data) {
+  if (bidRowsResult.error) return { error: bidRowsResult.error };
+  const bid = (bidRowsResult.data ?? [])[0] as Record<string, unknown> | undefined;
+  if (!bid) {
     return { bidId: null as string | number | null, estimatedCost: 0, estimatedRevenue: 0 };
   }
 
-  const bidId = normalizeId(bidResult.data.id);
+  const bidId = normalizeId(bid.id);
   if (bidId === null) {
     return { bidId: null as string | number | null, estimatedCost: 0, estimatedRevenue: 0 };
   }
 
-  const { data: bidItems, error: itemsError } = await supabase
-    .from("bid_items")
-    .select("*")
-    .eq("company_id", companyId)
-    .eq("bid_id", bidId);
+  const bidItemsResult = await queryVariants(supabase, [
+    {
+      table: "bid_items",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "bid_id", value: bidId },
+      ],
+    },
+    {
+      table: "bid_items",
+      select: "*",
+      filters: [{ column: "bid_id", value: bidId }],
+    },
+    {
+      table: "bid_items",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "bidId", value: bidId },
+      ],
+    },
+    {
+      table: "bid_items",
+      select: "*",
+      filters: [{ column: "bidId", value: bidId }],
+    },
+  ]);
 
-  if (itemsError?.message?.toLowerCase().includes("company_id")) {
-    const withoutCompany = await supabase
-      .from("bid_items")
-      .select("*")
-      .eq("bid_id", bidId);
-    if (!withoutCompany.error) {
-      const estimateFromSummary = calcBid(null, withoutCompany.data ?? []);
-      const estimatedCost =
-        toNumber((bidResult.data as any).subtotal) > 0
-          ? round2(toNumber((bidResult.data as any).subtotal))
-          : round2(estimateFromSummary.subtotalCost);
-      const estimatedRevenue =
-        toNumber((bidResult.data as any).total) > 0
-          ? round2(toNumber((bidResult.data as any).total))
-          : toNumber((bidResult.data as any).amount) > 0
-          ? round2(toNumber((bidResult.data as any).amount))
-          : round2(estimateFromSummary.revenue);
-      return { bidId, estimatedCost, estimatedRevenue };
-    }
-  }
+  if (bidItemsResult.error) return { error: bidItemsResult.error };
 
-  if (itemsError?.message?.toLowerCase().includes("bid_id")) {
-    const fallbackItems = await supabase
-      .from("bid_items")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("bidId", bidId);
-    if (fallbackItems.error) {
-      return { error: fallbackItems.error.message };
-    }
-    const estimateFromSummary = calcBid(null, fallbackItems.data ?? []);
-    const estimatedCost =
-      toNumber((bidResult.data as any).subtotal) > 0
-        ? round2(toNumber((bidResult.data as any).subtotal))
-        : round2(estimateFromSummary.subtotalCost);
-    const estimatedRevenue =
-      toNumber((bidResult.data as any).total) > 0
-        ? round2(toNumber((bidResult.data as any).total))
-        : toNumber((bidResult.data as any).amount) > 0
-        ? round2(toNumber((bidResult.data as any).amount))
-        : round2(estimateFromSummary.revenue);
-    return { bidId, estimatedCost, estimatedRevenue };
-  }
+  const estimateFromSummary = calcBid(null, bidItemsResult.data ?? []);
 
-  if (itemsError) {
-    return { error: itemsError.message };
-  }
-
-  const estimateFromSummary = calcBid(null, bidItems ?? []);
   const estimatedCost =
-    toNumber(bidResult.data.subtotal) > 0
-      ? round2(toNumber(bidResult.data.subtotal))
+    toNumber(pick(bid, ["subtotal", "estimated_cost", "estimatedCost"])) > 0
+      ? round2(toNumber(pick(bid, ["subtotal", "estimated_cost", "estimatedCost"])))
       : round2(estimateFromSummary.subtotalCost);
 
   const estimatedRevenue =
-    toNumber(bidResult.data.total) > 0
-      ? round2(toNumber(bidResult.data.total))
-      : toNumber(bidResult.data.amount) > 0
-      ? round2(toNumber(bidResult.data.amount))
+    toNumber(pick(bid, ["total", "amount", "estimated_revenue", "estimatedRevenue"])) > 0
+      ? round2(toNumber(pick(bid, ["total", "amount", "estimated_revenue", "estimatedRevenue"])))
       : round2(estimateFromSummary.revenue);
 
   return { bidId, estimatedCost, estimatedRevenue };
@@ -170,271 +216,224 @@ export async function getJobCostSummary(
 ): Promise<{ ok: true; summary: JobCostSummary } | { ok: false; error: string }> {
   const estimateResult = await fetchBidEstimate(supabase, companyId, jobId);
   if ("error" in estimateResult) {
-    return { ok: false, error: estimateResult.error };
+    return { ok: false, error: estimateResult.error || "Failed to load bid estimate" };
   }
 
-  const [dailyReportsResult, poResult, inventoryResult] = await Promise.all([
-    (async () => {
-      const primary = await supabase
-        .from("daily_reports")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("job_id", jobId);
-      if (primary.error) {
-        const companyMessage = String(primary.error.message || "").toLowerCase();
-        if (companyMessage.includes("company_id")) {
-          const withoutCompany = await supabase
-            .from("daily_reports")
-            .select("id")
-            .eq("job_id", jobId);
-          if (!withoutCompany.error) return withoutCompany;
-        }
-      }
-      if (!primary.error) return primary;
-      const message = String(primary.error.message || "").toLowerCase();
-      if (!message.includes("job_id")) return primary;
-      const fallback = await supabase
-        .from("daily_reports")
-        .select("id")
-        .eq("jobId", jobId);
-      if (!fallback.error) return fallback;
-      if (String(fallback.error.message || "").toLowerCase().includes("company_id")) {
-        return supabase
-          .from("daily_reports")
-          .select("id")
-          .eq("jobId", jobId);
-      }
-      return fallback;
-    })(),
-    (async () => {
-      const primary = await supabase
-        .from("purchase_orders")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("job_id", jobId);
-      if (primary.error) {
-        const companyMessage = String(primary.error.message || "").toLowerCase();
-        if (companyMessage.includes("company_id")) {
-          const withoutCompany = await supabase
-            .from("purchase_orders")
-            .select("id")
-            .eq("job_id", jobId);
-          if (!withoutCompany.error) return withoutCompany;
-        }
-      }
-      if (!primary.error) return primary;
-      const message = String(primary.error.message || "").toLowerCase();
-      if (!message.includes("job_id")) return primary;
-      const fallback = await supabase
-        .from("purchase_orders")
-        .select("id")
-        .eq("jobId", jobId);
-      if (!fallback.error) return fallback;
-      if (String(fallback.error.message || "").toLowerCase().includes("company_id")) {
-        return supabase
-          .from("purchase_orders")
-          .select("id")
-          .eq("jobId", jobId);
-      }
-      return fallback;
-    })(),
-    (async () => {
-      const primary = await supabase
-        .from("inventory")
-        .select("*")
-        .eq("company_id", companyId)
-        .eq("job_id", jobId);
-      if (primary.error) {
-        const companyMessage = String(primary.error.message || "").toLowerCase();
-        if (companyMessage.includes("company_id")) {
-          const withoutCompany = await supabase
-            .from("inventory")
-            .select("*")
-            .eq("job_id", jobId);
-          if (!withoutCompany.error) return withoutCompany;
-          const withoutCompanyJobId = await supabase
-            .from("inventory")
-            .select("*")
-            .eq("jobId", jobId);
-          if (!withoutCompanyJobId.error) return withoutCompanyJobId;
-          const withoutCompanyMessage = String(withoutCompany.error?.message || "").toLowerCase();
-          const withoutCompanyJobIdMessage = String(
-            withoutCompanyJobId.error?.message || ""
-          ).toLowerCase();
-          if (
-            (withoutCompanyMessage.includes("job_id") ||
-              withoutCompanyMessage.includes("jobid")) &&
-            (withoutCompanyJobIdMessage.includes("job_id") ||
-              withoutCompanyJobIdMessage.includes("jobid"))
-          ) {
-            return { data: [], error: null };
-          }
-        }
-      }
-      if (!primary.error) return primary;
-      const message = String(primary.error.message || "").toLowerCase();
-      if (!message.includes("job_id") && !message.includes("jobid")) return primary;
-      const fallback = await supabase
-        .from("inventory")
-        .select("*")
-        .eq("jobId", jobId);
-      if (!fallback.error) return fallback;
-      if (String(fallback.error.message || "").toLowerCase().includes("company_id")) {
-        const fallbackWithoutCompany = await supabase
-          .from("inventory")
-          .select("*")
-          .eq("jobId", jobId);
-        if (!fallbackWithoutCompany.error) return fallbackWithoutCompany;
-        const fallbackWithoutCompanyMessage = String(
-          fallbackWithoutCompany.error?.message || ""
-        ).toLowerCase();
-        if (
-          fallbackWithoutCompanyMessage.includes("job_id") ||
-          fallbackWithoutCompanyMessage.includes("jobid")
-        ) {
-          return { data: [], error: null };
-        }
-        return fallbackWithoutCompany;
-      }
-      const fallbackMessage = String(fallback.error.message || "").toLowerCase();
-      if (fallbackMessage.includes("job_id") || fallbackMessage.includes("jobid")) {
-        return { data: [], error: null };
-      }
-      return fallback;
-    })(),
+  const dailyReportsResult = await queryVariants(supabase, [
+    {
+      table: "daily_reports",
+      select: "id",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "job_id", value: jobId },
+      ],
+    },
+    {
+      table: "daily_reports",
+      select: "id",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "jobId", value: jobId },
+      ],
+    },
+    { table: "daily_reports", select: "id", filters: [{ column: "job_id", value: jobId }] },
+    { table: "daily_reports", select: "id", filters: [{ column: "jobId", value: jobId }] },
   ]);
 
-  if (dailyReportsResult.error) return { ok: false, error: dailyReportsResult.error.message };
-  if (poResult.error) return { ok: false, error: poResult.error.message };
-  if (inventoryResult.error) return { ok: false, error: inventoryResult.error.message };
+  if (dailyReportsResult.error) return { ok: false, error: dailyReportsResult.error };
+
+  const poResult = await queryVariants(supabase, [
+    {
+      table: "purchase_orders",
+      select: "id",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "job_id", value: jobId },
+      ],
+    },
+    {
+      table: "purchase_orders",
+      select: "id",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "jobId", value: jobId },
+      ],
+    },
+    { table: "purchase_orders", select: "id", filters: [{ column: "job_id", value: jobId }] },
+    { table: "purchase_orders", select: "id", filters: [{ column: "jobId", value: jobId }] },
+  ]);
+
+  if (poResult.error) return { ok: false, error: poResult.error };
+
+  const inventoryResult = await queryVariants(supabase, [
+    {
+      table: "inventory",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "job_id", value: jobId },
+      ],
+    },
+    {
+      table: "inventory",
+      select: "*",
+      filters: [
+        { column: "company_id", value: companyId },
+        { column: "jobId", value: jobId },
+      ],
+    },
+    { table: "inventory", select: "*", filters: [{ column: "job_id", value: jobId }] },
+    { table: "inventory", select: "*", filters: [{ column: "jobId", value: jobId }] },
+  ]);
+
+  if (inventoryResult.error) return { ok: false, error: inventoryResult.error };
 
   const reportIds = (dailyReportsResult.data ?? [])
-    .map((row: any) => normalizeId(row.id))
+    .map((row: Record<string, unknown>) => normalizeId(row.id))
     .filter((id: string | number | null) => id !== null);
   const poIds = (poResult.data ?? [])
-    .map((row: any) => normalizeId(row.id))
+    .map((row: Record<string, unknown>) => normalizeId(row.id))
     .filter((id: string | number | null) => id !== null);
 
-  const [entriesResult, poItemsResult] = await Promise.all([
-    reportIds.length > 0
-      ? (async () => {
-          const primary = await supabase
-            .from("daily_report_entries")
-            .select("*")
-            .eq("company_id", companyId)
-            .in("daily_report_id", reportIds);
-          if (primary.error) {
-            const companyMessage = String(primary.error.message || "").toLowerCase();
-            if (companyMessage.includes("company_id")) {
-              const withoutCompany = await supabase
-                .from("daily_report_entries")
-                .select("*")
-                .in("daily_report_id", reportIds);
-              if (!withoutCompany.error) return withoutCompany;
-            }
-          }
-          if (!primary.error) return primary;
-          const message = String(primary.error.message || "").toLowerCase();
-          if (!message.includes("daily_report_id")) return primary;
-          const fallback = await supabase
-            .from("daily_report_entries")
-            .select("*")
-            .in("report_id", reportIds);
-          if (!fallback.error) return fallback;
-          if (String(fallback.error.message || "").toLowerCase().includes("company_id")) {
-            return supabase
-              .from("daily_report_entries")
-              .select("*")
-              .in("report_id", reportIds);
-          }
-          return fallback;
-        })()
-      : Promise.resolve({ data: [], error: null }),
-    poIds.length > 0
-      ? supabase
-          .from("purchase_order_items")
-          .select("*")
-          .eq("company_id", companyId)
-          .in("purchase_order_id", poIds)
-          .then(async (result: any) => {
-            if (!result.error) return result;
-            const message = String(result.error.message || "").toLowerCase();
-            if (!message.includes("purchase_order_id")) return result;
-            return supabase
-              .from("purchase_order_items")
-              .select("*")
-              .eq("company_id", companyId)
-              .in("purchaseOrderId", poIds);
-          })
-      : Promise.resolve({ data: [], error: null }),
-  ]);
+  // Exactly one source query per table (variant-resolved):
+  // - daily_report_entries
+  // - purchase_order_items
+  // - inventory (already fetched above)
+  const entriesResult = reportIds.length
+    ? await queryVariants(supabase, [
+        {
+          table: "daily_report_entries",
+          select: "*",
+          filters: [
+            { column: "company_id", value: companyId },
+            { column: "daily_report_id", value: reportIds, op: "in" },
+          ],
+        },
+        {
+          table: "daily_report_entries",
+          select: "*",
+          filters: [{ column: "daily_report_id", value: reportIds, op: "in" }],
+        },
+        {
+          table: "daily_report_entries",
+          select: "*",
+          filters: [
+            { column: "company_id", value: companyId },
+            { column: "report_id", value: reportIds, op: "in" },
+          ],
+        },
+        {
+          table: "daily_report_entries",
+          select: "*",
+          filters: [{ column: "report_id", value: reportIds, op: "in" }],
+        },
+      ])
+    : { data: [] as any[], error: null as string | null };
 
-  if (entriesResult.error) return { ok: false, error: entriesResult.error.message };
-  if (poItemsResult.error) return { ok: false, error: poItemsResult.error.message };
+  if (entriesResult.error) return { ok: false, error: entriesResult.error };
+
+  const poItemsResult = poIds.length
+    ? await queryVariants(supabase, [
+        {
+          table: "purchase_order_items",
+          select: "*",
+          filters: [
+            { column: "company_id", value: companyId },
+            { column: "purchase_order_id", value: poIds, op: "in" },
+          ],
+        },
+        {
+          table: "purchase_order_items",
+          select: "*",
+          filters: [{ column: "purchase_order_id", value: poIds, op: "in" }],
+        },
+        {
+          table: "purchase_order_items",
+          select: "*",
+          filters: [
+            { column: "company_id", value: companyId },
+            { column: "purchaseOrderId", value: poIds, op: "in" },
+          ],
+        },
+        {
+          table: "purchase_order_items",
+          select: "*",
+          filters: [{ column: "purchaseOrderId", value: poIds, op: "in" }],
+        },
+      ])
+    : { data: [] as any[], error: null as string | null };
+
+  if (poItemsResult.error) return { ok: false, error: poItemsResult.error };
 
   const entries = entriesResult.data ?? [];
+
   const employeeIds = Array.from(
     new Set(
       entries
         .filter(
-          (entry: any) =>
-            String(entry.entry_type ?? entry.entryType ?? "").toLowerCase() === "labor"
+          (entry: Record<string, unknown>) =>
+            String(pick(entry, ["entry_type", "entryType"]) ?? "").toLowerCase() === "labor"
         )
-        .map((entry: any) => normalizeId(entry.employee_id ?? entry.employeeId))
+        .map((entry: Record<string, unknown>) => normalizeId(pick(entry, ["employee_id", "employeeId"])))
         .filter((id: string | number | null) => id !== null)
     )
   );
+
   const equipmentIds = Array.from(
     new Set(
       entries
         .filter(
-          (entry: any) =>
-            String(entry.entry_type ?? entry.entryType ?? "").toLowerCase() === "equipment"
+          (entry: Record<string, unknown>) =>
+            String(pick(entry, ["entry_type", "entryType"]) ?? "").toLowerCase() === "equipment"
         )
-        .map((entry: any) => normalizeId(entry.equipment_id ?? entry.equipmentId))
+        .map((entry: Record<string, unknown>) => normalizeId(pick(entry, ["equipment_id", "equipmentId"])))
         .filter((id: string | number | null) => id !== null)
     )
   );
 
-  const [employeesResult, equipmentResult] = await Promise.all([
-    employeeIds.length > 0
-      ? supabase
-          .from("employees")
-          .select("*")
-          .eq("company_id", companyId)
-          .in("id", employeeIds)
-      : Promise.resolve({ data: [], error: null }),
-    equipmentIds.length > 0
-      ? supabase
-          .from("equipment")
-          .select("*")
-          .eq("company_id", companyId)
-          .in("id", equipmentIds)
-          .then(async (result: any) => {
-            if (!result.error) return result;
-            const message = String(result.error.message || "").toLowerCase();
-            if (!message.includes("company_id")) return result;
-            return supabase
-              .from("equipment")
-              .select("*")
-              .in("id", equipmentIds);
-          })
-      : Promise.resolve({ data: [], error: null }),
-  ]);
+  const employeesResult = employeeIds.length
+    ? await queryVariants(supabase, [
+        {
+          table: "employees",
+          select: "*",
+          filters: [
+            { column: "company_id", value: companyId },
+            { column: "id", value: employeeIds, op: "in" },
+          ],
+        },
+        { table: "employees", select: "*", filters: [{ column: "id", value: employeeIds, op: "in" }] },
+      ])
+    : { data: [] as any[], error: null as string | null };
 
-  if (employeesResult.error) return { ok: false, error: employeesResult.error.message };
-  if (equipmentResult.error) return { ok: false, error: equipmentResult.error.message };
+  if (employeesResult.error) return { ok: false, error: employeesResult.error };
+
+  const equipmentResult = equipmentIds.length
+    ? await queryVariants(supabase, [
+        {
+          table: "equipment",
+          select: "*",
+          filters: [
+            { column: "company_id", value: companyId },
+            { column: "id", value: equipmentIds, op: "in" },
+          ],
+        },
+        { table: "equipment", select: "*", filters: [{ column: "id", value: equipmentIds, op: "in" }] },
+      ])
+    : { data: [] as any[], error: null as string | null };
+
+  if (equipmentResult.error) return { ok: false, error: equipmentResult.error };
 
   const employeeRates = new Map(
-    (employeesResult.data ?? []).map((row: any) => [
+    (employeesResult.data ?? []).map((row: Record<string, unknown>) => [
       String(row.id),
-      toNumber(row.hourly_rate ?? row.hourlyRate),
+      toNumber(pick(row, ["hourly_rate", "hourlyRate", "labor_rate", "laborRate"])),
     ])
   );
+
   const equipmentRates = new Map(
-    (equipmentResult.data ?? []).map((row: any) => {
-      const hourlyRate = toNumber(row.hourly_rate ?? row.hourlyRate);
-      const dailyRate = toNumber(row.daily_rate ?? row.dailyRate);
+    (equipmentResult.data ?? []).map((row: Record<string, unknown>) => {
+      const hourlyRate = toNumber(pick(row, ["hourly_rate", "hourlyRate"]));
+      const dailyRate = toNumber(pick(row, ["daily_rate", "dailyRate"]));
       const resolvedRate = hourlyRate > 0 ? hourlyRate : dailyRate > 0 ? dailyRate / 8 : 0;
       return [String(row.id), resolvedRate];
     })
@@ -444,42 +443,77 @@ export async function getJobCostSummary(
   let dailyReportEquipmentCost = 0;
   let dailyReportMaterialCost = 0;
 
-  for (const entry of entries) {
-    const entryType = String(entry.entry_type ?? entry.entryType ?? "").toLowerCase();
-    const entryHours = toNumber(entry.hours ?? entry.total_hours ?? entry.totalHours);
+  const warningsSet = new Set<string>();
+
+  for (const rawEntry of entries) {
+    const entry = rawEntry as Record<string, unknown>;
+    const entryType = String(pick(entry, ["entry_type", "entryType"]) ?? "").toLowerCase();
+
+    const lineTotal = toNumber(pick(entry, ["total_cost", "totalCost", "line_total", "lineTotal", "amount"]));
+    const hours = toNumber(pick(entry, ["hours", "total_hours", "totalHours", "duration_hours", "durationHours"]));
+    const quantity = toNumber(pick(entry, ["quantity", "qty", "quantity_used", "quantityUsed", "qty_used", "qtyUsed"]));
+    const unitCost = toNumber(pick(entry, ["unit_cost", "unitCost", "cost_per_unit", "costPerUnit", "rate", "hourly_rate", "hourlyRate"]));
+
     if (entryType === "labor") {
-      dailyReportLaborCost +=
-        entryHours *
-        toNumber(
-          employeeRates.get(String(normalizeId(entry.employee_id ?? entry.employeeId)))
+      let laborCost = lineTotal;
+      if (laborCost <= 0) {
+        const employeeRate = toNumber(
+          employeeRates.get(String(normalizeId(pick(entry, ["employee_id", "employeeId"]))))
         );
+        laborCost = hours * (employeeRate > 0 ? employeeRate : unitCost);
+      }
+      if (laborCost <= 0 && hours > 0) {
+        warningsSet.add("Some labor entries are missing hourly rates and were treated as $0");
+      }
+      dailyReportLaborCost += laborCost;
       continue;
     }
+
     if (entryType === "equipment") {
-      dailyReportEquipmentCost +=
-        entryHours *
-        toNumber(
-          equipmentRates.get(String(normalizeId(entry.equipment_id ?? entry.equipmentId)))
+      let equipmentCost = lineTotal;
+      if (equipmentCost <= 0) {
+        const equipmentRate = toNumber(
+          equipmentRates.get(String(normalizeId(pick(entry, ["equipment_id", "equipmentId"]))))
         );
+        equipmentCost = hours * (equipmentRate > 0 ? equipmentRate : unitCost);
+      }
+      if (equipmentCost <= 0 && hours > 0) {
+        warningsSet.add("Some equipment entries are missing hourly rates and were treated as $0");
+      }
+      dailyReportEquipmentCost += equipmentCost;
       continue;
     }
+
     if (entryType === "material") {
-      dailyReportMaterialCost += toNumber(entry.quantity ?? entry.qty);
+      const materialCost = lineTotal > 0 ? lineTotal : quantity > 0 && unitCost > 0 ? quantity * unitCost : quantity;
+      dailyReportMaterialCost += materialCost;
+      if (lineTotal <= 0 && unitCost <= 0 && quantity > 0) {
+        warningsSet.add("Material entries without unit cost are treated as direct quantity cost");
+      }
     }
   }
 
-  const purchaseOrderItemsCost = (poItemsResult.data ?? []).reduce(
-    (sum: number, row: any) =>
-      sum + toNumber(row.quantity) * toNumber(row.unit_cost ?? row.unitPrice),
-    0
-  );
-  const inventoryUsageCost = (inventoryResult.data ?? []).reduce(
-    (sum: number, row: any) =>
-      sum +
-      toNumber(row.qty_reserved ?? row.qtyReserved) *
-        toNumber(row.unit_cost ?? row.unitCost),
-    0
-  );
+  const purchaseOrderItemsCost = (poItemsResult.data ?? []).reduce((sum: number, rawRow: any) => {
+    const row = rawRow as Record<string, unknown>;
+    const lineTotal = toNumber(pick(row, ["total_cost", "totalCost", "line_total", "lineTotal", "amount"]));
+    if (lineTotal > 0) return sum + lineTotal;
+
+    const quantity = toNumber(pick(row, ["quantity", "qty"]));
+    const unitCost = toNumber(pick(row, ["unit_cost", "unitCost", "cost_per_unit", "costPerUnit"]));
+    return sum + quantity * unitCost;
+  }, 0);
+
+  const inventoryUsageCost = (inventoryResult.data ?? []).reduce((sum: number, rawRow: any) => {
+    const row = rawRow as Record<string, unknown>;
+    const lineTotal = toNumber(pick(row, ["total_cost", "totalCost", "line_total", "lineTotal", "amount"]));
+    if (lineTotal > 0) return sum + lineTotal;
+
+    const quantity = toNumber(
+      pick(row, ["qty_reserved", "qtyReserved", "quantity_used", "quantityUsed", "qty_used", "qtyUsed", "allocated_qty", "allocatedQty"])
+    );
+    const unitCost = toNumber(pick(row, ["unit_cost", "unitCost", "avg_cost", "average_cost", "cost_per_unit", "costPerUnit"]));
+    return sum + quantity * unitCost;
+  }, 0);
 
   const actualCost = round2(
     dailyReportLaborCost +
@@ -488,6 +522,7 @@ export async function getJobCostSummary(
       purchaseOrderItemsCost +
       inventoryUsageCost
   );
+
   const estimatedCost = round2(estimateResult.estimatedCost);
   const estimatedRevenue = round2(estimateResult.estimatedRevenue);
 
@@ -495,18 +530,15 @@ export async function getJobCostSummary(
   const variancePercent = estimatedCost > 0 ? round2((varianceAmount / estimatedCost) * 100) : 0;
   const thresholdPercent = 10;
   const isOverBudget = estimatedCost > 0 && variancePercent > thresholdPercent;
+
   const estimatedMarginPercent =
     estimatedRevenue > 0 ? round2(((estimatedRevenue - estimatedCost) / estimatedRevenue) * 100) : 0;
   const actualMarginPercent =
     estimatedRevenue > 0 ? round2(((estimatedRevenue - actualCost) / estimatedRevenue) * 100) : 0;
   const marginDriftPercent = round2(actualMarginPercent - estimatedMarginPercent);
 
-  const warnings: string[] = [];
   if (isOverBudget) {
-    warnings.push(`Actual cost is ${variancePercent}% over estimated cost`);
-  }
-  if (dailyReportMaterialCost > 0) {
-    warnings.push("Material entry quantities are used as a direct cost proxy");
+    warningsSet.add(`Actual cost is ${variancePercent}% over estimated cost`);
   }
 
   return {
@@ -515,6 +547,12 @@ export async function getJobCostSummary(
       jobId,
       estimatedCost,
       estimatedRevenue,
+      actualLaborCost: round2(dailyReportLaborCost),
+      actualEquipmentCost: round2(dailyReportEquipmentCost),
+      actualMaterialCost: round2(
+        dailyReportMaterialCost + purchaseOrderItemsCost + inventoryUsageCost
+      ),
+      actualTotalCost: actualCost,
       actualCost,
       varianceAmount,
       variancePercent,
@@ -530,7 +568,7 @@ export async function getJobCostSummary(
         purchaseOrderItemsCost: round2(purchaseOrderItemsCost),
         inventoryUsageCost: round2(inventoryUsageCost),
       },
-      warnings,
+      warnings: Array.from(warningsSet),
     },
   };
 }

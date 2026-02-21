@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const jobStatusSchema = z.enum([
   "draft",
@@ -76,8 +77,16 @@ export async function PATCH(
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const updatesBody = parsed.data;
+    const normalizedId = normalizeId(id);
+
+    const { data: beforeRow } = await supabase
+      .from("jobs")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", normalizedId)
+      .maybeSingle();
 
     const updatePayload: Record<string, unknown> = {};
     if (updatesBody.name !== undefined) updatePayload.name = updatesBody.name;
@@ -89,7 +98,7 @@ export async function PATCH(
       .from("jobs")
       .update(updatePayload)
       .eq("company_id", companyId)
-      .eq("id", normalizeId(id))
+      .eq("id", normalizedId)
       .select("*")
       .single();
 
@@ -97,7 +106,19 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ job: mapJob(data) });
+    const job = mapJob(data);
+    await logAuditEvent({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      eventType: "job.updated",
+      entityType: "job",
+      entityId: normalizedId as string | number,
+      before: beforeRow ? mapJob(beforeRow) : null,
+      after: job,
+    });
+
+    return NextResponse.json({ job });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -118,16 +139,38 @@ export async function DELETE(
     }
 
     const { id } = await params;
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    const normalizedId = normalizeId(id);
 
-    const { error } = await supabase
+    const { data: beforeRow } = await supabase
+      .from("jobs")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", normalizedId)
+      .maybeSingle();
+
+    const { data: deletedRow, error } = await supabase
       .from("jobs")
       .delete()
       .eq("company_id", companyId)
-      .eq("id", normalizeId(id));
+      .eq("id", normalizedId)
+      .select("*")
+      .maybeSingle();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    if (deletedRow || beforeRow) {
+      await logAuditEvent({
+        supabase,
+        companyId,
+        actorUserId: userId,
+        eventType: "job.deleted",
+        entityType: "job",
+        entityId: normalizedId as string | number,
+        before: mapJob((deletedRow ?? beforeRow) as any),
+      });
     }
 
     return NextResponse.json({ success: true });

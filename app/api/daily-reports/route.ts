@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
 const materialSchema = z.object({
   item: z.string().default(""),
@@ -84,32 +85,36 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   return lastResult;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
     let result = await supabase
       .from("daily_reports")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("date", { ascending: false });
+      .order("date", { ascending: false })
+      .range(from, to);
 
     if (result.error?.message?.toLowerCase().includes("date")) {
       result = await supabase
         .from("daily_reports")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("company_id", companyId)
-        .order("report_date", { ascending: false });
+        .order("report_date", { ascending: false })
+        .range(from, to);
     }
 
     if (result.error?.message?.toLowerCase().includes("report_date")) {
       result = await supabase
         .from("daily_reports")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("company_id", companyId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .range(from, to);
     }
 
-    const { data, error } = result;
+    const { data, error, count } = result;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -120,6 +125,7 @@ export async function GET() {
       dailyReports: mapped,
       daily_reports: mapped,
       reports: mapped,
+      ...getPaginationMeta(count ?? mapped.length, page, pageSize),
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {

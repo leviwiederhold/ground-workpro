@@ -6,6 +6,8 @@ import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscripti
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
+import { enqueueOutboxEvent } from "@/lib/outbox/queue";
+const ROUTE = "/api/proposals/[token]/approve";
 
 const paramsSchema = z.object({
   token: z.string().min(24),
@@ -23,6 +25,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  let context: { companyId?: string; userId?: string; role?: string } = {};
   const rateLimited = enforceRateLimit(request, {
     keyPrefix: "proposal-approve",
     limit: 120,
@@ -43,10 +46,17 @@ export async function POST(
     if (!proposalResult.ok) {
       return errorResponse(proposalResult.error, proposalResult.status);
     }
+    context = {
+      companyId: proposalResult.companyId,
+      userId: proposalResult.shareCreatedByUserId ?? undefined,
+      role: "public_token",
+    };
 
     const supabase = getSupabaseAdmin();
     if (!supabase) {
-      return errorResponse("Internal server error", 500);
+      return errorResponse("Internal server error", 500, {
+        context: { route: ROUTE, ...context },
+      });
     }
 
     const subscriptionError = await requireActiveSubscription(supabase, proposalResult.companyId);
@@ -90,11 +100,15 @@ export async function POST(
     }
 
     if (updateResult?.error) {
-      return errorResponse("Internal server error", 500);
+      return errorResponse("Internal server error", 500, {
+        context: { route: ROUTE, ...context },
+      });
     }
 
     if (!updateResult?.data) {
-      return errorResponse("Internal server error", 500);
+      return errorResponse("Internal server error", 500, {
+        context: { route: ROUTE, ...context },
+      });
     }
 
     if (proposalResult.shareCreatedByUserId) {
@@ -112,6 +126,18 @@ export async function POST(
       });
     }
 
+    await enqueueOutboxEvent(supabase, {
+      companyId: proposalResult.companyId,
+      eventType: "bid.approved",
+      aggregateType: "bid",
+      aggregateId: proposalResult.bidId,
+      idempotencyKey: `bid.approved:${proposalResult.bidId}`,
+      payload: {
+        bid_id: proposalResult.bidId,
+        token: parsedParams.data.token,
+      },
+    });
+
     const refreshed = await getPublicProposalByToken(parsedParams.data.token);
     if (!refreshed.ok) {
       return errorResponse(refreshed.error, refreshed.status);
@@ -119,6 +145,8 @@ export async function POST(
 
     return Response.json({ item: refreshed.item });
   } catch {
-    return errorResponse("Internal server error", 500);
+    return errorResponse("Internal server error", 500, {
+      context: { route: ROUTE, ...context },
+    });
   }
 }

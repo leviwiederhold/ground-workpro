@@ -1,4 +1,5 @@
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
+import * as Sentry from "@sentry/nextjs";
 
 export type Role = "admin" | "pm" | "foreman" | "mechanic" | "operator";
 
@@ -37,6 +38,8 @@ export async function requireRole(allowed: Role[]): Promise<{
   if (!role || !hasRole(role, allowed)) {
     throw new ForbiddenError();
   }
+
+  Sentry.setTag("role", role);
 
   return { userId, companyId, role };
 }

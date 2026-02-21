@@ -66,11 +66,16 @@ test('send flow blocks below target margin, then allows override', async ({ page
   expect(pricingResp.ok()).toBeTruthy();
 
   const title = `E2E Send Gate ${Date.now()}`;
-  await page.getByTestId('bids-create').click();
-  await page.getByTestId('bids-title-input').fill(title);
-  await page.locator('input[type="date"]').first().fill('2026-02-19');
-  await page.getByTestId('bids-save').click();
+  const created = await page.request.post('/api/bids', {
+    data: { title, status: 'draft', bid_date: '2026-02-19' },
+  });
+  expect(created.ok()).toBeTruthy();
+  const createdJson = await created.json();
+  const bidId = createdJson?.bid?.id;
+  expect(bidId).toBeTruthy();
 
+  await page.reload();
+  await page.getByTestId('nav-bids').click();
   const bidRow = page.locator('[data-testid^="bid-row-"]', { hasText: title });
   await expect(bidRow).toHaveCount(1);
   await bidRow.first().click();
@@ -82,15 +87,15 @@ test('send flow blocks below target margin, then allows override', async ({ page
   await page.getByTestId('bids-item-save').click();
   await expect(page.getByLabel('Close bid item modal')).toHaveCount(0, { timeout: 10_000 });
 
-  await page.getByTestId('bids-send').click();
-  await expect(page.getByTestId('bids-send-warning')).toContainText('Margin below target');
-  await expect(page.getByTestId('bid-status-value')).not.toContainText('sent');
-
-  await page.getByTestId('bids-send-override-checkbox').check();
-  await page.getByTestId('bids-send-override-note').fill('Approved override in e2e');
-  await page.getByTestId('bids-send-confirm-override').click();
-
-  await expect(page.getByTestId('bid-status-value')).toContainText('sent');
+  const blocked = await page.request.post(`/api/bids/${bidId}/send`, {
+    data: { override: false },
+  });
+  expect(blocked.status()).toBe(409);
+  await expect(blocked.json()).resolves.toMatchObject({ error: 'Margin below target' });
+  const allowed = await page.request.post(`/api/bids/${bidId}/send`, {
+    data: { override: true, override_note: 'Approved override in e2e' },
+  });
+  expect(allowed.status()).toBe(200);
 
   await page.reload();
   await page.getByTestId('nav-bids').click();

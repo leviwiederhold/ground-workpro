@@ -6,10 +6,13 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { generateShareToken } from "@/lib/tokens";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { errorResponse } from "@/lib/http/errorResponse";
+import { enforceRateLimit } from "@/lib/http/rateLimit";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
 });
+const ROUTE = "/api/bids/[id]/share";
 
 const allowedStatuses = new Set(["sent"]);
 
@@ -76,6 +79,14 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let context: { companyId?: string; userId?: string; role?: string } = {};
+  const rateLimited = enforceRateLimit(request, {
+    keyPrefix: "bid-share-create",
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (rateLimited) return rateLimited;
+
   try {
     const rawParams = await params;
     const parsedParams = paramsSchema.safeParse(rawParams);
@@ -85,9 +96,10 @@ export async function POST(
 
     const { supabase, companyId, userId } = await getCompanyId();
     try {
-      await requireRole(["admin", "pm"]);
+      const access = await requireRole(["admin", "pm"]);
+      context = { companyId: access.companyId, userId: access.userId, role: access.role };
     } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return errorResponse("Forbidden", 403);
     }
 
     const subscriptionError = await requireActiveSubscription(supabase, companyId);
@@ -109,15 +121,17 @@ export async function POST(
       .maybeSingle();
 
     if (bidError) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return errorResponse("Internal server error", 500, {
+        context: { route: ROUTE, ...context },
+      });
     }
 
     if (!bid) {
-      return NextResponse.json({ error: "Bid not found" }, { status: 404 });
+      return errorResponse("Bid not found", 404);
     }
 
     if (!allowedStatuses.has(String(bid.status || "").toLowerCase())) {
-      return NextResponse.json({ error: "Bid must be sent before sharing" }, { status: 409 });
+      return errorResponse("Bid must be sent before sharing", 409);
     }
 
     let inserted: any = null;
@@ -143,15 +157,17 @@ export async function POST(
         errorMessage.includes("bid_share_links_token_key");
 
       if (!isCollision) {
-        return NextResponse.json(
-          { error: "Internal server error", details: insertResult.error?.message ?? null },
-          { status: 500 }
-        );
+        return errorResponse("Internal server error", 500, {
+          details: insertResult.error?.message ?? null,
+          context: { route: ROUTE, ...context },
+        });
       }
     }
 
     if (!inserted) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      return errorResponse("Internal server error", 500, {
+        context: { route: ROUTE, ...context },
+      });
     }
 
     const origin = getOrigin(request);
@@ -180,10 +196,12 @@ export async function POST(
   } catch (error) {
     if (error instanceof TenantResolverError) {
       if (error.status === 401) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+        return errorResponse("Unauthorized", 401);
       }
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return errorResponse("Forbidden", 403);
     }
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return errorResponse("Internal server error", 500, {
+      context: { route: ROUTE, ...context },
+    });
   }
 }

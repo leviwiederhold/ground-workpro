@@ -5,9 +5,8 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
-const allowedEntityTypes = ["job", "daily_report", "work_order"] as const;
+const allowedEntityTypes = ["job", "daily_report", "work_order", "document"] as const;
 type EntityType = (typeof allowedEntityTypes)[number];
-
 const normalizeId = (id: unknown): string | number | null => {
   if (id === null || id === undefined || id === "") return null;
   if (typeof id === "number") return id;
@@ -38,20 +37,29 @@ const normalizeEntityIdForPath = (id: unknown) => {
 const getBucketForEntityType = (entityType: EntityType) => {
   if (entityType === "job") return "job-photos";
   if (entityType === "daily_report") return "report-attachments";
+  if (entityType === "document") return "report-attachments";
   return "work-order-attachments";
 };
 
-const mapAttachment = (row: any) => ({
-  id: row.id,
-  entityType: row.entity_type ?? row.entityType ?? "",
-  entityId: normalizeId(row.entity_id ?? row.entityId),
-  fileName: row.file_name ?? row.fileName ?? "",
-  contentType: row.content_type ?? row.contentType ?? "application/octet-stream",
-  bucket: row.storage_bucket ?? row.bucket ?? "attachments",
-  path: row.storage_path ?? row.path ?? row.file_path ?? "",
-  fileSize: normalizeNumber(row.file_size ?? row.fileSize),
-  createdAt: row.created_at ?? row.createdAt ?? "",
-});
+const mapAttachment = (row: any, companyId?: string) => {
+  const rawEntityType = row.entity_type ?? row.entityType ?? "";
+  const rawPath = String(row.storage_path ?? row.path ?? row.file_path ?? "");
+  const normalizedEntityType =
+    rawEntityType === "work_order" && companyId && rawPath.includes(`/${companyId}/document/`)
+      ? "document"
+      : rawEntityType;
+  return {
+    id: row.id,
+    entityType: normalizedEntityType,
+    entityId: normalizeId(row.entity_id ?? row.entityId),
+    fileName: row.file_name ?? row.fileName ?? "",
+    contentType: row.content_type ?? row.contentType ?? "application/octet-stream",
+    bucket: row.storage_bucket ?? row.bucket ?? "attachments",
+    path: row.storage_path ?? row.path ?? row.file_path ?? "",
+    fileSize: normalizeNumber(row.file_size ?? row.fileSize),
+    createdAt: row.created_at ?? row.createdAt ?? "",
+  };
+};
 
 async function insertWithColumnFallback(supabase: any, payload: Record<string, unknown>) {
   const currentPayload = { ...payload };
@@ -81,6 +89,10 @@ async function assertEntityOwnership(
   entityType: EntityType,
   entityId: string | number | null
 ) {
+  if (entityType === "document") {
+    return { ok: true };
+  }
+
   if (entityId === null) return { ok: false, error: "Invalid entity_id" };
 
   if (entityType === "job") {
@@ -117,12 +129,6 @@ async function assertEntityOwnership(
 
 export async function POST(request: Request) {
   try {
-    try {
-      await requireRole(["admin", "pm", "foreman", "mechanic"]);
-    } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const { supabase, companyId, userId } = await getCompanyId();
     const subscriptionError = await requireActiveSubscription(supabase, companyId);
     if (subscriptionError) {
@@ -144,7 +150,17 @@ export async function POST(request: Request) {
     }
 
     const entityType = entityTypeRaw as EntityType;
-    const entityId = normalizeId(entityIdRaw);
+    const entityId = entityType === "document" ? companyId : normalizeId(entityIdRaw);
+
+    try {
+      if (entityType === "document") {
+        await requireRole(["admin", "pm"]);
+      } else {
+        await requireRole(["admin", "pm", "foreman", "mechanic"]);
+      }
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const ownership = await assertEntityOwnership(supabase, companyId, entityType, entityId);
     if (!ownership.ok) {
@@ -155,7 +171,8 @@ export async function POST(request: Request) {
     const contentType = file.type || "application/octet-stream";
     const fileBytes = new Uint8Array(await file.arrayBuffer());
     const bucket = getBucketForEntityType(entityType);
-    const path = `${companyId}/${entityType}/${normalizeEntityIdForPath(entityId)}/${crypto.randomUUID()}_${safeFileName}`;
+    const pathEntityScope = entityType === "document" ? "company" : normalizeEntityIdForPath(entityId);
+    const path = `${companyId}/${entityType}/${pathEntityScope}/${crypto.randomUUID()}_${safeFileName}`;
 
     const { error: uploadError } = await storageClient.storage
       .from(bucket)
@@ -185,6 +202,16 @@ export async function POST(request: Request) {
       delete withoutUploadedBy.uploaded_by;
       result = await insertWithColumnFallback(supabase, withoutUploadedBy);
     }
+    if (
+      entityType === "document" &&
+      result.error?.message?.includes("attachments_entity_type_check")
+    ) {
+      const legacyPayload: Record<string, unknown> = {
+        ...insertPayload,
+        entity_type: "work_order",
+      };
+      result = await insertWithColumnFallback(supabase, legacyPayload);
+    }
 
     const { data, error } = result;
     if (error) {
@@ -192,7 +219,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const mapped = mapAttachment(data);
+    const mapped = mapAttachment(data, companyId);
     const { data: signedData } = await storageClient.storage
       .from(bucket)
       .createSignedUrl(path, 60 * 60);

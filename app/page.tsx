@@ -5,9 +5,14 @@
 
 import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
-import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
+import { DashboardView } from '@/app/components/views/DashboardView';
+import { BidsView } from '@/app/components/views/BidsView';
+import { DocumentsView } from '@/app/components/views/DocumentsView';
+
+const confirmDestructiveAction = (targetLabel) =>
+  window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 
 
     // ============================================
@@ -424,7 +429,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       };
 
       const handleDelete = async (attachmentId) => {
-        const confirmed = window.confirm('Delete this attachment? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this attachment');
         if (!confirmed) return;
         setError('');
         try {
@@ -550,6 +555,11 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       const [vendorsLoading, setVendorsLoading] = useState(true);
       const [costCodes, setCostCodes] = useState([]);
       const [costCodesLoading, setCostCodesLoading] = useState(true);
+      const [safetyLogs, setSafetyLogs] = useState([]);
+      const [safetyLogsLoading, setSafetyLogsLoading] = useState(true);
+      const [safetyLogsError, setSafetyLogsError] = useState('');
+      const [safetyCreateLoading, setSafetyCreateLoading] = useState(false);
+      const [safetyDeleteLoadingId, setSafetyDeleteLoadingId] = useState(null);
       const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
       const unreadAlertsCount = alerts.filter((alert) => !alert.is_read).length;
 
@@ -599,6 +609,63 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
           setAlerts([]);
         } finally {
           setAlertsLoading(false);
+        }
+      }, []);
+
+      const loadSafetyLogs = useCallback(async () => {
+        try {
+          setSafetyLogsLoading(true);
+          setSafetyLogsError('');
+          const response = await fetch('/api/safety-logs', { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load safety logs');
+          setSafetyLogs(payload.items || []);
+        } catch (error) {
+          setSafetyLogs([]);
+          setSafetyLogsError(error instanceof Error ? error.message : 'Failed to load safety logs');
+        } finally {
+          setSafetyLogsLoading(false);
+        }
+      }, []);
+
+      const handleCreateSafetyLog = useCallback(async (input) => {
+        try {
+          setSafetyCreateLoading(true);
+          const response = await fetch('/api/safety-logs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(input),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload?.item) {
+            return { ok: false, error: payload?.error || 'Failed to create safety log' };
+          }
+          setSafetyLogs((prev) => [payload.item, ...prev]);
+          return { ok: true, item: payload.item };
+        } catch {
+          return { ok: false, error: 'Failed to create safety log' };
+        } finally {
+          setSafetyCreateLoading(false);
+        }
+      }, []);
+
+      const handleDeleteSafetyLog = useCallback(async (id) => {
+        const confirmed = confirmDestructiveAction('this safety log');
+        if (!confirmed) return { ok: false, error: 'Cancelled' };
+
+        try {
+          setSafetyDeleteLoadingId(id);
+          const response = await fetch(`/api/safety-logs/${id}`, { method: 'DELETE' });
+          const payload = await response.json();
+          if (!response.ok) {
+            return { ok: false, error: payload?.error || 'Failed to delete safety log' };
+          }
+          setSafetyLogs((prev) => prev.filter((item) => String(item.id) !== String(id)));
+          return { ok: true };
+        } catch {
+          return { ok: false, error: 'Failed to delete safety log' };
+        } finally {
+          setSafetyDeleteLoadingId(null);
         }
       }, []);
 
@@ -657,6 +724,10 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       useEffect(() => {
         loadAlerts();
       }, [loadAlerts]);
+
+      useEffect(() => {
+        loadSafetyLogs();
+      }, [loadSafetyLogs]);
 
       useEffect(() => {
         let isMounted = true;
@@ -978,10 +1049,47 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
         return () => window.cancelAnimationFrame(id);
       }, [currentView, jobs, equipment, workOrders, dailyReports, inventory, bids, vendors, trainingData]);
 
+      const dashboardViewUi = {
+        StatGrid,
+        StatCard,
+        Card,
+        Button,
+        Icon,
+        Badge,
+        ProgressBar,
+        LeafletMap,
+        formatCurrency,
+        formatDate,
+        getDaysUntil,
+        getPriorityColor,
+        getStatusColor,
+      };
+
+      const bidsViewUi = {
+        StatGrid,
+        StatCard,
+        SearchInput,
+        Card,
+        Icon,
+        Button,
+        Badge,
+        formatCurrency,
+        getStatusColor,
+        formatDate,
+      };
+
+      const documentsViewUi = {
+        SearchInput,
+        Button,
+        Icon,
+        Card,
+        formatDate,
+      };
+
       const renderView = () => {
         switch(currentView) {
-          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} />;
-          case 'messages': return <MessagesView employees={employees} />;
+          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
+          case 'messages': return <MessagesView />;
           case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} setSelectedJob={setSelectedJob} setShowModal={setShowModal} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} />;
@@ -989,16 +1097,16 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} />;
-          case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} />;
-          case 'bids': return <BidsView bids={bids} bidsLoading={bidsLoading} setBids={setBids} jobs={jobs} />;
+          case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} safetyLogs={safetyLogs} safetyLogsLoading={safetyLogsLoading} safetyLogsError={safetyLogsError} onDeleteSafetyLog={handleDeleteSafetyLog} deleteLoadingId={safetyDeleteLoadingId} />;
+          case 'bids': return <BidsView bids={bids} bidsLoading={bidsLoading} setBids={setBids} jobs={jobs} ui={bidsViewUi} />;
           case 'vendors': return <VendorsView vendors={vendors} vendorsLoading={vendorsLoading} setVendors={setVendors} jobs={jobs} inventory={inventory} />;
           case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} />;
           case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} />;
-          case 'finance': return <FinanceView jobs={jobs} />;
+          case 'finance': return <FinanceView />;
           case 'marketing': return <MarketingView />;
           case 'integrations': return <IntegrationsView />;
-          case 'documents': return <DocumentsView jobs={jobs} />;
-          default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} />;
+          case 'documents': return <DocumentsView currentRole={currentRole} ui={documentsViewUi} />;
+          default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
         }
       };
 
@@ -1256,7 +1364,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} employees={employees} workOrders={workOrders} setWorkOrders={setWorkOrders} data={showModal.data} />
-          <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} />
+          <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} onSubmitSafetyLog={handleCreateSafetyLog} submitLoading={safetyCreateLoading} />
         </div>
       );
     };
@@ -1348,212 +1456,6 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
               </div>
             </>
           )}
-        </div>
-      );
-    };
-
-    // ============================================
-    // DASHBOARD VIEW
-    // ============================================
-    const DashboardView = ({ jobs, jobsLoading, equipment, employees, workOrders, inventory, setCurrentView, setShowModal }) => {
-      const activeJobs = jobs.filter(j => j.status === 'active');
-      const activeEquipment = equipment.filter(e => e.status === 'active');
-      const clockedInEmployees = employees.filter(e => e.status === 'clocked-in');
-      const totalRevenue = jobs.reduce((sum, j) => sum + j.budget, 0);
-      const totalSpent = jobs.reduce((sum, j) => sum + j.spent, 0);
-      const utilizationRate = Math.round((activeEquipment.length / equipment.length) * 100);
-
-      const upcomingMaintenance = equipment.filter(e => (e.nextService - e.hours) < 150).slice(0, 3);
-      const expiringCerts = employees.flatMap(emp =>
-        emp.certifications.filter(c => getDaysUntil(c.expires) < 60).map(c => ({ ...c, employee: emp.name }))
-      ).slice(0, 4);
-
-      return (
-        <div className="space-y-6">
-          {/* KPI Cards */}
-          <StatGrid desktopColsClass="md:grid-cols-2 lg:grid-cols-4" testId="stats-grid">
-            <StatCard icon="briefcase" label="Active Jobs" value={activeJobs.length} subValue={`${formatCurrency(totalRevenue)} total contract value`} color="brand" />
-            <StatCard icon="truck-monster" label="Fleet Utilization" value={`${utilizationRate}%`} subValue={`${activeEquipment.length} of ${equipment.length} active`} trend={5} color="green" />
-            <StatCard icon="users" label="Crew On-Site" value={clockedInEmployees.length} subValue={`of ${employees.length} total employees`} color="blue" />
-            <StatCard icon="dollar-sign" label="Month Revenue" value={formatCurrency(847500)} subValue="vs. budget: +12%" trend={12} color="green" />
-          </StatGrid>
-
-          {/* Main Content Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Active Jobs */}
-            <Card className="lg:col-span-2 p-0 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-                <h3 className="font-semibold text-gray-900">Active Jobs</h3>
-                <Button variant="ghost" size="sm" onClick={() => setCurrentView('jobs')}>
-                  View All <Icon name="arrow-right" className="ml-1" />
-                </Button>
-              </div>
-              <div className="divide-y divide-gray-100">
-                {jobsLoading ? (
-                  <div className="p-4 text-sm text-gray-500">Loading jobs...</div>
-                ) : activeJobs.length === 0 ? (
-                  <div className="p-4 text-sm text-gray-500">No jobs yet.</div>
-                ) : (
-                  activeJobs.map(job => (
-                    <div key={job.id} className="p-4 hover:bg-gray-50">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <h4 className="font-medium text-gray-900">{job.name}</h4>
-                          <p className="text-sm text-gray-500">{job.client}</p>
-                        </div>
-                        <Badge variant={job.progress > 50 ? 'success' : 'warning'}>{job.progress}% Complete</Badge>
-                      </div>
-                      <ProgressBar value={job.progress} color="brand" size="sm" />
-                      <div className="flex items-center justify-between mt-3 text-sm">
-                        <span className="text-gray-500">
-                          <Icon name="calendar" className="mr-1" />
-                          Due {formatDate(job.endDate)}
-                        </span>
-                        <span className={job.spent / job.budget > 0.9 ? 'text-red-600 font-medium' : 'text-gray-600'}>
-                          {formatCurrency(job.spent)} / {formatCurrency(job.budget)}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </Card>
-
-            {/* Quick Actions + Alerts */}
-            <div className="space-y-6">
-              {/* Quick Actions */}
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">Quick Actions</h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="secondary" size="sm" className="justify-start" onClick={() => setShowModal({ type: 'time-clock' })}>
-                    <Icon name="clock" className="mr-2 text-brand-500" /> Time Clock
-                  </Button>
-                  <Button variant="secondary" size="sm" className="justify-start" onClick={() => setShowModal({ type: 'equipment-checkin' })}>
-                    <Icon name="clipboard-check" className="mr-2 text-brand-500" /> Check-In
-                  </Button>
-                  <Button variant="secondary" size="sm" className="justify-start" onClick={() => setShowModal({ type: 'daily-report' })}>
-                    <Icon name="file-lines" className="mr-2 text-brand-500" /> Daily Report
-                  </Button>
-                  <Button variant="secondary" size="sm" className="justify-start" onClick={() => setShowModal({ type: 'work-order' })}>
-                    <Icon name="wrench" className="mr-2 text-brand-500" /> Work Order
-                  </Button>
-                  <Button variant="secondary" size="sm" className="justify-start col-span-2" onClick={() => setShowModal({ type: 'safety' })}>
-                    <Icon name="shield-halved" className="mr-2 text-brand-500" /> Safety Sign-Off
-                  </Button>
-                </div>
-              </Card>
-
-              {/* Alerts */}
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">
-                  <Icon name="triangle-exclamation" className="mr-2 text-yellow-500" />
-                  Alerts
-                </h3>
-                <div className="space-y-3">
-                  {upcomingMaintenance.map(eq => (
-                    <div key={eq.id} className="flex items-start gap-3 p-2 bg-yellow-50 rounded-lg">
-                      <Icon name="wrench" className="text-yellow-600 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{eq.name}</p>
-                        <p className="text-xs text-gray-600">Service due in {eq.nextService - eq.hours} hours</p>
-                      </div>
-                    </div>
-                  ))}
-                  {expiringCerts.map((cert, i) => (
-                    <div key={i} className="flex items-start gap-3 p-2 bg-red-50 rounded-lg">
-                      <Icon name="id-card" className="text-red-600 mt-0.5" />
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-gray-900">{cert.employee}</p>
-                        <p className="text-xs text-gray-600">{cert.name} expires {formatDate(cert.expires)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-
-              {/* Weather Widget */}
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">
-                  <Icon name="cloud-sun" className="mr-2 text-blue-500" />
-                  Weather - Cincinnati
-                </h3>
-                <div className="text-center mb-4">
-                  <div className="flex items-center justify-center gap-4">
-                    <Icon name="sun" className="text-yellow-500 text-4xl" />
-                    <div>
-                      <p className="text-4xl font-bold text-gray-900">47°F</p>
-                      <p className="text-sm text-gray-500">Partly Cloudy</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                  {[
-                    { day: 'Fri', icon: 'sun', high: 52, low: 38 },
-                    { day: 'Sat', icon: 'cloud', high: 48, low: 35 },
-                    { day: 'Sun', icon: 'cloud-rain', high: 44, low: 32, alert: true },
-                    { day: 'Mon', icon: 'sun', high: 50, low: 36 },
-                  ].map((d, i) => (
-                    <div key={i} className={`p-2 rounded-lg ${d.alert ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
-                      <p className="font-medium text-gray-700">{d.day}</p>
-                      <Icon name={d.icon} className={`my-2 ${d.icon === 'cloud-rain' ? 'text-blue-500' : d.icon === 'sun' ? 'text-yellow-500' : 'text-gray-400'}`} />
-                      <p className="text-gray-900">{d.high}°</p>
-                      <p className="text-gray-400">{d.low}°</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="mt-3 p-2 bg-blue-50 rounded-lg flex items-center gap-2">
-                  <Icon name="droplet" className="text-blue-500" />
-                  <span className="text-xs text-blue-800">Rain expected Sunday - plan accordingly</span>
-                </div>
-              </Card>
-            </div>
-          </div>
-
-          {/* Equipment Map & Status */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Equipment Location Map - Real Leaflet Map */}
-            <Card className="p-4">
-              <h3 className="font-semibold text-gray-900 mb-4">
-                <Icon name="map-location-dot" className="mr-2 text-brand-500" />
-                Equipment Locations - Cincinnati Area
-              </h3>
-              <LeafletMap equipment={equipment} jobs={jobs} />
-            </Card>
-
-            {/* Work Orders */}
-            <Card className="p-0 overflow-hidden">
-              <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-                <h3 className="font-semibold text-gray-900">Open Work Orders</h3>
-                <Button variant="ghost" size="sm" onClick={() => setCurrentView('maintenance')}>
-                  View All <Icon name="arrow-right" className="ml-1" />
-                </Button>
-              </div>
-              <div className="divide-y divide-gray-100">
-                {workOrders.filter(w => w.status !== 'completed').slice(0, 4).map(wo => {
-                  const eq = equipment.find(e => e.id === wo.equipmentId);
-                  const assignee = employees.find(e => e.id === wo.assignedTo);
-                  return (
-                    <div key={wo.id} className="p-4 hover:bg-gray-50">
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <Icon name={wo.priority === 'high' ? 'circle-exclamation' : 'circle'} className={getPriorityColor(wo.priority)} />
-                            <span className="font-medium text-gray-900">{wo.title}</span>
-                          </div>
-                          <p className="text-sm text-gray-500 mt-1">{eq?.name}</p>
-                        </div>
-                        <Badge className={getStatusColor(wo.status)}>{wo.status}</Badge>
-                      </div>
-                      <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-                        <span><Icon name="user" className="mr-1" />{assignee?.name}</span>
-                        <span>Due {formatDate(wo.dueDate)}</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          </div>
         </div>
       );
     };
@@ -1779,6 +1681,9 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       const [crewActionError, setCrewActionError] = useState('');
       const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
       const [equipmentActionError, setEquipmentActionError] = useState('');
+      const [profitability, setProfitability] = useState(null);
+      const [profitabilityLoading, setProfitabilityLoading] = useState(false);
+      const [profitabilityError, setProfitabilityError] = useState('');
 
       const handleCreateJob = async () => {
         try {
@@ -1841,6 +1746,47 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
           notes: selectedJob.notes || '',
         });
         setJobActionError('');
+      }, [selectedJob]);
+
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadProfitability = async () => {
+          if (!selectedJob) {
+            if (isMounted) {
+              setProfitability(null);
+              setProfitabilityError('');
+            }
+            return;
+          }
+
+          try {
+            setProfitabilityLoading(true);
+            setProfitabilityError('');
+            const response = await fetch(`/api/jobs/${selectedJob.id}/profitability`, { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok || !payload?.item) {
+              throw new Error(payload?.error || 'Failed to load profitability');
+            }
+            if (isMounted) {
+              setProfitability(payload.item);
+            }
+          } catch (error) {
+            if (isMounted) {
+              setProfitability(null);
+              setProfitabilityError(error instanceof Error ? error.message : 'Failed to load profitability');
+            }
+          } finally {
+            if (isMounted) {
+              setProfitabilityLoading(false);
+            }
+          }
+        };
+
+        loadProfitability();
+        return () => {
+          isMounted = false;
+        };
       }, [selectedJob]);
 
       useEffect(() => {
@@ -1955,6 +1901,8 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleUnassignEmployee = async (employeeId) => {
         if (!selectedJob) return;
+        const confirmed = confirmDestructiveAction('this crew assignment');
+        if (!confirmed) return;
         setCrewActionLoading(true);
         setCrewActionError('');
         try {
@@ -2023,6 +1971,8 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleUnassignEquipment = async (equipmentId) => {
         if (!selectedJob) return;
+        const confirmed = confirmDestructiveAction('this equipment assignment');
+        if (!confirmed) return;
         setEquipmentActionLoading(true);
         setEquipmentActionError('');
         try {
@@ -2093,7 +2043,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleDeleteJob = async () => {
         if (!selectedJob) return;
-        const confirmed = window.confirm('Delete this job? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this job');
         if (!confirmed) return;
 
         setDeleteLoading(true);
@@ -2275,6 +2225,42 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                         </span>
                       </div>
                     </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500 mb-2">Profitability</p>
+                    {profitabilityLoading ? (
+                      <p className="text-sm text-gray-400">Loading profitability...</p>
+                    ) : profitabilityError ? (
+                      <p className="text-sm text-red-600">{profitabilityError}</p>
+                    ) : profitability ? (
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Cost</span>
+                          <span className="font-medium">{formatCurrency(profitability.cost_to_date || 0)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Revenue</span>
+                          <span className="font-medium">{formatCurrency(profitability.revenue_to_date || 0)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Profit</span>
+                          <span className={`font-medium ${Number(profitability.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(profitability.profit || 0)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span>Margin</span>
+                          <span className="font-medium">
+                            {profitability.margin_percent === null || profitability.margin_percent === undefined
+                              ? '—'
+                              : `${Number(profitability.margin_percent).toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">No profitability data yet.</p>
+                    )}
                   </div>
 
                   <div>
@@ -2538,7 +2524,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleDeleteEquipment = async () => {
         if (!selectedEquipment) return;
-        const confirmed = window.confirm('Delete this equipment? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this equipment');
         if (!confirmed) return;
         setDeleteLoading(true);
         setEquipmentActionError('');
@@ -3225,7 +3211,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleDeleteWorkOrder = async () => {
         if (!selectedWO) return;
-        const confirmed = window.confirm('Delete this work order? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this work order');
         if (!confirmed) return;
         setWoActionLoading(true);
         setWoActionError('');
@@ -3626,6 +3612,9 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       };
 
       const deleteEntry = async (reportId, entryId) => {
+        const confirmed = confirmDestructiveAction('this report entry');
+        if (!confirmed) return;
+
         setEntryActionLoadingByReport((prev) => ({ ...prev, [reportId]: true }));
         setEntryActionErrorByReport((prev) => ({ ...prev, [reportId]: '' }));
         try {
@@ -3885,7 +3874,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                 };
 
                 const deleteReport = async () => {
-                  const confirmed = window.confirm('Delete this daily report? This cannot be undone.');
+                  const confirmed = confirmDestructiveAction('this daily report');
                   if (!confirmed) return;
                   setReportActionLoading(true);
                   setReportActionError('');
@@ -4316,7 +4305,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       };
 
       const handleDeleteCostCode = async (id) => {
-        const confirmed = window.confirm('Delete this cost code? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this cost code');
         if (!confirmed) return;
 
         setDeleteLoadingId(id);
@@ -4537,14 +4526,16 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
     // ============================================
     // SAFETY VIEW
     // ============================================
-    const SafetyView = ({ employees, setShowModal }) => {
-      const [safetyLogs] = useState([
-        { id: 1, type: 'Toolbox Talk', topic: 'Excavation Safety', date: '2026-02-03', jobId: 1, attendees: 6, conductor: 'Mike Johnson' },
-        { id: 2, type: 'JSA', topic: 'Trench Work - Highway 71', date: '2026-02-03', jobId: 1, attendees: 4, conductor: 'Mike Johnson' },
-        { id: 3, type: 'Pre-Op Inspection', topic: 'CAT 336 Excavator', date: '2026-02-03', jobId: 1, attendees: 1, conductor: 'Sarah Williams' },
-        { id: 4, type: 'Toolbox Talk', topic: 'Heat Illness Prevention', date: '2026-02-02', jobId: 2, attendees: 4, conductor: 'David Chen' },
-      ]);
-
+    const SafetyView = ({
+      employees,
+      setShowModal,
+      safetyLogs,
+      safetyLogsLoading,
+      safetyLogsError,
+      onDeleteSafetyLog,
+      deleteLoadingId,
+    }) => {
+      const [deleteError, setDeleteError] = useState('');
       const expiringCerts = employees.flatMap(emp =>
         emp.certifications.filter(c => getDaysUntil(c.expires) < 90).map(c => ({
           ...c,
@@ -4554,18 +4545,54 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
         }))
       ).sort((a, b) => a.daysLeft - b.daysLeft);
 
+      const safetyStats = {
+        total: safetyLogs.length,
+        high: safetyLogs.filter((log) => log.severity === 'high').length,
+        medium: safetyLogs.filter((log) => log.severity === 'medium').length,
+        low: safetyLogs.filter((log) => log.severity === 'low').length,
+      };
+
+      const severityVisuals = {
+        low: {
+          iconBg: 'bg-green-100',
+          iconColor: 'text-green-600',
+          icon: 'circle-check',
+          label: 'Low',
+        },
+        medium: {
+          iconBg: 'bg-yellow-100',
+          iconColor: 'text-yellow-600',
+          icon: 'triangle-exclamation',
+          label: 'Medium',
+        },
+        high: {
+          iconBg: 'bg-red-100',
+          iconColor: 'text-red-600',
+          icon: 'circle-exclamation',
+          label: 'High',
+        },
+      };
+
+      const handleDeleteClick = async (id) => {
+        setDeleteError('');
+        const result = await onDeleteSafetyLog(id);
+        if (!result?.ok) {
+          setDeleteError(result?.error || 'Failed to delete safety log');
+        }
+      };
+
       return (
         <div className="space-y-6">
           {/* Stats */}
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
-            <StatCard icon="shield-halved" label="Safety Logs (30d)" value={safetyLogs.length} color="green" />
-            <StatCard icon="clipboard-check" label="Toolbox Talks" value={safetyLogs.filter(s => s.type === 'Toolbox Talk').length} color="blue" />
+            <StatCard icon="shield-halved" label="Safety Logs (30d)" value={safetyStats.total} color="green" />
+            <StatCard icon="triangle-exclamation" label="High Severity" value={safetyStats.high} color="red" />
             <StatCard icon="triangle-exclamation" label="Expiring Certs" value={expiringCerts.length} color="yellow" />
             <StatCard icon="calendar-xmark" label="Expired Certs" value={expiringCerts.filter(c => c.daysLeft < 0).length} color="red" />
           </StatGrid>
 
           <div className="flex justify-end">
-            <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })}>
+            <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })} data-testid="safety-open-create">
               <Icon name="plus" className="mr-2" /> New Safety Log
             </Button>
           </div>
@@ -4577,29 +4604,45 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                 <h3 className="font-semibold text-gray-900">Recent Safety Logs</h3>
               </div>
               <div className="divide-y divide-gray-100">
-                {safetyLogs.map(log => (
-                  <div key={log.id} className="p-4 hover:bg-gray-50">
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-lg ${
-                          log.type === 'Toolbox Talk' ? 'bg-blue-100' : log.type === 'JSA' ? 'bg-yellow-100' : 'bg-green-100'
-                        }`}>
-                          <Icon name={log.type === 'Toolbox Talk' ? 'users' : log.type === 'JSA' ? 'clipboard-list' : 'clipboard-check'} className={`${
-                            log.type === 'Toolbox Talk' ? 'text-blue-600' : log.type === 'JSA' ? 'text-yellow-600' : 'text-green-600'
-                          }`} />
+                {safetyLogsLoading ? (
+                  <LoadingBlock testId="safety-loading">Loading safety logs...</LoadingBlock>
+                ) : safetyLogsError ? (
+                  <InlineError testId="safety-error">{safetyLogsError}</InlineError>
+                ) : safetyLogs.length === 0 ? (
+                  <EmptyState testId="safety-empty">No safety logs yet.</EmptyState>
+                ) : safetyLogs.map((log) => {
+                  const severity = severityVisuals[log.severity] || severityVisuals.medium;
+                  const isDeleting = String(deleteLoadingId) === String(log.id);
+                  return (
+                    <div key={log.id} className="p-4 hover:bg-gray-50" data-testid={`safety-log-row-${log.id}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className={`p-2 rounded-lg ${severity.iconBg}`}>
+                            <Icon name={severity.icon} className={severity.iconColor} />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-900 break-words">{log.summary}</p>
+                            <p className="text-sm text-gray-500">{severity.label} Severity</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-gray-900">{log.topic}</p>
-                          <p className="text-sm text-gray-500">{log.type}</p>
+                        <div className="text-right text-sm text-gray-500 shrink-0">
+                          <p>{formatDate(log.occurred_on)}</p>
+                          <button
+                            type="button"
+                            className="mt-2 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
+                            onClick={() => handleDeleteClick(log.id)}
+                            disabled={isDeleting}
+                            data-testid={`safety-delete-${log.id}`}
+                            aria-label="Delete safety log"
+                          >
+                            {isDeleting ? 'Deleting...' : 'Delete'}
+                          </button>
                         </div>
-                      </div>
-                      <div className="text-right text-sm text-gray-500">
-                        <p>{formatDate(log.date)}</p>
-                        <p>{log.attendees} attendees</p>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
+                {deleteError && <p className="px-4 py-2 text-sm text-red-600">{deleteError}</p>}
               </div>
             </Card>
 
@@ -4634,112 +4677,6 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
               </div>
             </Card>
           </div>
-        </div>
-      );
-    };
-
-    // ============================================
-    // DOCUMENTS VIEW
-    // ============================================
-    const DocumentsView = ({ jobs }) => {
-      const [documents] = useState([
-        { id: 1, name: 'Highway 71 Contract.pdf', type: 'Contract', jobId: 1, size: '2.4 MB', uploadedAt: '2025-10-15', uploadedBy: 'John Doe' },
-        { id: 2, name: 'ODOT Permit #12345.pdf', type: 'Permit', jobId: 1, size: '156 KB', uploadedAt: '2025-10-20', uploadedBy: 'John Doe', expires: '2026-04-15' },
-        { id: 3, name: 'Riverside Site Plans.dwg', type: 'Plans', jobId: 2, size: '15.8 MB', uploadedAt: '2025-12-01', uploadedBy: 'Jane Smith' },
-        { id: 4, name: 'Insurance Certificate 2026.pdf', type: 'Insurance', jobId: null, size: '892 KB', uploadedAt: '2026-01-05', uploadedBy: 'John Doe', expires: '2027-01-05' },
-        { id: 5, name: 'Equipment Lien Waiver - CAT.pdf', type: 'Lien Waiver', jobId: null, size: '245 KB', uploadedAt: '2026-01-15', uploadedBy: 'Accounting' },
-      ]);
-
-      const [filter, setFilter] = useState('all');
-      const filteredDocs = documents.filter(d => filter === 'all' || d.type.toLowerCase().includes(filter.toLowerCase()));
-
-      const getTypeIcon = (type) => {
-        const icons = {
-          'Contract': 'file-contract',
-          'Permit': 'file-shield',
-          'Plans': 'file-lines',
-          'Insurance': 'file-invoice',
-          'Lien Waiver': 'file-signature',
-        };
-        return icons[type] || 'file';
-      };
-
-      return (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {['all', 'contract', 'permit', 'insurance'].map(f => (
-                  <button
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                      filter === f ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    {f.charAt(0).toUpperCase() + f.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <SearchInput placeholder="Search documents..." value="" onChange={() => {}} />
-            </div>
-            <Button variant="brand">
-              <Icon name="cloud-arrow-up" className="mr-2" /> Upload Document
-            </Button>
-          </div>
-
-          <Card className="p-0 overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Size</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Uploaded</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Expires</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {filteredDocs.map(doc => {
-                  const job = jobs.find(j => j.id === doc.jobId);
-                  const isExpiring = doc.expires && getDaysUntil(doc.expires) < 60;
-                  return (
-                    <tr key={doc.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <Icon name={getTypeIcon(doc.type)} className="text-gray-400" />
-                          <span className="text-sm font-medium text-gray-900">{doc.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{doc.type}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{job?.name || 'General'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500">{doc.size}</td>
-                      <td className="px-4 py-3 text-sm text-gray-500">{formatDate(doc.uploadedAt)}</td>
-                      <td className="px-4 py-3">
-                        {doc.expires ? (
-                          <Badge variant={isExpiring ? 'warning' : 'success'}>
-                            {formatDate(doc.expires)}
-                          </Badge>
-                        ) : (
-                          <span className="text-sm text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <Button variant="ghost" size="sm">
-                          <Icon name="download" />
-                        </Button>
-                        <Button variant="ghost" size="sm">
-                          <Icon name="eye" />
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
         </div>
       );
     };
@@ -4871,7 +4808,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       };
 
       const handleDeleteItem = async (itemId) => {
-        const confirmed = window.confirm('Delete this inventory item? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this inventory item');
         if (!confirmed) return;
 
         setDeleteLoadingId(itemId);
@@ -5222,945 +5159,6 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
     };
 
     // ============================================
-    // BIDS VIEW
-    // ============================================
-    const BidsView = ({ bids, bidsLoading, setBids, jobs }) => {
-      const [filter, setFilter] = useState('all');
-      const [search, setSearch] = useState('');
-      const [selectedBidId, setSelectedBidId] = useState(null);
-      const [showBidModal, setShowBidModal] = useState(false);
-      const [editingBidId, setEditingBidId] = useState(null);
-      const [showItemModal, setShowItemModal] = useState(false);
-      const [editingItemId, setEditingItemId] = useState(null);
-      const [saveLoading, setSaveLoading] = useState(false);
-      const [deleteLoading, setDeleteLoading] = useState(false);
-      const [itemSaveLoading, setItemSaveLoading] = useState(false);
-      const [itemDeleteLoading, setItemDeleteLoading] = useState(false);
-      const [formError, setFormError] = useState('');
-      const [itemError, setItemError] = useState('');
-      const [bidItems, setBidItems] = useState([]);
-      const [bidItemsLoading, setBidItemsLoading] = useState(false);
-      const [bidSummary, setBidSummary] = useState(null);
-      const [bidSummaryLoading, setBidSummaryLoading] = useState(false);
-      const [bidSummaryError, setBidSummaryError] = useState('');
-      const [sendLoading, setSendLoading] = useState(false);
-      const [sendError, setSendError] = useState('');
-      const [showSendOverride, setShowSendOverride] = useState(false);
-      const [sendOverrideChecked, setSendOverrideChecked] = useState(false);
-      const [sendOverrideNote, setSendOverrideNote] = useState('');
-      const [bidForm, setBidForm] = useState({
-        title: '',
-        status: 'draft',
-        job_id: '',
-        client: '',
-        bid_date: '',
-        probability: 0,
-        notes: '',
-      });
-      const [itemForm, setItemForm] = useState({
-        item_type: 'custom',
-        description: '',
-        quantity: 1,
-        unit_cost: 0,
-      });
-
-      const selectedBid = bids.find((bid) => String(bid.id) === String(selectedBidId)) || null;
-
-      const filteredBids = bids.filter((bid) => {
-        if (filter !== 'all' && bid.status !== filter) return false;
-        if (!search) return true;
-        const query = search.toLowerCase();
-        return (
-          (bid.projectName || bid.title || '').toLowerCase().includes(query) ||
-          (bid.client || '').toLowerCase().includes(query)
-        );
-      });
-
-      const totalPending = bids
-        .filter((bid) => bid.status === 'pending' || bid.status === 'submitted' || bid.status === 'sent')
-        .reduce((sum, bid) => sum + (Number(bid.amount) || 0), 0);
-      const wonCount = bids.filter((bid) => bid.status === 'won').length;
-      const closedCount = bids.filter((bid) => bid.status === 'won' || bid.status === 'lost').length;
-      const winRate = Math.round((wonCount / closedCount) * 100) || 0;
-      const pendingBids = bids.filter((bid) => bid.status === 'pending');
-      const avgProbability = Math.round(
-        pendingBids.reduce((sum, bid) => sum + (Number(bid.probability) || 0), 0) / (pendingBids.length || 1)
-      ) || 0;
-
-      const getStatusIcon = (status) => {
-        const icons = {
-          draft: 'file',
-          pending: 'clock',
-          submitted: 'paper-plane',
-          sent: 'paper-plane',
-          accepted: 'trophy',
-          rejected: 'xmark',
-          archived: 'box-archive',
-          won: 'trophy',
-          lost: 'xmark',
-          canceled: 'ban',
-        };
-        return icons[status] || 'file';
-      };
-
-      const resetBidForm = () => {
-        setBidForm({
-          title: '',
-          status: 'draft',
-          job_id: '',
-          client: '',
-          bid_date: '',
-          probability: 0,
-          notes: '',
-        });
-        setEditingBidId(null);
-        setFormError('');
-      };
-
-      const resetItemForm = () => {
-        setItemForm({
-          item_type: 'custom',
-          description: '',
-          quantity: 1,
-          unit_cost: 0,
-        });
-        setEditingItemId(null);
-        setItemError('');
-      };
-
-      const refreshBids = async ({ preserveSelection = true } = {}) => {
-        const response = await fetch('/api/bids', { cache: 'no-store' });
-        const raw = await response.text();
-        let parsed = {};
-        try {
-          parsed = raw ? JSON.parse(raw) : {};
-        } catch {
-          parsed = {};
-        }
-        if (!response.ok) {
-          throw new Error(parsed?.error || raw || 'Failed to load bids');
-        }
-        const nextBids = parsed?.bids || [];
-        setBids(nextBids);
-        if (!preserveSelection) {
-          setSelectedBidId(nextBids[0]?.id || null);
-          return;
-        }
-        if (!selectedBidId && nextBids.length > 0) {
-          setSelectedBidId(nextBids[0].id);
-          return;
-        }
-        if (selectedBidId && !nextBids.some((bid) => String(bid.id) === String(selectedBidId))) {
-          setSelectedBidId(nextBids[0]?.id || null);
-        }
-      };
-
-      const loadBidItems = async (bidId) => {
-        if (!bidId) {
-          setBidItems([]);
-          return;
-        }
-        const response = await fetch(`/api/bids/${bidId}/items`, { cache: 'no-store' });
-        const raw = await response.text();
-        let parsed = {};
-        try {
-          parsed = raw ? JSON.parse(raw) : {};
-        } catch {
-          parsed = {};
-        }
-        if (!response.ok) {
-          throw new Error(parsed?.error || raw || 'Failed to load bid items');
-        }
-        setBidItems(parsed?.items || []);
-      };
-
-      const loadBidSummary = async (bidId) => {
-        if (!bidId) {
-          setBidSummary(null);
-          setBidSummaryError('');
-          return;
-        }
-        const response = await fetch(`/api/bids/${bidId}/summary`, { cache: 'no-store' });
-        const raw = await response.text();
-        let parsed = {};
-        try {
-          parsed = raw ? JSON.parse(raw) : {};
-        } catch {
-          parsed = {};
-        }
-        if (!response.ok) {
-          throw new Error(parsed?.error || raw || 'Failed to load bid summary');
-        }
-        setBidSummary(parsed?.summary || null);
-        setBidSummaryError('');
-      };
-
-      useEffect(() => {
-        if (!selectedBidId && bids.length > 0) {
-          setSelectedBidId(bids[0].id);
-          return;
-        }
-        if (selectedBidId && !bids.some((bid) => String(bid.id) === String(selectedBidId))) {
-          setSelectedBidId(bids[0]?.id || null);
-        }
-      }, [bids, selectedBidId]);
-
-      useEffect(() => {
-        let isMounted = true;
-
-        const load = async () => {
-          if (!selectedBidId) {
-            if (isMounted) {
-              setBidItems([]);
-              setBidSummary(null);
-              setBidSummaryError('');
-            }
-            return;
-          }
-          try {
-            setBidItemsLoading(true);
-            setBidSummaryLoading(true);
-            await Promise.all([
-              loadBidItems(selectedBidId),
-              loadBidSummary(selectedBidId),
-            ]);
-          } catch {
-            if (isMounted) {
-              setBidItems([]);
-              setBidSummary(null);
-              setBidSummaryError('Failed to load bid summary');
-            }
-          } finally {
-            if (isMounted) {
-              setBidItemsLoading(false);
-              setBidSummaryLoading(false);
-            }
-          }
-        };
-
-        load();
-        return () => {
-          isMounted = false;
-        };
-      }, [selectedBidId]);
-
-      useEffect(() => {
-        setSendError('');
-        setShowSendOverride(false);
-        setSendOverrideChecked(false);
-        setSendOverrideNote('');
-      }, [selectedBidId]);
-
-      const openCreateBid = () => {
-        resetBidForm();
-        setShowBidModal(true);
-      };
-
-      const openEditBid = (bid) => {
-        setBidForm({
-          title: bid.projectName || bid.title || '',
-          status: bid.status || 'draft',
-          job_id: bid.job_id || bid.jobId || '',
-          client: bid.client || '',
-          bid_date: bid.bid_date || bid.bidDate || '',
-          probability: Number(bid.probability) || 0,
-          notes: bid.notes || '',
-        });
-        setEditingBidId(bid.id);
-        setFormError('');
-        setShowBidModal(true);
-      };
-
-      const closeBidModal = () => {
-        if (saveLoading) return;
-        setShowBidModal(false);
-        resetBidForm();
-      };
-
-      const handleSaveBid = async () => {
-        if (!bidForm.title.trim()) {
-          setFormError('Project name is required.');
-          return;
-        }
-
-        try {
-          setSaveLoading(true);
-          setFormError('');
-
-          const payload = {
-            title: bidForm.title.trim(),
-            status: bidForm.status,
-            job_id: bidForm.job_id || null,
-            client: bidForm.client.trim(),
-            bid_date: bidForm.bid_date || null,
-            probability: Number(bidForm.probability) || 0,
-            notes: bidForm.notes.trim(),
-          };
-
-          const response = await fetch(editingBidId ? `/api/bids/${editingBidId}` : '/api/bids', {
-            method: editingBidId ? 'PATCH' : 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-
-          if (!response.ok) {
-            setFormError(parsed?.error || raw || 'Failed to save bid');
-            return;
-          }
-
-          await refreshBids({ preserveSelection: true });
-          if (!editingBidId && parsed?.bid?.id) {
-            setSelectedBidId(parsed.bid.id);
-          }
-          setShowBidModal(false);
-          resetBidForm();
-        } catch {
-          setFormError('Failed to save bid');
-        } finally {
-          setSaveLoading(false);
-        }
-      };
-
-      const handleDeleteBid = async (bidId) => {
-        const confirmed = window.confirm('Delete this bid? This cannot be undone.');
-        if (!confirmed) return;
-
-        try {
-          setDeleteLoading(true);
-          setFormError('');
-
-          const response = await fetch(`/api/bids/${bidId}`, { method: 'DELETE' });
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-          if (!response.ok) {
-            setFormError(parsed?.error || raw || 'Failed to delete bid');
-            return;
-          }
-
-          setBids((prev) => prev.filter((bid) => String(bid.id) !== String(bidId)));
-          if (String(selectedBidId) === String(bidId)) {
-            setSelectedBidId(null);
-            setBidItems([]);
-          }
-        } catch {
-          setFormError('Failed to delete bid');
-        } finally {
-          setDeleteLoading(false);
-        }
-      };
-
-      const handleSendBid = async ({ override = false } = {}) => {
-        if (!selectedBid) return;
-
-        try {
-          setSendLoading(true);
-          setSendError('');
-
-          const response = await fetch(`/api/bids/${selectedBid.id}/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              override,
-              override_note: override ? sendOverrideNote.trim() : undefined,
-            }),
-          });
-
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-
-          if (response.status === 409) {
-            setSendError(parsed?.error || 'Margin below target');
-            if (parsed?.summary) {
-              setBidSummary(parsed.summary);
-            }
-            setShowSendOverride(true);
-            return;
-          }
-
-          if (!response.ok) {
-            setSendError(parsed?.error || raw || 'Failed to send bid');
-            return;
-          }
-
-          setShowSendOverride(false);
-          setSendOverrideChecked(false);
-          setSendOverrideNote('');
-          await Promise.all([refreshBids({ preserveSelection: true }), loadBidSummary(selectedBid.id)]);
-        } catch {
-          setSendError('Failed to send bid');
-        } finally {
-          setSendLoading(false);
-        }
-      };
-
-      const openCreateItem = () => {
-        resetItemForm();
-        setShowItemModal(true);
-      };
-
-      const openEditItem = (item) => {
-        setItemForm({
-          item_type: item.item_type || 'custom',
-          description: item.description || '',
-          quantity: Number(item.quantity) || 1,
-          unit_cost: Number(item.unit_cost) || 0,
-        });
-        setEditingItemId(item.id);
-        setItemError('');
-        setShowItemModal(true);
-      };
-
-      const closeItemModal = () => {
-        if (itemSaveLoading) return;
-        setShowItemModal(false);
-        resetItemForm();
-      };
-
-      const handleSaveItem = async () => {
-        if (!selectedBidId) {
-          setItemError('Select a bid first.');
-          return;
-        }
-        if (!itemForm.description.trim()) {
-          setItemError('Description is required.');
-          return;
-        }
-
-        try {
-          setItemSaveLoading(true);
-          setItemError('');
-          const payload = {
-            item_type: itemForm.item_type,
-            description: itemForm.description.trim(),
-            quantity: Number(itemForm.quantity) || 0,
-            unit_cost: Number(itemForm.unit_cost) || 0,
-          };
-
-          const response = await fetch(
-            editingItemId
-              ? `/api/bids/${selectedBidId}/items/${editingItemId}`
-              : `/api/bids/${selectedBidId}/items`,
-            {
-              method: editingItemId ? 'PATCH' : 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            }
-          );
-
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-          if (!response.ok) {
-            setItemError(parsed?.error || raw || 'Failed to save bid item');
-            return;
-          }
-
-          await Promise.all([refreshBids({ preserveSelection: true }), loadBidItems(selectedBidId), loadBidSummary(selectedBidId)]);
-          setShowItemModal(false);
-          resetItemForm();
-        } catch {
-          setItemError('Failed to save bid item');
-        } finally {
-          setItemSaveLoading(false);
-        }
-      };
-
-      const handleDeleteItem = async (itemId) => {
-        if (!selectedBidId) return;
-        const confirmed = window.confirm('Delete this bid item? This cannot be undone.');
-        if (!confirmed) return;
-
-        try {
-          setItemDeleteLoading(true);
-          setItemError('');
-          const response = await fetch(`/api/bids/${selectedBidId}/items/${itemId}`, { method: 'DELETE' });
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-          if (!response.ok) {
-            setItemError(parsed?.error || raw || 'Failed to delete bid item');
-            return;
-          }
-          await Promise.all([refreshBids({ preserveSelection: true }), loadBidItems(selectedBidId), loadBidSummary(selectedBidId)]);
-        } catch {
-          setItemError('Failed to delete bid item');
-        } finally {
-          setItemDeleteLoading(false);
-        }
-      };
-
-      return (
-        <div className="space-y-6">
-          <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
-            <StatCard icon="file-invoice-dollar" label="Active Bids" value={bids.filter((bid) => bid.status === 'pending' || bid.status === 'submitted').length} color="brand" />
-            <StatCard icon="dollar-sign" label="Pending Value" value={formatCurrency(totalPending)} color="blue" />
-            <StatCard icon="trophy" label="Win Rate" value={`${winRate}%`} color="green" />
-            <StatCard icon="chart-line" label="Avg Probability" value={`${avgProbability}%`} color="yellow" />
-          </StatGrid>
-
-          <div className="flex flex-wrap items-center gap-3 justify-between">
-            <div className="flex flex-wrap bg-gray-100 rounded-lg p-1">
-              {['all', 'draft', 'pending', 'submitted', 'sent', 'accepted', 'rejected', 'archived', 'won', 'lost', 'canceled'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setFilter(status)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
-                >
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-56 max-w-[60vw]">
-                <SearchInput value={search} onChange={setSearch} placeholder="Search bids..." />
-              </div>
-              <Button variant="brand" onClick={openCreateBid} data-testid="bids-create"><Icon name="plus" className="mr-2" />New Bid</Button>
-            </div>
-          </div>
-
-          {formError && (
-            <Card className="p-3 border border-red-200 bg-red-50 text-red-700 text-sm">
-              {formError}
-            </Card>
-          )}
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <div className="space-y-4">
-              {bidsLoading ? (
-                <Card className="p-4 text-sm text-gray-500">Loading bids...</Card>
-              ) : filteredBids.length === 0 ? (
-                <Card className="p-4 text-sm text-gray-500">No bids found.</Card>
-              ) : (
-                filteredBids.map((bid) => (
-                  <Card
-                    key={bid.id}
-                    data-testid={`bid-row-${bid.id}`}
-                    className={`p-4 cursor-pointer ${String(selectedBidId) === String(bid.id) ? 'ring-2 ring-brand-orange border-brand-orange' : ''}`}
-                    onClick={() => setSelectedBidId(bid.id)}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-4">
-                        <div className={`p-3 rounded-lg ${bid.status === 'won' ? 'bg-green-100' : bid.status === 'lost' ? 'bg-red-100' : 'bg-blue-100'}`}>
-                          <Icon name={getStatusIcon(bid.status)} className={`text-lg ${bid.status === 'won' ? 'text-green-600' : bid.status === 'lost' ? 'text-red-600' : 'text-blue-600'}`} />
-                        </div>
-                        <div>
-                          <h4 className="font-semibold text-gray-900">{bid.projectName || bid.title}</h4>
-                          <p className="text-sm text-gray-500">{bid.client || 'No client'}</p>
-                          <p className="text-xs text-gray-400 mt-1">Bid Date: {formatDate(bid.bidDate || bid.bid_date)}</p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xl font-bold text-gray-900">{formatCurrency(bid.amount || 0)}</p>
-                        <Badge className={getStatusColor(bid.status)}>{bid.status}</Badge>
-                        {(bid.status === 'pending' || bid.status === 'submitted' || bid.status === 'sent') && (
-                          <p className="text-sm text-gray-500 mt-1">{bid.probability || 0}% probability</p>
-                        )}
-                      </div>
-                    </div>
-                    {bid.notes && (
-                      <div className="mt-3 pt-3 border-t border-gray-100">
-                        <p className="text-sm text-gray-600"><Icon name="sticky-note" className="mr-2 text-gray-400" />{bid.notes}</p>
-                      </div>
-                    )}
-                  </Card>
-                ))
-              )}
-            </div>
-
-            <Card className="p-4">
-              {selectedBid ? (
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
-                      <p className="text-sm text-gray-500">{selectedBid.client || 'No client selected'}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
-                        <Icon name="pen" className="mr-2" />Edit
-                      </Button>
-                      <Button
-                        variant="brand"
-                        onClick={() => handleSendBid({ override: false })}
-                        disabled={sendLoading || selectedBid.status === 'sent'}
-                        data-testid="bids-send"
-                      >
-                        <Icon name="paper-plane" className="mr-2" />
-                        {sendLoading ? 'Sending...' : (selectedBid.status === 'sent' ? 'Sent' : 'Send')}
-                      </Button>
-                      <Button
-                        variant="danger"
-                        onClick={() => handleDeleteBid(selectedBid.id)}
-                        disabled={deleteLoading}
-                        data-testid="bids-delete"
-                      >
-                        <Icon name="trash" className="mr-2" />Delete
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <p className="text-gray-500">Status</p>
-                      <p className="font-semibold text-gray-900 capitalize" data-testid="bid-status-value">{selectedBid.status}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Bid Date</p>
-                      <p className="font-semibold text-gray-900">{formatDate(selectedBid.bidDate || selectedBid.bid_date)}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Probability</p>
-                      <p className="font-semibold text-gray-900">{selectedBid.probability || 0}%</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Total</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(selectedBid.amount || 0)}</p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-sm pt-2 border-t border-gray-200">
-                    <div>
-                      <p className="text-gray-500">Revenue</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.revenue || 0))}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Cost</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.subtotalCost || 0))}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Profit</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.profit || 0))}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-500">Margin %</p>
-                      <p className="font-semibold text-gray-900" data-testid="bids-summary-margin">
-                        {Number(bidSummary?.marginPercent || 0).toFixed(2)}%
-                      </p>
-                    </div>
-                  </div>
-
-                  {bidSummaryLoading && (
-                    <p className="text-xs text-gray-500">Loading summary...</p>
-                  )}
-                  {bidSummaryError && (
-                    <p className="text-xs text-red-600">{bidSummaryError}</p>
-                  )}
-                  {bidSummary?.isBelowTarget && (
-                    <Card className="p-3 border border-yellow-300 bg-yellow-50 text-yellow-800 text-sm">
-                      <Icon name="triangle-exclamation" className="mr-2" />
-                      {bidSummary.warnings?.[0] || 'Margin is below target.'}
-                    </Card>
-                  )}
-                  {sendError && (
-                    <Card className="p-3 border border-red-200 bg-red-50 text-red-700 text-sm" data-testid="bids-send-warning">
-                      {sendError}
-                    </Card>
-                  )}
-                  {showSendOverride && (
-                    <Card className="p-3 border border-yellow-300 bg-yellow-50 text-yellow-900 space-y-3">
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={sendOverrideChecked}
-                          onChange={(e) => setSendOverrideChecked(e.target.checked)}
-                          data-testid="bids-send-override-checkbox"
-                        />
-                        <span>I understand, send anyway</span>
-                      </label>
-                      <textarea
-                        value={sendOverrideNote}
-                        onChange={(e) => setSendOverrideNote(e.target.value)}
-                        placeholder="Override note (optional)"
-                        className="w-full border border-yellow-300 rounded-lg px-3 py-2 text-sm bg-white"
-                        data-testid="bids-send-override-note"
-                      />
-                      <div className="flex justify-end">
-                        <Button
-                          variant="brand"
-                          onClick={() => handleSendBid({ override: true })}
-                          disabled={!sendOverrideChecked || sendLoading}
-                          data-testid="bids-send-confirm-override"
-                        >
-                          {sendLoading ? 'Sending...' : 'Send Anyway'}
-                        </Button>
-                      </div>
-                    </Card>
-                  )}
-
-                  <BidShareLinkPanel bidId={selectedBid ? String(selectedBid.id) : null} />
-
-                  <div className="pt-2 border-t border-gray-200">
-                    <div className="flex items-center justify-between mb-3">
-                      <h5 className="font-semibold text-gray-900">Line Items</h5>
-                      <Button variant="brand" onClick={openCreateItem} data-testid="bids-add-item">
-                        <Icon name="plus" className="mr-2" />Add Item
-                      </Button>
-                    </div>
-
-                    {itemError && (
-                      <p className="text-sm text-red-600 mb-2">{itemError}</p>
-                    )}
-
-                    {bidItemsLoading ? (
-                      <p className="text-sm text-gray-500">Loading items...</p>
-                    ) : bidItems.length === 0 ? (
-                      <p className="text-sm text-gray-500">No bid items yet.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {bidItems.map((item) => (
-                          <div key={item.id} className="border border-gray-200 rounded-lg p-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <p className="font-medium text-gray-900">{item.description}</p>
-                                <p className="text-xs text-gray-500 capitalize">
-                                  {item.item_type} • {item.quantity} × {formatCurrency(item.unit_cost)}
-                                </p>
-                              </div>
-                              <div className="text-right">
-                                <p className="font-semibold text-gray-900">{formatCurrency(item.total_cost)}</p>
-                                <div className="mt-1 flex gap-1 justify-end">
-                                  <button
-                                    type="button"
-                                    className="text-xs text-blue-600 hover:text-blue-700"
-                                    onClick={() => openEditItem(item)}
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="text-xs text-red-600 hover:text-red-700"
-                                    disabled={itemDeleteLoading}
-                                    onClick={() => handleDeleteItem(item.id)}
-                                  >
-                                    Delete
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="p-8 text-center text-gray-500">
-                  <Icon name="file-invoice-dollar" className="text-4xl mb-2 text-gray-300" />
-                  <p>Select a bid to view details</p>
-                </div>
-              )}
-            </Card>
-          </div>
-
-          {showBidModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeBidModal} aria-label="Close bid modal" />
-              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-gray-900">{editingBidId ? 'Edit Bid' : 'Create Bid'}</h3>
-                  <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeBidModal}>
-                    <Icon name="xmark" className="text-lg" />
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
-                    <input
-                      type="text"
-                      data-testid="bids-title-input"
-                      value={bidForm.title}
-                      onChange={(e) => setBidForm({ ...bidForm, title: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
-                      <select
-                        value={bidForm.status}
-                        onChange={(e) => setBidForm({ ...bidForm, status: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      >
-                        {['draft', 'pending', 'submitted', 'sent', 'accepted', 'rejected', 'archived', 'won', 'lost', 'canceled'].map((status) => (
-                          <option key={status} value={status}>
-                            {status.charAt(0).toUpperCase() + status.slice(1)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Bid Date</label>
-                      <input
-                        type="date"
-                        value={bidForm.bid_date || ''}
-                        onChange={(e) => setBidForm({ ...bidForm, bid_date: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Related Job (Optional)</label>
-                    <select
-                      value={bidForm.job_id || ''}
-                      onChange={(e) => setBidForm({ ...bidForm, job_id: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="">None</option>
-                      {jobs.map((job) => (
-                        <option key={job.id} value={job.id}>
-                          {job.name || job.projectName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
-                    <input
-                      type="text"
-                      value={bidForm.client}
-                      onChange={(e) => setBidForm({ ...bidForm, client: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Probability (%)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      value={bidForm.probability}
-                      onChange={(e) => setBidForm({ ...bidForm, probability: Number(e.target.value) })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea
-                      rows={3}
-                      value={bidForm.notes}
-                      onChange={(e) => setBidForm({ ...bidForm, notes: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  {formError && <p className="text-sm text-red-600">{formError}</p>}
-                </div>
-
-                <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
-                  <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading} data-testid="bids-save">
-                    {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
-                  </Button>
-                </div>
-              </Card>
-            </div>
-          )}
-
-          {showItemModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeItemModal} aria-label="Close bid item modal" />
-              <Card className="relative z-10 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-bold text-gray-900">{editingItemId ? 'Edit Bid Item' : 'Add Bid Item'}</h3>
-                  <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeItemModal}>
-                    <Icon name="xmark" className="text-lg" />
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    <select
-                      value={itemForm.item_type}
-                      onChange={(e) => setItemForm({ ...itemForm, item_type: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      {['custom', 'labor', 'equipment', 'material', 'subcontract'].map((type) => (
-                        <option key={type} value={type}>
-                          {type.charAt(0).toUpperCase() + type.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <input
-                      type="text"
-                      data-testid="bid-item-description"
-                      value={itemForm.description}
-                      onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
-                      <input
-                        type="number"
-                        data-testid="bid-item-quantity"
-                        min="0.01"
-                        step="0.01"
-                        value={itemForm.quantity}
-                        onChange={(e) => setItemForm({ ...itemForm, quantity: Number(e.target.value) })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost</label>
-                      <input
-                        type="number"
-                        data-testid="bid-item-unit-cost"
-                        min="0"
-                        step="0.01"
-                        value={itemForm.unit_cost}
-                        onChange={(e) => setItemForm({ ...itemForm, unit_cost: Number(e.target.value) })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                  {itemError && <p className="text-sm text-red-600">{itemError}</p>}
-                </div>
-
-                <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
-                  <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading} data-testid="bids-item-save">
-                    {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
-                  </Button>
-                </div>
-              </Card>
-            </div>
-          )}
-        </div>
-      );
-    };
-
-    // ============================================
     // VENDORS VIEW
     // ============================================
     const VendorsView = ({ vendors, vendorsLoading, setVendors, jobs, inventory }) => {
@@ -6410,7 +5408,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleDeleteVendor = async () => {
         if (!selectedVendor) return;
-        const confirmed = window.confirm('Delete this vendor? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this vendor');
         if (!confirmed) return;
 
         setDeleteLoading(true);
@@ -6489,7 +5487,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleDeletePO = async () => {
         if (!selectedPO) return;
-        const confirmed = window.confirm('Delete this purchase order? This cannot be undone.');
+        const confirmed = confirmDestructiveAction('this purchase order');
         if (!confirmed) return;
         setPoLoading(true);
         setPoError('');
@@ -6583,6 +5581,8 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       const handleDeletePoItem = async (itemId) => {
         if (!selectedPO) return;
+        const confirmed = confirmDestructiveAction('this purchase order line item');
+        if (!confirmed) return;
         setPoItemLoading(true);
         setPoError('');
         try {
@@ -6969,9 +5969,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
     // ============================================
     // FINANCE VIEW (QBO Integration Placeholder)
     // ============================================
-    const FinanceView = ({ jobs }) => {
-      const [connected, setConnected] = useState(false);
-      const [syncing, setSyncing] = useState(false);
+    const FinanceView = () => {
       const [pricingLoading, setPricingLoading] = useState(true);
       const [pricingSaving, setPricingSaving] = useState(false);
       const [pricingError, setPricingError] = useState('');
@@ -6985,22 +5983,6 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
         contingency_percent: 0,
         markup_percent: 0,
       });
-
-      const mockFinancials = {
-        revenue: { current: 2847500, previous: 2150000, change: 32.4 },
-        expenses: { current: 1892000, previous: 1650000, change: 14.7 },
-        profit: { current: 955500, previous: 500000, change: 91.1 },
-        receivables: { current: 485000, overdue: 125000 },
-        payables: { current: 312000, overdue: 45000 },
-      };
-
-      const recentTransactions = [
-        { id: 1, date: '2026-02-05', description: 'ODOT - Progress Payment #4', type: 'income', amount: 425000, status: 'cleared' },
-        { id: 2, date: '2026-02-04', description: 'Martin Marietta - Aggregate', type: 'expense', amount: 28500, status: 'cleared' },
-        { id: 3, date: '2026-02-03', description: 'Payroll - Week Ending 2/1', type: 'expense', amount: 86400, status: 'cleared' },
-        { id: 4, date: '2026-02-02', description: 'CAT - Parts & Service', type: 'expense', amount: 12850, status: 'pending' },
-        { id: 5, date: '2026-02-01', description: 'Kaufman Dev - Invoice #1082', type: 'income', amount: 185000, status: 'pending' },
-      ];
 
       useEffect(() => {
         let isMounted = true;
@@ -7095,45 +6077,33 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
 
       return (
         <div className="space-y-6">
-          {/* Connection Status Banner */}
-          {!connected ? (
-            <Card className="p-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center">
-                    <Icon name="plug" className="text-3xl" />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold">Connect Your Accounting Software</h3>
-                    <p className="text-blue-100">Sync with QuickBooks Online, Xero, or Sage to see real-time financials</p>
-                  </div>
+          <Card className="p-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center">
+                  <Icon name="plug" className="text-3xl" />
                 </div>
-                <div className="flex gap-3">
-                  <button onClick={() => setConnected(true)} className="px-6 py-3 bg-white text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-2">
-                    <Icon name="link" /> Connect QuickBooks
-                  </button>
-                  <button className="px-6 py-3 bg-white/20 text-white font-semibold rounded-lg hover:bg-white/30 transition-colors">
-                    Other Options
-                  </button>
+                <div>
+                  <h3 className="text-xl font-bold">Accounting Integration</h3>
+                  <p className="text-blue-100">Not configured yet</p>
                 </div>
               </div>
-            </Card>
-          ) : (
-            <Card className="p-4 bg-green-50 border-green-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Icon name="circle-check" className="text-green-500 text-xl" />
-                  <div>
-                    <p className="font-medium text-green-800">Connected to QuickBooks Online</p>
-                    <p className="text-sm text-green-600">Last synced: 5 minutes ago</p>
-                  </div>
-                </div>
-                <Button variant="secondary" size="sm" onClick={() => setSyncing(true)}>
-                  <Icon name="rotate" className={`mr-2 ${syncing ? 'animate-spin' : ''}`} /> Sync Now
-                </Button>
+              <div className="flex gap-3">
+                <button
+                  className="px-6 py-3 bg-white/20 text-white font-semibold rounded-lg opacity-60 cursor-not-allowed flex items-center gap-2"
+                  disabled
+                >
+                  <Icon name="link" /> Connect QuickBooks
+                </button>
+                <button
+                  className="px-6 py-3 bg-white/20 text-white font-semibold rounded-lg opacity-60 cursor-not-allowed flex items-center gap-2"
+                  disabled
+                >
+                  <Icon name="rotate" /> Sync Now
+                </button>
               </div>
-            </Card>
-          )}
+            </div>
+          </Card>
 
           <Card className="p-4">
             <div className="flex items-center justify-between mb-4">
@@ -7233,132 +6203,38 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
             {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
           </Card>
 
-          {/* Financial KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-500">Revenue YTD</span>
-                <Badge variant="success">+{mockFinancials.revenue.change}%</Badge>
-              </div>
-              <p className="text-3xl font-bold text-gray-900">{formatCurrency(mockFinancials.revenue.current)}</p>
-              <p className="text-sm text-gray-500">vs {formatCurrency(mockFinancials.revenue.previous)} last year</p>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-500">Expenses YTD</span>
-                <Badge variant="warning">+{mockFinancials.expenses.change}%</Badge>
-              </div>
-              <p className="text-3xl font-bold text-gray-900">{formatCurrency(mockFinancials.expenses.current)}</p>
-              <p className="text-sm text-gray-500">vs {formatCurrency(mockFinancials.expenses.previous)} last year</p>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-gray-500">Net Profit YTD</span>
-                <Badge variant="success">+{mockFinancials.profit.change}%</Badge>
-              </div>
-              <p className="text-3xl font-bold text-green-600">{formatCurrency(mockFinancials.profit.current)}</p>
-              <p className="text-sm text-gray-500">vs {formatCurrency(mockFinancials.profit.previous)} last year</p>
-            </Card>
-          </div>
+          <Card className="p-4">
+            <h3 className="font-semibold text-gray-900 mb-2">
+              <Icon name="chart-line" className="mr-2 text-brand-500" />
+              Financial KPIs
+            </h3>
+            <p className="text-sm text-gray-500">Not configured yet</p>
+          </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Receivables & Payables */}
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-4">
                 <Icon name="money-bill-transfer" className="mr-2 text-brand-500" />
                 Accounts Overview
               </h3>
-              <div className="space-y-4">
-                <div className="p-4 bg-green-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-green-800">Accounts Receivable</span>
-                    <span className="text-xl font-bold text-green-600">{formatCurrency(mockFinancials.receivables.current)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-green-600">Overdue</span>
-                    <span className="font-medium text-red-600">{formatCurrency(mockFinancials.receivables.overdue)}</span>
-                  </div>
-                </div>
-                <div className="p-4 bg-red-50 rounded-lg">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-red-800">Accounts Payable</span>
-                    <span className="text-xl font-bold text-red-600">{formatCurrency(mockFinancials.payables.current)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-red-600">Overdue</span>
-                    <span className="font-medium text-red-600">{formatCurrency(mockFinancials.payables.overdue)}</span>
-                  </div>
-                </div>
-              </div>
+              <p className="text-sm text-gray-500">Not configured yet</p>
             </Card>
 
-            {/* Recent Transactions */}
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-4">
                 <Icon name="receipt" className="mr-2 text-brand-500" />
                 Recent Transactions
               </h3>
-              <div className="space-y-3">
-                {recentTransactions.map(tx => (
-                  <div key={tx.id} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${tx.type === 'income' ? 'bg-green-100' : 'bg-red-100'}`}>
-                        <Icon name={tx.type === 'income' ? 'arrow-down' : 'arrow-up'} className={tx.type === 'income' ? 'text-green-600' : 'text-red-600'} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">{tx.description}</p>
-                        <p className="text-xs text-gray-500">{formatDate(tx.date)}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className={`font-semibold ${tx.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                        {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amount)}
-                      </p>
-                      <Badge variant={tx.status === 'cleared' ? 'success' : 'warning'} className="text-xs">{tx.status}</Badge>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="text-sm text-gray-500">Not configured yet</p>
             </Card>
           </div>
 
-          {/* Job Profitability */}
           <Card className="p-4">
             <h3 className="font-semibold text-gray-900 mb-4">
               <Icon name="chart-simple" className="mr-2 text-brand-500" />
               Job Profitability
             </h3>
-            <table className="w-full">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Contract</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Billed</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Costs</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Profit</th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Margin</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {jobs.filter(j => j.status === 'active').map(job => {
-                  const billed = job.spent * 1.15;
-                  const profit = billed - job.spent;
-                  const margin = Math.round((profit / billed) * 100);
-                  return (
-                    <tr key={job.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">{job.name}</td>
-                      <td className="px-4 py-3 text-right">{formatCurrency(job.budget)}</td>
-                      <td className="px-4 py-3 text-right">{formatCurrency(billed)}</td>
-                      <td className="px-4 py-3 text-right">{formatCurrency(job.spent)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-green-600">{formatCurrency(profit)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <Badge variant={margin > 15 ? 'success' : margin > 10 ? 'warning' : 'danger'}>{margin}%</Badge>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <p className="text-sm text-gray-500">Not configured yet</p>
           </Card>
         </div>
       );
@@ -7367,121 +6243,142 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
     // ============================================
     // MESSAGES VIEW - Team Communication Hub
     // ============================================
-    const MessagesView = ({ employees }) => {
-      const [activeConversation, setActiveConversation] = useState(null);
+    const MessagesView = () => {
+      const [activeChannel, setActiveChannel] = useState(null);
       const [messageText, setMessageText] = useState('');
       const [searchTerm, setSearchTerm] = useState('');
-      const [showNewMessage, setShowNewMessage] = useState(false);
-      const [activeTab, setActiveTab] = useState('all');
+      const [showNewChannel, setShowNewChannel] = useState(false);
+      const [newChannelName, setNewChannelName] = useState('');
+      const [channels, setChannels] = useState([]);
+      const [messages, setMessages] = useState([]);
+      const [channelsLoading, setChannelsLoading] = useState(true);
+      const [channelsError, setChannelsError] = useState('');
+      const [messagesLoading, setMessagesLoading] = useState(false);
+      const [messagesError, setMessagesError] = useState('');
+      const [createChannelLoading, setCreateChannelLoading] = useState(false);
+      const [createChannelError, setCreateChannelError] = useState('');
+      const [sendLoading, setSendLoading] = useState(false);
+      const [sendError, setSendError] = useState('');
       const messagesEndRef = useRef(null);
 
-      // Current user (simulated)
-      const currentUser = { id: 99, name: 'John Doe', initials: 'JD', role: 'Operations Manager', status: 'online' };
+      const loadChannels = useCallback(async () => {
+        try {
+          setChannelsLoading(true);
+          setChannelsError('');
+          const response = await fetch('/api/messages/channels', { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load channels');
+          const nextChannels = payload.items || [];
+          setChannels(nextChannels);
+          setActiveChannel((prev) => {
+            if (!prev) return nextChannels[0] || null;
+            const refreshed = nextChannels.find((c) => String(c.id) === String(prev.id));
+            return refreshed || (nextChannels[0] || null);
+          });
+        } catch (error) {
+          setChannels([]);
+          setChannelsError(error instanceof Error ? error.message : 'Failed to load channels');
+        } finally {
+          setChannelsLoading(false);
+        }
+      }, []);
 
-      // Channels
-      const [channels] = useState([
-        { id: 'ch-1', type: 'channel', name: 'general', icon: 'hashtag', description: 'Company-wide announcements', members: 12, unread: 2 },
-        { id: 'ch-2', type: 'channel', name: 'field-crew', icon: 'helmet-safety', description: 'Field team coordination', members: 8, unread: 0 },
-        { id: 'ch-3', type: 'channel', name: 'equipment-updates', icon: 'truck-field', description: 'Fleet status and issues', members: 6, unread: 1 },
-        { id: 'ch-4', type: 'channel', name: 'safety-alerts', icon: 'shield-halved', description: 'Safety notifications', members: 12, unread: 0, important: true },
-        { id: 'ch-5', type: 'channel', name: 'project-highway42', icon: 'road', description: 'Highway 42 Expansion team', members: 5, unread: 0 },
-      ]);
+      const loadMessages = useCallback(async (channelId) => {
+        try {
+          setMessagesLoading(true);
+          setMessagesError('');
+          const response = await fetch(`/api/messages/channels/${channelId}/messages`, { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load messages');
+          setMessages(payload.items || []);
+        } catch (error) {
+          setMessages([]);
+          setMessagesError(error instanceof Error ? error.message : 'Failed to load messages');
+        } finally {
+          setMessagesLoading(false);
+        }
+      }, []);
 
-      // Direct Messages
-      const [directMessages] = useState([
-        { id: 'dm-1', type: 'dm', recipientId: 1, name: 'Mike Rodriguez', initials: 'MR', role: 'Foreman', status: 'online', unread: 1, lastMessage: 'The CAT 320 is ready for pickup', lastTime: '10:32 AM' },
-        { id: 'dm-2', type: 'dm', recipientId: 2, name: 'Sarah Chen', initials: 'SC', role: 'Project Manager', status: 'online', unread: 0, lastMessage: 'Thanks for the update!', lastTime: '9:15 AM' },
-        { id: 'dm-3', type: 'dm', recipientId: 3, name: 'Tom Wilson', initials: 'TW', role: 'Equipment Operator', status: 'away', unread: 0, lastMessage: 'Got it, heading there now', lastTime: 'Yesterday' },
-        { id: 'dm-4', type: 'dm', recipientId: 4, name: 'Lisa Martinez', initials: 'LM', role: 'Safety Officer', status: 'offline', unread: 2, lastMessage: 'Please review the incident report', lastTime: 'Yesterday' },
-        { id: 'dm-5', type: 'dm', recipientId: 5, name: 'James Brown', initials: 'JB', role: 'Mechanic', status: 'online', unread: 0, lastMessage: 'Parts arrived this morning', lastTime: 'Mon' },
-      ]);
+      useEffect(() => {
+        loadChannels();
+      }, [loadChannels]);
 
-      // Sample messages for conversations
-      const [conversationMessages, setConversationMessages] = useState({
-        'ch-1': [
-          { id: 1, senderId: 1, sender: 'Mike Rodriguez', initials: 'MR', content: 'Good morning team! Weather looks clear for the rest of the week.', time: '8:00 AM', date: 'Today', reactions: [{ emoji: '👍', count: 4 }] },
-          { id: 2, senderId: 2, sender: 'Sarah Chen', initials: 'SC', content: 'Great news! We should be able to make up for lost time on Highway 42.', time: '8:15 AM', date: 'Today' },
-          { id: 3, senderId: 99, sender: 'John Doe', initials: 'JD', content: 'Agreed. Let\'s push to finish the grading by Friday.', time: '8:22 AM', date: 'Today', isOwn: true },
-          { id: 4, senderId: 3, sender: 'Tom Wilson', initials: 'TW', content: 'I can bring the dozer over from Site B if needed.', time: '8:30 AM', date: 'Today' },
-          { id: 5, senderId: 1, sender: 'Mike Rodriguez', initials: 'MR', content: 'That would help. @John can we authorize the move?', time: '8:45 AM', date: 'Today', mention: true },
-          { id: 6, senderId: 99, sender: 'John Doe', initials: 'JD', content: 'Yes, go ahead. I\'ll update the schedule.', time: '9:00 AM', date: 'Today', isOwn: true },
-        ],
-        'ch-3': [
-          { id: 1, senderId: 5, sender: 'James Brown', initials: 'JB', content: 'CAT 320 Excavator maintenance complete. Ready for deployment.', time: '7:30 AM', date: 'Today', reactions: [{ emoji: '✅', count: 2 }] },
-          { id: 2, senderId: 5, sender: 'James Brown', initials: 'JB', content: 'Also replaced hydraulic lines on Dozer #3. Good for another 500 hours.', time: '7:32 AM', date: 'Today', file: { name: 'maintenance-report-dozer3.pdf', size: '245 KB', type: 'pdf' } },
-          { id: 3, senderId: 1, sender: 'Mike Rodriguez', initials: 'MR', content: 'Perfect timing. We need it at Highway 42 tomorrow.', time: '9:15 AM', date: 'Today' },
-        ],
-        'dm-1': [
-          { id: 1, senderId: 1, sender: 'Mike Rodriguez', initials: 'MR', content: 'Hey, quick question about the grading specs for lot 4', time: '9:00 AM', date: 'Today' },
-          { id: 2, senderId: 99, sender: 'John Doe', initials: 'JD', content: 'Sure, what do you need?', time: '9:05 AM', date: 'Today', isOwn: true },
-          { id: 3, senderId: 1, sender: 'Mike Rodriguez', initials: 'MR', content: 'The plans show 2% grade but the surveyor marked 1.5%. Which one do we follow?', time: '9:08 AM', date: 'Today', file: { name: 'lot4-survey.jpg', size: '1.2 MB', type: 'image' } },
-          { id: 4, senderId: 99, sender: 'John Doe', initials: 'JD', content: 'Go with the surveyor marks. I\'ll get the plans updated.', time: '9:15 AM', date: 'Today', isOwn: true },
-          { id: 5, senderId: 1, sender: 'Mike Rodriguez', initials: 'MR', content: 'Got it. Also, the CAT 320 is ready for pickup', time: '10:32 AM', date: 'Today' },
-        ],
-        'dm-4': [
-          { id: 1, senderId: 4, sender: 'Lisa Martinez', initials: 'LM', content: 'Hi John, I need you to review the incident report from yesterday', time: '4:30 PM', date: 'Yesterday' },
-          { id: 2, senderId: 4, sender: 'Lisa Martinez', initials: 'LM', content: 'Minor injury - Tom scraped his arm on some rebar. Already treated on site.', time: '4:31 PM', date: 'Yesterday', file: { name: 'incident-report-020526.pdf', size: '156 KB', type: 'pdf' } },
-          { id: 3, senderId: 99, sender: 'John Doe', initials: 'JD', content: 'Thanks Lisa. I\'ll review and sign off today.', time: '4:45 PM', date: 'Yesterday', isOwn: true },
-          { id: 4, senderId: 4, sender: 'Lisa Martinez', initials: 'LM', content: 'Also scheduling a safety refresher for next week. Can you make Tuesday morning work?', time: '5:00 PM', date: 'Yesterday' },
-          { id: 5, senderId: 4, sender: 'Lisa Martinez', initials: 'LM', content: 'Just following up on the Tuesday safety refresher - let me know!', time: '9:00 AM', date: 'Today' },
-        ],
-      });
+      useEffect(() => {
+        if (!activeChannel?.id) {
+          setMessages([]);
+          return;
+        }
+        loadMessages(activeChannel.id);
+      }, [activeChannel, loadMessages]);
 
-      const allConversations = [...channels, ...directMessages];
+      useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }, [messages]);
 
-      const filteredConversations = allConversations.filter(conv => {
-        const matchesSearch = conv.name.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesTab = activeTab === 'all' ||
-                          (activeTab === 'channels' && conv.type === 'channel') ||
-                          (activeTab === 'direct' && conv.type === 'dm') ||
-                          (activeTab === 'unread' && conv.unread > 0);
-        return matchesSearch && matchesTab;
-      });
+      const filteredChannels = channels.filter((channel) =>
+        String(channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+      );
 
-      const totalUnread = allConversations.reduce((sum, c) => sum + (c.unread || 0), 0);
-
-      const getStatusColor = (status) => {
-        switch(status) {
-          case 'online': return 'bg-green-500';
-          case 'away': return 'bg-yellow-500';
-          default: return 'bg-gray-400';
+      const handleCreateChannel = async () => {
+        if (!newChannelName.trim()) return;
+        try {
+          setCreateChannelLoading(true);
+          setCreateChannelError('');
+          const response = await fetch('/api/messages/channels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: newChannelName.trim() }),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload?.item) {
+            throw new Error(payload?.error || 'Failed to create channel');
+          }
+          const createdChannel = payload.item;
+          setShowNewChannel(false);
+          setNewChannelName('');
+          setChannels((prev) => [...prev, createdChannel]);
+          setActiveChannel(createdChannel);
+        } catch (error) {
+          setCreateChannelError(error instanceof Error ? error.message : 'Failed to create channel');
+        } finally {
+          setCreateChannelLoading(false);
         }
       };
 
-      const sendMessage = () => {
-        if (!messageText.trim() || !activeConversation) return;
-
-        const newMessage = {
-          id: Date.now(),
-          senderId: 99,
-          sender: 'John Doe',
-          initials: 'JD',
-          content: messageText,
-          time: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-          date: 'Today',
-          isOwn: true,
-        };
-
-        setConversationMessages(prev => ({
-          ...prev,
-          [activeConversation.id]: [...(prev[activeConversation.id] || []), newMessage]
-        }));
-        setMessageText('');
+      const handleSendMessage = async () => {
+        if (!messageText.trim() || !activeChannel?.id) return;
+        try {
+          setSendLoading(true);
+          setSendError('');
+          const response = await fetch(`/api/messages/channels/${activeChannel.id}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ body: messageText.trim() }),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload?.item) {
+            throw new Error(payload?.error || 'Failed to send message');
+          }
+          setMessageText('');
+          await loadMessages(activeChannel.id);
+          await loadChannels();
+        } catch (error) {
+          setSendError(error instanceof Error ? error.message : 'Failed to send message');
+        } finally {
+          setSendLoading(false);
+        }
       };
-
-      const currentMessages = activeConversation ? (conversationMessages[activeConversation.id] || []) : [];
 
       return (
         <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] max-md:h-[calc(100vh-170px)] bg-white rounded-lg border border-gray-200 overflow-hidden">
-          {/* Sidebar - Conversations List */}
-          <div className={`${activeConversation ? 'hidden lg:flex' : 'flex'} w-full lg:w-80 border-r border-gray-200 flex-col min-h-0`}>
-            {/* Header */}
+          <div className={`${activeChannel ? 'hidden lg:flex' : 'flex'} w-full lg:w-80 border-r border-gray-200 flex-col min-h-0`}>
             <div className="p-4 border-b border-gray-200">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-bold text-gray-900">Messages</h2>
                 <button
-                  onClick={() => setShowNewMessage(true)}
+                  onClick={() => setShowNewChannel(true)}
                   className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
+                  data-testid="messages-create-channel-open"
                 >
                   <Icon name="pen-to-square" />
                 </button>
@@ -7490,241 +6387,87 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                 <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search conversations..."
+                  placeholder="Search channels..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 bg-gray-100 border-0 rounded-lg text-sm focus:ring-2 focus:ring-brand-500"
                 />
               </div>
+              {channelsError && <p className="text-sm text-red-600 mt-3">{channelsError}</p>}
             </div>
 
-            {/* Tabs */}
-            <div className="flex border-b border-gray-200 px-2 overflow-x-auto">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'channels', label: 'Channels' },
-                { id: 'direct', label: 'Direct' },
-                { id: 'unread', label: `Unread (${totalUnread})` },
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex-1 min-w-[88px] py-2 text-sm font-medium transition-colors whitespace-nowrap ${
-                    activeTab === tab.id
-                      ? 'text-brand-600 border-b-2 border-brand-500'
-                      : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Conversations List */}
             <div className="flex-1 overflow-y-auto">
-              {/* Channels Section */}
-              {(activeTab === 'all' || activeTab === 'channels') && (
-                <div className="py-2">
-                  {activeTab === 'all' && (
-                    <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Channels</p>
-                  )}
-                  {filteredConversations.filter(c => c.type === 'channel').map(channel => (
-                    <button
-                      key={channel.id}
-                      onClick={() => setActiveConversation(channel)}
-                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${
-                        activeConversation?.id === channel.id ? 'bg-brand-50' : ''
-                      }`}
-                    >
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${channel.important ? 'bg-red-100' : 'bg-gray-100'}`}>
-                        <Icon name={channel.icon} className={channel.important ? 'text-red-600' : 'text-gray-600'} />
+              <div className="py-2">
+                <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Channels</p>
+                {channelsLoading ? (
+                  <div className="px-4 py-3 text-sm text-gray-500">Loading channels...</div>
+                ) : filteredChannels.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div>
+                ) : filteredChannels.map((channel) => (
+                  <button
+                    key={channel.id}
+                    onClick={() => setActiveChannel(channel)}
+                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${
+                      activeChannel?.id === channel.id ? 'bg-brand-50' : ''
+                    }`}
+                    data-testid={`messages-channel-${channel.id}`}
+                  >
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100">
+                      <Icon name="hashtag" className="text-gray-600" />
+                    </div>
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-gray-900 text-sm truncate"># {channel.name}</span>
+                        {channel.message_count > 0 && (
+                          <span className="px-1.5 py-0.5 bg-gray-200 text-gray-700 text-xs rounded-full">{channel.message_count}</span>
+                        )}
                       </div>
-                      <div className="flex-1 text-left">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-gray-900 text-sm"># {channel.name}</span>
-                          {channel.unread > 0 && (
-                            <span className="px-1.5 py-0.5 bg-brand-500 text-white text-xs rounded-full">{channel.unread}</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-gray-500 truncate">{channel.members} members</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Direct Messages Section */}
-              {(activeTab === 'all' || activeTab === 'direct' || activeTab === 'unread') && (
-                <div className="py-2">
-                  {activeTab === 'all' && (
-                    <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Direct Messages</p>
-                  )}
-                  {filteredConversations.filter(c => c.type === 'dm').map(dm => (
-                    <button
-                      key={dm.id}
-                      onClick={() => setActiveConversation(dm)}
-                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${
-                        activeConversation?.id === dm.id ? 'bg-brand-50' : ''
-                      }`}
-                    >
-                      <div className="relative">
-                        <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-gray-700">
-                          {dm.initials}
-                        </div>
-                        <span className={`absolute bottom-0 right-0 w-3 h-3 ${getStatusColor(dm.status)} rounded-full border-2 border-white`}></span>
-                      </div>
-                      <div className="flex-1 text-left min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium text-gray-900 text-sm">{dm.name}</span>
-                          <span className="text-xs text-gray-400">{dm.lastTime}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-gray-500 truncate pr-2">{dm.lastMessage}</p>
-                          {dm.unread > 0 && (
-                            <span className="px-1.5 py-0.5 bg-brand-500 text-white text-xs rounded-full flex-shrink-0">{dm.unread}</span>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
+                      <p className="text-xs text-gray-500 truncate">{channel.last_message_preview || 'No messages yet'}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
-          {/* Main Chat Area */}
-          {activeConversation ? (
+          {activeChannel ? (
             <div className="flex-1 flex flex-col min-h-0">
-              {/* Chat Header */}
               <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <button
-                    onClick={() => setActiveConversation(null)}
+                    onClick={() => setActiveChannel(null)}
                     className="md:hidden p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
                   >
                     <Icon name="chevron-left" />
                   </button>
-                  {activeConversation.type === 'channel' ? (
-                    <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
-                      <Icon name={activeConversation.icon} className="text-gray-600" />
-                    </div>
-                  ) : (
-                    <div className="relative">
-                      <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center font-medium text-gray-700">
-                        {activeConversation.initials}
-                      </div>
-                      <span className={`absolute bottom-0 right-0 w-3 h-3 ${getStatusColor(activeConversation.status)} rounded-full border-2 border-white`}></span>
-                    </div>
-                  )}
-                  <div>
-                    <h3 className="font-semibold text-gray-900">
-                      {activeConversation.type === 'channel' ? `# ${activeConversation.name}` : activeConversation.name}
-                    </h3>
-                    <p className="text-xs text-gray-500">
-                      {activeConversation.type === 'channel'
-                        ? `${activeConversation.members} members`
-                        : `${activeConversation.role} • ${activeConversation.status}`
-                      }
-                    </p>
+                  <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
+                    <Icon name="hashtag" className="text-gray-600" />
                   </div>
-                </div>
-                <div className="hidden sm:flex items-center gap-2">
-                  <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
-                    <Icon name="phone" />
-                  </button>
-                  <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
-                    <Icon name="video" />
-                  </button>
-                  <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
-                    <Icon name="circle-info" />
-                  </button>
+                  <div>
+                    <h3 className="font-semibold text-gray-900" data-testid="messages-active-channel"># {activeChannel.name}</h3>
+                    <p className="text-xs text-gray-500">{activeChannel.message_count || 0} messages</p>
+                  </div>
                 </div>
               </div>
 
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-                {currentMessages.map((msg, idx) => {
-                  const showDate = idx === 0 || currentMessages[idx - 1]?.date !== msg.date;
-                  return (
-                    <Fragment key={msg.id}>
-                      {showDate && (
-                        <div className="flex items-center gap-4 my-4">
-                          <div className="flex-1 h-px bg-gray-200"></div>
-                          <span className="text-xs text-gray-500 font-medium">{msg.date}</span>
-                          <div className="flex-1 h-px bg-gray-200"></div>
-                        </div>
-                      )}
-                      <div className={`flex gap-3 ${msg.isOwn ? 'flex-row-reverse' : ''}`}>
-                        {!msg.isOwn && (
-                          <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-gray-700 flex-shrink-0">
-                            {msg.initials}
-                          </div>
-                        )}
-                        <div className={`max-w-[85%] sm:max-w-[70%] ${msg.isOwn ? 'items-end' : ''}`}>
-                          {!msg.isOwn && (
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-sm font-medium text-gray-900">{msg.sender}</span>
-                              <span className="text-xs text-gray-400">{msg.time}</span>
-                            </div>
-                          )}
-                          <div className={`rounded-2xl px-4 py-2 ${
-                            msg.isOwn
-                              ? 'bg-brand-500 text-white rounded-br-md'
-                              : msg.mention
-                                ? 'bg-yellow-50 border border-yellow-200 rounded-bl-md'
-                                : 'bg-gray-100 text-gray-900 rounded-bl-md'
-                          }`}>
-                            <p className="text-sm">{msg.content}</p>
-                          </div>
-                          {msg.file && (
-                            <div className="mt-2 p-3 bg-gray-50 border border-gray-200 rounded-lg flex items-center gap-3 max-w-xs">
-                              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                                msg.file.type === 'pdf' ? 'bg-red-100' : 'bg-blue-100'
-                              }`}>
-                                <Icon name={msg.file.type === 'pdf' ? 'file-pdf' : 'file-image'} className={
-                                  msg.file.type === 'pdf' ? 'text-red-600' : 'text-blue-600'
-                                } />
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium text-gray-900 truncate">{msg.file.name}</p>
-                                <p className="text-xs text-gray-500">{msg.file.size}</p>
-                              </div>
-                              <button className="p-2 text-gray-400 hover:text-gray-600">
-                                <Icon name="download" />
-                              </button>
-                            </div>
-                          )}
-                          {msg.reactions && msg.reactions.length > 0 && (
-                            <div className="flex gap-1 mt-1">
-                              {msg.reactions.map((r, i) => (
-                                <span key={i} className="px-2 py-0.5 bg-gray-100 rounded-full text-xs">
-                                  {r.emoji} {r.count}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {msg.isOwn && (
-                            <p className="text-xs text-gray-400 text-right mt-1">{msg.time}</p>
-                          )}
-                        </div>
-                      </div>
-                    </Fragment>
-                  );
-                })}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3">
+                {messagesLoading ? (
+                  <div className="text-sm text-gray-500">Loading messages...</div>
+                ) : messagesError ? (
+                  <div className="text-sm text-red-600">{messagesError}</div>
+                ) : messages.length === 0 ? (
+                  <div className="text-sm text-gray-500">No messages yet.</div>
+                ) : messages.map((msg) => (
+                  <div key={msg.id} className="rounded-xl bg-gray-100 px-4 py-3" data-testid={`messages-message-${msg.id}`}>
+                    <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{msg.body}</p>
+                    <p className="text-xs text-gray-500 mt-1">{formatDate(msg.created_at)}</p>
+                  </div>
+                ))}
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Message Input */}
               <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200">
                 <div className="flex items-end gap-3">
-                  <div className="flex gap-1">
-                    <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
-                      <Icon name="paperclip" />
-                    </button>
-                    <button className="hidden sm:inline-flex p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
-                      <Icon name="image" />
-                    </button>
-                  </div>
                   <div className="flex-1 relative">
                     <textarea
                       value={messageText}
@@ -7732,88 +6475,75 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
-                          sendMessage();
+                          handleSendMessage();
                         }
                       }}
-                      placeholder={`Message ${activeConversation.type === 'channel' ? '#' + activeConversation.name : activeConversation.name}`}
+                      placeholder={`Message #${activeChannel.name}`}
                       className="w-full px-4 py-3 bg-gray-100 border-0 rounded-xl text-sm resize-none focus:ring-2 focus:ring-brand-500"
                       rows="1"
+                      data-testid="messages-input"
                     />
                   </div>
-                  <div className="flex gap-1">
-                    <button className="hidden sm:inline-flex p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
-                      <Icon name="face-smile" />
-                    </button>
-                    <button
-                      onClick={sendMessage}
-                      disabled={!messageText.trim()}
-                      className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Icon name="paper-plane" />
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!messageText.trim() || sendLoading}
+                    className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    data-testid="messages-send"
+                  >
+                    <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
+                  </button>
                 </div>
+                {sendError && <p className="text-xs text-red-600 mt-2">{sendError}</p>}
                 <p className="text-xs text-gray-400 mt-2">Press Enter to send, Shift + Enter for new line</p>
               </div>
             </div>
           ) : (
-            /* No Conversation Selected */
             <div className="hidden md:flex flex-1 items-center justify-center bg-gray-50">
               <div className="text-center">
                 <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
                   <Icon name="comments" className="text-3xl text-gray-400" />
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Your Messages</h3>
-                <p className="text-gray-500 mb-6 max-w-sm">Select a conversation to start messaging or create a new one.</p>
-                <Button variant="brand" onClick={() => setShowNewMessage(true)}>
-                  <Icon name="pen-to-square" className="mr-2" /> New Message
+                <p className="text-gray-500 mb-6 max-w-sm">Select a channel to start messaging or create a new one.</p>
+                <Button variant="brand" onClick={() => setShowNewChannel(true)}>
+                  <Icon name="pen-to-square" className="mr-2" /> New Channel
                 </Button>
               </div>
             </div>
           )}
 
-          {/* New Message Modal */}
-          {showNewMessage && (
+          {showNewChannel && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
               <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900">New Message</h3>
-                  <button onClick={() => setShowNewMessage(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                  <h3 className="font-semibold text-gray-900">Create Channel</h3>
+                  <button onClick={() => setShowNewChannel(false)} className="p-1 text-gray-400 hover:text-gray-600">
                     <Icon name="xmark" />
                   </button>
                 </div>
-                <div className="p-6">
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">To:</label>
-                    <input
-                      type="text"
-                      placeholder="Search people or channels..."
-                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    />
-                  </div>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Suggested</p>
-                    {employees.slice(0, 5).map(emp => (
-                      <button
-                        key={emp.id}
-                        onClick={() => {
-                          const existingDm = directMessages.find(dm => dm.recipientId === emp.id);
-                          if (existingDm) {
-                            setActiveConversation(existingDm);
-                          }
-                          setShowNewMessage(false);
-                        }}
-                        className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 rounded-lg transition-colors"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-medium text-gray-700">
-                          {emp.name.split(' ').map(n => n[0]).join('')}
-                        </div>
-                        <div className="text-left">
-                          <p className="font-medium text-gray-900">{emp.name}</p>
-                          <p className="text-xs text-gray-500">{emp.role}</p>
-                        </div>
-                      </button>
-                    ))}
+                <div className="p-6 space-y-3">
+                  <label className="block text-sm font-medium text-gray-700">Channel Name</label>
+                  <input
+                    type="text"
+                    value={newChannelName}
+                    onChange={(e) => setNewChannelName(e.target.value)}
+                    placeholder="e.g. field-updates"
+                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                    data-testid="messages-create-channel-input"
+                  />
+                  {createChannelError && <p className="text-sm text-red-600">{createChannelError}</p>}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button variant="secondary" onClick={() => setShowNewChannel(false)} disabled={createChannelLoading}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="brand"
+                      onClick={handleCreateChannel}
+                      disabled={!newChannelName.trim() || createChannelLoading}
+                      data-testid="messages-create-channel-submit"
+                    >
+                      {createChannelLoading ? 'Creating...' : 'Create'}
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -7827,69 +6557,106 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
     // INTEGRATIONS VIEW
     // ============================================
     const IntegrationsView = () => {
+      type IntegrationCapability = {
+        canConnect: boolean;
+        canDisconnect: boolean;
+        hasSync: boolean;
+      };
+
+      type IntegrationCatalogItem = {
+        provider: string;
+        name: string;
+        category: string;
+        icon: string;
+        description: string;
+        popular: boolean;
+        capabilities: IntegrationCapability;
+        connect_url_placeholder: string;
+      };
+
+      type IntegrationConnection = {
+        id: string;
+        provider: string;
+        connected: boolean;
+        connected_at?: string | null;
+        disconnected_at?: string | null;
+        created_at?: string | null;
+        updated_at?: string | null;
+      };
+
       const [searchTerm, setSearchTerm] = useState('');
       const [activeCategory, setActiveCategory] = useState('all');
-      const [connectedIntegrations, setConnectedIntegrations] = useState(['quickbooks', 'samsara', 'clockshark', 'dropbox', 'twilio']);
+      const [connections, setConnections] = useState<IntegrationConnection[]>([]);
+      const [integrations, setIntegrations] = useState<IntegrationCatalogItem[]>([]);
+      const [loadingConnections, setLoadingConnections] = useState(false);
+      const [loadingCapabilities, setLoadingCapabilities] = useState(false);
+      const [connectionsError, setConnectionsError] = useState('');
+      const [activeProviderAction, setActiveProviderAction] = useState<string | null>(null);
 
-      const integrations = [
-        // Financial & Accounting
-        { id: 'quickbooks', name: 'QuickBooks Online', category: 'financial', icon: 'calculator', description: 'Sync invoices, expenses, and payroll data automatically', popular: true },
-        { id: 'xero', name: 'Xero', category: 'financial', icon: 'coins', description: 'Cloud accounting with real-time financial data' },
-        { id: 'stripe', name: 'Stripe', category: 'financial', icon: 'credit-card', description: 'Accept payments and process deposits online' },
-        { id: 'square', name: 'Square', category: 'financial', icon: 'square', description: 'Point-of-sale and payment processing' },
-        { id: 'expensify', name: 'Expensify', category: 'financial', icon: 'receipt', description: 'Receipt capture and expense report automation' },
+      const loadConnections = useCallback(async () => {
+        setLoadingConnections(true);
+        setConnectionsError('');
+        try {
+          const response = await fetch('/api/integrations', { cache: 'no-store' });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
 
-        // Fleet & GPS
-        { id: 'samsara', name: 'Samsara', category: 'fleet', icon: 'satellite-dish', description: 'Real-time GPS tracking, telematics, and driver safety', popular: true },
-        { id: 'verizon-connect', name: 'Verizon Connect', category: 'fleet', icon: 'location-crosshairs', description: 'Fleet tracking and workforce management' },
-        { id: 'geotab', name: 'Geotab', category: 'fleet', icon: 'map-pin', description: 'Telematics and fleet optimization platform' },
-        { id: 'fleetio', name: 'Fleetio', category: 'fleet', icon: 'truck', description: 'Fleet maintenance and fuel management' },
+          if (!response.ok) {
+            setConnectionsError(parsed?.error || raw || 'Failed to load integrations');
+            setConnections([]);
+            return;
+          }
 
-        // Time & Payroll
-        { id: 'clockshark', name: 'ClockShark', category: 'time', icon: 'clock', description: 'GPS time tracking built for field crews', popular: true },
-        { id: 'busybusy', name: 'busybusy', category: 'time', icon: 'stopwatch', description: 'Construction time tracking and job costing' },
-        { id: 'gusto', name: 'Gusto', category: 'time', icon: 'money-bill-wave', description: 'Full-service payroll, benefits, and HR' },
-        { id: 'adp', name: 'ADP', category: 'time', icon: 'building', description: 'Enterprise payroll and workforce management' },
-        { id: 'quickbooks-time', name: 'QuickBooks Time', category: 'time', icon: 'user-clock', description: 'Time tracking synced with QuickBooks' },
+          setConnections(Array.isArray(parsed?.items) ? parsed.items : []);
+        } catch {
+          setConnectionsError('Failed to load integrations');
+          setConnections([]);
+        } finally {
+          setLoadingConnections(false);
+        }
+      }, []);
 
-        // Project & Construction
-        { id: 'procore', name: 'Procore', category: 'project', icon: 'helmet-safety', description: 'Industry-leading construction management platform', popular: true },
-        { id: 'plangrid', name: 'PlanGrid', category: 'project', icon: 'drafting-compass', description: 'Blueprints, punch lists, and field reports' },
-        { id: 'buildertrend', name: 'Buildertrend', category: 'project', icon: 'house-chimney', description: 'Project management and client portal' },
-        { id: 'hcss', name: 'HCSS HeavyBid', category: 'project', icon: 'calculator', description: 'Heavy civil estimating and bidding' },
+      const loadCapabilities = useCallback(async () => {
+        setLoadingCapabilities(true);
+        setConnectionsError('');
+        try {
+          const response = await fetch('/api/integrations/capabilities', { cache: 'no-store' });
+          const raw = await response.text();
+          let parsed: { items?: IntegrationCatalogItem[]; error?: string } = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
 
-        // Communication
-        { id: 'twilio', name: 'Twilio', category: 'communication', icon: 'comment-sms', description: 'SMS alerts for weather, schedules, and emergencies', popular: true },
-        { id: 'slack', name: 'Slack', category: 'communication', icon: 'hashtag', description: 'Team messaging and channel-based communication' },
-        { id: 'teams', name: 'Microsoft Teams', category: 'communication', icon: 'users', description: 'Chat, meetings, and file collaboration' },
-        { id: 'calendly', name: 'Calendly', category: 'communication', icon: 'calendar-check', description: 'Easy scheduling for client meetings' },
+          if (!response.ok) {
+            setConnectionsError(parsed.error || raw || 'Failed to load integration capabilities');
+            setIntegrations([]);
+            return;
+          }
 
-        // Documents & Contracts
-        { id: 'docusign', name: 'DocuSign', category: 'documents', icon: 'file-signature', description: 'Digital signatures for contracts and change orders', popular: true },
-        { id: 'dropbox', name: 'Dropbox', category: 'documents', icon: 'box', description: 'Cloud file storage and sharing' },
-        { id: 'google-drive', name: 'Google Drive', category: 'documents', icon: 'google-drive', description: 'Cloud storage with docs, sheets, and slides' },
-        { id: 'box', name: 'Box', category: 'documents', icon: 'box-archive', description: 'Secure enterprise content management' },
+          setIntegrations(Array.isArray(parsed.items) ? parsed.items : []);
+        } catch {
+          setConnectionsError('Failed to load integration capabilities');
+          setIntegrations([]);
+        } finally {
+          setLoadingCapabilities(false);
+        }
+      }, []);
 
-        // Weather
-        { id: 'tomorrow-io', name: 'Tomorrow.io', category: 'weather', icon: 'cloud-sun', description: 'Hyperlocal weather forecasting and alerts' },
-        { id: 'openweather', name: 'OpenWeatherMap', category: 'weather', icon: 'temperature-half', description: 'Weather data API for job site conditions' },
-        { id: 'dtn', name: 'DTN', category: 'weather', icon: 'cloud-bolt', description: 'Agriculture and construction-grade weather data' },
+      useEffect(() => {
+        loadConnections();
+        loadCapabilities();
+      }, [loadConnections, loadCapabilities]);
 
-        // Fuel & Purchasing
-        { id: 'wex', name: 'WEX', category: 'fuel', icon: 'gas-pump', description: 'Fleet fuel cards and spend management' },
-        { id: 'fleetcor', name: 'Fleetcor', category: 'fuel', icon: 'credit-card', description: 'Fuel cards and workforce payments' },
-        { id: 'grainger', name: 'Grainger', category: 'fuel', icon: 'screwdriver-wrench', description: 'Industrial supplies and parts ordering' },
-
-        // Compliance & Safety
-        { id: 'safetyculture', name: 'SafetyCulture', category: 'compliance', icon: 'clipboard-check', description: 'Digital inspections and safety checklists' },
-        { id: 'isnetworld', name: 'ISNetworld', category: 'compliance', icon: 'shield-halved', description: 'Contractor safety management network' },
-        { id: 'avetta', name: 'Avetta', category: 'compliance', icon: 'certificate', description: 'Supply chain risk management' },
-
-        // CRM & Sales
-        { id: 'hubspot', name: 'HubSpot', category: 'crm', icon: 'chart-line', description: 'CRM, marketing, and sales automation' },
-        { id: 'salesforce', name: 'Salesforce', category: 'crm', icon: 'cloud', description: 'Enterprise CRM and customer platform' },
-        { id: 'pipedrive', name: 'Pipedrive', category: 'crm', icon: 'filter', description: 'Sales pipeline and deal tracking' },
-      ];
+      const connectedIntegrations = connections
+        .filter((item) => item.connected)
+        .map((item) => item.provider);
 
       const categories = [
         { id: 'all', label: 'All Integrations', icon: 'grid-2' },
@@ -7912,10 +6679,31 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
         return matchesSearch && matchesCategory;
       });
 
-      const toggleConnection = (id) => {
-        setConnectedIntegrations(prev =>
-          prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-        );
+      const toggleConnection = async (id, connected) => {
+        setActiveProviderAction(id);
+        setConnectionsError('');
+        try {
+          const endpoint = connected
+            ? `/api/integrations/${id}/disconnect`
+            : `/api/integrations/${id}/connect`;
+          const response = await fetch(endpoint, { method: 'POST' });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) {
+            setConnectionsError(parsed?.error || raw || 'Failed to update integration');
+            return;
+          }
+          await loadConnections();
+        } catch {
+          setConnectionsError('Failed to update integration');
+        } finally {
+          setActiveProviderAction(null);
+        }
       };
 
       return (
@@ -7933,6 +6721,27 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
               </Badge>
             </div>
           </div>
+
+          {loadingConnections && (
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">Loading integrations...</p>
+            </Card>
+          )}
+          {loadingCapabilities && (
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">Loading integration capabilities...</p>
+            </Card>
+          )}
+          {connectionsError && (
+            <Card className="p-4 border border-red-200 bg-red-50">
+              <p className="text-sm text-red-700">{connectionsError}</p>
+            </Card>
+          )}
+          {!loadingConnections && !loadingCapabilities && !connectionsError && connections.length === 0 && (
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">No saved integrations yet.</p>
+            </Card>
+          )}
 
           {/* Search and Stats */}
           <div className="flex items-center gap-4">
@@ -7978,9 +6787,16 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
             <div className="flex-1">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                 {filteredIntegrations.map(integration => {
-                  const isConnected = connectedIntegrations.includes(integration.id);
+                  const isConnected = connectedIntegrations.includes(integration.provider);
+                  const isBusy = activeProviderAction === integration.provider || loadingConnections || loadingCapabilities;
+                  const canConnect = integration.capabilities?.canConnect !== false;
+                  const canDisconnect = integration.capabilities?.canDisconnect !== false;
                   return (
-                    <Card key={integration.id} className={`p-4 transition-all ${isConnected ? 'ring-2 ring-green-500 bg-green-50/30' : 'hover:shadow-md'}`}>
+                    <Card
+                      key={integration.provider}
+                      data-testid={`integration-card-${integration.provider}`}
+                      className={`p-4 transition-all ${isConnected ? 'ring-2 ring-green-500 bg-green-50/30' : 'hover:shadow-md'}`}
+                    >
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-3">
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isConnected ? 'bg-green-100' : 'bg-gray-100'}`}>
@@ -8011,9 +6827,11 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                               <Button
                                 variant="secondary"
                                 size="sm"
-                                onClick={() => toggleConnection(integration.id)}
+                                onClick={() => toggleConnection(integration.provider, true)}
+                                disabled={isBusy || !canDisconnect}
+                                data-testid={`integration-disconnect-${integration.provider}`}
                               >
-                                Disconnect
+                                {isBusy ? 'Saving...' : 'Disconnect'}
                               </Button>
                             </div>
                           </>
@@ -8023,9 +6841,11 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
                             <Button
                               variant="brand"
                               size="sm"
-                              onClick={() => toggleConnection(integration.id)}
+                              onClick={() => toggleConnection(integration.provider, false)}
+                              disabled={isBusy || !canConnect}
+                              data-testid={`integration-connect-${integration.provider}`}
                             >
-                              <Icon name="plug" className="mr-1" /> Connect
+                              <Icon name="plug" className="mr-1" /> {isBusy ? 'Saving...' : 'Connect'}
                             </Button>
                           </>
                         )}
@@ -8933,14 +7753,49 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
       );
     };
 
-    const SafetyModal = ({ isOpen, onClose, employees, jobs }) => {
+    const SafetyModal = ({ isOpen, onClose, employees, jobs, onSubmitSafetyLog, submitLoading }) => {
       const [form, setForm] = useState({ type: 'toolbox', topic: '', jobId: '', notes: '' });
       const [attendees, setAttendees] = useState([]);
+      const [submitError, setSubmitError] = useState('');
 
       const topics = {
         toolbox: ['Excavation Safety', 'Fall Protection', 'Heat Illness Prevention', 'Electrical Safety', 'PPE Requirements', 'Housekeeping'],
         preop: ['Excavator Inspection', 'Dozer Inspection', 'Loader Inspection', 'Truck Inspection'],
         jsa: ['Trench Work', 'Overhead Utilities', 'Confined Space', 'Heavy Lifting', 'Working Near Traffic'],
+      };
+
+      const severityByType = {
+        toolbox: 'low',
+        preop: 'medium',
+        jsa: 'high',
+      };
+
+      useEffect(() => {
+        if (!isOpen) return;
+        setForm({ type: 'toolbox', topic: '', jobId: '', notes: '' });
+        setAttendees([]);
+        setSubmitError('');
+      }, [isOpen]);
+
+      const handleSubmit = async () => {
+        setSubmitError('');
+        if (!form.topic) {
+          setSubmitError('Topic is required');
+          return;
+        }
+        const extra = form.notes?.trim();
+        const summary = extra ? `${form.topic} — ${extra}` : form.topic;
+        const payload = {
+          occurred_on: new Date().toISOString().slice(0, 10),
+          summary,
+          severity: severityByType[form.type] || 'medium',
+        };
+        const result = await onSubmitSafetyLog(payload);
+        if (!result?.ok) {
+          setSubmitError(result?.error || 'Failed to create safety log');
+          return;
+        }
+        onClose();
       };
 
       return (
@@ -8959,7 +7814,7 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Topic</label>
-              <select value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+              <select value={form.topic} onChange={(e) => setForm({ ...form, topic: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2" data-testid="safety-topic">
                 <option value="">Select Topic</option>
                 {topics[form.type]?.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
@@ -8989,12 +7844,15 @@ import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/Feedb
             )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Additional notes..." />
+              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Additional notes..." data-testid="safety-notes" />
             </div>
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={onClose}>Cancel</Button>
-              <Button variant="brand" onClick={onClose}>Submit Sign-Off</Button>
+              <Button variant="secondary" onClick={onClose} disabled={submitLoading}>Cancel</Button>
+              <Button variant="brand" onClick={handleSubmit} disabled={submitLoading} data-testid="safety-submit">
+                {submitLoading ? 'Saving...' : 'Submit Sign-Off'}
+              </Button>
             </div>
+            {submitError && <p className="text-sm text-red-600">{submitError}</p>}
           </div>
         </Modal>
       );

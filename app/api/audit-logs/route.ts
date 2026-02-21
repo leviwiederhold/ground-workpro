@@ -8,9 +8,12 @@ const mapAuditLog = (row: any) => ({
   id: row.id,
   company_id: row.company_id ?? null,
   actor_user_id: row.actor_user_id ?? null,
+  action: row.action ?? row.event_type ?? row.event ?? "",
   event_type: row.event_type ?? row.event ?? "",
   entity_type: row.entity_type ?? null,
   entity_id: row.entity_id ?? null,
+  before_data: row.before_data ?? {},
+  after_data: row.after_data ?? {},
   metadata: row.metadata ?? {},
   created_at: row.created_at ?? null,
 });

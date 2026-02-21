@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { enqueueOutboxEvent } from "@/lib/outbox/queue";
 
 const poStatusSchema = z.enum(["draft", "submitted", "approved", "ordered", "received", "canceled"]);
 
@@ -50,29 +52,33 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   return lastResult;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
     let result = await supabase
       .from("purchase_orders")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
     if (result.error?.message?.toLowerCase().includes("created_at")) {
       result = await supabase
         .from("purchase_orders")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("company_id", companyId)
-        .order("id", { ascending: false });
+        .order("id", { ascending: false })
+        .range(from, to);
     }
 
-    const { data, error } = result;
+    const { data, error, count } = result;
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ purchase_orders: (data ?? []).map(mapPurchaseOrder) });
+    const purchase_orders = (data ?? []).map(mapPurchaseOrder);
+    return NextResponse.json({ purchase_orders, ...getPaginationMeta(count ?? purchase_orders.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -129,6 +135,20 @@ export async function POST(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
+
+    await enqueueOutboxEvent(supabase, {
+      companyId,
+      eventType: "purchase_order.created",
+      aggregateType: "purchase_order",
+      aggregateId: String(data.id),
+      idempotencyKey: `purchase_order.created:${data.id}`,
+      payload: {
+        purchase_order_id: data.id,
+        vendor_id: normalizeId(data.vendor_id),
+        job_id: normalizeId(data.job_id),
+        status: data.status ?? "draft",
+      },
+    });
 
     return NextResponse.json({ purchase_order: mapPurchaseOrder(data) });
   } catch (error) {

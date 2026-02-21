@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getJobCostSummary } from "@/lib/job-costing/getJobCostSummary";
+import { deleteFallbackAlert, upsertFallbackAlert } from "@/lib/alerts/fallbackStore";
 
 const paramsSchema = z.object({
   id: z.string().min(1),
@@ -26,32 +27,53 @@ async function syncMarginDriftAlert(
 ) {
   const dedupeKey = `margin_drift:${jobId}`;
   if (!summary.isOverBudget) {
-    await supabase
+    const deletion = await supabase
       .from("alerts")
       .delete()
       .eq("company_id", companyId)
       .eq("dedupe_key", dedupeKey);
+    if (
+      deletion.error &&
+      String(deletion.error.message || "").toLowerCase().includes("alerts") &&
+      String(deletion.error.message || "").toLowerCase().includes("does not exist")
+    ) {
+      deleteFallbackAlert(companyId, dedupeKey);
+    }
     return;
   }
 
-  await supabase.from("alerts").upsert(
-    {
-      company_id: companyId,
-      alert_type: "margin_drift",
-      title: "Margin drift detected",
-      message: `${jobName} is ${summary.variancePercent}% over budget (${summary.varianceAmount >= 0 ? "+" : ""}$${Math.abs(summary.varianceAmount).toFixed(2)})`,
-      entity_type: "job",
-      entity_id: String(jobId),
-      dedupe_key: dedupeKey,
-      metadata: {
-        estimatedCost: summary.estimatedCost,
-        actualCost: summary.actualCost,
-        variancePercent: summary.variancePercent,
-        marginDriftPercent: summary.marginDriftPercent,
-      },
+  const payload = {
+    company_id: companyId,
+    alert_type: "margin_drift",
+    title: "Margin drift detected",
+    message: `${jobName} is ${summary.variancePercent}% over budget (${summary.varianceAmount >= 0 ? "+" : ""}$${Math.abs(summary.varianceAmount).toFixed(2)})`,
+    entity_type: "job",
+    entity_id: String(jobId),
+    dedupe_key: dedupeKey,
+    metadata: {
+      estimatedCost: summary.estimatedCost,
+      actualCost: summary.actualCost,
+      variancePercent: summary.variancePercent,
+      marginDriftPercent: summary.marginDriftPercent,
     },
+  };
+
+  const upsert = await supabase.from("alerts").upsert(
+    payload,
     { onConflict: "company_id,dedupe_key" }
   );
+
+  if (upsert.error) {
+    upsertFallbackAlert(companyId, {
+      alert_type: payload.alert_type,
+      title: payload.title,
+      message: payload.message,
+      entity_type: payload.entity_type,
+      entity_id: payload.entity_id,
+      dedupe_key: payload.dedupe_key,
+      metadata: payload.metadata,
+    });
+  }
 }
 
 export async function GET(
@@ -85,7 +107,7 @@ export async function GET(
       .maybeSingle();
 
     if (jobError) {
-      return NextResponse.json({ error: jobError.message }, { status: 400 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (!job) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
@@ -93,7 +115,7 @@ export async function GET(
 
     const summaryResult = await getJobCostSummary(supabase, companyId, jobId);
     if (!summaryResult.ok) {
-      return NextResponse.json({ error: summaryResult.error }, { status: 400 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     await syncMarginDriftAlert(
@@ -107,9 +129,8 @@ export async function GET(
     return NextResponse.json({ item: summaryResult.summary });
   } catch (error) {
     if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message || "Unexpected server error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

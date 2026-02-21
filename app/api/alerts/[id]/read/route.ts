@@ -23,6 +23,15 @@ export async function POST(
     }
 
     const { supabase, companyId } = await getCompanyId();
+
+    if (isFallbackId) {
+      const updated = markFallbackAlertRead(companyId, id);
+      if (!updated) {
+        return NextResponse.json({ error: "Alert not found" }, { status: 404 });
+      }
+      return NextResponse.json({ item: { success: true } });
+    }
+
     const now = new Date().toISOString();
 
     const { data, error } = await supabase

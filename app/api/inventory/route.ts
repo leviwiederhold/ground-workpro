@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
 const inventoryStatusSchema = z.enum(["active", "low_stock", "out_of_stock", "inactive"]);
 
@@ -70,29 +71,33 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   return lastResult;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
     let result = await supabase
       .from("inventory")
-      .select("*")
+      .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
     if (result.error?.message?.toLowerCase().includes("created_at")) {
       result = await supabase
         .from("inventory")
-        .select("*")
+        .select("*", { count: "exact" })
         .eq("company_id", companyId)
-        .order("id", { ascending: false });
+        .order("id", { ascending: false })
+        .range(from, to);
     }
 
-    const { data, error } = result;
+    const { data, error, count } = result;
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ inventory: (data ?? []).map(mapInventory) });
+    const inventory = (data ?? []).map(mapInventory);
+    return NextResponse.json({ inventory, ...getPaginationMeta(count ?? inventory.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -4,8 +4,9 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
-const entityTypeSchema = z.enum(["job", "daily_report", "work_order"]);
+const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document"]);
 
 const normalizeId = (id: unknown): string | number | null => {
   if (id === null || id === undefined || id === "") return null;
@@ -21,21 +22,29 @@ const normalizeNumber = (value: unknown) => {
   return Number.isNaN(parsed) ? null : parsed;
 };
 
-const mapAttachment = (row: any) => ({
-  id: row.id,
-  entityType: row.entity_type ?? row.entityType ?? "",
-  entityId: normalizeId(row.entity_id ?? row.entityId),
-  fileName: row.file_name ?? row.fileName ?? "",
-  contentType: row.content_type ?? row.contentType ?? "application/octet-stream",
-  bucket: row.storage_bucket ?? row.bucket ?? "attachments",
-  path: row.storage_path ?? row.path ?? row.file_path ?? "",
-  fileSize: normalizeNumber(row.file_size ?? row.fileSize),
-  createdAt: row.created_at ?? row.createdAt ?? "",
-});
+const mapAttachment = (row: any, companyId?: string) => {
+  const rawEntityType = row.entity_type ?? row.entityType ?? "";
+  const rawPath = String(row.storage_path ?? row.path ?? row.file_path ?? "");
+  const normalizedEntityType =
+    rawEntityType === "work_order" && companyId && rawPath.includes(`/${companyId}/document/`)
+      ? "document"
+      : rawEntityType;
+  return {
+    id: row.id,
+    entityType: normalizedEntityType,
+    entityId: normalizeId(row.entity_id ?? row.entityId),
+    fileName: row.file_name ?? row.fileName ?? "",
+    contentType: row.content_type ?? row.contentType ?? "application/octet-stream",
+    bucket: row.storage_bucket ?? row.bucket ?? "attachments",
+    path: row.storage_path ?? row.path ?? row.file_path ?? "",
+    fileSize: normalizeNumber(row.file_size ?? row.fileSize),
+    createdAt: row.created_at ?? row.createdAt ?? "",
+  };
+};
 
 const jsonUploadSchema = z.object({
   entity_type: entityTypeSchema,
-  entity_id: z.union([z.number(), z.string()]),
+  entity_id: z.union([z.number(), z.string()]).optional(),
   file_name: z.string().min(1),
   content_type: z.string().optional(),
   file_base64: z.string().min(1),
@@ -48,9 +57,10 @@ const sanitizeFileName = (value: string) =>
     .replace(/_+/g, "_")
     .slice(0, 180);
 
-const getBucketForEntityType = (entityType: "job" | "daily_report" | "work_order") => {
+const getBucketForEntityType = (entityType: "job" | "daily_report" | "work_order" | "document") => {
   if (entityType === "job") return "job-photos";
   if (entityType === "daily_report") return "report-attachments";
+  if (entityType === "document") return "report-attachments";
   return "work-order-attachments";
 };
 
@@ -85,9 +95,13 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 async function assertEntityOwnership(
   supabase: any,
   companyId: string,
-  entityType: "job" | "daily_report" | "work_order",
+  entityType: "job" | "daily_report" | "work_order" | "document",
   entityId: string | number | null
 ) {
+  if (entityType === "document") {
+    return { ok: true };
+  }
+
   if (entityId === null) return { ok: false, error: "Invalid entity_id" };
 
   if (entityType === "job") {
@@ -124,15 +138,13 @@ async function assertEntityOwnership(
 
 export async function GET(request: Request) {
   try {
+    const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { searchParams } = new URL(request.url);
     const entityTypeValue = searchParams.get("entity_type");
     const entityIdValue = searchParams.get("entity_id");
 
-    if (!entityTypeValue || !entityIdValue) {
-      return NextResponse.json(
-        { error: "entity_type and entity_id are required" },
-        { status: 400 }
-      );
+    if (!entityTypeValue) {
+      return NextResponse.json({ error: "entity_type is required" }, { status: 400 });
     }
 
     const entityTypeParsed = entityTypeSchema.safeParse(entityTypeValue);
@@ -143,30 +155,37 @@ export async function GET(request: Request) {
     const { supabase, companyId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
 
-    let result = await supabase
+    let query = supabase
       .from("attachments")
-      .select("*")
-      .eq("company_id", companyId)
-      .eq("entity_type", entityTypeParsed.data)
-      .eq("entity_id", normalizeId(entityIdValue))
-      .order("created_at", { ascending: false });
+      .select("*", { count: "exact" })
+      .eq("company_id", companyId);
 
-    if (result.error?.message?.toLowerCase().includes("created_at")) {
-      result = await supabase
-        .from("attachments")
-        .select("*")
-        .eq("company_id", companyId)
+    if (entityTypeParsed.data === "document") {
+      query = query.eq("entity_id", companyId).in("entity_type", ["document", "work_order"]);
+    } else {
+      if (!entityIdValue) {
+        return NextResponse.json(
+          { error: "entity_id is required for this entity_type" },
+          { status: 400 }
+        );
+      }
+      query = query
         .eq("entity_type", entityTypeParsed.data)
-        .eq("entity_id", normalizeId(entityIdValue))
-        .order("id", { ascending: false });
+        .eq("entity_id", normalizeId(entityIdValue));
     }
 
-    const { data, error } = result;
+    let result = await query.order("created_at", { ascending: false }).range(from, to);
+
+    if (result.error?.message?.toLowerCase().includes("created_at")) {
+      result = await query.order("id", { ascending: false }).range(from, to);
+    }
+
+    const { data, error, count } = result;
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const mapped = (data ?? []).map(mapAttachment);
+    const mapped = (data ?? []).map((row) => mapAttachment(row, companyId));
     const withSignedUrls = await Promise.all(
       mapped.map(async (attachment) => {
         if (!attachment.bucket || !attachment.path) {
@@ -187,7 +206,10 @@ export async function GET(request: Request) {
       })
     );
 
-    return NextResponse.json({ attachments: withSignedUrls });
+    return NextResponse.json({
+      attachments: withSignedUrls,
+      ...getPaginationMeta(count ?? withSignedUrls.length, page, pageSize),
+    });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -199,17 +221,11 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    try {
-      await requireRole(["admin", "pm", "foreman", "mechanic"]);
-    } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const { supabase, companyId, userId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
     const storageClient = supabaseAdmin ?? supabase;
 
-    let entityType: "job" | "daily_report" | "work_order";
+    let entityType: "job" | "daily_report" | "work_order" | "document";
     let entityId: string | number | null;
     let fileName: string;
     let contentType: string;
@@ -223,7 +239,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Invalid entity_type" }, { status: 400 });
       }
       entityType = entityTypeParsed.data;
-      entityId = normalizeId(formData.get("entity_id"));
+      entityId = entityType === "document" ? companyId : normalizeId(formData.get("entity_id"));
       const file = formData.get("file");
       if (!(file instanceof File)) {
         return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -246,13 +262,26 @@ export async function POST(request: Request) {
         );
       }
       entityType = parsed.data.entity_type;
-      entityId = normalizeId(parsed.data.entity_id);
+      entityId = entityType === "document" ? companyId : normalizeId(parsed.data.entity_id);
+      if (entityType !== "document" && entityId === null) {
+        return NextResponse.json({ error: "entity_id is required" }, { status: 400 });
+      }
       fileName = parsed.data.file_name;
       contentType = parsed.data.content_type || "application/octet-stream";
       const base64Payload = parsed.data.file_base64.includes(",")
         ? parsed.data.file_base64.split(",").pop() || ""
         : parsed.data.file_base64;
       fileBytes = new Uint8Array(Buffer.from(base64Payload, "base64"));
+    }
+
+    try {
+      if (entityType === "document") {
+        await requireRole(["admin", "pm"]);
+      } else {
+        await requireRole(["admin", "pm", "foreman", "mechanic"]);
+      }
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const ownership = await assertEntityOwnership(supabase, companyId, entityType, entityId);
@@ -262,7 +291,8 @@ export async function POST(request: Request) {
 
     const safeFileName = sanitizeFileName(fileName);
     const bucket = getBucketForEntityType(entityType);
-    const path = `${companyId}/${entityType}/${normalizeEntityIdForPath(entityId)}/${Date.now()}-${safeFileName}`;
+    const pathEntityScope = entityType === "document" ? "company" : normalizeEntityIdForPath(entityId);
+    const path = `${companyId}/${entityType}/${pathEntityScope}/${Date.now()}-${safeFileName}`;
 
     const { error: uploadError } = await storageClient.storage
       .from(bucket)
@@ -292,6 +322,16 @@ export async function POST(request: Request) {
       delete withoutUploadedBy.uploaded_by;
       result = await insertWithColumnFallback(supabase, withoutUploadedBy);
     }
+    if (
+      entityType === "document" &&
+      result.error?.message?.includes("attachments_entity_type_check")
+    ) {
+      const legacyPayload: Record<string, unknown> = {
+        ...insertPayload,
+        entity_type: "work_order",
+      };
+      result = await insertWithColumnFallback(supabase, legacyPayload);
+    }
 
     const { data, error } = result;
     if (error) {
@@ -299,7 +339,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const mapped = mapAttachment(data);
+    const mapped = mapAttachment(data, companyId);
     const { data: signedData } = await storageClient.storage
       .from(bucket)
       .createSignedUrl(path, 60 * 60);

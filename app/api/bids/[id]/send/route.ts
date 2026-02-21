@@ -6,6 +6,9 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { calcBid } from "@/lib/pricing/calcBid";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { errorResponse } from "@/lib/http/errorResponse";
+
+const ROUTE = "/api/bids/[id]/send";
 
 const sendSchema = z.object({
   override: z.boolean().optional().default(false),
@@ -18,11 +21,13 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
     try {
-      await requireRole(["admin", "pm"]);
+      const access = await requireRole(["admin", "pm"]);
+      context = { companyId: access.companyId, userId: access.userId, role: access.role };
     } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      return errorResponse("Forbidden", 403);
     }
 
     const { id } = await params;
@@ -58,10 +63,10 @@ export async function POST(
       .maybeSingle();
 
     if (bidError) {
-      return NextResponse.json({ error: bidError.message }, { status: 400 });
+      return errorResponse(bidError.message, 400);
     }
     if (!bidRow) {
-      return NextResponse.json({ error: "Bid not found" }, { status: 404 });
+      return errorResponse("Bid not found", 404);
     }
 
     const { data: pricingSettings, error: pricingError } = await supabase
@@ -71,7 +76,7 @@ export async function POST(
       .maybeSingle();
 
     if (pricingError && !pricingError.message.toLowerCase().includes("does not exist")) {
-      return NextResponse.json({ error: pricingError.message }, { status: 400 });
+      return errorResponse(pricingError.message, 400);
     }
 
     const { data: bidItems, error: itemsError } = await supabase
@@ -81,7 +86,7 @@ export async function POST(
       .eq("bid_id", bidId);
 
     if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 400 });
+      return errorResponse(itemsError.message, 400);
     }
 
     const summary = calcBid(pricingSettings ?? null, bidItems ?? []);
@@ -122,7 +127,7 @@ export async function POST(
     }
 
     if (updateResult?.error) {
-      return NextResponse.json({ error: updateResult.error.message }, { status: 400 });
+      return errorResponse(updateResult.error.message, 400);
     }
 
     await logAuditEvent({
@@ -132,6 +137,18 @@ export async function POST(
       eventType: "bid.sent",
       entityType: "bid",
       entityId: bidId,
+      before: {
+        status: bidRow.status ?? null,
+        sent_at: bidRow.sent_at ?? null,
+        margin_override_acknowledged: bidRow.margin_override_acknowledged ?? false,
+        margin_override_note: bidRow.margin_override_note ?? null,
+      },
+      after: {
+        status: updateResult.data?.status ?? "sent",
+        sent_at: updateResult.data?.sent_at ?? null,
+        margin_override_acknowledged: updateResult.data?.margin_override_acknowledged ?? !!override,
+        margin_override_note: updateResult.data?.margin_override_note ?? (override ? (override_note || "") : null),
+      },
       metadata: {
         override: !!override,
         override_note: override ? (override_note || "") : null,
@@ -143,9 +160,14 @@ export async function POST(
     return NextResponse.json({ bid: updateResult.data, summary });
   } catch (error) {
     if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return errorResponse(error.message, error.status);
     }
     const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: message || "Unexpected server error" }, { status: 500 });
+    return errorResponse(message || "Unexpected server error", 500, {
+      context: {
+        route: ROUTE,
+        ...context,
+      },
+    });
   }
 }

@@ -1,4 +1,5 @@
 import { errorResponse } from "@/lib/http/errorResponse";
+import { incrementMetric } from "@/lib/observability/metrics";
 
 type RateLimitOptions = {
   keyPrefix: string;
@@ -64,6 +65,10 @@ export function enforceRateLimit(request: Request, options: RateLimitOptions) {
       1,
       Math.ceil((current.resetAt - now) / 1000)
     );
+    incrementMetric("rate_limited_total", {
+      keyPrefix: options.keyPrefix,
+      limit: options.limit,
+    });
     return errorResponse("Too many requests", 429, {
       headers: { "Retry-After": String(retryAfterSeconds) },
     });

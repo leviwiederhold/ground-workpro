@@ -2,9 +2,12 @@ type FallbackAuditLog = {
   id: string;
   company_id: string;
   actor_user_id: string | null;
+  action: string;
   event_type: string;
   entity_type: string | null;
   entity_id: string | null;
+  before_data: Record<string, unknown>;
+  after_data: Record<string, unknown>;
   metadata: Record<string, unknown>;
   created_at: string;
 };

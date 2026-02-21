@@ -31,6 +31,7 @@ export function syncFallbackAlerts(companyId: string, candidates: AlertCandidate
   const store = getStore();
   const now = new Date().toISOString();
   const activeIds = new Set<string>();
+  const managedPrefixes = ["low_inventory:", "overdue_maintenance:"];
 
   for (const candidate of candidates) {
     const id = `${companyId}:${candidate.dedupe_key}`;
@@ -69,6 +70,10 @@ export function syncFallbackAlerts(companyId: string, candidates: AlertCandidate
 
   for (let i = store.length - 1; i >= 0; i -= 1) {
     if (store[i].company_id !== companyId) continue;
+    const isManaged = managedPrefixes.some((prefix) =>
+      String(store[i].id).startsWith(`${companyId}:${prefix}`)
+    );
+    if (!isManaged) continue;
     if (!activeIds.has(store[i].id)) {
       store.splice(i, 1);
     }
@@ -96,5 +101,63 @@ export function markFallbackAlertRead(companyId: string, alertId: string): boole
     read_at: now,
     updated_at: now,
   };
+  return true;
+}
+
+type FallbackAlertInput = {
+  alert_type: string;
+  title: string;
+  message: string;
+  entity_type: string;
+  entity_id: string;
+  dedupe_key: string;
+  metadata?: Record<string, unknown>;
+};
+
+export function upsertFallbackAlert(companyId: string, input: FallbackAlertInput): FallbackAlert {
+  const store = getStore();
+  const now = new Date().toISOString();
+  const id = `${companyId}:${input.dedupe_key}`;
+  const idx = store.findIndex((item) => item.id === id);
+
+  if (idx >= 0) {
+    const existing = store[idx];
+    store[idx] = {
+      ...existing,
+      alert_type: input.alert_type,
+      title: input.title,
+      message: input.message,
+      entity_type: input.entity_type,
+      entity_id: input.entity_id,
+      metadata: input.metadata ?? {},
+      updated_at: now,
+    };
+    return store[idx];
+  }
+
+  const created: FallbackAlert = {
+    id,
+    company_id: companyId,
+    alert_type: input.alert_type,
+    title: input.title,
+    message: input.message,
+    entity_type: input.entity_type,
+    entity_id: input.entity_id,
+    metadata: input.metadata ?? {},
+    is_read: false,
+    read_at: null,
+    created_at: now,
+    updated_at: now,
+  };
+  store.push(created);
+  return created;
+}
+
+export function deleteFallbackAlert(companyId: string, dedupeKey: string): boolean {
+  const store = getStore();
+  const id = `${companyId}:${dedupeKey}`;
+  const idx = store.findIndex((item) => item.id === id);
+  if (idx < 0) return false;
+  store.splice(idx, 1);
   return true;
 }

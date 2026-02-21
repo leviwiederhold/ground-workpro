@@ -40,3 +40,28 @@ export function InlineError({ children, className = "", testId }: BlockProps) {
   );
 }
 
+type SkeletonBlockProps = {
+  lines?: number;
+  className?: string;
+  testId?: string;
+};
+
+export function SkeletonBlock({ lines = 3, className = "", testId }: SkeletonBlockProps) {
+  return (
+    <div
+      className={`rounded-lg border border-gray-200 bg-white p-4 ${className}`.trim()}
+      data-testid={testId}
+      aria-busy="true"
+      aria-live="polite"
+    >
+      <div className="animate-pulse space-y-2">
+        {Array.from({ length: lines }).map((_, idx) => (
+          <div
+            key={idx}
+            className={`h-3 rounded bg-gray-200 ${idx === lines - 1 ? "w-2/3" : "w-full"}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}

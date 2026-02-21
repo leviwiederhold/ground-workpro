@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabase/server";
+import * as Sentry from "@sentry/nextjs";
 
 export class TenantResolverError extends Error {
   status: number;
@@ -21,6 +22,7 @@ export async function getCompanyId() {
     .from("memberships")
     .select("company_id")
     .eq("user_id", userData.user.id)
+    .order("company_id", { ascending: true })
     .limit(1);
 
   if (membershipsError) {
@@ -34,6 +36,10 @@ export async function getCompanyId() {
       403
     );
   }
+
+  Sentry.setUser({ id: userData.user.id });
+  Sentry.setTag("companyId", String(companyId));
+  Sentry.setTag("userId", String(userData.user.id));
 
   return { supabase, companyId, userId: userData.user.id };
 }

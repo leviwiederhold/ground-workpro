@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { buildAlertCandidates, generateAlertsForCompany } from "@/lib/alerts/generateAlerts";
-import { syncFallbackAlerts } from "@/lib/alerts/fallbackStore";
+import { getFallbackAlerts, syncFallbackAlerts } from "@/lib/alerts/fallbackStore";
 
 const mapAlert = (row: any) => ({
   id: row.id,
@@ -66,7 +66,22 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ items: (data ?? []).map(mapAlert) });
+    const dbItems = (data ?? []).map(mapAlert);
+    const fallbackItems = getFallbackAlerts(companyId).map(mapAlert);
+    const mergedById = new Map<string, ReturnType<typeof mapAlert>>();
+
+    for (const item of dbItems) {
+      mergedById.set(String(item.id), item);
+    }
+    for (const item of fallbackItems) {
+      mergedById.set(String(item.id), item);
+    }
+
+    const items = Array.from(mergedById.values()).sort((a, b) =>
+      String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""))
+    );
+
+    return NextResponse.json({ items });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -73,6 +73,12 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireRole(["admin", "pm", "mechanic"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
     let result = await supabase
@@ -110,7 +116,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "pm"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

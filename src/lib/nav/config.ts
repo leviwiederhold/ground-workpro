@@ -1,0 +1,125 @@
+export type AppRole = "admin" | "pm" | "foreman" | "mechanic" | "operator";
+
+export type NavItem = {
+  key: string;
+  label: string;
+  href: string;
+  iconKey?: string;
+};
+
+export const NAV_ITEMS: NavItem[] = [
+  { key: "dashboard", label: "Dashboard", href: "/", iconKey: "grid-2" },
+  { key: "messages", label: "Messages", href: "/messages", iconKey: "comments" },
+  { key: "schedule", label: "Schedule", href: "/schedule", iconKey: "calendar-week" },
+  { key: "jobs", label: "Jobs", href: "/jobs", iconKey: "briefcase" },
+  { key: "fleet", label: "Fleet", href: "/fleet", iconKey: "truck-field" },
+  { key: "team", label: "Team", href: "/team", iconKey: "people-group" },
+  { key: "inventory", label: "Inventory", href: "/inventory", iconKey: "warehouse" },
+  { key: "maintenance", label: "Maintenance", href: "/maintenance", iconKey: "toolbox" },
+  { key: "training", label: "Training", href: "/training", iconKey: "chalkboard-user" },
+  { key: "safety", label: "Safety", href: "/safety", iconKey: "shield-heart" },
+  { key: "bids", label: "Bids", href: "/bids", iconKey: "file-contract" },
+  { key: "vendors", label: "Vendors", href: "/vendors", iconKey: "handshake" },
+  { key: "reports", label: "Reports", href: "/reports", iconKey: "chart-mixed" },
+  { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
+  { key: "integrations", label: "Integrations", href: "/integrations", iconKey: "plug" },
+  { key: "documents", label: "Documents", href: "/documents", iconKey: "folder-open" },
+  { key: "settings", label: "Settings", href: "/settings", iconKey: "gear" },
+  { key: "audit", label: "Audit", href: "/audit", iconKey: "clipboard-list" },
+];
+
+export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
+  admin: [
+    "dashboard",
+    "jobs",
+    "bids",
+    "vendors",
+    "inventory",
+    "fleet",
+    "maintenance",
+    "safety",
+    "messages",
+    "finance",
+    "reports",
+    "integrations",
+    "settings",
+    "audit",
+    "documents",
+    "team",
+    "training",
+    "schedule",
+  ],
+  pm: [
+    "dashboard",
+    "jobs",
+    "bids",
+    "vendors",
+    "inventory",
+    "fleet",
+    "safety",
+    "messages",
+    "reports",
+    "finance",
+    "settings",
+    "documents",
+    "team",
+    "training",
+    "schedule",
+  ],
+  foreman: [
+    "dashboard",
+    "jobs",
+    "reports",
+    "safety",
+    "messages",
+    "fleet",
+    "documents",
+    "training",
+    "schedule",
+  ],
+  mechanic: [
+    "dashboard",
+    "fleet",
+    "maintenance",
+    "inventory",
+    "messages",
+    "safety",
+    "documents",
+    "training",
+    "schedule",
+  ],
+  operator: ["dashboard", "reports", "safety", "messages", "documents", "training"],
+};
+
+export const ROUTE_GUARDS: Record<string, AppRole[]> = {
+  "/jobs": ["admin", "pm", "foreman"],
+  "/bids": ["admin", "pm"],
+  "/vendors": ["admin", "pm"],
+  "/inventory": ["admin", "pm", "mechanic"],
+  "/fleet": ["admin", "pm", "foreman", "mechanic"],
+  "/maintenance": ["admin", "pm", "foreman", "mechanic"],
+  "/finance": ["admin", "pm"],
+  "/integrations": ["admin", "pm"],
+  "/settings": ["admin", "pm"],
+  "/audit": ["admin", "pm"],
+};
+
+export function toNavItems(role: AppRole): NavItem[] {
+  const allowed = new Set(ROLE_NAV_KEYS[role]);
+  return NAV_ITEMS.filter((item) => allowed.has(item.key));
+}
+
+export function normalizeAppRole(rawRole: unknown): AppRole | null {
+  const normalized = String(rawRole ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z]/g, "");
+
+  if (!normalized) return null;
+  if (normalized.includes("admin") || normalized.includes("executive") || normalized.includes("ceo")) return "admin";
+  if (normalized === "pm" || normalized.includes("operations") || normalized.includes("projectmanager")) return "pm";
+  if (normalized.includes("foreman")) return "foreman";
+  if (normalized.includes("mechanic")) return "mechanic";
+  if (normalized.includes("operator") || normalized.includes("field")) return "operator";
+  return null;
+}

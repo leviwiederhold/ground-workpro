@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { enqueueOutboxEvent } from "@/lib/outbox/queue";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const poStatusSchema = z.enum(["draft", "submitted", "approved", "ordered", "received", "canceled"]);
 
@@ -54,6 +55,12 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
     let result = await supabase
@@ -90,6 +97,12 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     let body: unknown;
     try {
       body = await request.json();

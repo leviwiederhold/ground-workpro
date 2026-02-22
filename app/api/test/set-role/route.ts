@@ -16,7 +16,7 @@ const toValidationError = (issues: { path: (string | number)[]; message: string 
 });
 
 export async function POST(request: Request) {
-  if (process.env.E2E !== "true") {
+  if (process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -27,32 +27,26 @@ export async function POST(request: Request) {
       return NextResponse.json(toValidationError(parsed.error.issues), { status: 422 });
     }
 
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { supabase, userId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
     const client = supabaseAdmin ?? supabase;
 
-    const { data: updated, error } = await client
+    const { data: updatedRows, error } = await client
       .from("memberships")
       .update({ role: parsed.data.role })
-      .eq("company_id", companyId)
       .eq("user_id", userId)
-      .select("company_id, user_id, role")
-      .maybeSingle();
+      .select("company_id, user_id, role");
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
-    if (!updated) {
+    if (!updatedRows || updatedRows.length === 0) {
       return NextResponse.json({ error: "Membership not found" }, { status: 404 });
     }
 
-    return NextResponse.json({
-      item: {
-        company_id: updated.company_id,
-        user_id: updated.user_id,
-        role: updated.role,
-      },
-    });
+    const response = NextResponse.json({ success: true });
+    response.cookies.set("e2e_role", parsed.data.role, { path: "/", sameSite: "lax" });
+    return response;
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

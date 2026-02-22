@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 const jobStatusSchema = z.enum([
   "draft",
@@ -43,6 +44,48 @@ const mapJob = (row: any) => ({
 });
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const normalizedId = normalizeId(id);
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { data, error } = await supabase
+      .from("jobs")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", normalizedId)
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ job: mapJob(data) });
+  } catch (error) {
+    if (error instanceof TenantResolverError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
+  }
+}
 
 export async function PATCH(
   request: Request,

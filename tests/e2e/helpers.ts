@@ -19,10 +19,10 @@ export function getE2ECreds() {
 export async function loginViaUI(page: Page) {
   attachFailFast(page);
   const { email, password } = getE2ECreds();
-  const navJobs = page.getByTestId('nav-jobs');
+  const navDashboard = page.getByTestId('nav-dashboard');
 
   await page.goto('/');
-  if (await navJobs.isVisible().catch(() => false)) {
+  if (await navDashboard.isVisible().catch(() => false)) {
     return;
   }
 
@@ -42,7 +42,7 @@ export async function loginViaUI(page: Page) {
     throw new Error('E2E login failed: app did not navigate after submit.');
   });
 
-  await expect(navJobs).toBeVisible({ timeout: 30_000 });
+  await expect(navDashboard).toBeVisible({ timeout: 30_000 });
 }
 
 type JobCostingSeed = {

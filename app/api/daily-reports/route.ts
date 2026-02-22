@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 const materialSchema = z.object({
   item: z.string().default(""),
@@ -88,30 +89,59 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
-    const { supabase, companyId } = await getCompanyId();
-    let result = await supabase
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && scopedJobIds.length === 0) {
+      const pagination = getPaginationMeta(0, page, pageSize);
+      return NextResponse.json({
+        dailyReports: [],
+        daily_reports: [],
+        reports: [],
+        items: [],
+        ...pagination,
+      });
+    }
+
+    let query = supabase
       .from("daily_reports")
       .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("date", { ascending: false })
-      .range(from, to);
+      .order("date", { ascending: false });
+
+    if (scopedJobIds) {
+      query = query.in("job_id", scopedJobIds);
+    }
+
+    let result = await query.range(from, to);
 
     if (result.error?.message?.toLowerCase().includes("date")) {
-      result = await supabase
+      let reportDateQuery = supabase
         .from("daily_reports")
         .select("*", { count: "exact" })
         .eq("company_id", companyId)
-        .order("report_date", { ascending: false })
-        .range(from, to);
+        .order("report_date", { ascending: false });
+      if (scopedJobIds) {
+        reportDateQuery = reportDateQuery.in("job_id", scopedJobIds);
+      }
+      result = await reportDateQuery.range(from, to);
     }
 
     if (result.error?.message?.toLowerCase().includes("report_date")) {
-      result = await supabase
+      let createdAtQuery = supabase
         .from("daily_reports")
         .select("*", { count: "exact" })
         .eq("company_id", companyId)
-        .order("created_at", { ascending: false })
-        .range(from, to);
+        .order("created_at", { ascending: false });
+      if (scopedJobIds) {
+        createdAtQuery = createdAtQuery.in("job_id", scopedJobIds);
+      }
+      result = await createdAtQuery.range(from, to);
     }
 
     const { data, error, count } = result;
@@ -125,6 +155,7 @@ export async function GET(request: Request) {
       dailyReports: mapped,
       daily_reports: mapped,
       reports: mapped,
+      items: mapped,
       ...getPaginationMeta(count ?? mapped.length, page, pageSize),
     });
   } catch (error) {
@@ -139,7 +170,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman"]);
+      await requireRole(["admin", "pm", "foreman", "operator"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -160,11 +191,39 @@ export async function POST(request: Request) {
     }
 
     const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const payload = parsed.data;
+    const jobId = normalizeId(payload.jobId);
+
+    if ((role === "foreman" || role === "operator") && jobId === null) {
+      return NextResponse.json({ error: "jobId is required" }, { status: 400 });
+    }
+
+    if (jobId !== null) {
+      const { data: jobRows, error: jobError } = await supabase
+        .from("jobs")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("id", jobId)
+        .limit(1);
+      if (jobError || !jobRows?.length) {
+        return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      }
+    }
+
+    if (role === "foreman" || role === "operator") {
+      const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+      if (jobId === null || !scopedJobIds?.includes(String(jobId))) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
 
     const basePayload = {
       company_id: companyId,
-      job_id: normalizeId(payload.jobId),
+      job_id: jobId,
       date: normalizeDate(payload.date),
       report_date: normalizeDate(payload.date),
       weather: payload.weather ?? "",

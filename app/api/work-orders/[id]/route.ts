@@ -103,7 +103,7 @@ export async function PATCH(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "mechanic"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -159,7 +159,7 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm"]);
+      await requireRole(["admin"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

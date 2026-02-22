@@ -516,6 +516,8 @@ const confirmDestructiveAction = (targetLabel) =>
       executive: { label: 'Executive / CEO', icon: 'crown', color: 'text-yellow-500' },
       operations: { label: 'Operations Manager', icon: 'sitemap', color: 'text-blue-500' },
       foreman: { label: 'Foreman', icon: 'helmet-safety', color: 'text-orange-500' },
+      mechanic: { label: 'Mechanic', icon: 'wrench', color: 'text-red-500' },
+      operator: { label: 'Operator', icon: 'user-gear', color: 'text-green-500' },
       field: { label: 'Field Staff', icon: 'user-gear', color: 'text-green-500' },
     };
 
@@ -527,6 +529,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [currentRole, setCurrentRole] = useState('executive');
       const [showRoleSelector, setShowRoleSelector] = useState(false);
+      const [serverNavItems, setServerNavItems] = useState([]);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
       const [alerts, setAlerts] = useState([]);
@@ -562,6 +565,15 @@ const confirmDestructiveAction = (targetLabel) =>
       const [safetyDeleteLoadingId, setSafetyDeleteLoadingId] = useState(null);
       const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
       const unreadAlertsCount = alerts.filter((alert) => !alert.is_read).length;
+
+      const mapServerRoleToUiRole = useCallback((role) => {
+        if (role === 'admin') return 'executive';
+        if (role === 'pm') return 'operations';
+        if (role === 'foreman') return 'foreman';
+        if (role === 'mechanic') return 'mechanic';
+        if (role === 'operator') return 'operator';
+        return 'executive';
+      }, []);
 
       const alertVisuals = {
         low_inventory: {
@@ -985,38 +997,55 @@ const confirmDestructiveAction = (targetLabel) =>
         };
       }, []);
 
-      // Role-based navigation - what each role can see
-      const rolePermissions = {
-        executive: ['dashboard', 'messages', 'schedule', 'jobs', 'fleet', 'team', 'inventory', 'maintenance', 'training', 'safety', 'bids', 'vendors', 'reports', 'costing', 'finance', 'marketing', 'integrations', 'documents'],
-        operations: ['dashboard', 'messages', 'schedule', 'jobs', 'fleet', 'team', 'inventory', 'maintenance', 'training', 'safety', 'vendors', 'reports', 'marketing', 'integrations', 'documents'],
-        foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'fleet', 'team', 'maintenance', 'training', 'safety', 'reports', 'documents'],
-        field: ['dashboard', 'messages', 'training', 'safety'],
+      useEffect(() => {
+        let isMounted = true;
+
+        const loadNav = async () => {
+          try {
+            const response = await fetch('/api/nav', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) return;
+            if (!isMounted) return;
+            setServerNavItems(Array.isArray(payload?.items) ? payload.items : []);
+            setCurrentRole(mapServerRoleToUiRole(payload?.role));
+          } catch {
+            if (isMounted) setServerNavItems([]);
+          }
+        };
+
+        loadNav();
+        return () => {
+          isMounted = false;
+        };
+      }, [mapServerRoleToUiRole]);
+
+      const navCountsByKey = {
+        messages: 3,
+        jobs: jobs.filter(j => j.status === 'active').length,
+        fleet: equipment.length,
+        team: employees.length,
+        inventory: inventory.filter(i => i.qtyOnHand <= i.reorderPoint).length,
+        maintenance: workOrders.filter(w => w.status !== 'completed').length,
+        training: trainingData.filter(t => t.required && t.completedBy.length < employees.length).length,
+        bids: bids.filter(b => b.status === 'pending').length,
       };
 
-      // Full Navigation Items with modern icons
-      const allNavItems = [
-        { id: 'dashboard', icon: 'grid-2', label: 'Dashboard' },
-        { id: 'messages', icon: 'comments', label: 'Messages', count: 3 },
-        { id: 'schedule', icon: 'calendar-week', label: 'Schedule' },
-        { id: 'jobs', icon: 'briefcase', label: 'Jobs', count: jobs.filter(j => j.status === 'active').length },
-        { id: 'fleet', icon: 'truck-field', label: 'Fleet', count: equipment.length },
-        { id: 'team', icon: 'people-group', label: 'Team', count: employees.length },
-        { id: 'inventory', icon: 'warehouse', label: 'Inventory', count: inventory.filter(i => i.qtyOnHand <= i.reorderPoint).length },
-        { id: 'maintenance', icon: 'toolbox', label: 'Maintenance', count: workOrders.filter(w => w.status !== 'completed').length },
-        { id: 'training', icon: 'chalkboard-user', label: 'Training', count: trainingData.filter(t => t.required && t.completedBy.length < employees.length).length },
-        { id: 'safety', icon: 'shield-heart', label: 'Safety' },
-        { id: 'bids', icon: 'file-contract', label: 'Bids', count: bids.filter(b => b.status === 'pending').length },
-        { id: 'vendors', icon: 'handshake', label: 'Vendors' },
-        { id: 'reports', icon: 'chart-mixed', label: 'Reports' },
-        { id: 'costing', icon: 'money-check-dollar', label: 'Job Costing' },
-        { id: 'finance', icon: 'landmark', label: 'Finance' },
-        { id: 'marketing', icon: 'bullhorn', label: 'Marketing' },
-        { id: 'integrations', icon: 'plug', label: 'Integrations' },
-        { id: 'documents', icon: 'folder-open', label: 'Documents' },
-      ];
+      const navItems = serverNavItems.map((item) => ({
+        id: item.key,
+        icon: item.iconKey || 'circle',
+        label: item.label,
+        count: navCountsByKey[item.key],
+      }));
 
-      // Filter nav items based on role
-      const navItems = allNavItems.filter(item => rolePermissions[currentRole].includes(item.id));
+      useEffect(() => {
+        if (navItems.length === 0) {
+          if (currentView !== 'dashboard') setCurrentView('dashboard');
+          return;
+        }
+        if (!navItems.some((item) => item.id === currentView)) {
+          setCurrentView('dashboard');
+        }
+      }, [navItems, currentView]);
 
       useEffect(() => {
         if (!mobileSidebarOpen) return undefined;
@@ -7866,6 +7895,8 @@ const confirmDestructiveAction = (targetLabel) =>
       const [authMode, setAuthMode] = useState('login');
       const [formData, setFormData] = useState({ name: '', email: '', password: '', company: '' });
       const [authError, setAuthError] = useState('');
+      const [authNotice, setAuthNotice] = useState('');
+      const [authLoading, setAuthLoading] = useState(false);
 
       // =====================================================
       // IMAGE CONFIGURATION - UPDATE THESE WITH YOUR PHOTOS
@@ -7916,28 +7947,56 @@ const confirmDestructiveAction = (targetLabel) =>
       const handleSubmit = async (e) => {
         e.preventDefault();
         setAuthError('');
+        setAuthNotice('');
+        setAuthLoading(true);
         const supabase = supabaseBrowser();
 
-        if (authMode === 'login') {
-          const { error } = await supabase.auth.signInWithPassword({
+        try {
+          if (authMode === 'login') {
+            const { error } = await supabase.auth.signInWithPassword({
+              email: formData.email,
+              password: formData.password,
+            });
+            if (error) {
+              setAuthError(error.message);
+              return;
+            }
+
+            await supabase.auth.getSession();
+            onLogin(formData);
+            return;
+          }
+
+          const { data, error } = await supabase.auth.signUp({
             email: formData.email,
             password: formData.password,
           });
+
           if (error) {
+            const normalized = error.message.toLowerCase();
+            if (normalized.includes('already') || normalized.includes('exists') || normalized.includes('registered')) {
+              setAuthError('This email is already registered. Please log in.');
+              return;
+            }
             setAuthError(error.message);
             return;
           }
-          onLogin(formData);
-        } else {
-          const { error } = await supabase.auth.signUp({
-            email: formData.email,
-            password: formData.password,
-          });
-          if (error) {
-            setAuthError(error.message);
+
+          const identityCount = Array.isArray(data?.user?.identities) ? data.user.identities.length : 1;
+          if (data?.user && identityCount === 0) {
+            setAuthError('This email is already registered. Please log in.');
             return;
           }
-          onSignup(formData);
+
+          if (data?.session) {
+            await supabase.auth.getSession();
+            onSignup(formData);
+            return;
+          }
+
+          setAuthNotice('Check your email to confirm your account, then log in.');
+        } finally {
+          setAuthLoading(false);
         }
       };
 
@@ -7957,19 +8016,19 @@ const confirmDestructiveAction = (targetLabel) =>
                   </div>
                 </div>
                 <div className="hidden md:flex items-center gap-8">
-                  <a href="#features" className="text-gray-600 hover:text-gray-900 font-medium">Features</a>
-                  <a href="#pricing" className="text-gray-600 hover:text-gray-900 font-medium">Pricing</a>
-                  <a href="#testimonials" className="text-gray-600 hover:text-gray-900 font-medium">Testimonials</a>
+                  <a href="/features" className="text-gray-600 hover:text-gray-900 font-medium">Features</a>
+                  <a href="/pricing" className="text-gray-600 hover:text-gray-900 font-medium">Pricing</a>
+                  <a href="/testimonials" className="text-gray-600 hover:text-gray-900 font-medium">Testimonials</a>
                 </div>
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                   <button
-                    onClick={() => { setAuthMode('login'); setShowAuthModal(true); }}
+                    onClick={() => { window.location.href = '/login'; }}
                     className="px-2 sm:px-4 py-2 text-gray-700 font-medium hover:text-gray-900 whitespace-nowrap"
                   >
                     Log In
                   </button>
                   <button
-                    onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
+                    onClick={() => { window.location.href = '/signup'; }}
                     className="hidden sm:inline-flex px-5 py-2.5 bg-brand-500 text-white font-medium rounded-lg hover:bg-brand-600 transition-colors whitespace-nowrap"
                   >
                     Start Free Trial
@@ -8011,7 +8070,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 </p>
                 <div className="flex flex-col sm:flex-row items-start gap-4">
                   <button
-                    onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
+                    onClick={() => { window.location.href = '/signup'; }}
                     className="px-8 py-4 bg-brand-500 text-white font-semibold rounded-xl hover:bg-brand-600 transition-all transform hover:scale-105 shadow-lg shadow-brand-500/30 flex items-center gap-2"
                   >
                     Start Free Trial
@@ -8306,7 +8365,7 @@ const confirmDestructiveAction = (targetLabel) =>
                       ))}
                     </ul>
                     <button
-                      onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
+                      onClick={() => { window.location.href = '/signup'; }}
                       className={`w-full py-3 font-semibold rounded-lg transition-colors ${
                         plan.popular
                           ? 'bg-brand-500 text-white hover:bg-brand-600'
@@ -8336,7 +8395,7 @@ const confirmDestructiveAction = (targetLabel) =>
               <h2 className="text-4xl font-bold text-white mb-6">Ready to Transform Your Operation?</h2>
               <p className="text-xl text-brand-100 mb-10">Join 500+ excavation companies already using Groundwork Pro to streamline their business.</p>
               <button
-                onClick={() => { setAuthMode('signup'); setShowAuthModal(true); }}
+                onClick={() => { window.location.href = '/signup'; }}
                 className="px-10 py-4 bg-white text-brand-600 font-bold rounded-xl hover:bg-gray-100 transition-colors shadow-lg"
               >
                 Start Your Free Trial
@@ -8476,11 +8535,18 @@ const confirmDestructiveAction = (targetLabel) =>
                         <a href="#" className="text-sm text-brand-600 hover:text-brand-700 font-medium">Forgot password?</a>
                       </div>
                     )}
+                    {authError && (
+                      <p className="text-sm text-red-600" role="alert">{authError}</p>
+                    )}
+                    {!authError && authNotice && (
+                      <p className="text-sm text-green-700" role="status">{authNotice}</p>
+                    )}
                     <button
                       type="submit"
-                      className="w-full py-3 bg-brand-500 text-white font-semibold rounded-lg hover:bg-brand-600 transition-colors"
+                      disabled={authLoading}
+                      className="w-full py-3 bg-brand-500 text-white font-semibold rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                      {authMode === 'login' ? 'Sign In' : 'Create Account'}
+                      {authLoading ? 'Please wait...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
                     </button>
                   </form>
 
@@ -8508,7 +8574,11 @@ const confirmDestructiveAction = (targetLabel) =>
                   <p className="mt-6 text-center text-sm text-gray-500">
                     {authMode === 'login' ? "Don't have an account? " : "Already have an account? "}
                     <button
-                      onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+                      onClick={() => {
+                        setAuthError('');
+                        setAuthNotice('');
+                        setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                      }}
                       className="text-brand-600 hover:text-brand-700 font-medium"
                     >
                       {authMode === 'login' ? 'Sign up' : 'Sign in'}

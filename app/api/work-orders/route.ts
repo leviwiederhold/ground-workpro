@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { getRoleScopedEquipmentIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -84,20 +85,40 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
-    const { supabase, companyId } = await getCompanyId();
-    const { data, error, count } = await supabase
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+
+    if (!role || role === "operator") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const scopedEquipmentIds = role === "foreman"
+      ? await getRoleScopedEquipmentIds(supabase, companyId, userId, role)
+      : null;
+
+    if (scopedEquipmentIds && scopedEquipmentIds.length === 0) {
+      const pagination = getPaginationMeta(0, page, pageSize);
+      return NextResponse.json({ workOrders: [], items: [], ...pagination });
+    }
+
+    let query = supabase
       .from("work_orders")
       .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false })
-      .range(from, to);
+      .order("created_at", { ascending: false });
+
+    if (scopedEquipmentIds) {
+      query = query.in("equipment_id", scopedEquipmentIds);
+    }
+
+    const { data, error, count } = await query.range(from, to);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
     const workOrders = (data ?? []).map(mapWorkOrder);
-    return NextResponse.json({ workOrders, ...getPaginationMeta(count ?? workOrders.length, page, pageSize) });
+    return NextResponse.json({ workOrders, items: workOrders, ...getPaginationMeta(count ?? workOrders.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -110,7 +131,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "mechanic"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

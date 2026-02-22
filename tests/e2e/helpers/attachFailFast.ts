@@ -7,6 +7,10 @@ export function attachFailFast(page: Page) {
 
   page.on('console', (message) => {
     if (message.type() === 'error') {
+      const text = message.text();
+      if (text.includes('Failed to load resource') && text.includes('403 (Forbidden)')) {
+        return;
+      }
       throw new Error(`[console.error] ${message.text()}`);
     }
   });

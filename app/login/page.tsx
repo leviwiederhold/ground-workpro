@@ -17,19 +17,24 @@ export default function LoginPage() {
     setError(null);
 
     const supabase = supabaseBrowser();
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (signInError) {
-      setError(signInError.message);
+      if (signInError) {
+        setError(signInError.message);
+        return;
+      }
+
+      // Ensure session cookies are in place before redirecting.
+      await supabase.auth.getSession();
+      router.replace("/");
+      router.refresh();
+    } finally {
       setLoading(false);
-      return;
     }
-
-    router.push("/");
-    router.refresh();
   }
 
   return (

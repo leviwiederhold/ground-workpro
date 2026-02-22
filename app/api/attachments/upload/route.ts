@@ -156,7 +156,7 @@ export async function POST(request: Request) {
       if (entityType === "document") {
         await requireRole(["admin", "pm"]);
       } else {
-        await requireRole(["admin", "pm", "foreman", "mechanic"]);
+        await requireRole(["admin", "pm", "foreman", "mechanic", "operator"]);
       }
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

@@ -46,7 +46,7 @@ export async function DELETE(
     }
 
     try {
-      await requireRole(["admin", "pm", "foreman"]);
+      await requireRole(["admin"]);
     } catch {
       return forbidden();
     }

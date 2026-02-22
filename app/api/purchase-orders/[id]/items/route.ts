@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const createPoItemSchema = z.object({
   inventory_id: z.union([z.string(), z.number()]).nullable().optional(),
@@ -81,6 +82,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { id } = await params;
     const poId = normalizeRouteId(id);
     const { supabase, companyId } = await getCompanyId();
@@ -126,6 +133,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { id } = await params;
     const poId = normalizeRouteId(id);
 

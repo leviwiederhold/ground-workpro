@@ -53,9 +53,15 @@ export async function GET(request: Request) {
     if (channelsResult.error) {
       const message = channelsResult.error?.message || "";
       if (isMissingMessagesTables(message)) {
-        const fallback = listFallbackChannels(companyId);
+        const fallback = listFallbackChannels(companyId).map((channel) => ({
+          ...channel,
+          message_count: 0,
+          last_message_at: null,
+          last_message_preview: null,
+          unread_count: 0,
+        }));
         const paged = fallback.slice(from, to + 1);
-        return Response.json({ items: paged, ...getPaginationMeta(fallback.length, page, pageSize) });
+        return Response.json({ items: paged, unread_count: 0, ...getPaginationMeta(fallback.length, page, pageSize) });
       }
       return serverError();
     }
@@ -73,9 +79,15 @@ export async function GET(request: Request) {
 
     if (messagesQuery.error) {
       if (isMissingMessagesTables(messagesQuery.error.message || "")) {
-        const fallback = listFallbackChannels(companyId);
+        const fallback = listFallbackChannels(companyId).map((channel) => ({
+          ...channel,
+          message_count: 0,
+          last_message_at: null,
+          last_message_preview: null,
+          unread_count: 0,
+        }));
         const paged = fallback.slice(from, to + 1);
-        return Response.json({ items: paged, ...getPaginationMeta(fallback.length, page, pageSize) });
+        return Response.json({ items: paged, unread_count: 0, ...getPaginationMeta(fallback.length, page, pageSize) });
       }
       return serverError();
     }
@@ -108,11 +120,13 @@ export async function GET(request: Request) {
         message_count: countsByChannel.get(key) ?? 0,
         last_message_at: latest?.created_at ?? null,
         last_message_preview: latest?.body ?? null,
+        unread_count: 0,
       };
     });
 
     return Response.json({
       items,
+      unread_count: 0,
       ...getPaginationMeta(channelsResult.count ?? items.length, page, pageSize),
     });
   } catch (error) {

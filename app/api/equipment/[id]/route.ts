@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getRoleScopedEquipmentIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 const equipmentStatusSchema = z.enum(["active", "idle", "maintenance"]);
 
@@ -91,13 +92,55 @@ async function updateWithColumnFallback(
   return lastResult;
 }
 
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const normalizedId = normalizeId(id);
+    const scopedEquipmentIds = await getRoleScopedEquipmentIds(supabase, companyId, userId, role);
+    if (scopedEquipmentIds && !scopedEquipmentIds.includes(String(normalizedId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const { data, error } = await supabase
+      .from("equipment")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", normalizedId)
+      .maybeSingle();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    if (!data) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ equipment: mapEquipment(data) });
+  } catch (error) {
+    if (error instanceof TenantResolverError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: message || "Unexpected server error" }, { status: 500 });
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "mechanic"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -157,7 +200,7 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "mechanic"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

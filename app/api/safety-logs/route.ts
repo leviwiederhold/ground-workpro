@@ -5,6 +5,7 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { okItem } from "@/lib/http/json";
 import { createFallbackSafetyLog, listFallbackSafetyLogs } from "@/lib/safety/fallbackStore";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ const createSafetyLogSchema = z.object({
   occurred_on: z.string().trim().min(1),
   summary: z.string().trim().min(1),
   severity: z.enum(["low", "medium", "high"]),
+  job_id: z.union([z.string(), z.number()]).nullable().optional(),
 });
 
 type ValidationIssue = {
@@ -61,6 +63,7 @@ function normalizeSeverity(raw: unknown) {
 function normalizeSafetyLog(row: Record<string, unknown>) {
   return {
     id: row.id,
+    job_id: row.job_id ?? null,
     occurred_on: String(row.occurred_on ?? row.date ?? row.occurredAt ?? ""),
     summary: String(row.summary ?? row.topic ?? row.title ?? row.notes ?? ""),
     severity: normalizeSeverity(row.severity ?? row.type),
@@ -74,16 +77,17 @@ async function insertSafetyLogWithFallback(
   companyId: string,
   occurredOn: string,
   summary: string,
-  severity: "low" | "medium" | "high"
+  severity: "low" | "medium" | "high",
+  jobId: string | null
 ) {
   const attempts = [
-    { company_id: companyId, occurred_on: occurredOn, summary, severity },
-    { company_id: companyId, date: occurredOn, summary, severity },
-    { company_id: companyId, occurred_on: occurredOn, topic: summary, severity },
-    { company_id: companyId, date: occurredOn, topic: summary, severity },
-    { company_id: companyId, date: occurredOn, topic: summary, type: severityToLegacyType[severity] },
-    { company_id: companyId, occurred_on: occurredOn, summary, type: severityToLegacyType[severity] },
-    { company_id: companyId, date: occurredOn, topic: summary, type: severityToLegacyTypeLabel[severity] },
+    { company_id: companyId, occurred_on: occurredOn, summary, severity, job_id: jobId },
+    { company_id: companyId, date: occurredOn, summary, severity, job_id: jobId },
+    { company_id: companyId, occurred_on: occurredOn, topic: summary, severity, job_id: jobId },
+    { company_id: companyId, date: occurredOn, topic: summary, severity, job_id: jobId },
+    { company_id: companyId, date: occurredOn, topic: summary, type: severityToLegacyType[severity], job_id: jobId },
+    { company_id: companyId, occurred_on: occurredOn, summary, type: severityToLegacyType[severity], job_id: jobId },
+    { company_id: companyId, date: occurredOn, topic: summary, type: severityToLegacyTypeLabel[severity], job_id: jobId },
     {
       company_id: companyId,
       date: occurredOn,
@@ -91,7 +95,7 @@ async function insertSafetyLogWithFallback(
       type: severityToLegacyTypeLabel[severity],
       attendees: 0,
       conductor: "System",
-      job_id: null,
+      job_id: jobId,
     },
     {
       company_id: companyId,
@@ -100,7 +104,7 @@ async function insertSafetyLogWithFallback(
       severity,
       attendees: 0,
       conductor: "System",
-      job_id: null,
+      job_id: jobId,
     },
   ];
 
@@ -128,14 +132,29 @@ async function insertSafetyLogWithFallback(
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+    if (!role) {
+      return forbidden();
+    }
 
-    const { data, error, count } = await supabase
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && scopedJobIds.length === 0) {
+      const pagination = getPaginationMeta(0, page, pageSize);
+      return Response.json({ items: [], ...pagination });
+    }
+
+    let query = supabase
       .from("safety_logs")
       .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("occurred_on", { ascending: false })
-      .range(from, to);
+      .order("occurred_on", { ascending: false });
+
+    if (scopedJobIds) {
+      query = query.in("job_id", scopedJobIds);
+    }
+
+    const { data, error, count } = await query.range(from, to);
 
     const fallbackItems = listFallbackSafetyLogs(companyId);
 
@@ -157,7 +176,7 @@ export async function GET(request: Request) {
       merged.set(String(item.id), item);
     }
     for (const item of fallbackItems) {
-      merged.set(String(item.id), item);
+      merged.set(String(item.id), { ...item, job_id: null });
     }
 
     const sorted = Array.from(merged.values()).sort((a, b) =>
@@ -177,7 +196,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman"]);
+      await requireRole(["admin", "pm", "foreman", "operator"]);
     } catch {
       return forbidden();
     }
@@ -197,14 +216,47 @@ export async function POST(request: Request) {
       ]);
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+    if (!role) {
+      return forbidden();
+    }
+
+    const jobId =
+      parsedBody.data.job_id === null || parsedBody.data.job_id === undefined || parsedBody.data.job_id === ""
+        ? null
+        : String(parsedBody.data.job_id);
+
+    if ((role === "foreman" || role === "operator") && !jobId) {
+      return validationError([{ path: "job_id", message: "job_id is required" }]);
+    }
+
+    if (jobId) {
+      const { data: jobRows, error: jobError } = await supabase
+        .from("jobs")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("id", jobId)
+        .limit(1);
+      if (jobError || !jobRows?.length) {
+        return notFound("Job not found");
+      }
+    }
+
+    if ((role === "foreman" || role === "operator") && jobId) {
+      const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+      if (!scopedJobIds?.includes(String(jobId))) {
+        return forbidden();
+      }
+    }
 
     const { data, error } = await insertSafetyLogWithFallback(
       supabase,
       companyId,
       parsedBody.data.occurred_on,
       parsedBody.data.summary,
-      parsedBody.data.severity
+      parsedBody.data.severity,
+      jobId
     );
 
     if (error || !data) {

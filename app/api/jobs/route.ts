@@ -5,6 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 const jobStatusSchema = z.enum([
   "draft",
@@ -42,21 +43,38 @@ const mapJob = (row: any) => ({
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
-    const { supabase, companyId } = await getCompanyId();
-    const { data, error, count } = await supabase
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = await resolveMembershipRole(supabase, companyId, userId);
+
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && scopedJobIds.length === 0) {
+      const pagination = getPaginationMeta(0, page, pageSize);
+      return NextResponse.json({ jobs: [], items: [], ...pagination });
+    }
+
+    let query = supabase
       .from("jobs")
       .select("*", { count: "exact" })
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .range(from, to);
+      .order("id", { ascending: false });
+
+    if (scopedJobIds) {
+      query = query.in("id", scopedJobIds);
+    }
+
+    const { data, error, count } = await query.range(from, to);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
     const jobs = (data ?? []).map(mapJob);
-    return NextResponse.json({ jobs, ...getPaginationMeta(count ?? jobs.length, page, pageSize) });
+    return NextResponse.json({ jobs, items: jobs, ...getPaginationMeta(count ?? jobs.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -17,6 +17,14 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
+function isMissingNotificationsTable(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('notifications') &&
+    (normalized.includes('does not exist') || normalized.includes('not find'))
+  );
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -48,6 +56,9 @@ export async function GET(request: Request) {
       .limit(limit);
 
     if (result.error) {
+      if (isMissingNotificationsTable(result.error.message)) {
+        return NextResponse.json({ items: [] });
+      }
       return NextResponse.json({ error: result.error.message }, { status: 400 });
     }
 

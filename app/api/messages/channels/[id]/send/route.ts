@@ -1,5 +1,4 @@
 import { z } from "next/dist/compiled/zod";
-import { requireRole } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
@@ -7,6 +6,7 @@ import {
   createFallbackMessage,
   getFallbackChannel,
 } from "@/lib/messages/fallbackStore";
+import { getMyMembership } from "@/lib/messages/members";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,7 @@ function toTenantErrorResponse(error: TenantResolverError) {
 function isMissingMessagesTables(message: string) {
   const normalized = message.toLowerCase();
   return (
-    (normalized.includes("message_channels") || normalized.includes("messages")) &&
+    (normalized.includes("message_channels") || normalized.includes("messages") || normalized.includes("message_channel_members")) &&
     (normalized.includes("does not exist") || normalized.includes("not find"))
   );
 }
@@ -54,12 +54,6 @@ export async function POST(
       return validationError(toValidationDetails(parsedParams.error));
     }
 
-    try {
-      await requireRole(["admin", "pm", "foreman"]);
-    } catch {
-      return forbidden();
-    }
-
     const parsedBody = sendMessageSchema.safeParse(await request.json());
     if (!parsedBody.success) {
       return validationError(toValidationDetails(parsedBody.error));
@@ -68,30 +62,30 @@ export async function POST(
     const channelId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
 
-    const { data: channel, error: channelError } = await supabase
-      .from("message_channels")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("id", channelId)
-      .maybeSingle();
-
-    if (channelError) {
-      if (isMissingMessagesTables(channelError.message)) {
+    const membership = await getMyMembership(supabase, companyId, channelId, userId);
+    if (membership.error) {
+      if (isMissingMessagesTables(membership.error.message || "")) {
         const fallbackChannel = getFallbackChannel(companyId, channelId);
         if (!fallbackChannel) return notFound("Channel not found");
         return okItem(
-          createFallbackMessage({
-            companyId,
-            channelId,
-            senderUserId: userId,
-            body: parsedBody.data.body,
-          }),
+          createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
           201
         );
       }
       return serverError();
     }
-    if (!channel) return notFound("Channel not found");
+
+    if (!membership.data) {
+      const channelResult = await supabase
+        .from("message_channels")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("id", channelId)
+        .maybeSingle();
+      if (channelResult.error) return serverError();
+      if (!channelResult.data) return notFound("Channel not found");
+      return forbidden();
+    }
 
     const payload = {
       company_id: companyId,
@@ -109,12 +103,7 @@ export async function POST(
     if (error || !data) {
       if (error?.message && isMissingMessagesTables(error.message)) {
         return okItem(
-          createFallbackMessage({
-            companyId,
-            channelId,
-            senderUserId: userId,
-            body: parsedBody.data.body,
-          }),
+          createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
           201
         );
       }
@@ -123,9 +112,7 @@ export async function POST(
 
     return okItem(data, 201);
   } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return toTenantErrorResponse(error);
-    }
+    if (error instanceof TenantResolverError) return toTenantErrorResponse(error);
     return serverError();
   }
 }

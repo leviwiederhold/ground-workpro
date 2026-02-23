@@ -30,33 +30,148 @@ const listQuerySchema = z.object({
 const createJobSchema = z.object({
   name: z.string().min(1),
   status: persistedJobStatusSchema.default("draft").optional(),
+  client: z.string().default("").optional(),
   site_address: z.string().default("").optional(),
+  start_date: z.string().default("").optional(),
+  target_end_date: z.string().default("").optional(),
   notes: z.string().default("").optional(),
 });
 
-const mapJob = (row: any) => ({
+type JobNotesMeta = {
+  client?: string;
+  start_date?: string;
+  target_end_date?: string;
+};
+
+const JOB_META_PREFIX = "\n<!--GW_META:";
+const JOB_META_SUFFIX = "-->";
+
+function parseJobNotes(raw: unknown): { plainNotes: string; meta: JobNotesMeta } {
+  const text = typeof raw === "string" ? raw : "";
+  const start = text.indexOf(JOB_META_PREFIX);
+  const end = start >= 0 ? text.indexOf(JOB_META_SUFFIX, start + JOB_META_PREFIX.length) : -1;
+  if (start < 0 || end < 0) {
+    return { plainNotes: text, meta: {} };
+  }
+  const plainNotes = text.slice(0, start).trimEnd();
+  const jsonText = text.slice(start + JOB_META_PREFIX.length, end).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as JobNotesMeta;
+    return { plainNotes, meta: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch {
+    return { plainNotes, meta: {} };
+  }
+}
+
+function buildJobNotes(plainNotes: string, meta: JobNotesMeta): string {
+  const compactMeta: JobNotesMeta = {};
+  if (meta.client) compactMeta.client = meta.client;
+  if (meta.start_date) compactMeta.start_date = meta.start_date;
+  if (meta.target_end_date) compactMeta.target_end_date = meta.target_end_date;
+  const base = plainNotes?.trimEnd() ?? "";
+  if (Object.keys(compactMeta).length === 0) return base;
+  return `${base}${JOB_META_PREFIX}${JSON.stringify(compactMeta)}${JOB_META_SUFFIX}`;
+}
+
+const mapJob = (row: any) => {
+  const parsedNotes = parseJobNotes(row.notes);
+  return {
   id: row.id,
   name: row.name ?? "",
-  client: row.client ?? "",
+  client: row.client ?? row.client_name ?? parsedNotes.meta.client ?? "",
+  client_name: row.client_name ?? row.client ?? parsedNotes.meta.client ?? "",
   status: row.status ?? "draft",
   siteAddress: row.siteAddress ?? row.site_address ?? row.address ?? "",
   address: row.site_address ?? row.address ?? "",
   site_address: row.site_address ?? row.address ?? "",
-  notes: row.notes ?? "",
+  notes: parsedNotes.plainNotes,
   budget: Number(row.budget ?? 0),
   spent: Number(row.spent ?? 0),
-  startDate: row.startDate ?? row.start_date ?? "",
-  targetEndDate: row.targetEndDate ?? row.target_end_date ?? row.endDate ?? row.end_date ?? "",
+  startDate: row.startDate ?? row.start_date ?? parsedNotes.meta.start_date ?? "",
+  targetEndDate: row.targetEndDate ?? row.target_end_date ?? row.endDate ?? row.end_date ?? parsedNotes.meta.target_end_date ?? "",
   endDate: row.endDate ?? row.end_date ?? row.target_end_date ?? "",
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
-});
+  };
+};
 
 const isMissingSchemaError = (message: string | undefined) =>
   /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
     message ?? ""
   );
+
+const parseMissingColumn = (message: string | undefined): string | null => {
+  if (!message) return null;
+  const quoted = message.match(/Could not find the '([^']+)' column/i);
+  if (quoted?.[1]) return quoted[1];
+  const relation = message.match(/column "?([a-zA-Z0-9_]+)"? of relation/i);
+  if (relation?.[1]) return relation[1];
+  const generic = message.match(/column "?([a-zA-Z0-9_]+)"? does not exist/i);
+  if (generic?.[1]) return generic[1];
+  return null;
+};
+
+async function insertJobWithSchemaFallback(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  payload: Record<string, unknown>
+) {
+  const insertPayload: Record<string, unknown> = { ...payload };
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await supabase.from("jobs").insert(insertPayload).select("*").single();
+    if (!result.error) return result;
+
+    const message = result.error.message ?? "";
+    if (!isMissingSchemaError(message)) return result;
+
+    const missingColumn = parseMissingColumn(message);
+    if (!missingColumn) return result;
+
+    if (missingColumn === "client" && "client" in insertPayload) {
+      if (!("client_name" in insertPayload)) {
+        insertPayload.client_name = insertPayload.client;
+      }
+      delete insertPayload.client;
+      continue;
+    }
+    if (missingColumn === "client_name" && "client_name" in insertPayload) {
+      delete insertPayload.client_name;
+      continue;
+    }
+    if (missingColumn === "start_date" && "start_date" in insertPayload) {
+      if (!("startDate" in insertPayload)) {
+        insertPayload.startDate = insertPayload.start_date;
+      }
+      delete insertPayload.start_date;
+      continue;
+    }
+    if (missingColumn === "startDate" && "startDate" in insertPayload) {
+      delete insertPayload.startDate;
+      continue;
+    }
+    if (missingColumn === "target_end_date" && "target_end_date" in insertPayload) {
+      if (!("targetEndDate" in insertPayload)) {
+        insertPayload.targetEndDate = insertPayload.target_end_date;
+      }
+      delete insertPayload.target_end_date;
+      continue;
+    }
+    if (missingColumn === "targetEndDate" && "targetEndDate" in insertPayload) {
+      delete insertPayload.targetEndDate;
+      continue;
+    }
+
+    if (missingColumn in insertPayload) {
+      delete insertPayload[missingColumn];
+      continue;
+    }
+
+    return result;
+  }
+
+  return supabase.from("jobs").insert(insertPayload).select("*").single();
+}
 
 function resolveStatusFilters(status: ListStatus): string[] | null {
   if (status === "all") return null;
@@ -197,32 +312,35 @@ export async function POST(request: Request) {
     const payload = parsed.data;
     const { data: userData } = await supabase.auth.getUser();
 
+    const encodedNotes = buildJobNotes(payload.notes ?? "", {
+      client: payload.client ?? "",
+      start_date: payload.start_date ?? "",
+      target_end_date: payload.target_end_date ?? "",
+    });
+
     const baseInsertPayload = {
       company_id: companyId,
       created_by: userData?.user?.id ?? null,
       name: payload.name,
+      client: payload.client ?? "",
       site_address: payload.site_address ?? "",
-      notes: payload.notes ?? "",
+      start_date: payload.start_date || null,
+      target_end_date: payload.target_end_date || null,
+      notes: encodedNotes,
     };
 
-    let result = await supabase
-      .from("jobs")
-      .insert({
-        ...baseInsertPayload,
-        ...(payload.status ? { status: payload.status } : {}),
-      })
-      .select("*")
-      .single();
+    const insertPayload = {
+      ...baseInsertPayload,
+      ...(payload.status ? { status: payload.status } : {}),
+    };
+
+    let result = await insertJobWithSchemaFallback(supabase, insertPayload);
 
     if (
       result.error?.message?.includes('jobs_status_check') &&
       payload.status
     ) {
-      result = await supabase
-        .from("jobs")
-        .insert(baseInsertPayload)
-        .select("*")
-        .single();
+      result = await insertJobWithSchemaFallback(supabase, baseInsertPayload);
     }
 
     const { data, error } = result;

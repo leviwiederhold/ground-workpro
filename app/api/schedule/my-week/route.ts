@@ -11,6 +11,11 @@ const querySchema = z.object({
     .optional(),
 });
 
+function isMissingTable(message: string, table: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes(table) && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
 const JOB_SCHEDULE_STATUSES = ["active", "open", "in_progress", "approved", "draft"];
 
 const asDateKey = (date: Date) => date.toISOString().slice(0, 10);
@@ -33,6 +38,8 @@ type AssignmentRow = {
   employee_id: string | null;
   equipment_id: string | null;
   notes: string | null;
+  starts_at: string | null;
+  ends_at: string | null;
   created_by: string;
   created_at: string;
 };
@@ -78,6 +85,8 @@ const mapAssignment = (row: AssignmentRow) => ({
   date: String(row.date),
   employeeId: row.employee_id ? String(row.employee_id) : null,
   equipmentId: row.equipment_id ? String(row.equipment_id) : null,
+  startsAt: row.starts_at ? String(row.starts_at) : null,
+  endsAt: row.ends_at ? String(row.ends_at) : null,
   notes: row.notes ? String(row.notes) : "",
   createdBy: row.created_by ? String(row.created_by) : "",
   createdAt: row.created_at ? String(row.created_at) : "",
@@ -192,7 +201,7 @@ export async function GET(request: Request) {
         .order("name", { ascending: true }),
       supabase
         .from("schedule_assignments")
-        .select("id, job_id, date, employee_id, equipment_id, notes, created_by, created_at")
+        .select("id, job_id, date, employee_id, equipment_id, starts_at, ends_at, notes, created_by, created_at")
         .eq("company_id", companyId)
         .gte("date", weekDays[0])
         .lte("date", weekEnd)
@@ -212,9 +221,15 @@ export async function GET(request: Request) {
     ]);
 
     if (jobsResult.error) return NextResponse.json({ error: jobsResult.error.message }, { status: 400 });
-    if (assignmentsResult.error) return NextResponse.json({ error: assignmentsResult.error.message }, { status: 400 });
-    if (employeesResult.error) return NextResponse.json({ error: employeesResult.error.message }, { status: 400 });
-    if (eventsResult.error) return NextResponse.json({ error: eventsResult.error.message }, { status: 400 });
+    if (assignmentsResult.error && !isMissingTable(assignmentsResult.error.message, "schedule_assignments")) {
+      return NextResponse.json({ error: assignmentsResult.error.message }, { status: 400 });
+    }
+    if (employeesResult.error && !isMissingTable(employeesResult.error.message, "employees")) {
+      return NextResponse.json({ error: employeesResult.error.message }, { status: 400 });
+    }
+    if (eventsResult.error && !isMissingTable(eventsResult.error.message, "calendar_events")) {
+      return NextResponse.json({ error: eventsResult.error.message }, { status: 400 });
+    }
 
     const employees = (employeesResult.data ?? []) as Array<EmployeeRow & { role: string | null }>;
     const employeeRoleById = new Map<string, AppRole | null>();
@@ -251,13 +266,17 @@ export async function GET(request: Request) {
       .filter((assignment) => assignmentVisibleForRole(role, assignment, employeeRoleById))
       .map(mapAssignment);
 
-    const attendeeRowsResult = await supabase
-      .from("calendar_event_attendees")
-      .select("event_id, attendee_type, user_id, employee_id, external_name, external_contact, response_status")
-      .eq("company_id", companyId)
-      .in("event_id", ((eventsResult.data ?? []) as EventRow[]).map((event) => event.id));
+    const eventRows = (eventsResult.data ?? []) as EventRow[];
+    const attendeeRowsResult =
+      eventRows.length === 0
+        ? { data: [], error: null }
+        : await supabase
+            .from("calendar_event_attendees")
+            .select("event_id, attendee_type, user_id, employee_id, external_name, external_contact, response_status")
+            .eq("company_id", companyId)
+            .in("event_id", eventRows.map((event) => event.id));
 
-    if (attendeeRowsResult.error) {
+    if (attendeeRowsResult.error && !isMissingTable(attendeeRowsResult.error.message, "calendar_event_attendees")) {
       return NextResponse.json({ error: attendeeRowsResult.error.message }, { status: 400 });
     }
 
@@ -268,7 +287,7 @@ export async function GET(request: Request) {
       attendeesByEvent.set(attendee.event_id, list);
     }
 
-    const events = ((eventsResult.data ?? []) as EventRow[])
+    const events = eventRows
       .filter((event) => eventVisibleForRole(role, event, attendeesByEvent.get(event.id) ?? [], userId, userEmployeeIds))
       .map((event) => mapEvent(event, attendeesByEvent.get(event.id) ?? []));
 

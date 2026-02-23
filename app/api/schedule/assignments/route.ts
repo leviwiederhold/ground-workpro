@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const createAssignmentSchema = z
@@ -10,6 +11,8 @@ const createAssignmentSchema = z
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     employeeId: z.string().uuid().optional(),
     equipmentId: z.string().uuid().optional(),
+    startsAt: z.string().datetime().optional(),
+    endsAt: z.string().datetime().optional(),
     notes: z.string().optional(),
   })
   .refine((value: { employeeId?: string; equipmentId?: string }) => Boolean(value.employeeId || value.equipmentId), {
@@ -23,6 +26,8 @@ const mapAssignment = (row: Record<string, unknown>) => ({
   date: String(row.date),
   employeeId: row.employee_id ? String(row.employee_id) : null,
   equipmentId: row.equipment_id ? String(row.equipment_id) : null,
+  startsAt: row.starts_at ? String(row.starts_at) : null,
+  endsAt: row.ends_at ? String(row.ends_at) : null,
   notes: row.notes ? String(row.notes) : "",
   createdBy: row.created_by ? String(row.created_by) : "",
   createdAt: row.created_at ? String(row.created_at) : "",
@@ -36,6 +41,11 @@ export async function POST(request: Request) {
     try {
       access = await requireRole(["admin", "pm", "foreman"]);
     } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const effectiveRole = await getEffectiveRole();
+    if (!effectiveRole || !["admin", "pm", "foreman"].includes(effectiveRole)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -56,6 +66,21 @@ export async function POST(request: Request) {
 
     const { supabase, companyId } = await getCompanyId();
     const payload = parsedBody.data;
+
+    if ((payload.startsAt && !payload.endsAt) || (!payload.startsAt && payload.endsAt)) {
+      return NextResponse.json({ error: "startsAt and endsAt required together" }, { status: 400 });
+    }
+
+    if (payload.startsAt && payload.endsAt) {
+      const startsAtDate = new Date(payload.startsAt);
+      const endsAtDate = new Date(payload.endsAt);
+      if (Number.isNaN(startsAtDate.getTime()) || Number.isNaN(endsAtDate.getTime())) {
+        return NextResponse.json({ error: "Invalid startsAt or endsAt" }, { status: 400 });
+      }
+      if (endsAtDate <= startsAtDate) {
+        return NextResponse.json({ error: "endsAt must be after startsAt" }, { status: 400 });
+      }
+    }
 
     const checks = [
       supabase.from("jobs").select("id, name").eq("company_id", companyId).eq("id", payload.jobId).maybeSingle(),
@@ -90,6 +115,25 @@ export async function POST(request: Request) {
     }
 
     const warnings: string[] = [];
+    const duplicateCheck =
+      payload.employeeId && payload.jobId
+        ? await supabase
+            .from("schedule_assignments")
+            .select("id")
+            .eq("company_id", companyId)
+            .eq("date", payload.date)
+            .eq("employee_id", payload.employeeId)
+            .eq("job_id", payload.jobId)
+            .limit(1)
+        : { data: [], error: null };
+
+    if (duplicateCheck.error) {
+      return NextResponse.json({ error: duplicateCheck.error.message }, { status: 400 });
+    }
+    if ((duplicateCheck.data ?? []).length > 0) {
+      return NextResponse.json({ error: "Already assigned" }, { status: 409 });
+    }
+
     const conflictChecks = await Promise.all([
       payload.employeeId
         ? supabase
@@ -134,10 +178,12 @@ export async function POST(request: Request) {
         date: payload.date,
         employee_id: payload.employeeId ?? null,
         equipment_id: payload.equipmentId ?? null,
+        starts_at: payload.startsAt ?? null,
+        ends_at: payload.endsAt ?? null,
         notes: payload.notes ?? "",
         created_by: access.userId,
       })
-      .select("id, job_id, date, employee_id, equipment_id, notes, created_by, created_at")
+      .select("id, job_id, date, employee_id, equipment_id, starts_at, ends_at, notes, created_by, created_at")
       .single();
 
     if (insertResult.error || !insertResult.data) {

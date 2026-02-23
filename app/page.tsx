@@ -310,7 +310,7 @@ const confirmDestructiveAction = (targetLabel) =>
       </div>
     );
 
-    const StatCard = ({ icon, label, value, subValue, trend, color = 'brand' }) => {
+    const StatCard = ({ icon, label, value, subValue, trend, color = 'brand', onClick, href, testId }) => {
       const iconBg = {
         brand: 'bg-brand-100 text-brand-600',
         green: 'bg-green-100 text-green-600',
@@ -318,8 +318,18 @@ const confirmDestructiveAction = (targetLabel) =>
         blue: 'bg-blue-100 text-blue-600',
         yellow: 'bg-yellow-100 text-yellow-600',
       };
+      const isInteractive = typeof onClick === 'function' || Boolean(href);
+      const handleCardClick = () => {
+        if (typeof onClick === 'function') {
+          onClick();
+        }
+      };
       return (
-        <Card className="p-3 sm:p-4">
+        <Card
+          className={`p-3 sm:p-4 ${isInteractive ? 'cursor-pointer' : ''}`}
+          onClick={isInteractive ? handleCardClick : undefined}
+          data-testid={testId}
+        >
           <div className="flex items-start justify-between">
             <div className={`p-2 rounded-lg ${iconBg[color]}`}>
               <Icon name={icon} className="text-lg" />
@@ -485,7 +495,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 className="hidden"
                 onChange={handleUpload}
               />
-              <Button variant="ghost" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
                 <Icon name="paperclip" className="mr-1" />
                 {uploading ? 'Uploading...' : 'Upload'}
               </Button>
@@ -517,7 +527,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     ) : (
                       <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-500 border border-gray-200">No link</span>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => handleDelete(attachment.id)}>
+                    <Button variant="secondary" size="sm" onClick={() => handleDelete(attachment.id)}>
                       <Icon name="trash" />
                     </Button>
                   </div>
@@ -574,6 +584,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [dailyReportsLoading, setDailyReportsLoading] = useState(true);
       const [timeEntries, setTimeEntries] = useState([]);
       const [scheduleData, setScheduleData] = useState({});
+      const [calendarRefreshVersion, setCalendarRefreshVersion] = useState(0);
 
       // Additional State
       const [inventory, setInventory] = useState([]);
@@ -1198,11 +1209,11 @@ const confirmDestructiveAction = (targetLabel) =>
       const renderView = () => {
         switch(currentView) {
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
-          case 'messages': return <MessagesView />;
-          case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} />;
+          case 'messages': return <MessagesView employees={employees} />;
+          case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} calendarRefreshVersion={calendarRefreshVersion} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} setSelectedJob={setSelectedJob} setShowModal={setShowModal} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} />;
-          case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} />;
+          case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} />;
@@ -1473,7 +1484,13 @@ const confirmDestructiveAction = (targetLabel) =>
 
           {/* Modals */}
           <QuickActionsModal isOpen={showModal.type === 'quick-actions'} onClose={() => setShowModal({ type: null })} setShowModal={setShowModal} />
-          <CalendarEventModal isOpen={showModal.type === 'calendar-event'} onClose={() => setShowModal({ type: null })} employees={employees} />
+          <CalendarEventModal
+            isOpen={showModal.type === 'calendar-event'}
+            onClose={() => setShowModal({ type: null })}
+            employees={employees}
+            initialData={showModal.data}
+            onCreated={() => setCalendarRefreshVersion((prev) => prev + 1)}
+          />
           <TimeClockModal isOpen={showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} setTimeEntries={setTimeEntries} />
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
@@ -1575,17 +1592,20 @@ const confirmDestructiveAction = (targetLabel) =>
     };
 
     // ============================================
-    // SCHEDULE VIEW (Drag & Drop Calendar)
+    // SCHEDULE VIEW (Click-to-Add Calendar)
     // ============================================
-    const ScheduleView = ({ jobs, equipment, employees, scheduleData, setScheduleData, currentRole }) => {
+    const ScheduleView = ({ jobs, equipment, employees, scheduleData, setScheduleData, currentRole, setShowModal, calendarRefreshVersion }) => {
       const [currentWeek, setCurrentWeek] = useState(0);
-      const [dragItem, setDragItem] = useState(null);
       const [scheduleLoading, setScheduleLoading] = useState(false);
       const [scheduleError, setScheduleError] = useState('');
       const [scheduleWarning, setScheduleWarning] = useState('');
       const [scheduleSaving, setScheduleSaving] = useState(false);
       const [eventsByDate, setEventsByDate] = useState({});
       const [scopedJobs, setScopedJobs] = useState(null);
+
+      const TIME_GRID_START_HOUR = 6;
+      const TIME_GRID_END_HOUR = 18;
+      const timeGridHours = Array.from({ length: TIME_GRID_END_HOUR - TIME_GRID_START_HOUR }, (_, index) => TIME_GRID_START_HOUR + index);
 
       const getWeekDates = (offset = 0) => {
         const today = new Date();
@@ -1641,6 +1661,8 @@ const confirmDestructiveAction = (targetLabel) =>
                 name,
                 employeeId: assignment.employeeId ?? null,
                 equipmentId: assignment.equipmentId ?? null,
+                startsAt: assignment.startsAt ?? null,
+                endsAt: assignment.endsAt ?? null,
               });
               nextSchedule[key] = assigned;
             }
@@ -1693,6 +1715,8 @@ const confirmDestructiveAction = (targetLabel) =>
                 name,
                 employeeId: assignment.employeeId ?? null,
                 equipmentId: assignment.equipmentId ?? null,
+                startsAt: assignment.startsAt ?? null,
+                endsAt: assignment.endsAt ?? null,
               });
               nextSchedule[key] = assigned;
             }
@@ -1720,80 +1744,41 @@ const confirmDestructiveAction = (targetLabel) =>
         } finally {
           setScheduleLoading(false);
         }
-      }, [equipmentMap, employeeMap, isFieldRole, setScheduleData, weekStartKey]);
+      }, [equipmentMap, employeeMap, isFieldRole, setScheduleData, weekStartKey, calendarRefreshVersion]);
 
       useEffect(() => {
         loadWeekAssignments();
       }, [loadWeekAssignments]);
 
-      const handleDragStart = (e, item, type) => {
-        setDragItem({ ...item, type });
-        e.dataTransfer.effectAllowed = 'move';
+      const formatHourLabel = (hour) => {
+        const date = new Date(Date.UTC(2026, 0, 1, hour, 0, 0));
+        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
       };
 
-      const handleDrop = async (e, jobId, date) => {
-        e.preventDefault();
-        e.currentTarget.classList.remove('drag-over');
-        if (!dragItem) return;
-
-        const dateKey = asDateKey(date);
-        const key = `${jobId}-${dateKey}`;
-
-        try {
-          setScheduleSaving(true);
-          const body = {
-            jobId: String(jobId),
-            date: dateKey,
-            employeeId: dragItem.type === 'employee' ? String(dragItem.id) : undefined,
-            equipmentId: dragItem.type === 'equipment' ? String(dragItem.id) : undefined,
-          };
-          const response = await fetch('/api/schedule/assignments', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok || !payload?.item) {
-            setScheduleError(payload?.error || 'Failed to create assignment.');
-            return;
-          }
-          if (Array.isArray(payload?.warnings) && payload.warnings.length > 0) {
-            setScheduleWarning(payload.warnings.join(' '));
-          } else {
-            setScheduleWarning('');
-          }
-
-          setScheduleData(prev => ({
-            ...prev,
-            [key]: [
-              ...(prev[key] || []),
-              {
-                id: payload.item.id,
-                type: dragItem.type,
-                name: dragItem.name,
-                employeeId: payload.item.employeeId ?? null,
-                equipmentId: payload.item.equipmentId ?? null,
-              },
-            ],
-          }));
-          setDragItem(null);
-        } catch {
-          setScheduleError('Failed to create assignment.');
-        } finally {
-          setScheduleSaving(false);
-        }
+      const getTimedHour = (startsAt) => {
+        const start = new Date(startsAt);
+        if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
+        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
       };
 
-      const handleDragOver = (e) => {
-        e.preventDefault();
-        e.currentTarget.classList.add('drag-over');
+      const openEventModalAtSlot = (dateKey, startHour) => {
+        const start = new Date(`${dateKey}T00:00:00`);
+        start.setHours(startHour, 0, 0, 0);
+        const end = new Date(start);
+        end.setHours(end.getHours() + 1);
+        setShowModal({
+          type: 'calendar-event',
+          data: {
+            startsAt: start.toISOString(),
+            endsAt: end.toISOString(),
+          },
+        });
       };
 
-      const handleDragLeave = (e) => {
-        e.currentTarget.classList.remove('drag-over');
-      };
+      const getAssignmentsForDate = (dateKey) =>
+        Object.entries(scheduleData).flatMap(([key, items]) => (key.endsWith(`-${dateKey}`) ? items : []));
 
-      const removeFromSchedule = async (key, itemId) => {
+      const removeFromSchedule = async (itemId) => {
         try {
           setScheduleSaving(true);
           const response = await fetch(`/api/schedule/assignments/${itemId}`, { method: 'DELETE' });
@@ -1808,10 +1793,14 @@ const confirmDestructiveAction = (targetLabel) =>
             setScheduleWarning('');
           }
 
-          setScheduleData(prev => ({
-            ...prev,
-            [key]: (prev[key] || []).filter(item => String(item.id) !== String(itemId)),
-          }));
+          setScheduleData(prev =>
+            Object.fromEntries(
+              Object.entries(prev).map(([entryKey, items]) => [
+                entryKey,
+                (items || []).filter(item => String(item.id) !== String(itemId)),
+              ])
+            )
+          );
         } catch {
           setScheduleError('Failed to remove assignment.');
         } finally {
@@ -1820,162 +1809,137 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       return (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Header */}
-          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-              <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w - 1)}>
-                <Icon name="chevron-left" />
-              </Button>
-              <h2 className="text-lg font-semibold">
-                {weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </h2>
-              <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w + 1)}>
-                <Icon name="chevron-right" />
-              </Button>
+          <Card className="p-3 sm:p-4 bg-white/90 backdrop-blur border border-gray-200/80 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w - 1)}>
+                  <Icon name="chevron-left" />
+                </Button>
+                <h2 className="text-base sm:text-lg font-semibold tracking-tight">
+                  {weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                </h2>
+                <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w + 1)}>
+                  <Icon name="chevron-right" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(0)}>Today</Button>
+                <Button variant="brand" size="sm" onClick={() => setShowModal({ type: 'calendar-event' })}>
+                  <Icon name="calendar-plus" className="mr-2" /> Add Event
+                </Button>
+              </div>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => setCurrentWeek(0)}>Today</Button>
-          </div>
+          </Card>
 
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
-            {/* Resource Pool */}
-            <div className="space-y-4 xl:col-span-1">
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-3">
-                  <Icon name="truck-monster" className="mr-2 text-brand-500" />
-                  Equipment
-                </h3>
-                <div className="space-y-2">
-                  {equipment.filter(e => e.status !== 'maintenance').map(eq => (
-                    <div
-                      key={eq.id}
-                      data-testid={`schedule-resource-equipment-${eq.id}`}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, eq, 'equipment')}
-                      className="p-2 bg-blue-50 border border-blue-200 rounded cursor-move hover:bg-blue-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Icon name="truck-monster" className="text-blue-600 text-sm" />
-                        <span className="text-sm font-medium">{eq.name}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-3">
-                  <Icon name="users" className="mr-2 text-brand-500" />
-                  Crew
-                </h3>
-                <div className="space-y-2">
-                  {employees.filter(e => e.role !== 'Mechanic').map(emp => (
-                    <div
-                      key={emp.id}
-                      data-testid={`schedule-resource-employee-${emp.id}`}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, emp, 'employee')}
-                      className="p-2 bg-green-50 border border-green-200 rounded cursor-move hover:bg-green-100 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Icon name="user" className="text-green-600 text-sm" />
-                        <div>
-                          <span className="text-sm font-medium">{emp.name}</span>
-                          <span className="text-xs text-gray-500 ml-2">{emp.role}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Card>
-            </div>
-
-            {/* Schedule Grid */}
-            <div className="xl:col-span-3 overflow-x-auto">
-              <Card className="p-0 min-w-0 md:min-w-[700px]">
+          <div className="overflow-x-auto">
+              <Card className="p-0 min-w-[880px] border border-gray-200/80 shadow-sm">
                 {/* Days Header */}
-                <div className="grid grid-cols-7 border-b border-gray-200">
+                <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50/70">
                   {weekDates.map((date, i) => {
                     const isToday = date.toDateString() === new Date().toDateString();
                     return (
-                      <div key={i} className={`p-3 text-center border-r border-gray-100 last:border-r-0 ${isToday ? 'bg-brand-50' : ''}`}>
-                        <div className="text-xs text-gray-500">{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
-                        <div className={`text-lg font-semibold ${isToday ? 'text-brand-600' : 'text-gray-900'}`}>{date.getDate()}</div>
+                      <div key={i} className={`p-3 text-center border-r border-gray-200 last:border-r-0 ${isToday ? 'bg-brand-50/80' : ''}`}>
+                        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                        <div className={`text-xl font-semibold mt-0.5 ${isToday ? 'text-brand-600' : 'text-gray-900'}`}>{date.getDate()}</div>
                       </div>
                     );
                   })}
                 </div>
 
-                {/* Job Rows */}
-                {activeJobs.map((job, jobIndex) => (
-                  <div key={job.id} className="border-b border-gray-100 last:border-b-0">
-                    <div className="grid grid-cols-7">
-                      {weekDates.map((date, i) => {
-                        const dateKey = date.toISOString().split('T')[0];
-                        const key = `${job.id}-${dateKey}`;
-                        const assigned = scheduleData[key] || [];
-                        const dayEvents = jobIndex === 0 ? (eventsByDate[dateKey] || []) : [];
+                <div className="grid grid-cols-7">
+                  {weekDates.map((date, i) => {
+                    const dateKey = date.toISOString().split('T')[0];
+                    const assigned = getAssignmentsForDate(dateKey);
+                    const dayEvents = eventsByDate[dateKey] || [];
+                    const allDayAssignments = assigned.filter((item) => !item.startsAt || !item.endsAt);
+                    const timedAssignments = assigned.filter((item) => item.startsAt && item.endsAt);
 
-                        return (
-                          <div
-                            key={i}
-                            data-testid={`schedule-slot-${job.id}-${dateKey}`}
-                            className="min-h-[100px] p-2 border-r border-gray-100 last:border-r-0 transition-colors"
-                            onDrop={(e) => handleDrop(e, job.id, date)}
-                            onDragOver={handleDragOver}
-                            onDragLeave={handleDragLeave}
-                          >
-                            {i === 0 && (
-                              <div className="text-xs font-medium text-gray-900 mb-2 truncate" title={job.name}>
-                                {job.name}
+                    return (
+                      <div
+                        key={i}
+                        data-testid={`schedule-day-${dateKey}`}
+                        className="min-h-[620px] p-2 border-r border-gray-200 last:border-r-0 transition-colors bg-white"
+                      >
+                        <div className="space-y-1">
+                          {dayEvents.map(event => (
+                            <div
+                              key={`event-${event.id}-${dateKey}`}
+                              data-testid={`schedule-event-${event.id}`}
+                              className="text-xs p-1.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-[0_1px_0_rgba(0,0,0,0.03)]"
+                            >
+                              <div className="truncate font-medium">{event.title}</div>
+                              <div className="truncate text-[10px] opacity-80 mt-0.5">
+                                {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                {' - '}
+                                {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                               </div>
-                            )}
-                            <div className="space-y-1">
-                              {dayEvents.map(event => (
-                                <div
-                                  key={`event-${event.id}-${job.id}`}
-                                  data-testid={`schedule-event-${event.id}`}
-                                  className="text-xs p-1 rounded bg-purple-100 text-purple-800 border border-purple-200"
-                                >
-                                  <div className="truncate font-medium">{event.title}</div>
-                                  <div className="truncate text-[10px] opacity-80">
-                                    {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                    {' - '}
-                                    {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                  </div>
-                                </div>
-                              ))}
-                              {assigned.map(item => (
-                                <div
-                                  key={item.id}
-                                  data-testid={`schedule-assignment-${item.id}`}
-                                  className={`text-xs p-1 rounded flex items-center justify-between ${
-                                    item.type === 'equipment' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
-                                  }`}
-                                >
-                                  <span className="truncate">{item.name}</span>
-                                  <button
-                                    onClick={() => removeFromSchedule(key, item.id)}
-                                    className="ml-1 hover:text-red-600"
-                                  >
-                                    <Icon name="xmark" className="text-[10px]" />
-                                  </button>
-                                </div>
-                              ))}
                             </div>
+                          ))}
+                        </div>
+                        <div className="mt-2">
+                          <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">All Day</div>
+                          <div className="space-y-1">
+                            {allDayAssignments.map(item => (
+                              <div
+                                key={item.id}
+                                data-testid={`schedule-assignment-${item.id}`}
+                                className={`text-xs p-1.5 rounded-md flex items-center justify-between border ${
+                                  item.type === 'equipment'
+                                    ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                }`}
+                              >
+                                <span className="truncate">{item.name}</span>
+                                <button
+                                  onClick={() => removeFromSchedule(item.id)}
+                                  className="ml-1 hover:text-red-600"
+                                >
+                                  <Icon name="xmark" className="text-[10px]" />
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
+                        </div>
+                        <div className="mt-2 space-y-1">
+                          {timeGridHours.map((hour) => {
+                            const hourAssignments = timedAssignments.filter((item) => getTimedHour(item.startsAt) === hour);
+                            return (
+                              <div
+                                key={`${dateKey}-hour-${hour}`}
+                                data-testid={`schedule-time-cell-${dateKey}-${hour}`}
+                                className="h-8 border border-gray-200/90 rounded-md px-1.5 hover:bg-brand-50/40 cursor-pointer transition-colors"
+                                onClick={() => openEventModalAtSlot(dateKey, hour)}
+                              >
+                                <div className="flex items-center justify-between text-[10px] text-gray-400">
+                                  <span>{formatHourLabel(hour)}</span>
+                                </div>
+                                {hourAssignments.map((item) => (
+                                  <div
+                                    key={`${item.id}-${hour}`}
+                                    data-testid={`schedule-time-assignment-${item.id}`}
+                                    className={`text-[10px] truncate rounded px-1 ${
+                                      item.type === 'equipment' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'
+                                    }`}
+                                  >
+                                    {item.name}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </Card>
-            </div>
           </div>
 
           <p className="text-sm text-gray-500">
             <Icon name="circle-info" className="mr-1" />
-            Drag equipment and crew members from the left panel and drop them onto job slots to schedule.
+            Click a time slot to open Add Event.
           </p>
           {scheduleWarning && (
             <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700">{scheduleWarning}</p>
@@ -2000,7 +1964,15 @@ const confirmDestructiveAction = (targetLabel) =>
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [selectedJobId, setSelectedJobId] = useState(null);
-      const [jobForm, setJobForm] = useState({ name: '', status: 'draft', site_address: '', notes: '' });
+      const [jobForm, setJobForm] = useState({
+        name: '',
+        status: 'active',
+        client: '',
+        site_address: '',
+        start_date: '',
+        target_end_date: '',
+        notes: '',
+      });
       const [saveLoading, setSaveLoading] = useState(false);
       const [deleteLoading, setDeleteLoading] = useState(false);
       const [jobActionError, setJobActionError] = useState('');
@@ -2014,9 +1986,6 @@ const confirmDestructiveAction = (targetLabel) =>
       const [crewActionError, setCrewActionError] = useState('');
       const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
       const [equipmentActionError, setEquipmentActionError] = useState('');
-      const [jobFinancialSummary, setJobFinancialSummary] = useState(null);
-      const [jobFinancialSummaryLoading, setJobFinancialSummaryLoading] = useState(false);
-      const [jobFinancialSummaryError, setJobFinancialSummaryError] = useState('');
 
       const handleCreateJob = async () => {
         try {
@@ -2026,8 +1995,11 @@ const confirmDestructiveAction = (targetLabel) =>
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: `New Job ${baseCount}`,
-              status: 'draft',
-              site_address: 'TBD',
+              status: 'in_progress',
+              client: '',
+              site_address: '',
+              start_date: '',
+              target_end_date: '',
               notes: '',
             }),
           });
@@ -2052,10 +2024,25 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       };
 
+      const normalizeJobStatus = useCallback((status) => {
+        const value = String(status || '').trim().toLowerCase();
+        if (['in_progress', 'active', 'open', 'approved'].includes(value)) return 'active';
+        if (['completed', 'complete'].includes(value)) return 'completed';
+        return 'other';
+      }, []);
+
       const filteredJobs = jobs.filter(job => {
-        if (filter !== 'all' && job.status !== filter) return false;
-        if (search && !job.name.toLowerCase().includes(search.toLowerCase()) && !job.client.toLowerCase().includes(search.toLowerCase())) return false;
+        const normalizedStatus = normalizeJobStatus(job.status);
+        if (normalizedStatus === 'other') return false;
+        if (filter !== 'all' && filter !== normalizedStatus) return false;
+        const haystack = `${job.name || ''} ${job.client || job.client_name || ''} ${job.site_address || job.address || ''}`.toLowerCase();
+        if (search && !haystack.includes(search.toLowerCase())) return false;
         return true;
+      }).sort((a, b) => {
+        const aStatus = normalizeJobStatus(a.status);
+        const bStatus = normalizeJobStatus(b.status);
+        if (aStatus !== bStatus) return aStatus === 'active' ? -1 : 1;
+        return String(a.name || '').localeCompare(String(b.name || ''));
       });
 
       const selectedJob = jobs.find(j => j.id === selectedJobId);
@@ -2074,53 +2061,25 @@ const confirmDestructiveAction = (targetLabel) =>
         if (!selectedJob) return;
         setJobForm({
           name: selectedJob.name || '',
-          status: selectedJob.status || 'draft',
+          status: normalizeJobStatus(selectedJob.status),
+          client: selectedJob.client || selectedJob.client_name || '',
           site_address: selectedJob.site_address || selectedJob.address || '',
+          start_date: selectedJob.start_date || selectedJob.startDate || '',
+          target_end_date: selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '',
           notes: selectedJob.notes || '',
         });
         setJobActionError('');
-      }, [selectedJob]);
+      }, [normalizeJobStatus, selectedJob]);
 
-      useEffect(() => {
-        let isMounted = true;
+      const getJobCrewCount = useCallback((job) =>
+        employees.filter((employee) => String(employee.jobId ?? '') === String(job.id)).length
+      , [employees]);
 
-        const loadJobFinancialSummary = async () => {
-          if (!selectedJob) {
-            if (isMounted) {
-              setJobFinancialSummary(null);
-              setJobFinancialSummaryError('');
-            }
-            return;
-          }
-
-          try {
-            setJobFinancialSummaryLoading(true);
-            setJobFinancialSummaryError('');
-            const response = await fetch(`/api/jobs/${selectedJob.id}/financial-summary`, { cache: 'no-store' });
-            const payload = await response.json();
-            if (!response.ok || !payload?.item) {
-              throw new Error(payload?.error || 'Failed to load financial summary');
-            }
-            if (isMounted) {
-              setJobFinancialSummary(payload.item);
-            }
-          } catch (error) {
-            if (isMounted) {
-              setJobFinancialSummary(null);
-              setJobFinancialSummaryError(error instanceof Error ? error.message : 'Failed to load financial summary');
-            }
-          } finally {
-            if (isMounted) {
-              setJobFinancialSummaryLoading(false);
-            }
-          }
-        };
-
-        loadJobFinancialSummary();
-        return () => {
-          isMounted = false;
-        };
-      }, [selectedJob]);
+      const getJobEquipmentCount = useCallback((job) =>
+        String(selectedJobId ?? '') === String(job.id)
+          ? jobEquipment.length
+          : equipment.filter((item) => String(item.jobId ?? '') === String(job.id)).length
+      , [equipment, jobEquipment.length, selectedJobId]);
 
       useEffect(() => {
         let isMounted = true;
@@ -2294,6 +2253,13 @@ const confirmDestructiveAction = (targetLabel) =>
           }
 
           setJobEquipment((prev) => [payload.equipment, ...prev]);
+          setEquipment((prev) =>
+            prev.map((item) =>
+              String(item.id) === String(payload.equipment.id)
+                ? { ...item, jobId: selectedJob.id }
+                : item
+            )
+          );
           setEquipmentToAssign('');
         } catch {
           setEquipmentActionError('Failed to assign equipment');
@@ -2329,6 +2295,11 @@ const confirmDestructiveAction = (targetLabel) =>
           setJobEquipment((prev) =>
             prev.filter((item) => String(item.id) !== String(equipmentId))
           );
+          setEquipment((prev) =>
+            prev.map((item) =>
+              String(item.id) === String(equipmentId) ? { ...item, jobId: null } : item
+            )
+          );
         } catch {
           setEquipmentActionError('Failed to remove equipment');
         } finally {
@@ -2344,8 +2315,14 @@ const confirmDestructiveAction = (targetLabel) =>
         try {
           const updates = {};
           if (jobForm.name !== (selectedJob.name || '')) updates.name = jobForm.name;
-          if (jobForm.status !== (selectedJob.status || 'draft')) updates.status = jobForm.status;
+          const selectedStatus = normalizeJobStatus(selectedJob.status);
+          if (jobForm.status !== selectedStatus) {
+            updates.status = jobForm.status === 'completed' ? 'completed' : 'in_progress';
+          }
+          if (jobForm.client !== (selectedJob.client || selectedJob.client_name || '')) updates.client = jobForm.client;
           if (jobForm.site_address !== (selectedJob.site_address || selectedJob.address || '')) updates.site_address = jobForm.site_address;
+          if (jobForm.start_date !== (selectedJob.start_date || selectedJob.startDate || '')) updates.start_date = jobForm.start_date;
+          if (jobForm.target_end_date !== (selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '')) updates.target_end_date = jobForm.target_end_date;
           if (jobForm.notes !== (selectedJob.notes || '')) updates.notes = jobForm.notes;
 
           if (Object.keys(updates).length === 0) {
@@ -2408,7 +2385,7 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
               <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
-                {['all', 'active', 'bidding', 'completed'].map(status => (
+                {['all', 'active', 'completed'].map(status => (
                   <button
                     key={status}
                     onClick={() => setFilter(status)}
@@ -2456,32 +2433,38 @@ const confirmDestructiveAction = (targetLabel) =>
                     <div className="flex items-start justify-between mb-3">
                       <div>
                         <h3 className="font-semibold text-gray-900">{job.name}</h3>
-                        <p className="text-sm text-gray-500">{job.client}</p>
+                        <p className="text-sm text-gray-500">{job.client || job.client_name || 'No client set'}</p>
                       </div>
-                      <Badge className={getStatusColor(job.status)}>{job.status}</Badge>
+                      <Badge className={normalizeJobStatus(job.status) === 'completed' ? 'bg-gray-100 text-gray-700' : 'bg-emerald-100 text-emerald-700'}>
+                        {normalizeJobStatus(job.status) === 'completed' ? 'completed' : 'active'}
+                      </Badge>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4 mb-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-3">
                       <div>
-                        <p className="text-xs text-gray-500">Contract Value</p>
-                        <p className="font-semibold text-gray-900">{formatCurrency(job.budget)}</p>
+                        <p className="text-xs text-gray-500">Client</p>
+                        <p className="font-medium text-gray-900 truncate">{job.client || job.client_name || '—'}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500">Spent to Date</p>
-                        <p className="font-semibold text-gray-900">{formatCurrency(job.spent)}</p>
+                        <p className="text-xs text-gray-500">Site</p>
+                        <p className="font-medium text-gray-900 truncate">{job.site_address || job.address || '—'}</p>
                       </div>
                       <div>
-                        <p className="text-xs text-gray-500">Margin</p>
-                        <p className={`font-semibold ${job.budget - job.spent > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {formatCurrency(job.budget - job.spent)}
-                        </p>
+                        <p className="text-xs text-gray-500">Start Date</p>
+                        <p className="font-medium text-gray-900">{formatDate(job.startDate || job.start_date)}</p>
                       </div>
-                    </div>
-
-                    <ProgressBar value={job.progress} color="brand" size="sm" />
-                    <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
-                      <span>{job.progress}% complete</span>
-                      <span>{formatDate(job.startDate)} - {formatDate(job.endDate)}</span>
+                      <div>
+                        <p className="text-xs text-gray-500">Crew</p>
+                        <p className="font-medium text-gray-900">{getJobCrewCount(job)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Equipment</p>
+                        <p className="font-medium text-gray-900">{getJobEquipmentCount(job)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">End Date</p>
+                        <p className="font-medium text-gray-900">{formatDate(job.targetEndDate || job.target_end_date || job.endDate || job.end_date)}</p>
+                      </div>
                     </div>
                   </Card>
                 ))
@@ -2490,7 +2473,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
             {/* Job Detail Panel */}
             {selectedJob ? (
-              <Card className="p-4 h-fit sticky top-4">
+              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
                 <h3 className="font-semibold text-gray-900 mb-4">{selectedJob.name}</h3>
 
                 <div className="space-y-4">
@@ -2511,13 +2494,19 @@ const confirmDestructiveAction = (targetLabel) =>
                       onChange={(e) => setJobForm({ ...jobForm, status: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     >
-                      <option value="draft">draft</option>
-                      <option value="sent">sent</option>
-                      <option value="approved">approved</option>
-                      <option value="in_progress">in_progress</option>
+                      <option value="active">active</option>
                       <option value="completed">completed</option>
-                      <option value="canceled">canceled</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Client</p>
+                    <input
+                      type="text"
+                      value={jobForm.client}
+                      onChange={(e) => setJobForm({ ...jobForm, client: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
                   </div>
 
                   <div>
@@ -2530,6 +2519,27 @@ const confirmDestructiveAction = (targetLabel) =>
                     />
                   </div>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Start Date</p>
+                      <input
+                        type="date"
+                        value={jobForm.start_date}
+                        onChange={(e) => setJobForm({ ...jobForm, start_date: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Target End Date</p>
+                      <input
+                        type="date"
+                        value={jobForm.target_end_date}
+                        onChange={(e) => setJobForm({ ...jobForm, target_end_date: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Notes</p>
                     <textarea
@@ -2540,70 +2550,15 @@ const confirmDestructiveAction = (targetLabel) =>
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500 mb-2">Budget vs Spent</p>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span>Budget</span>
-                        <span className="font-medium">{formatCurrency(jobFinancialSummary?.budgetCost || 0)}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span>Spent</span>
-                        <span className="font-medium">{formatCurrency(jobFinancialSummary?.spentCost || 0)}</span>
-                      </div>
-                      <ProgressBar
-                        value={Number(jobFinancialSummary?.spentCost || 0)}
-                        max={Math.max(Number(jobFinancialSummary?.budgetCost || 0), 1)}
-                        color="auto"
-                      />
-                      <div className="flex justify-between text-sm">
-                        <span>Remaining</span>
-                        <span className={`font-medium ${Number(jobFinancialSummary?.remainingCost || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {formatCurrency(jobFinancialSummary?.remainingCost || 0)}
-                        </span>
-                      </div>
+                    <p className="text-xs text-gray-500 mb-2">Job Record Snapshot</p>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-gray-500">Client</span><span className="font-medium">{selectedJob.client || selectedJob.client_name || '—'}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">Start Date</span><span className="font-medium">{formatDate(selectedJob.startDate || selectedJob.start_date)}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">Target End</span><span className="font-medium">{formatDate(selectedJob.targetEndDate || selectedJob.target_end_date || selectedJob.endDate || selectedJob.end_date)}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">Crew Assigned</span><span className="font-medium">{jobEmployees.length}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">Equipment Assigned</span><span className="font-medium">{jobEquipment.length}</span></div>
+                      <div className="flex justify-between"><span className="text-gray-500">End Date</span><span className="font-medium">{formatDate(selectedJob.targetEndDate || selectedJob.target_end_date || selectedJob.endDate || selectedJob.end_date)}</span></div>
                     </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-2">Profitability</p>
-                    {jobFinancialSummaryLoading ? (
-                      <p className="text-sm text-gray-400">Loading profitability...</p>
-                    ) : jobFinancialSummaryError ? (
-                      <p className="text-sm text-red-600">{jobFinancialSummaryError}</p>
-                    ) : jobFinancialSummary?.visible ? (
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span>Contract</span>
-                          <span className="font-medium">{formatCurrency(jobFinancialSummary.contractValue || 0)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Cost</span>
-                          <span className="font-medium">{formatCurrency(jobFinancialSummary.spentCost || 0)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Revenue</span>
-                          <span className="font-medium">{formatCurrency(jobFinancialSummary.revenueTotal || 0)}</span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Profit</span>
-                          <span className={`font-medium ${Number(jobFinancialSummary.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(jobFinancialSummary.profit || 0)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span>Margin</span>
-                          <span className="font-medium">
-                            {jobFinancialSummary.marginPct === null || jobFinancialSummary.marginPct === undefined
-                              ? '—'
-                              : `${Number(jobFinancialSummary.marginPct).toFixed(1)}%`}
-                          </span>
-                        </div>
-                      </div>
-                    ) : jobFinancialSummary ? (
-                      <p className="text-sm text-gray-400" data-testid="job-financial-hidden">Financial summary unavailable for your role.</p>
-                    ) : (
-                      <p className="text-sm text-gray-400">No profitability data yet.</p>
-                    )}
                   </div>
 
                   <div>
@@ -3263,7 +3218,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // TEAM VIEW
     // ============================================
-    const TeamView = ({ employees, employeesLoading, setEmployees, jobs, setShowModal }) => {
+    const TeamView = ({ employees, employeesLoading, setEmployees, jobs, setShowModal, currentRole }) => {
       const [filter, setFilter] = useState('all');
       const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
       const [employeeActionLoading, setEmployeeActionLoading] = useState(false);
@@ -3271,6 +3226,11 @@ const confirmDestructiveAction = (targetLabel) =>
       const [teamItems, setTeamItems] = useState([]);
       const [teamLoading, setTeamLoading] = useState(false);
       const [teamError, setTeamError] = useState('');
+      const [showAssignModal, setShowAssignModal] = useState(false);
+      const [assignForm, setAssignForm] = useState({ employeeId: '', jobId: '', date: new Date().toISOString().slice(0, 10), notes: '' });
+      const [assignLoading, setAssignLoading] = useState(false);
+      const [assignError, setAssignError] = useState('');
+      const [assignSuccess, setAssignSuccess] = useState('');
 
       const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
@@ -3281,6 +3241,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
       const selectedEmployee = teamItems.find(e => String(e.id) === String(selectedEmployeeId));
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
+      const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
 
       const stats = {
         total: teamItems.length,
@@ -3407,6 +3368,58 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       };
 
+      const openAssignModal = (employee) => {
+        setAssignError('');
+        setAssignSuccess('');
+        setAssignForm({
+          employeeId: String(employee.id),
+          jobId: '',
+          date: new Date().toISOString().slice(0, 10),
+          notes: '',
+        });
+        setShowAssignModal(true);
+      };
+
+      const handleAssignSubmit = async (event) => {
+        event.preventDefault();
+        if (!assignForm.employeeId || !assignForm.jobId || !assignForm.date) {
+          setAssignError('Job and date are required.');
+          return;
+        }
+
+        setAssignLoading(true);
+        setAssignError('');
+        setAssignSuccess('');
+
+        try {
+          const response = await fetch('/api/schedule/assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              employeeId: assignForm.employeeId,
+              jobId: assignForm.jobId,
+              date: assignForm.date,
+              notes: assignForm.notes || undefined,
+            }),
+          });
+
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.item) {
+            setAssignError(payload?.error || 'Failed to create assignment.');
+            setAssignLoading(false);
+            return;
+          }
+
+          setAssignSuccess('Assignment created.');
+          await loadTeamItems();
+          setShowAssignModal(false);
+        } catch {
+          setAssignError('Failed to create assignment.');
+        } finally {
+          setAssignLoading(false);
+        }
+      };
+
       return (
         <div className="space-y-6">
           {/* Stats */}
@@ -3481,8 +3494,21 @@ const confirmDestructiveAction = (targetLabel) =>
                         <p className="text-xs text-gray-500">Hours This Week: {Number(emp.hoursThisWeek || 0).toFixed(1)}</p>
                       </div>
                       <div className="text-right">
+                        {canAssignFromTeam && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            data-testid={`team-assign-${emp.id}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openAssignModal(emp);
+                            }}
+                          >
+                            Assign
+                          </Button>
+                        )}
                         {emp.assignedToday && (
-                          <p className="text-sm text-gray-600 flex items-center gap-1">
+                          <p className="text-sm text-gray-600 flex items-center gap-1 justify-end">
                             <Icon name="location-dot" className="text-brand-500" />
                             {emp.assignedToday.jobName}
                           </p>
@@ -3581,7 +3607,59 @@ const confirmDestructiveAction = (targetLabel) =>
                 <p>Select an employee to view details</p>
               </Card>
             )}
+
           </div>
+
+          <Modal isOpen={showAssignModal} onClose={() => setShowAssignModal(false)} title="Assign" size="sm">
+            <form className="space-y-3" onSubmit={handleAssignSubmit}>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Job</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={assignForm.jobId}
+                  onChange={(event) => setAssignForm((prev) => ({ ...prev, jobId: event.target.value }))}
+                  data-testid="team-assign-job"
+                  required
+                >
+                  <option value="">Select job</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>{job.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Date</label>
+                <input
+                  type="date"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={assignForm.date}
+                  onChange={(event) => setAssignForm((prev) => ({ ...prev, date: event.target.value }))}
+                  data-testid="team-assign-date"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Notes</label>
+                <textarea
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  rows={2}
+                  value={assignForm.notes}
+                  onChange={(event) => setAssignForm((prev) => ({ ...prev, notes: event.target.value }))}
+                  data-testid="team-assign-notes"
+                />
+              </div>
+              {assignError && <InlineError>{assignError}</InlineError>}
+              {assignSuccess && <p className="text-sm text-green-700">{assignSuccess}</p>}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowAssignModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="brand" size="sm" disabled={assignLoading} data-testid="team-assign-submit">
+                  {assignLoading ? 'Assigning...' : 'Assign'}
+                </Button>
+              </div>
+            </form>
+          </Modal>
         </div>
       );
     };
@@ -3787,7 +3865,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             </Badge>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Button variant="ghost" size="sm" onClick={() => setShowModal({ type: 'work-order', data: { equipmentId: eq.id, type: 'preventive' } })}>
+                            <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'work-order', data: { equipmentId: eq.id, type: 'preventive' } })}>
                               Schedule
                             </Button>
                           </td>
@@ -4883,11 +4961,11 @@ const confirmDestructiveAction = (targetLabel) =>
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Button variant="ghost" size="sm" onClick={() => openEditModal(cc)}>
+                            <Button variant="secondary" size="sm" onClick={() => openEditModal(cc)}>
                               <Icon name="pen-to-square" />
                             </Button>
                             <Button
-                              variant="ghost"
+                              variant="secondary"
                               size="sm"
                               onClick={() => handleDeleteCostCode(cc.id)}
                               disabled={deleteLoadingId === cc.id}
@@ -5370,9 +5448,9 @@ const confirmDestructiveAction = (targetLabel) =>
                       <td className="px-4 py-3 text-sm text-gray-600">{item.location}</td>
                       <td className="px-4 py-3 text-sm text-gray-600">{job?.name || 'General'}</td>
                       <td className="px-4 py-3 text-right">
-                        <Button variant="ghost" size="sm" onClick={() => openEditModal(item)}><Icon name="pen-to-square" /></Button>
+                        <Button variant="secondary" size="sm" onClick={() => openEditModal(item)}><Icon name="pen-to-square" /></Button>
                         <Button
-                          variant="ghost"
+                          variant="secondary"
                           size="sm"
                           onClick={() => handleDeleteItem(item.id)}
                           disabled={deleteLoadingId === item.id}
@@ -6223,8 +6301,8 @@ const confirmDestructiveAction = (targetLabel) =>
                               <p className="text-xs text-gray-500">{item.quantity} x {formatCurrency(item.unit_cost)}</p>
                             </div>
                             <div className="flex gap-1">
-                              <Button variant="ghost" size="sm" onClick={() => handleEditPoItem(item)}><Icon name="pen-to-square" /></Button>
-                              <Button variant="ghost" size="sm" onClick={() => handleDeletePoItem(item.id)}><Icon name="trash" /></Button>
+                              <Button variant="secondary" size="sm" onClick={() => handleEditPoItem(item)}><Icon name="pen-to-square" /></Button>
+                              <Button variant="secondary" size="sm" onClick={() => handleDeletePoItem(item.id)}><Icon name="trash" /></Button>
                             </div>
                           </div>
                         </div>
@@ -6688,7 +6766,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // MESSAGES VIEW - Team Communication Hub
     // ============================================
-    const MessagesView = () => {
+    const MessagesView = ({ employees = [] }) => {
       const [activeChannel, setActiveChannel] = useState(null);
       const [messageText, setMessageText] = useState('');
       const [searchTerm, setSearchTerm] = useState('');
@@ -6704,7 +6782,54 @@ const confirmDestructiveAction = (targetLabel) =>
       const [createChannelError, setCreateChannelError] = useState('');
       const [sendLoading, setSendLoading] = useState(false);
       const [sendError, setSendError] = useState('');
+      const [availableUsers, setAvailableUsers] = useState([]);
+      const [selectedNewChatUsers, setSelectedNewChatUsers] = useState([]);
+      const [showMembers, setShowMembers] = useState(false);
+      const [members, setMembers] = useState([]);
+      const [membersError, setMembersError] = useState('');
+      const [selectedAddMembers, setSelectedAddMembers] = useState([]);
+      const [myUserId, setMyUserId] = useState('');
       const messagesEndRef = useRef(null);
+
+      const normalized = (value) => String(value || '').trim().toLowerCase();
+
+      const contactOptions = useMemo(() => {
+        const userById = new Map((availableUsers || []).map((user) => [String(user.userId), user]));
+        const options = [];
+
+        for (const employee of employees || []) {
+          const explicitUserId = employee?.user_id ? String(employee.user_id) : null;
+          const matchedUser = explicitUserId ? userById.get(explicitUserId) : null;
+          options.push({
+            key: explicitUserId ? `user:${explicitUserId}` : `employee:${employee.id}`,
+            label: String(employee.name || employee.full_name || 'Team Member'),
+            subtitle: String(employee.role || ''),
+            userId: explicitUserId || null,
+            hasAccount: Boolean(matchedUser || explicitUserId),
+          });
+        }
+
+        for (const user of availableUsers || []) {
+          const key = `user:${user.userId}`;
+          if (options.some((item) => item.key === key)) continue;
+          options.push({
+            key,
+            label: String(user.displayName || 'Team Member'),
+            subtitle: String(user.role || ''),
+            userId: String(user.userId),
+            hasAccount: true,
+          });
+        }
+
+        return options.sort((a, b) => a.label.localeCompare(b.label));
+      }, [availableUsers, employees]);
+
+      const loadUsers = useCallback(async () => {
+        const response = await fetch('/api/messages/users', { cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload?.error || 'Failed to load team members');
+        setAvailableUsers(payload.items || []);
+      }, []);
 
       const loadChannels = useCallback(async () => {
         try {
@@ -6744,17 +6869,39 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       }, []);
 
+      const loadMembers = useCallback(async (channelId) => {
+        try {
+          setMembersError('');
+          const response = await fetch(`/api/messages/channels/${channelId}/members`, { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load members');
+          setMembers(payload.items || []);
+        } catch (error) {
+          setMembers([]);
+          setMembersError(error instanceof Error ? error.message : 'Failed to load members');
+        }
+      }, []);
+
+      useEffect(() => {
+        supabaseBrowser().auth.getUser().then(({ data }) => {
+          setMyUserId(String(data?.user?.id || ''));
+        }).catch(() => setMyUserId(''));
+      }, []);
+
       useEffect(() => {
         loadChannels();
-      }, [loadChannels]);
+        loadUsers().catch(() => setAvailableUsers([]));
+      }, [loadChannels, loadUsers]);
 
       useEffect(() => {
         if (!activeChannel?.id) {
           setMessages([]);
+          setMembers([]);
           return;
         }
         loadMessages(activeChannel.id);
-      }, [activeChannel, loadMessages]);
+        loadMembers(activeChannel.id);
+      }, [activeChannel, loadMessages, loadMembers]);
 
       useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -6763,26 +6910,78 @@ const confirmDestructiveAction = (targetLabel) =>
       const filteredChannels = channels.filter((channel) =>
         String(channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
+      const filteredContacts = contactOptions.filter((contact) =>
+        normalized(contact.label).includes(normalized(searchTerm))
+      );
+
+      const startDirectChat = async (contact) => {
+        try {
+          setCreateChannelLoading(true);
+          setCreateChannelError('');
+          const directName = `dm-${String(contact.label || 'team-member')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '')}`;
+
+          const existing = channels.find((channel) => String(channel.name || '') === directName);
+          if (existing) {
+            setActiveChannel(existing);
+            return;
+          }
+
+          const response = await fetch('/api/messages/channels', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name: directName,
+              memberUserIds: contact.userId ? [contact.userId] : [],
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to create chat');
+          await loadChannels();
+          setActiveChannel(payload.item);
+        } catch (error) {
+          setCreateChannelError(error instanceof Error ? error.message : 'Failed to create chat');
+        } finally {
+          setCreateChannelLoading(false);
+        }
+      };
 
       const handleCreateChannel = async () => {
         if (!newChannelName.trim()) return;
         try {
           setCreateChannelLoading(true);
           setCreateChannelError('');
+          const selectedParticipants = contactOptions.filter((item) => selectedNewChatUsers.includes(item.key));
+          const memberUserIds = Array.from(
+            new Set(
+              selectedParticipants
+                .map((participant) => participant.userId)
+                .filter(Boolean)
+            )
+          );
+          const generatedName =
+            newChannelName.trim() ||
+            (selectedParticipants.length === 1
+              ? `dm-${String(selectedParticipants[0].label || 'team-member')
+                  .toLowerCase()
+                  .replace(/[^a-z0-9]+/g, '-')
+                  .replace(/^-+|-+$/g, '')}`
+              : `group-${Date.now()}`);
+
           const response = await fetch('/api/messages/channels', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newChannelName.trim() }),
+            body: JSON.stringify({ name: generatedName, memberUserIds }),
           });
           const payload = await response.json();
-          if (!response.ok || !payload?.item) {
-            throw new Error(payload?.error || 'Failed to create channel');
-          }
-          const createdChannel = payload.item;
+          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to create channel');
           setShowNewChannel(false);
           setNewChannelName('');
-          setChannels((prev) => [...prev, createdChannel]);
-          setActiveChannel(createdChannel);
+          setSelectedNewChatUsers([]);
+          await loadChannels();
+          setActiveChannel(payload.item);
         } catch (error) {
           setCreateChannelError(error instanceof Error ? error.message : 'Failed to create channel');
         } finally {
@@ -6801,9 +7000,7 @@ const confirmDestructiveAction = (targetLabel) =>
             body: JSON.stringify({ body: messageText.trim() }),
           });
           const payload = await response.json();
-          if (!response.ok || !payload?.item) {
-            throw new Error(payload?.error || 'Failed to send message');
-          }
+          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
           setMessageText('');
           await loadMessages(activeChannel.id);
           await loadChannels();
@@ -6814,182 +7011,201 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       };
 
+      const handleAddMembers = async () => {
+        if (!activeChannel?.id || selectedAddMembers.length === 0) return;
+        const response = await fetch(`/api/messages/channels/${activeChannel.id}/members`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userIds: selectedAddMembers }),
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          setMembersError(payload?.error || 'Failed to add members');
+          return;
+        }
+        setSelectedAddMembers([]);
+        await loadMembers(activeChannel.id);
+        await loadChannels();
+      };
+
+      const handleLeave = async () => {
+        if (!activeChannel?.id) return;
+        const response = await fetch(`/api/messages/channels/${activeChannel.id}/members/me`, { method: 'DELETE' });
+        if (!response.ok) return;
+        setShowMembers(false);
+        await loadChannels();
+      };
+
+      const handleRemoveMember = async (userId) => {
+        if (!activeChannel?.id) return;
+        const response = await fetch(`/api/messages/channels/${activeChannel.id}/members/${userId}`, { method: 'DELETE' });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({}));
+          setMembersError(payload?.error || 'Failed to remove member');
+          return;
+        }
+        await loadMembers(activeChannel.id);
+        await loadChannels();
+      };
+
       return (
-        <div className="flex flex-col lg:flex-row h-[calc(100vh-140px)] max-md:h-[calc(100vh-170px)] bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className={`${activeChannel ? 'hidden lg:flex' : 'flex'} w-full lg:w-80 border-r border-gray-200 flex-col min-h-0`}>
-            <div className="p-4 border-b border-gray-200">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-gray-900">Messages</h2>
-                <button
-                  onClick={() => setShowNewChannel(true)}
-                  className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors"
-                  data-testid="messages-create-channel-open"
-                >
+        <div className="h-[calc(100vh-190px)] min-h-[700px] flex rounded-xl overflow-hidden border border-gray-800 bg-[#0d1016] shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
+          <div className="w-full md:w-80 bg-[#0b0f14] border-r border-gray-800/80 flex flex-col">
+            <div className="p-4 border-b border-gray-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-gray-100 tracking-wide">Messages</h3>
+                <Button variant="secondary" size="sm" onClick={() => setShowNewChannel(true)} data-testid="messages-new-chat-open">
                   <Icon name="pen-to-square" />
-                </button>
+                </Button>
               </div>
               <div className="relative">
-                <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="Search channels..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-gray-100 border-0 rounded-lg text-sm focus:ring-2 focus:ring-brand-500"
-                />
+                <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs" />
+                <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full pl-8 pr-3 py-2 bg-[#141922] border border-gray-800 rounded-lg text-sm text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500" />
               </div>
-              {channelsError && <p className="text-sm text-red-600 mt-3">{channelsError}</p>}
+              {channelsError && <p className="text-sm text-red-400 mt-3">{channelsError}</p>}
             </div>
-
             <div className="flex-1 overflow-y-auto">
-              <div className="py-2">
-                <p className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase">Channels</p>
-                {channelsLoading ? (
-                  <div className="px-4 py-3 text-sm text-gray-500">Loading channels...</div>
-                ) : filteredChannels.length === 0 ? (
-                  <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div>
-                ) : filteredChannels.map((channel) => (
-                  <button
-                    key={channel.id}
-                    onClick={() => setActiveChannel(channel)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${
-                      activeChannel?.id === channel.id ? 'bg-brand-50' : ''
-                    }`}
-                    data-testid={`messages-channel-${channel.id}`}
-                  >
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-gray-100">
-                      <Icon name="hashtag" className="text-gray-600" />
-                    </div>
-                    <div className="flex-1 text-left min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium text-gray-900 text-sm truncate"># {channel.name}</span>
-                        {channel.message_count > 0 && (
-                          <span className="px-1.5 py-0.5 bg-gray-200 text-gray-700 text-xs rounded-full">{channel.message_count}</span>
-                        )}
+              {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
+                <button key={channel.id} onClick={() => setActiveChannel(channel)} className={`w-full text-left px-4 py-3 border-b border-gray-800/70 hover:bg-[#151b26] ${activeChannel?.id === channel.id ? 'bg-brand-600/85' : ''}`} data-testid={`messages-channel-${channel.id}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}># {channel.name}</span>
+                    {channel.message_count > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-800 text-gray-300'}`}>{channel.message_count}</span>}
+                  </div>
+                  <p className={`text-xs truncate ${activeChannel?.id === channel.id ? 'text-white/80' : 'text-gray-500'}`}>{channel.last_message_preview || 'No messages yet'}</p>
+                </button>
+              ))}
+              <div className="px-4 py-3 border-t border-gray-800">
+                <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Team Members</p>
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {filteredContacts.map((contact) => (
+                    <button
+                      key={`contact-${contact.key}`}
+                      type="button"
+                      onClick={() => startDirectChat(contact)}
+                      className="w-full text-left px-2 py-2 rounded-lg hover:bg-[#151b26] flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="text-sm text-gray-100 truncate">{contact.label}</p>
+                        <p className="text-xs text-gray-500 truncate">{contact.subtitle || (contact.hasAccount ? 'Account ready' : 'Placeholder only')}</p>
                       </div>
-                      <p className="text-xs text-gray-500 truncate">{channel.last_message_preview || 'No messages yet'}</p>
-                    </div>
-                  </button>
-                ))}
+                      <span className="text-[10px] text-gray-500">{contact.hasAccount ? 'Chat' : 'Placeholder'}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
 
           {activeChannel ? (
-            <div className="flex-1 flex flex-col min-h-0">
-              <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setActiveChannel(null)}
-                    className="md:hidden p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-                  >
-                    <Icon name="chevron-left" />
-                  </button>
-                  <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center">
-                    <Icon name="hashtag" className="text-gray-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900" data-testid="messages-active-channel"># {activeChannel.name}</h3>
-                    <p className="text-xs text-gray-500">{activeChannel.message_count || 0} messages</p>
-                  </div>
+            <div className="flex-1 flex flex-col bg-[#11151d]">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
+                <div>
+                  <h3 className="font-semibold text-gray-100" data-testid="messages-active-channel"># {activeChannel.name}</h3>
+                  <p className="text-xs text-gray-400">{activeChannel.message_count || 0} messages</p>
                 </div>
+                <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3">
-                {messagesLoading ? (
-                  <div className="text-sm text-gray-500">Loading messages...</div>
-                ) : messagesError ? (
-                  <div className="text-sm text-red-600">{messagesError}</div>
-                ) : messages.length === 0 ? (
-                  <div className="text-sm text-gray-500">No messages yet.</div>
-                ) : messages.map((msg) => (
-                  <div key={msg.id} className="rounded-xl bg-gray-100 px-4 py-3" data-testid={`messages-message-${msg.id}`}>
-                    <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{msg.body}</p>
-                    <p className="text-xs text-gray-500 mt-1">{formatDate(msg.created_at)}</p>
-                  </div>
-                ))}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-gradient-to-b from-[#131824] to-[#0f131b]">
+                {messagesLoading ? <div className="text-sm text-gray-400">Loading messages...</div> : messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500">No messages yet.</div> : messages.map((msg) => {
+                  const isMine = myUserId && String(msg.sender_user_id || '') === String(myUserId);
+                  return (
+                    <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
+                      <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                        isMine ? 'bg-blue-500 text-white rounded-br-md' : 'bg-[#2a2f38] text-gray-100 rounded-bl-md'
+                      }`}>
+                        <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                        <p className={`text-[10px] mt-1 ${isMine ? 'text-white/80' : 'text-gray-400'}`}>{formatDate(msg.created_at)}</p>
+                      </div>
+                    </div>
+                  );
+                })}
                 <div ref={messagesEndRef} />
               </div>
 
-              <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200">
+              <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
                 <div className="flex items-end gap-3">
                   <div className="flex-1 relative">
-                    <textarea
-                      value={messageText}
-                      onChange={(e) => setMessageText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          handleSendMessage();
-                        }
-                      }}
-                      placeholder={`Message #${activeChannel.name}`}
-                      className="w-full px-4 py-3 bg-gray-100 border-0 rounded-xl text-sm resize-none focus:ring-2 focus:ring-brand-500"
-                      rows="1"
-                      data-testid="messages-input"
-                    />
+                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
                   </div>
-                  <button
-                    onClick={handleSendMessage}
-                    disabled={!messageText.trim() || sendLoading}
-                    className="p-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    data-testid="messages-send"
-                  >
+                  <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                     <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
                   </button>
                 </div>
-                {sendError && <p className="text-xs text-red-600 mt-2">{sendError}</p>}
-                <p className="text-xs text-gray-400 mt-2">Press Enter to send, Shift + Enter for new line</p>
+                {sendError && <p className="text-xs text-red-400 mt-2">{sendError}</p>}
+                <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
               </div>
             </div>
           ) : (
-            <div className="hidden md:flex flex-1 items-center justify-center bg-gray-50">
-              <div className="text-center">
-                <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Icon name="comments" className="text-3xl text-gray-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Your Messages</h3>
-                <p className="text-gray-500 mb-6 max-w-sm">Select a channel to start messaging or create a new one.</p>
-                <Button variant="brand" onClick={() => setShowNewChannel(true)}>
-                  <Icon name="pen-to-square" className="mr-2" /> New Channel
-                </Button>
-              </div>
-            </div>
+            <div className="hidden md:flex flex-1 items-center justify-center bg-[#11151d]"><div className="text-center"><h3 className="text-lg font-semibold text-gray-100 mb-2">Your Messages</h3></div></div>
           )}
 
           {showNewChannel && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
               <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
                 <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900">Create Channel</h3>
-                  <button onClick={() => setShowNewChannel(false)} className="p-1 text-gray-400 hover:text-gray-600">
-                    <Icon name="xmark" />
-                  </button>
+                  <h3 className="font-semibold text-gray-900">Create Group Chat</h3>
+                  <button onClick={() => setShowNewChannel(false)} className="p-1 text-gray-400 hover:text-gray-600"><Icon name="xmark" /></button>
                 </div>
-                <div className="p-6 space-y-3">
-                  <label className="block text-sm font-medium text-gray-700">Channel Name</label>
-                  <input
-                    type="text"
-                    value={newChannelName}
-                    onChange={(e) => setNewChannelName(e.target.value)}
-                    placeholder="e.g. field-updates"
-                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-                    data-testid="messages-create-channel-input"
-                  />
+                <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
+                  <label className="block text-sm font-medium text-gray-700">Chat Name</label>
+                  <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="e.g. field-updates" className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500" data-testid="messages-create-channel-input" />
+                  <label className="block text-sm font-medium text-gray-700">Add Members</label>
+                  <div className="border border-gray-200 rounded-lg p-2 max-h-48 overflow-y-auto space-y-2" data-testid="messages-create-channel-members">
+                    {contactOptions.map((contact) => (
+                      <label key={contact.key} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selectedNewChatUsers.includes(contact.key)}
+                          onChange={(e) =>
+                            setSelectedNewChatUsers((prev) =>
+                              e.target.checked ? [...prev, contact.key] : prev.filter((id) => id !== contact.key)
+                            )
+                          }
+                        />
+                        <span>{contact.label}</span>
+                        {!contact.hasAccount && <span className="text-xs text-gray-400">(placeholder)</span>}
+                      </label>
+                    ))}
+                  </div>
                   {createChannelError && <p className="text-sm text-red-600">{createChannelError}</p>}
                   <div className="flex justify-end gap-2 pt-2">
-                    <Button variant="secondary" onClick={() => setShowNewChannel(false)} disabled={createChannelLoading}>
-                      Cancel
-                    </Button>
-                    <Button
-                      variant="brand"
-                      onClick={handleCreateChannel}
-                      disabled={!newChannelName.trim() || createChannelLoading}
-                      data-testid="messages-create-channel-submit"
-                    >
-                      {createChannelLoading ? 'Creating...' : 'Create'}
-                    </Button>
+                    <Button variant="secondary" onClick={() => setShowNewChannel(false)} disabled={createChannelLoading}>Cancel</Button>
+                    <Button variant="brand" onClick={handleCreateChannel} disabled={(!newChannelName.trim() && selectedNewChatUsers.length === 0) || createChannelLoading} data-testid="messages-create-channel-submit">{createChannelLoading ? 'Creating...' : 'Create'}</Button>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showMembers && activeChannel && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="messages-members-modal">
+              <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
+                <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">Members</h3>
+                  <button onClick={() => setShowMembers(false)} className="p-1 text-gray-400 hover:text-gray-600"><Icon name="xmark" /></button>
+                </div>
+                <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
+                  {members.map((member) => (
+                    <div key={member.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2">
+                      <span>{member.displayName} {member.memberRole === 'owner' ? '(owner)' : ''}</span>
+                      {member.memberRole !== 'owner' && <Button variant="secondary" size="sm" onClick={() => handleRemoveMember(member.userId)} data-testid={`messages-member-remove-${member.userId}`}>Remove</Button>}
+                    </div>
+                  ))}
+                  <label className="block text-sm font-medium text-gray-700">Add Members</label>
+                  <div className="border border-gray-200 rounded-lg p-2 max-h-40 overflow-y-auto space-y-2">
+                    {availableUsers.map((user) => (
+                      <label key={user.userId} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={selectedAddMembers.includes(user.userId)} onChange={(e) => setSelectedAddMembers((prev) => e.target.checked ? [...prev, user.userId] : prev.filter((id) => id !== user.userId))} />
+                        <span>{user.displayName}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex justify-between">
+                    <Button variant="secondary" onClick={handleLeave} data-testid="messages-leave-chat">Leave chat</Button>
+                    <Button variant="brand" onClick={handleAddMembers} data-testid="messages-add-members">Add selected</Button>
+                  </div>
+                  {membersError && <p className="text-sm text-red-600">{membersError}</p>}
                 </div>
               </div>
             </div>
@@ -7266,7 +7482,7 @@ const confirmDestructiveAction = (targetLabel) =>
                               <Icon name="check-circle" /> Connected
                             </span>
                             <div className="flex gap-2">
-                              <Button variant="ghost" size="sm">
+                              <Button variant="secondary" size="sm">
                                 <Icon name="gear" />
                               </Button>
                               <Button
@@ -7599,7 +7815,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   <p className="text-sm text-gray-500 mb-3">{asset.type} • {asset.items} items</p>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-gray-400">Updated {formatDate(asset.updated)}</span>
-                    <Button variant="ghost" size="sm"><Icon name="folder-open" /></Button>
+                    <Button variant="secondary" size="sm"><Icon name="folder-open" /></Button>
                   </div>
                 </Card>
               ))}
@@ -7815,7 +8031,7 @@ const confirmDestructiveAction = (targetLabel) =>
       </Modal>
     );
 
-    const CalendarEventModal = ({ isOpen, onClose, employees }) => {
+    const CalendarEventModal = ({ isOpen, onClose, employees, initialData, onCreated }) => {
       const [title, setTitle] = useState('');
       const [eventType, setEventType] = useState('meeting');
       const [visibility, setVisibility] = useState('attendees');
@@ -7823,10 +8039,38 @@ const confirmDestructiveAction = (targetLabel) =>
       const [endsAt, setEndsAt] = useState(new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
       const [locationText, setLocationText] = useState('');
       const [description, setDescription] = useState('');
-      const [attendeeEmployeeId, setAttendeeEmployeeId] = useState('');
+      const [attendeeEmployeeIds, setAttendeeEmployeeIds] = useState([]);
+      const [attendeeSearch, setAttendeeSearch] = useState('');
+      const [favoriteEmployeeIds, setFavoriteEmployeeIds] = useState([]);
+      const [externalAttendees, setExternalAttendees] = useState([]);
+      const [externalName, setExternalName] = useState('');
+      const [externalContact, setExternalContact] = useState('');
       const [saving, setSaving] = useState(false);
       const [error, setError] = useState('');
       const [warning, setWarning] = useState('');
+
+      useEffect(() => {
+        if (!isOpen || typeof window === 'undefined') return;
+        try {
+          const raw = window.localStorage.getItem('calendar.favoriteEmployeeIds');
+          const parsed = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(parsed)) {
+            setFavoriteEmployeeIds(parsed.map((id) => String(id)));
+          }
+        } catch {
+          setFavoriteEmployeeIds([]);
+        }
+      }, [isOpen]);
+
+      useEffect(() => {
+        if (!isOpen) return;
+        if (!initialData?.startsAt) return;
+        const start = new Date(initialData.startsAt);
+        if (Number.isNaN(start.getTime())) return;
+        const end = initialData?.endsAt ? new Date(initialData.endsAt) : new Date(start.getTime() + 60 * 60 * 1000);
+        setStartsAt(toLocalInputValue(start));
+        setEndsAt(toLocalInputValue(Number.isNaN(end.getTime()) ? new Date(start.getTime() + 60 * 60 * 1000) : end));
+      }, [isOpen, initialData]);
 
       const reset = () => {
         setTitle('');
@@ -7836,19 +8080,88 @@ const confirmDestructiveAction = (targetLabel) =>
         setEndsAt(new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
         setLocationText('');
         setDescription('');
-        setAttendeeEmployeeId('');
+        setAttendeeEmployeeIds([]);
+        setAttendeeSearch('');
+        setExternalAttendees([]);
+        setExternalName('');
+        setExternalContact('');
         setError('');
         setWarning('');
       };
+
+      const persistFavorites = (next) => {
+        setFavoriteEmployeeIds(next);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('calendar.favoriteEmployeeIds', JSON.stringify(next));
+        }
+      };
+
+      const toggleFavoriteEmployee = (employeeId) => {
+        const id = String(employeeId);
+        if (favoriteEmployeeIds.includes(id)) {
+          persistFavorites(favoriteEmployeeIds.filter((item) => item !== id));
+        } else {
+          persistFavorites([id, ...favoriteEmployeeIds]);
+        }
+      };
+
+      const toggleAttendeeEmployee = (employeeId) => {
+        const id = String(employeeId);
+        setAttendeeEmployeeIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+      };
+
+      const addExternalAttendee = () => {
+        const trimmedName = externalName.trim();
+        const trimmedContact = externalContact.trim();
+        if (!trimmedName) return;
+        setExternalAttendees((prev) => [...prev, { name: trimmedName, contact: trimmedContact }]);
+        setExternalName('');
+        setExternalContact('');
+      };
+
+      const toLocalInputValue = (date) => {
+        const dt = new Date(date);
+        const year = dt.getFullYear();
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        const hour = String(dt.getHours()).padStart(2, '0');
+        const minute = String(dt.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hour}:${minute}`;
+      };
+
+      const removeExternalAttendee = (index) => {
+        setExternalAttendees((prev) => prev.filter((_, idx) => idx !== index));
+      };
+
+      const filteredEmployees = employees.filter((employee) => {
+        const haystack = `${employee.name || ''} ${employee.role || ''}`.toLowerCase();
+        return haystack.includes(attendeeSearch.trim().toLowerCase());
+      });
+
+      const selectedEmployees = attendeeEmployeeIds
+        .map((id) => employees.find((employee) => String(employee.id) === String(id)))
+        .filter(Boolean);
+
+      const favoriteEmployees = favoriteEmployeeIds
+        .map((id) => employees.find((employee) => String(employee.id) === String(id)))
+        .filter(Boolean);
 
       const handleSubmit = async () => {
         if (!title.trim()) return;
         try {
           setSaving(true);
           setError('');
-          const attendees = attendeeEmployeeId
-            ? [{ attendeeType: 'employee', employeeId: attendeeEmployeeId }]
-            : [];
+          const attendees = [
+            ...attendeeEmployeeIds.map((employeeId) => ({
+              attendeeType: 'employee',
+              employeeId: String(employeeId),
+            })),
+            ...externalAttendees.map((attendee) => ({
+              attendeeType: 'external',
+              externalName: attendee.name,
+              externalContact: attendee.contact || undefined,
+            })),
+          ];
           const response = await fetch('/api/calendar/events', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -7873,6 +8186,7 @@ const confirmDestructiveAction = (targetLabel) =>
             return;
           }
           reset();
+          if (typeof onCreated === 'function') onCreated();
           onClose();
         } catch {
           setError('Failed to create event');
@@ -7891,7 +8205,20 @@ const confirmDestructiveAction = (targetLabel) =>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Starts</label>
-                <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                <input
+                  type="datetime-local"
+                  value={startsAt}
+                  onChange={(e) => {
+                    const nextStart = e.target.value;
+                    setStartsAt(nextStart);
+                    const startDate = new Date(nextStart);
+                    if (!Number.isNaN(startDate.getTime())) {
+                      const nextEndDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+                      setEndsAt(toLocalInputValue(nextEndDate));
+                    }
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ends</label>
@@ -7919,14 +8246,124 @@ const confirmDestructiveAction = (targetLabel) =>
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Attendee (Employee)</label>
-              <select value={attendeeEmployeeId} onChange={(e) => setAttendeeEmployeeId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                <option value="">No specific attendee</option>
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>{employee.name}</option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">Attendees</label>
+                <button
+                  type="button"
+                  className="text-xs text-brand-600 hover:text-brand-700"
+                  onClick={() => {
+                    setVisibility('private');
+                    setAttendeeEmployeeIds([]);
+                    setExternalAttendees([]);
+                  }}
+                >
+                  Meeting with just me
+                </button>
+              </div>
+
+              {favoriteEmployees.length > 0 && (
+                <div className="mb-2">
+                  <p className="text-xs font-medium text-gray-500 mb-1">Favorites</p>
+                  <div className="flex flex-wrap gap-1">
+                    {favoriteEmployees.map((employee) => {
+                      const selected = attendeeEmployeeIds.includes(String(employee.id));
+                      return (
+                        <button
+                          key={`fav-employee-${employee.id}`}
+                          type="button"
+                          onClick={() => toggleAttendeeEmployee(employee.id)}
+                          className={`px-2 py-1 text-xs rounded border ${
+                            selected ? 'bg-brand-100 border-brand-300 text-brand-700' : 'bg-white border-gray-300 text-gray-700'
+                          }`}
+                        >
+                          {employee.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <input
+                value={attendeeSearch}
+                onChange={(e) => setAttendeeSearch(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                placeholder="Search employees..."
+              />
+
+              <div className="mt-2 max-h-36 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                {filteredEmployees.map((employee) => {
+                  const selected = attendeeEmployeeIds.includes(String(employee.id));
+                  const favorite = favoriteEmployeeIds.includes(String(employee.id));
+                  return (
+                    <div key={`attendee-row-${employee.id}`} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <button
+                        type="button"
+                        className={`text-left flex-1 ${selected ? 'text-brand-700 font-medium' : 'text-gray-700'}`}
+                        onClick={() => toggleAttendeeEmployee(employee.id)}
+                      >
+                        {employee.name} <span className="text-xs text-gray-400">{employee.role}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`ml-2 text-xs ${favorite ? 'text-brand-600' : 'text-gray-400 hover:text-gray-600'}`}
+                        onClick={() => toggleFavoriteEmployee(employee.id)}
+                      >
+                        {favorite ? 'Favorited' : 'Favorite'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {selectedEmployees.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {selectedEmployees.map((employee) => (
+                    <span key={`selected-employee-${employee.id}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-brand-50 text-brand-700 border border-brand-200">
+                      {employee.name}
+                      <button type="button" onClick={() => toggleAttendeeEmployee(employee.id)}>
+                        <Icon name="xmark" className="text-[10px]" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">External attendees (placeholder)</label>
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+                <input
+                  value={externalName}
+                  onChange={(e) => setExternalName(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  placeholder="Name (homeowner/client)"
+                />
+                <input
+                  value={externalContact}
+                  onChange={(e) => setExternalContact(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  placeholder="Phone or email (optional)"
+                />
+                <Button type="button" variant="secondary" onClick={addExternalAttendee} disabled={!externalName.trim()}>
+                  Add
+                </Button>
+              </div>
+              {externalAttendees.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {externalAttendees.map((attendee, index) => (
+                    <span key={`external-attendee-${index}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-gray-50 text-gray-700 border border-gray-200">
+                      {attendee.name}
+                      {attendee.contact ? ` (${attendee.contact})` : ''}
+                      <button type="button" onClick={() => removeExternalAttendee(index)}>
+                        <Icon name="xmark" className="text-[10px]" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
               <input value={locationText} onChange={(e) => setLocationText(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Main office" />
@@ -8189,7 +8626,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   </select>
                 </div>
               ))}
-              <Button variant="ghost" size="sm" onClick={() => setMaterials(prev => [...prev, { item: '', qty: '', unit: 'CY' }])}>
+              <Button variant="secondary" size="sm" onClick={() => setMaterials(prev => [...prev, { item: '', qty: '', unit: 'CY' }])}>
                 <Icon name="plus" className="mr-1" /> Add Material
               </Button>
             </div>

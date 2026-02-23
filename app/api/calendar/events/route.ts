@@ -115,6 +115,11 @@ const mapEvent = (
 
 export const dynamic = "force-dynamic";
 
+function isMissingScheduleAssignmentsTable(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("schedule_assignments") && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
 export async function POST(request: Request) {
   try {
     let access: Awaited<ReturnType<typeof requireRole>>;
@@ -157,10 +162,10 @@ export async function POST(request: Request) {
         .gte("date", startDate)
         .lte("date", endDate)
         .limit(1);
-      if (overlapAssignmentsResult.error) {
+      if (overlapAssignmentsResult.error && !isMissingScheduleAssignmentsTable(overlapAssignmentsResult.error.message)) {
         return NextResponse.json({ error: overlapAssignmentsResult.error.message }, { status: 400 });
       }
-      if ((overlapAssignmentsResult.data ?? []).length > 0) {
+      if (!overlapAssignmentsResult.error && (overlapAssignmentsResult.data ?? []).length > 0) {
         warnings.push("Event overlaps with existing assignments for one or more attendees.");
       }
     }

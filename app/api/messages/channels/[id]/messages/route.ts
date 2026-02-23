@@ -3,6 +3,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getFallbackChannel, listFallbackMessages } from "@/lib/messages/fallbackStore";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { getMyMembership } from "@/lib/messages/members";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +32,7 @@ function toTenantErrorResponse(error: TenantResolverError) {
 function isMissingMessagesTables(message: string) {
   const normalized = message.toLowerCase();
   return (
-    (normalized.includes("message_channels") || normalized.includes("messages")) &&
+    (normalized.includes("message_channels") || normalized.includes("messages") || normalized.includes("message_channel_members")) &&
     (normalized.includes("does not exist") || normalized.includes("not find"))
   );
 }
@@ -48,17 +49,11 @@ export async function GET(
     }
     const channelId = parsedParams.data.id;
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
 
-    const { data: channel, error: channelError } = await supabase
-      .from("message_channels")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("id", channelId)
-      .maybeSingle();
-
-    if (channelError) {
-      if (isMissingMessagesTables(channelError.message)) {
+    const membership = await getMyMembership(supabase, companyId, channelId, userId);
+    if (membership.error) {
+      if (isMissingMessagesTables(membership.error.message || "")) {
         const fallbackChannel = getFallbackChannel(companyId, channelId);
         if (!fallbackChannel) return notFound("Channel not found");
         const fallbackItems = listFallbackMessages(companyId, channelId);
@@ -66,7 +61,17 @@ export async function GET(
       }
       return serverError();
     }
-    if (!channel) return notFound("Channel not found");
+    if (!membership.data) {
+      const channelResult = await supabase
+        .from("message_channels")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("id", channelId)
+        .maybeSingle();
+      if (channelResult.error) return serverError();
+      if (!channelResult.data) return notFound("Channel not found");
+      return forbidden();
+    }
 
     const { data, error, count } = await supabase
       .from("messages")
@@ -76,20 +81,12 @@ export async function GET(
       .order("created_at", { ascending: true })
       .range(from, to);
 
-    if (error) {
-      if (isMissingMessagesTables(error.message)) {
-        const fallbackItems = listFallbackMessages(companyId, channelId);
-        return Response.json({ items: fallbackItems.slice(from, to + 1), ...getPaginationMeta(fallbackItems.length, page, pageSize) });
-      }
-      return serverError();
-    }
+    if (error) return serverError();
 
     const items = data ?? [];
     return Response.json({ items, ...getPaginationMeta(count ?? items.length, page, pageSize) });
   } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return toTenantErrorResponse(error);
-    }
+    if (error instanceof TenantResolverError) return toTenantErrorResponse(error);
     return serverError();
   }
 }

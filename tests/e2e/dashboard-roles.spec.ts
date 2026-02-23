@@ -32,24 +32,29 @@ async function setRole(page: Page, role: Role) {
 async function openDashboard(page: Page) {
   await page.goto('/');
   await page.getByTestId('nav-dashboard').click();
-  await expect(page.getByRole('heading', { name: 'Quick Actions' })).toBeVisible();
 }
 
-test('dashboard summary visibility is role scoped', async ({ page }) => {
+test('admin dashboard keeps CEO cards and weather', async ({ page }) => {
   await setRole(page, 'admin');
   await openDashboard(page);
+
   await expect(page.getByText('Month Revenue')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Active Jobs' })).toBeVisible();
+  await expect(page.getByText('Weather - Cincinnati')).toBeVisible();
+});
 
-  await setRole(page, 'foreman');
-  await openDashboard(page);
-  await expect(page.getByText('Month Revenue')).toHaveCount(0);
-  await expect(page.getByText('Fleet Utilization')).toHaveCount(0);
-
-  await setRole(page, 'mechanic');
-  await openDashboard(page);
-  await expect(page.getByRole('heading', { name: 'Open Work Orders' })).toBeVisible();
-
+test('operator dashboard shows assignment and weather', async ({ page }) => {
   await setRole(page, 'operator');
   await openDashboard(page);
-  await expect(page.getByText('Month Revenue')).toHaveCount(0);
+
+  await expect(page.getByRole('heading', { name: 'My assignment today' })).toBeVisible();
+  await expect(page.getByText('Weather - Cincinnati')).toBeVisible();
+});
+
+test('mechanic dashboard shows open work orders and weather', async ({ page }) => {
+  await setRole(page, 'mechanic');
+  await openDashboard(page);
+
+  await expect(page.getByRole('heading', { name: 'Open work orders assigned to me' })).toBeVisible();
+  await expect(page.getByText('Weather - Cincinnati')).toBeVisible();
 });

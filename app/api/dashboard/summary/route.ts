@@ -6,6 +6,7 @@ import {
 } from "@/lib/onboarding/checklist";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import type { AppRole } from "@/lib/nav/config";
+import { getStatsForRole } from "@/lib/stats/getStats";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,8 @@ type DashboardSummary = {
     value: number | string;
     sublabel?: string;
     trendPct?: number | null;
+    href?: string | null;
+    visible?: boolean;
   }>;
   sections: {
     activeJobs?: {
@@ -63,14 +66,6 @@ const asNumber = (value: unknown) => {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? num : 0;
 };
-
-const formatCurrency = (amount: number) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(amount);
 
 const ACTIVE_JOB_STATUSES = ["active", "open", "in_progress"];
 const OPEN_WORK_ORDER_STATUSES = ["open", "scheduled", "in-progress", "in_progress"];
@@ -214,9 +209,8 @@ export async function GET() {
     const fleetUtilizationPct = equipmentRows.length > 0 ? Math.round((activeEquipmentCount / equipmentRows.length) * 100) : 0;
 
     const safetyCount = safetyCountResult.error ? 0 : safetyCountResult.count ?? 0;
-    const unreadMessages = 0;
-    const monthRevenuePlaceholder = 847500;
-    const hoursTodayPlaceholder = 0;
+
+    const stats = await getStatsForRole({ supabase, companyId, userId, role });
 
     const workOrderItems = (openWorkOrdersResult.data ?? []).map((row) => ({
       id: String(row.id),
@@ -260,10 +254,10 @@ export async function GET() {
 
     if (role === "admin") {
       kpis.push(
-        { key: "active_jobs", label: "Active Jobs", value: activeJobsCount, sublabel: `${activeJobsCount} currently in progress` },
-        { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, sublabel: `${activeEquipmentCount} of ${equipmentRows.length} active`, trendPct: 5 },
-        { key: "crew_on_site", label: "Crew On-Site", value: employeesOnSiteCountResult.count ?? 0 },
-        { key: "month_revenue", label: "Month Revenue", value: formatCurrency(monthRevenuePlaceholder), sublabel: "deterministic placeholder", trendPct: 12 }
+        { key: "active_jobs", label: "Active Jobs", value: stats.active_jobs?.value ?? 0, sublabel: `${activeJobsCount} currently in progress`, href: stats.active_jobs?.href, visible: stats.active_jobs?.visible },
+        { key: "fleet_utilization", label: "Fleet Utilization", value: stats.fleet_utilization?.value ?? `${fleetUtilizationPct}%`, sublabel: `${activeEquipmentCount} of ${equipmentRows.length} active`, trendPct: 5, href: stats.fleet_utilization?.href, visible: stats.fleet_utilization?.visible },
+        { key: "crew_on_site", label: "Crew On-Site", value: stats.crew_on_site?.value ?? (employeesOnSiteCountResult.count ?? 0), href: stats.crew_on_site?.href, visible: stats.crew_on_site?.visible },
+        { key: "month_revenue", label: "Month Revenue", value: stats.month_revenue?.value ?? "$0", trendPct: 12, href: stats.month_revenue?.href, visible: stats.month_revenue?.visible }
       );
 
       sections.activeJobs = {
@@ -317,9 +311,9 @@ export async function GET() {
 
     if (role === "pm") {
       kpis.push(
-        { key: "active_jobs", label: "Active Jobs", value: activeJobsCount },
-        { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, sublabel: `${activeEquipmentCount} of ${equipmentRows.length} active` },
-        { key: "crew_on_site", label: "Crew On-Site", value: employeesOnSiteCountResult.count ?? 0 }
+        { key: "active_jobs", label: "Active Jobs", value: stats.active_jobs?.value ?? activeJobsCount, href: stats.active_jobs?.href, visible: stats.active_jobs?.visible },
+        { key: "fleet_utilization", label: "Fleet Utilization", value: stats.fleet_utilization?.value ?? `${fleetUtilizationPct}%`, sublabel: `${activeEquipmentCount} of ${equipmentRows.length} active`, href: stats.fleet_utilization?.href, visible: stats.fleet_utilization?.visible },
+        { key: "crew_on_site", label: "Crew On-Site", value: stats.crew_on_site?.value ?? (employeesOnSiteCountResult.count ?? 0), href: stats.crew_on_site?.href, visible: stats.crew_on_site?.visible }
       );
 
       sections.activeJobs = {
@@ -373,10 +367,10 @@ export async function GET() {
 
     if (role === "foreman") {
       kpis.push(
-        { key: "my_active_jobs", label: "My Active Jobs", value: activeJobsCount },
-        { key: "crew_assigned_today", label: "Crew Assigned Today", value: employeesOnSiteCountResult.count ?? 0 },
-        { key: "safety_7d", label: "Safety Logs (7d)", value: safetyCount },
-        { key: "unread_messages", label: "Unread Messages", value: unreadMessages }
+        { key: "my_active_jobs", label: "My Active Jobs", value: stats.my_active_jobs?.value ?? activeJobsCount, href: stats.my_active_jobs?.href, visible: stats.my_active_jobs?.visible },
+        { key: "crew_assigned_today", label: "Crew Assigned Today", value: stats.crew_assigned_today?.value ?? (employeesOnSiteCountResult.count ?? 0), href: stats.crew_assigned_today?.href, visible: stats.crew_assigned_today?.visible },
+        { key: "safety_7d", label: "Safety Logs (7d)", value: stats.safety_7d?.value ?? safetyCount, href: stats.safety_7d?.href, visible: stats.safety_7d?.visible },
+        { key: "unread_messages", label: "Unread Messages", value: stats.unread_messages?.value ?? 0, href: stats.unread_messages?.href, visible: stats.unread_messages?.visible }
       );
 
       sections.activeJobs = {
@@ -406,7 +400,7 @@ export async function GET() {
       sections.alerts = {
         items: [
           { key: "safety_7d", label: "Safety Logs (7d)", value: safetyCount, href: "/safety" },
-          { key: "unread_messages", label: "Unread Messages", value: unreadMessages, href: "/messages" },
+          { key: "unread_messages", label: "Unread Messages", value: Number(stats.unread_messages?.value ?? 0), href: "/messages" },
         ],
       };
       sections.weather = {
@@ -420,10 +414,10 @@ export async function GET() {
 
     if (role === "mechanic") {
       kpis.push(
-        { key: "open_work_orders", label: "Open Work Orders", value: openWorkOrdersCount },
-        { key: "maintenance_due_soon", label: "Maintenance Due Soon", value: maintenanceDueSoonCount },
-        { key: "equipment_down", label: "Equipment Down", value: equipmentDownCount },
-        { key: "parts_low", label: "Parts Low", value: lowPartsCount }
+        { key: "open_work_orders", label: "Open Work Orders", value: stats.open_work_orders?.value ?? openWorkOrdersCount, href: stats.open_work_orders?.href, visible: stats.open_work_orders?.visible },
+        { key: "maintenance_due_soon", label: "Maintenance Due Soon", value: stats.maintenance_due_soon?.value ?? maintenanceDueSoonCount, href: stats.maintenance_due_soon?.href, visible: stats.maintenance_due_soon?.visible },
+        { key: "equipment_down", label: "Equipment Down", value: stats.equipment_down?.value ?? equipmentDownCount, href: stats.equipment_down?.href, visible: stats.equipment_down?.visible },
+        { key: "parts_low", label: "Parts Low", value: stats.parts_low?.value ?? lowPartsCount, href: stats.parts_low?.href, visible: stats.parts_low?.visible }
       );
 
       sections.gettingStarted = {
@@ -455,10 +449,10 @@ export async function GET() {
 
     if (role === "operator") {
       kpis.push(
-        { key: "my_jobs_today", label: "My Jobs Today", value: activeJobsCount },
-        { key: "hours_today", label: "Hours Today", value: hoursTodayPlaceholder },
-        { key: "safety_items_7d", label: "Safety Items (7d)", value: safetyCount },
-        { key: "unread_messages", label: "Unread Messages", value: unreadMessages }
+        { key: "my_jobs_today", label: "My Jobs Today", value: stats.my_jobs_today?.value ?? activeJobsCount, href: stats.my_jobs_today?.href, visible: stats.my_jobs_today?.visible },
+        { key: "hours_today", label: "Hours Today", value: stats.hours_today?.value ?? 0, href: stats.hours_today?.href, visible: stats.hours_today?.visible },
+        { key: "safety_items_7d", label: "Safety Items (7d)", value: stats.safety_items_7d?.value ?? safetyCount, href: stats.safety_items_7d?.href, visible: stats.safety_items_7d?.visible },
+        { key: "unread_messages", label: "Unread Messages", value: stats.unread_messages?.value ?? 0, href: stats.unread_messages?.href, visible: stats.unread_messages?.visible }
       );
 
       sections.activeJobs = {
@@ -487,7 +481,7 @@ export async function GET() {
       sections.alerts = {
         items: [
           { key: "safety_7d", label: "Safety Items (7d)", value: safetyCount, href: "/safety" },
-          { key: "unread_messages", label: "Unread Messages", value: unreadMessages, href: "/messages" },
+          { key: "unread_messages", label: "Unread Messages", value: Number(stats.unread_messages?.value ?? 0), href: "/messages" },
         ],
       };
       sections.weather = {

@@ -64,14 +64,12 @@ test('messages channels are scoped and permissions are enforced', async ({ page 
   expect(operatorMessages.items.length).toBeGreaterThan(0);
 
   const operatorCreateChannelRes = await page.request.post('/api/messages/channels', {
-    data: { name: `operator-should-fail-${stamp}` },
+    data: { name: `operator-create-${stamp}`, memberUserIds: [] },
   });
-  expect(operatorCreateChannelRes.status()).toBe(403);
-  expect(await operatorCreateChannelRes.json()).toEqual({ error: 'Forbidden' });
+  expect(operatorCreateChannelRes.status()).toBe(201);
 
   const operatorSendRes = await page.request.post(`/api/messages/channels/${channelId}/send`, {
-    data: { body: 'operator should fail' },
+    data: { body: 'operator can send as a member' },
   });
-  expect(operatorSendRes.status()).toBe(403);
-  expect(await operatorSendRes.json()).toEqual({ error: 'Forbidden' });
+  expect(operatorSendRes.status()).toBe(201);
 });

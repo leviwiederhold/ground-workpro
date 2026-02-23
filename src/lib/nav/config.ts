@@ -8,7 +8,7 @@ export type NavItem = {
 };
 
 export const NAV_ITEMS: NavItem[] = [
-  { key: "dashboard", label: "Dashboard", href: "/", iconKey: "grid-2" },
+  { key: "dashboard", label: "Dashboard", href: "/", iconKey: "table-cells-large" },
   { key: "messages", label: "Messages", href: "/messages", iconKey: "comments" },
   { key: "schedule", label: "Schedule", href: "/schedule", iconKey: "calendar-week" },
   { key: "jobs", label: "Jobs", href: "/jobs", iconKey: "briefcase" },
@@ -20,7 +20,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "safety", label: "Safety", href: "/safety", iconKey: "shield-heart" },
   { key: "bids", label: "Bids", href: "/bids", iconKey: "file-contract" },
   { key: "vendors", label: "Vendors", href: "/vendors", iconKey: "handshake" },
-  { key: "reports", label: "Reports", href: "/reports", iconKey: "chart-mixed" },
+  { key: "reports", label: "Reports", href: "/reports", iconKey: "chart-line" },
   { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
   { key: "integrations", label: "Integrations", href: "/integrations", iconKey: "plug" },
   { key: "documents", label: "Documents", href: "/documents", iconKey: "folder-open" },

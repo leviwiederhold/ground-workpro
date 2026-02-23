@@ -3,6 +3,14 @@ import { getCompanyId, TenantResolverError } from '@/lib/tenant/getCompanyId';
 
 export const dynamic = 'force-dynamic';
 
+function isMissingNotificationsTable(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('notifications') &&
+    (normalized.includes('does not exist') || normalized.includes('not find'))
+  );
+}
+
 export async function GET() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
@@ -15,6 +23,9 @@ export async function GET() {
       .is('read_at', null);
 
     if (result.error) {
+      if (isMissingNotificationsTable(result.error.message)) {
+        return NextResponse.json({ item: { count: 0 } });
+      }
       return NextResponse.json({ error: result.error.message }, { status: 400 });
     }
 

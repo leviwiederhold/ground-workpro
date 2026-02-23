@@ -1,15 +1,16 @@
 import { z } from "next/dist/compiled/zod";
-import { requireRole } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import { createFallbackChannel, listFallbackChannels } from "@/lib/messages/fallbackStore";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { dedupeUserIds } from "@/lib/messages/members";
 
 export const dynamic = "force-dynamic";
 
 const createChannelSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  memberUserIds: z.array(z.string().uuid()).default([]),
 });
 
 type ValidationIssue = {
@@ -33,7 +34,7 @@ function toTenantErrorResponse(error: TenantResolverError) {
 function isMissingMessagesTables(message: string) {
   const normalized = message.toLowerCase();
   return (
-    (normalized.includes("message_channels") || normalized.includes("messages")) &&
+    (normalized.includes("message_channels") || normalized.includes("messages") || normalized.includes("message_channel_members")) &&
     (normalized.includes("does not exist") || normalized.includes("not find"))
   );
 }
@@ -41,17 +42,16 @@ function isMissingMessagesTables(message: string) {
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
 
-    const channelsResult = await supabase
-      .from("message_channels")
-      .select("id, name, created_at, updated_at", { count: "exact" })
+    const memberRows = await supabase
+      .from("message_channel_members")
+      .select("channel_id")
       .eq("company_id", companyId)
-      .order("created_at", { ascending: true })
-      .range(from, to);
+      .eq("user_id", userId);
 
-    if (channelsResult.error) {
-      const message = channelsResult.error?.message || "";
+    if (memberRows.error) {
+      const message = memberRows.error?.message || "";
       if (isMissingMessagesTables(message)) {
         const fallback = listFallbackChannels(companyId).map((channel) => ({
           ...channel,
@@ -66,6 +66,22 @@ export async function GET(request: Request) {
       return serverError();
     }
 
+    const memberChannelIds = Array.from(new Set((memberRows.data ?? []).map((row) => String(row.channel_id))));
+
+    if (memberChannelIds.length === 0) {
+      return Response.json({ items: [], unread_count: 0, ...getPaginationMeta(0, page, pageSize) });
+    }
+
+    const channelsResult = await supabase
+      .from("message_channels")
+      .select("id, name, created_at, updated_at", { count: "exact" })
+      .eq("company_id", companyId)
+      .in("id", memberChannelIds)
+      .order("created_at", { ascending: true })
+      .range(from, to);
+
+    if (channelsResult.error) return serverError();
+
     const channelIds = (channelsResult.data ?? []).map((c) => c.id);
     const messagesQuery =
       channelIds.length > 0
@@ -77,36 +93,28 @@ export async function GET(request: Request) {
             .order("created_at", { ascending: false })
         : { data: [], error: null };
 
-    if (messagesQuery.error) {
-      if (isMissingMessagesTables(messagesQuery.error.message || "")) {
-        const fallback = listFallbackChannels(companyId).map((channel) => ({
-          ...channel,
-          message_count: 0,
-          last_message_at: null,
-          last_message_preview: null,
-          unread_count: 0,
-        }));
-        const paged = fallback.slice(from, to + 1);
-        return Response.json({ items: paged, unread_count: 0, ...getPaginationMeta(fallback.length, page, pageSize) });
-      }
-      return serverError();
-    }
+    if (messagesQuery.error) return serverError();
+
+    const memberCountsQuery = await supabase
+      .from("message_channel_members")
+      .select("channel_id")
+      .eq("company_id", companyId)
+      .in("channel_id", channelIds);
+
+    if (memberCountsQuery.error) return serverError();
 
     const latestByChannel = new Map<string, { body: string; created_at: string }>();
     const countsByChannel = new Map<string, number>();
-
     for (const msg of messagesQuery.data ?? []) {
-      const channelId = String(msg.channel_id);
-      if (!countsByChannel.has(channelId)) {
-        countsByChannel.set(channelId, 0);
-      }
-      countsByChannel.set(channelId, (countsByChannel.get(channelId) ?? 0) + 1);
-      if (!latestByChannel.has(channelId)) {
-        latestByChannel.set(channelId, {
-          body: String(msg.body ?? ""),
-          created_at: String(msg.created_at ?? ""),
-        });
-      }
+      const key = String(msg.channel_id);
+      countsByChannel.set(key, (countsByChannel.get(key) ?? 0) + 1);
+      if (!latestByChannel.has(key)) latestByChannel.set(key, { body: String(msg.body ?? ""), created_at: String(msg.created_at ?? "") });
+    }
+
+    const memberCountByChannel = new Map<string, number>();
+    for (const row of memberCountsQuery.data ?? []) {
+      const key = String(row.channel_id);
+      memberCountByChannel.set(key, (memberCountByChannel.get(key) ?? 0) + 1);
     }
 
     const items = (channelsResult.data ?? []).map((channel) => {
@@ -121,6 +129,7 @@ export async function GET(request: Request) {
         last_message_at: latest?.created_at ?? null,
         last_message_preview: latest?.body ?? null,
         unread_count: 0,
+        member_count: memberCountByChannel.get(key) ?? 0,
       };
     });
 
@@ -130,33 +139,41 @@ export async function GET(request: Request) {
       ...getPaginationMeta(channelsResult.count ?? items.length, page, pageSize),
     });
   } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return toTenantErrorResponse(error);
-    }
+    if (error instanceof TenantResolverError) return toTenantErrorResponse(error);
     return serverError();
   }
 }
 
 export async function POST(request: Request) {
   try {
-    try {
-      await requireRole(["admin", "pm", "foreman"]);
-    } catch {
-      return forbidden();
-    }
-
     const parsedBody = createChannelSchema.safeParse(await request.json());
     if (!parsedBody.success) {
       return validationError(toValidationDetails(parsedBody.error));
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const now = new Date().toISOString();
+    const memberUserIds = dedupeUserIds(parsedBody.data.memberUserIds, userId);
+
+    const membersResult = await supabase
+      .from("memberships")
+      .select("user_id")
+      .eq("company_id", companyId)
+      .in("user_id", memberUserIds);
+
+    if (membersResult.error) return serverError();
+    const validUserIds = new Set((membersResult.data ?? []).map((row) => String(row.user_id)));
+    if (validUserIds.size !== memberUserIds.length) {
+      return validationError([{ path: "memberUserIds", message: "One or more users are not members of this company" }]);
+    }
+
     const payload = {
       company_id: companyId,
       name: parsedBody.data.name,
       created_at: now,
       updated_at: now,
+      is_dm: false,
+      created_by: userId,
     };
 
     const { data, error } = await supabase
@@ -172,11 +189,19 @@ export async function POST(request: Request) {
       return serverError();
     }
 
+    const membershipRows = memberUserIds.map((memberId) => ({
+      company_id: companyId,
+      channel_id: data.id,
+      user_id: memberId,
+      member_role: memberId === userId ? "owner" : "member",
+    }));
+
+    const membersInsert = await supabase.from("message_channel_members").insert(membershipRows);
+    if (membersInsert.error) return serverError();
+
     return okItem(data, 201);
   } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return toTenantErrorResponse(error);
-    }
+    if (error instanceof TenantResolverError) return toTenantErrorResponse(error);
     return serverError();
   }
 }

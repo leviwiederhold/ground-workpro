@@ -7,6 +7,18 @@ const querySchema = z.object({
   start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 
+function isMissingCalendarTables(message: string) {
+  const normalized = message.toLowerCase();
+  const referencesCalendarTables =
+    normalized.includes("calendar_events") || normalized.includes("calendar_event_attendees");
+  return referencesCalendarTables && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
+function isMissingEmployeesTable(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("employees") && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
 const asDateKey = (date: Date) => date.toISOString().slice(0, 10);
 
 const getWeekDays = (start: Date) =>
@@ -72,6 +84,9 @@ async function resolveUserEmployeeIds(
     .eq("company_id", companyId);
 
   if (employeesResult.error) {
+    if (isMissingEmployeesTable(employeesResult.error.message)) {
+      return { ids: new Set<string>(), error: null };
+    }
     return { ids: new Set<string>(), error: employeesResult.error.message };
   }
 
@@ -133,6 +148,9 @@ export async function GET(request: Request) {
       .order("starts_at", { ascending: true });
 
     if (eventsResult.error) {
+      if (isMissingCalendarTables(eventsResult.error.message)) {
+        return NextResponse.json({ items: [] });
+      }
       return NextResponse.json({ error: eventsResult.error.message }, { status: 400 });
     }
 
@@ -146,6 +164,13 @@ export async function GET(request: Request) {
       .in("event_id", allEvents.map((event) => event.id));
 
     if (attendeesResult.error) {
+      if (isMissingCalendarTables(attendeesResult.error.message)) {
+        return NextResponse.json({
+          items: allEvents
+            .filter((event) => event.visibility !== "private" || String(event.created_by) === String(userId))
+            .map((event) => mapEvent(event, [])),
+        });
+      }
       return NextResponse.json({ error: attendeesResult.error.message }, { status: 400 });
     }
 

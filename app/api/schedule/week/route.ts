@@ -10,6 +10,11 @@ const querySchema = z.object({
     .optional(),
 });
 
+function isMissingScheduleAssignmentsTable(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("schedule_assignments") && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
 const JOB_SCHEDULE_STATUSES = ["active", "open", "in_progress", "approved", "draft"];
 
 const asDateKey = (date: Date) => date.toISOString().slice(0, 10);
@@ -38,6 +43,8 @@ const mapAssignment = (row: Record<string, unknown>) => ({
   date: String(row.date),
   employeeId: row.employee_id ? String(row.employee_id) : null,
   equipmentId: row.equipment_id ? String(row.equipment_id) : null,
+  startsAt: row.starts_at ? String(row.starts_at) : null,
+  endsAt: row.ends_at ? String(row.ends_at) : null,
   notes: row.notes ? String(row.notes) : "",
   createdBy: row.created_by ? String(row.created_by) : "",
   createdAt: row.created_at ? String(row.created_at) : "",
@@ -90,7 +97,7 @@ export async function GET(request: Request) {
         .order("name", { ascending: true }),
       supabase
         .from("schedule_assignments")
-        .select("id, job_id, date, employee_id, equipment_id, notes, created_by, created_at")
+        .select("id, job_id, date, employee_id, equipment_id, starts_at, ends_at, notes, created_by, created_at")
         .eq("company_id", companyId)
         .gte("date", weekDays[0])
         .lte("date", weekEnd)
@@ -101,6 +108,21 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: jobsResult.error.message }, { status: 400 });
     }
     if (assignmentsResult.error) {
+      if (isMissingScheduleAssignmentsTable(assignmentsResult.error.message)) {
+        const jobs = (jobsResult.data ?? []).map((job) => ({
+          id: String(job.id),
+          title: String(job.name ?? "Untitled Job"),
+          status: String(job.status ?? ""),
+          href: `/jobs/${job.id}`,
+        }));
+        return NextResponse.json({
+          items: weekDays.map((date) => ({
+            date,
+            jobs,
+            assignments: [],
+          })),
+        });
+      }
       return NextResponse.json({ error: assignmentsResult.error.message }, { status: 400 });
     }
 

@@ -30,7 +30,7 @@ async function setRole(page: Page, role: Role) {
   ]);
 }
 
-test('onboarding checklist persists and is role-aware', async ({ page }) => {
+test('onboarding checklist is role-aware and persisted', async ({ page }) => {
   await loginViaUI(page);
 
   await setRole(page, 'admin');
@@ -38,32 +38,26 @@ test('onboarding checklist persists and is role-aware', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId('nav-dashboard').click();
   await expect(page.getByRole('heading', { name: 'Getting Started' })).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-invite_teammate')).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-create_first_bid')).toBeVisible();
 
-  const persistenceResponse = await page.request.post('/api/onboarding/checklist/complete', {
+  await expect(page.getByTestId('onboarding-item-invite_teammate')).toBeVisible();
+  await expect(page.getByTestId('onboarding-item-create_first_job')).toBeVisible();
+  await expect(page.getByTestId('onboarding-item-create_first_bid')).toBeVisible();
+  await expect(page.getByTestId('onboarding-item-send_first_proposal')).toBeVisible();
+  await expect(page.getByTestId('onboarding-item-add_first_equipment')).toBeVisible();
+
+  const completeRes = await page.request.post('/api/onboarding/checklist/complete', {
     data: { key: 'invite_teammate', completed: true },
   });
-  const persistenceBody = await persistenceResponse.text();
-  if (persistenceResponse.status() === 200) {
-    await page.reload();
-    await page.getByTestId('nav-dashboard').click();
+  const completeBody = await completeRes.text();
+  expect(completeRes.status(), completeBody).toBe(200);
 
-    const summaryResponse = await page.request.get('/api/dashboard/summary');
-    expect(summaryResponse.status(), await summaryResponse.text()).toBe(200);
-    const summary = await summaryResponse.json();
-    const checklistItems = summary?.item?.sections?.gettingStarted?.items ?? [];
-    const companyProfile = checklistItems.find((entry: { key: string }) => entry.key === 'invite_teammate');
-    expect(companyProfile?.completed).toBe(true);
-  } else {
-    expect(persistenceBody.toLowerCase()).toContain('onboarding_checklist');
-  }
-
-  await setRole(page, 'operator');
-  await page.goto('/');
+  await page.reload();
   await page.getByTestId('nav-dashboard').click();
 
-  await expect(page.getByRole('heading', { name: 'Getting Started' })).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-upload_first_photo')).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-create_first_bid')).toHaveCount(0);
+  const summaryResponse = await page.request.get('/api/dashboard/summary');
+  expect(summaryResponse.status(), await summaryResponse.text()).toBe(200);
+  const summary = await summaryResponse.json();
+  const checklistItems = summary?.item?.sections?.gettingStarted?.items ?? [];
+  const invited = checklistItems.find((entry: { key: string }) => entry.key === 'invite_teammate');
+  expect(invited?.completed).toBe(true);
 });

@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 type ChecklistRow = {
   key: string;
+  user_id: string | null;
   completed_at: string | null;
   completed_by: string | null;
 };
@@ -53,7 +54,7 @@ export async function GET() {
 
     const { data, error } = await supabase
       .from("onboarding_checklist")
-      .select("key, completed_at, completed_by")
+      .select("key, user_id, completed_at, completed_by")
       .eq("company_id", companyId);
 
     if (error) {
@@ -61,15 +62,19 @@ export async function GET() {
     }
 
     const rows = (data ?? []) as ChecklistRow[];
-    const completedMap = new Map(rows.map((row) => [row.key, row]));
-    const dismissed = Boolean(completedMap.get(ONBOARDING_DISMISSED_KEY)?.completed_at);
+    const completedMap = new Map(
+      rows.map((row) => [`${row.key}::${row.user_id ?? "__company__"}`, row])
+    );
+    const dismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
     const checklistItems = getOnboardingChecklistItemsForRole(role);
 
     const items = checklistItems.map((item) => {
-      const completion = completedMap.get(item.key);
+      const mapKey = `${item.key}::${item.scope === "company" ? "__company__" : userId}`;
+      const completion = completedMap.get(mapKey);
       return {
         key: item.key,
         label: item.label,
+        scope: item.scope,
         description: item.description,
         view: item.view,
         completed: Boolean(completion?.completed_at),

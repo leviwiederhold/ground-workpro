@@ -24,14 +24,21 @@ test('role-scoped nav + guarded routes', async ({ page }) => {
   await setRole(page, 'operator');
   await page.goto('/');
   await expect(page.getByTestId('nav-jobs')).toHaveCount(0);
+  await expect(page.getByTestId('nav-finance')).toHaveCount(0);
+  await expect(page.getByTestId('nav-vendors')).toHaveCount(0);
+  await expect(page.getByTestId('nav-integrations')).toHaveCount(0);
 
-  const jobsForbidden = await page.request.get('/jobs');
-  expect(jobsForbidden.status()).toBe(403);
-  expect(await jobsForbidden.json()).toEqual({ error: 'Forbidden' });
+  const operatorBlockedPaths = ['/jobs', '/finance', '/vendors', '/integrations'];
+  for (const path of operatorBlockedPaths) {
+    const blocked = await page.request.get(path);
+    expect(blocked.status()).toBe(403);
+    expect(await blocked.json()).toEqual({ error: 'Forbidden' });
+  }
 
   await setRole(page, 'mechanic');
   await page.goto('/');
   await expect(page.getByTestId('nav-maintenance')).toBeVisible();
+  await expect(page.getByTestId('nav-fleet')).toBeVisible();
 
   await setRole(page, 'foreman');
   const financeForbidden = await page.request.get('/finance');

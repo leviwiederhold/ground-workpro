@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import { normalizeAppRole, ROUTE_GUARDS } from "@/lib/nav/config";
+import { ACTING_ROLE_COOKIE, clampActingRole } from "@/lib/auth/effectiveRole";
 
 const shouldLogRequests = process.env.REQUEST_LOGGING_ENABLED !== "false";
 const REQUEST_ID_HEADER = "x-request-id";
@@ -79,7 +80,13 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        resolvedRole = normalizeAppRole(memberships?.[0]?.role);
+        const realRole = normalizeAppRole(memberships?.[0]?.role);
+        if (!realRole) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
+
+        const actingRole = normalizeAppRole(request.cookies.get(ACTING_ROLE_COOKIE)?.value);
+        resolvedRole = actingRole ? clampActingRole(realRole, actingRole) : realRole;
       }
 
       const allowedRoles = ROUTE_GUARDS[guardedPrefix] ?? [];

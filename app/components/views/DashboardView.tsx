@@ -23,6 +23,7 @@ const KPI_ICON_BY_KEY = {
 };
 
 const ACTION_ICON_BY_KEY = {
+  add_event: 'calendar-plus',
   time_clock: 'clock',
   check_in: 'clipboard-check',
   daily_report: 'file-lines',
@@ -165,6 +166,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const runQuickAction = (action) => {
     if (!action?.href) return;
     const modalMap = {
+      'calendar-event': { type: 'calendar-event' },
       'time-clock': { type: 'time-clock' },
       'equipment-checkin': { type: 'equipment-checkin' },
       'daily-report': { type: 'daily-report' },

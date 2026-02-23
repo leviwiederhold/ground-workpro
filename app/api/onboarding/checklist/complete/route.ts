@@ -75,19 +75,41 @@ export async function POST(request: Request) {
     }
 
     const completedAt = parsedBody.data.completed ? new Date().toISOString() : null;
+    const rowUserId = itemDef.scope === "company" ? null : userId;
+    const nowIso = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const existingQuery = supabase
       .from("onboarding_checklist")
-      .upsert(
-        {
-          company_id: companyId,
-          key: parsedBody.data.key,
-          completed_at: completedAt,
-          completed_by: parsedBody.data.completed ? userId : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "company_id,key" }
-      )
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("key", parsedBody.data.key)
+      .limit(1);
+
+    const existingResult = rowUserId
+      ? await existingQuery.eq("user_id", rowUserId).maybeSingle()
+      : await existingQuery.is("user_id", null).maybeSingle();
+
+    if (existingResult.error) {
+      return serverError(existingResult.error.message);
+    }
+
+    const mutationPayload = {
+      company_id: companyId,
+      user_id: rowUserId,
+      key: parsedBody.data.key,
+      completed_at: completedAt,
+      completed_by: parsedBody.data.completed ? userId : null,
+      updated_at: nowIso,
+    };
+
+    const mutationQuery = existingResult.data?.id
+      ? supabase
+          .from("onboarding_checklist")
+          .update(mutationPayload)
+          .eq("id", existingResult.data.id)
+      : supabase.from("onboarding_checklist").insert(mutationPayload);
+
+    const { data, error } = await mutationQuery
       .select("key, completed_at, completed_by")
       .single();
 

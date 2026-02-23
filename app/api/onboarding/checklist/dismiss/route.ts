@@ -38,22 +38,35 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const completedAt = parsedBody.data.dismissed ? new Date().toISOString() : null;
+    const nowIso = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const existingResult = await supabase
       .from("onboarding_checklist")
-      .upsert(
-        {
-          company_id: companyId,
-          key: ONBOARDING_DISMISSED_KEY,
-          completed_at: completedAt,
-          completed_by: parsedBody.data.dismissed ? userId : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "company_id,key" }
-      )
-      .select("key, completed_at")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("key", ONBOARDING_DISMISSED_KEY)
+      .eq("user_id", userId)
+      .limit(1)
       .single();
 
+    if (existingResult.error && existingResult.error.code !== "PGRST116") {
+      return serverError(existingResult.error.message);
+    }
+
+    const mutationPayload = {
+      company_id: companyId,
+      user_id: userId,
+      key: ONBOARDING_DISMISSED_KEY,
+      completed_at: completedAt,
+      completed_by: parsedBody.data.dismissed ? userId : null,
+      updated_at: nowIso,
+    };
+
+    const mutationQuery = existingResult.data?.id
+      ? supabase.from("onboarding_checklist").update(mutationPayload).eq("id", existingResult.data.id)
+      : supabase.from("onboarding_checklist").insert(mutationPayload);
+
+    const { data, error } = await mutationQuery.select("key, completed_at").single();
     if (error || !data) {
       return serverError(error?.message ?? "Failed to update dismissal state");
     }

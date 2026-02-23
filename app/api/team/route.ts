@@ -1,0 +1,222 @@
+import { NextResponse } from "next/server";
+import { z } from "next/dist/compiled/zod";
+import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
+
+const querySchema = z.object({
+  q: z.string().trim().optional().default(""),
+  status: z.enum(["all", "active", "inactive"]).optional().default("all"),
+  role: z.enum(["all", "admin", "pm", "foreman", "mechanic", "operator"]).optional().default("all"),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(25),
+});
+
+const normalizeId = (value: unknown) => String(value ?? "");
+
+const mapEmployeeStatus = (value: unknown): "active" | "inactive" => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "clocked-in" || normalized === "active" || normalized === "on_site" || normalized === "onsite") {
+    return "active";
+  }
+  return "inactive";
+};
+
+const mapRoleForOutput = (rawRole: unknown): AppRole => {
+  return normalizeAppRole(rawRole) ?? "operator";
+};
+
+const isPayVisibleRole = (role: AppRole | null) => role === "admin" || role === "pm";
+
+const toNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return 0;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const isMissingSchemaError = (message: string | undefined) =>
+  /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
+    message ?? ""
+  );
+
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
+  try {
+    const { supabase, companyId } = await getCompanyId();
+    const effectiveRole = await getEffectiveRole();
+    if (!effectiveRole) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const parsedQuery = querySchema.safeParse({
+      q: new URL(request.url).searchParams.get("q") ?? undefined,
+      status: new URL(request.url).searchParams.get("status") ?? undefined,
+      role: new URL(request.url).searchParams.get("role") ?? undefined,
+      limit: new URL(request.url).searchParams.get("limit") ?? undefined,
+    });
+    if (!parsedQuery.success) {
+      return NextResponse.json(
+        {
+          error: "Validation error",
+          details: parsedQuery.error.issues.map((issue: { path: Array<string | number>; message: string }) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        },
+        { status: 422 }
+      );
+    }
+
+    const queryInput = parsedQuery.data;
+    let employeesQuery = supabase
+      .from("employees")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(queryInput.limit);
+
+    if (queryInput.q) {
+      const escaped = queryInput.q.replace(/[%_]/g, "");
+      employeesQuery = employeesQuery.or(`name.ilike.%${escaped}%,full_name.ilike.%${escaped}%,email.ilike.%${escaped}%`);
+    }
+
+    let { data: employeeRows, error: employeesError } = await employeesQuery;
+    if (employeesError && isMissingSchemaError(employeesError.message)) {
+      const fallbackQuery = supabase
+        .from("employees")
+        .select("*")
+        .eq("company_id", companyId)
+        .order("id", { ascending: false })
+        .limit(queryInput.limit);
+      if (queryInput.q) {
+        const escaped = queryInput.q.replace(/[%_]/g, "");
+        fallbackQuery.or(`name.ilike.%${escaped}%,full_name.ilike.%${escaped}%,email.ilike.%${escaped}%`);
+      }
+      const fallbackResult = await fallbackQuery;
+      employeeRows = fallbackResult.data;
+      employeesError = fallbackResult.error;
+    }
+    if (employeesError) {
+      return NextResponse.json({ error: employeesError.message }, { status: 400 });
+    }
+
+    let items = (employeeRows ?? []).map((row: Record<string, unknown>) => {
+      const normalizedRole = mapRoleForOutput(row.role);
+      return {
+        id: normalizeId(row.id),
+        displayName: String(row.name ?? row.full_name ?? ""),
+        role: normalizedRole,
+        status: mapEmployeeStatus(row.status),
+        assignedToday: null as { jobId: string; jobName: string; href: string } | null,
+        hoursThisWeek: 0,
+        pay: {
+          visible: isPayVisibleRole(effectiveRole),
+          hourlyRate: isPayVisibleRole(effectiveRole) ? toNumber(row.hourly_rate) : 0,
+          loadedHourlyCost: 0,
+        },
+        email: String(row.email ?? ""),
+        phone: String(row.phone ?? ""),
+        clockedInAt: row.clocked_in_at ? String(row.clocked_in_at) : null,
+      };
+    });
+
+    if (queryInput.role !== "all") {
+      items = items.filter((item) => item.role === queryInput.role);
+    }
+    if (queryInput.status !== "all") {
+      items = items.filter((item) => item.status === queryInput.status);
+    }
+
+    const employeeIds = items.map((item) => item.id);
+    if (employeeIds.length === 0) {
+      return NextResponse.json({ items: [] });
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const assignmentResult = await supabase
+      .from("schedule_assignments")
+      .select("employee_id, job_id, created_at")
+      .eq("company_id", companyId)
+      .eq("date", today)
+      .in("employee_id", employeeIds)
+      .order("created_at", { ascending: true });
+    let assignmentRows = assignmentResult.data;
+    if (assignmentResult.error) {
+      if (isMissingSchemaError(assignmentResult.error.message)) {
+        assignmentRows = [];
+      } else {
+        return NextResponse.json({ error: assignmentResult.error.message }, { status: 400 });
+      }
+    }
+
+    const assignmentByEmployeeId = new Map<string, { jobId: string }>();
+    for (const row of (assignmentRows ?? []) as Array<Record<string, unknown>>) {
+      const employeeId = normalizeId(row.employee_id);
+      if (!employeeId || assignmentByEmployeeId.has(employeeId)) continue;
+      assignmentByEmployeeId.set(employeeId, { jobId: normalizeId(row.job_id) });
+    }
+
+    const assignedJobIds = Array.from(
+      new Set(
+        Array.from(assignmentByEmployeeId.values())
+          .map((value) => value.jobId)
+          .filter(Boolean)
+      )
+    );
+
+    let jobNameById = new Map<string, string>();
+    if (assignedJobIds.length > 0) {
+      const { data: jobs, error: jobsError } = await supabase
+        .from("jobs")
+        .select("id, name")
+        .eq("company_id", companyId)
+        .in("id", assignedJobIds);
+      if (jobsError) {
+        return NextResponse.json({ error: jobsError.message }, { status: 400 });
+      }
+      jobNameById = new Map(
+        (jobs ?? []).map((job: Record<string, unknown>) => [normalizeId(job.id), String(job.name ?? "Job")])
+      );
+    }
+
+    // Time entries table is not present in current schema; keep deterministic placeholder.
+    for (const item of items) {
+      const assignment = assignmentByEmployeeId.get(item.id);
+      if (assignment?.jobId) {
+        item.assignedToday = {
+          jobId: assignment.jobId,
+          jobName: jobNameById.get(assignment.jobId) ?? "Job",
+          href: `/jobs/${assignment.jobId}`,
+        };
+      }
+      item.hoursThisWeek = 0;
+      if (item.pay.visible) {
+        const burdenPct = 0;
+        item.pay.loadedHourlyCost = Number((item.pay.hourlyRate * (1 + burdenPct)).toFixed(2));
+      } else {
+        item.pay.hourlyRate = 0;
+        item.pay.loadedHourlyCost = 0;
+      }
+    }
+
+    return NextResponse.json({
+      items: items.map((item) => ({
+        id: item.id,
+        displayName: item.displayName,
+        role: item.role,
+        status: item.status,
+        assignedToday: item.assignedToday,
+        hoursThisWeek: item.hoursThisWeek,
+        pay: item.pay,
+        email: item.email,
+        phone: item.phone,
+        clockedInAt: item.clockedInAt,
+      })),
+    });
+  } catch (error) {
+    if (error instanceof TenantResolverError) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

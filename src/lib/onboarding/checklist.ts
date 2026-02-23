@@ -1,18 +1,21 @@
 export type OnboardingChecklistKey =
-  | "company_profile"
   | "invite_teammate"
-  | "first_job"
-  | "add_equipment_or_inventory"
-  | "create_bid"
-  | "send_proposal"
-  | "upload_attachment"
-  | "first_safety_log";
+  | "create_first_job"
+  | "create_first_bid"
+  | "send_first_proposal"
+  | "add_first_equipment"
+  | "create_first_po"
+  | "submit_first_daily_report"
+  | "submit_first_safety_log"
+  | "upload_first_photo"
+  | "close_first_work_order";
 
 export type OnboardingChecklistItemDef = {
   key: OnboardingChecklistKey;
   label: string;
   description: string;
   view: string;
+  scope: "company" | "user";
 };
 
 export const ONBOARDING_DISMISSED_KEY = "__card_dismissed__";
@@ -25,70 +28,95 @@ type OnboardingChecklistRoleItemDef = OnboardingChecklistItemDef & {
 
 const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
   {
-    key: "company_profile",
-    label: "Create company profile",
-    description: "Set your company details and branding.",
-    view: "dashboard",
-    roles: ["admin", "pm"],
-  },
-  {
     key: "invite_teammate",
     label: "Invite a teammate",
     description: "Bring at least one teammate into your workspace.",
     view: "team",
-    roles: ["admin", "pm", "foreman"],
+    scope: "company",
+    roles: ["admin", "pm"],
   },
   {
-    key: "first_job",
-    label: "Add first job",
+    key: "create_first_job",
+    label: "Create first job",
     description: "Create your first project record.",
     view: "jobs",
-    roles: ["admin", "pm", "foreman"],
+    scope: "company",
+    roles: ["admin", "pm"],
   },
   {
-    key: "add_equipment_or_inventory",
-    label: "Add equipment (or inventory)",
-    description: "Create your first fleet asset or inventory item.",
-    view: "fleet",
-    roles: ["admin", "pm", "mechanic"],
-  },
-  {
-    key: "create_bid",
-    label: "Create a bid",
+    key: "create_first_bid",
+    label: "Create first bid",
     description: "Build your first bid in the system.",
     view: "bids",
+    scope: "company",
     roles: ["admin", "pm"],
   },
   {
-    key: "send_proposal",
-    label: "Send proposal",
+    key: "send_first_proposal",
+    label: "Send first proposal",
     description: "Send your first bid/proposal to a customer.",
     view: "bids",
+    scope: "company",
     roles: ["admin", "pm"],
   },
   {
-    key: "upload_attachment",
-    label: "Upload attachment",
-    description: "Upload at least one file to a job/report/work order.",
-    view: "jobs",
-    roles: ["admin", "pm", "foreman", "mechanic", "operator"],
+    key: "add_first_equipment",
+    label: "Add first equipment",
+    description: "Create your first fleet asset.",
+    view: "fleet",
+    scope: "company",
+    roles: ["admin", "pm"],
   },
   {
-    key: "first_safety_log",
-    label: "Create first safety log",
+    key: "create_first_po",
+    label: "Create first PO",
+    description: "Create a purchase order in procurement.",
+    view: "vendors",
+    scope: "company",
+    roles: ["admin", "pm"],
+  },
+  {
+    key: "submit_first_daily_report",
+    label: "Submit first daily report",
+    description: "Submit your first daily field report.",
+    view: "reports",
+    scope: "user",
+    roles: ["foreman", "operator"],
+  },
+  {
+    key: "submit_first_safety_log",
+    label: "Submit first safety log",
     description: "Log your first safety event.",
     view: "safety",
-    roles: ["admin", "pm", "foreman", "mechanic", "operator"],
+    scope: "user",
+    roles: ["foreman"],
+  },
+  {
+    key: "upload_first_photo",
+    label: "Upload first photo",
+    description: "Upload your first job photo/attachment.",
+    view: "documents",
+    scope: "user",
+    roles: ["operator"],
+  },
+  {
+    key: "close_first_work_order",
+    label: "Close first work order",
+    description: "Complete and close a maintenance work order.",
+    view: "maintenance",
+    scope: "user",
+    roles: ["mechanic"],
   },
 ];
 
 export const ONBOARDING_CHECKLIST_ITEMS: OnboardingChecklistItemDef[] = ONBOARDING_CHECKLIST_ITEMS_BY_ROLE.map(
   (item) => ({
-    key: item.key,
-    label: item.label,
-    description: item.description,
-    view: item.view,
-  })
+      key: item.key,
+      label: item.label,
+      description: item.description,
+      view: item.view,
+      scope: item.scope,
+    })
 );
 
 const CHECKLIST_KEY_SET = new Set(ONBOARDING_CHECKLIST_ITEMS_BY_ROLE.map((item) => item.key));
@@ -105,5 +133,6 @@ export function getOnboardingChecklistItemsForRole(role: OnboardingChecklistRole
       label: item.label,
       description: item.description,
       view: item.view,
+      scope: item.scope,
     }));
 }

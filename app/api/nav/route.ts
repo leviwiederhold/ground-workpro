@@ -1,25 +1,13 @@
 import { NextResponse } from "next/server";
-import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { normalizeAppRole, toNavItems } from "@/lib/nav/config";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { toNavItems } from "@/lib/nav/config";
+import { TenantResolverError } from "@/lib/tenant/getCompanyId";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { supabase, companyId, userId } = await getCompanyId();
-
-    const { data, error } = await supabase
-      .from("memberships")
-      .select("role")
-      .eq("company_id", companyId)
-      .eq("user_id", userId)
-      .limit(1);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
-
-    const role = normalizeAppRole(data?.[0]?.role);
+    const role = await getEffectiveRole();
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element, react/no-unescaped-entities, @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
-import { Fragment, useState, useEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
@@ -116,18 +116,41 @@ const confirmDestructiveAction = (targetLabel) =>
     const formatCurrency = (amount) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
     const formatDate = (dateStr) => {
       if (!dateStr) return 'TBD';
-      const parsedDate = new Date(dateStr);
+      const normalized = /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))
+        ? `${dateStr}T00:00:00Z`
+        : String(dateStr);
+      const parsedDate = new Date(normalized);
       if (Number.isNaN(parsedDate.getTime())) return 'TBD';
-      return parsedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return parsedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
     };
     const formatTime = (date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    const getDaysUntil = (dateStr) => Math.ceil((new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24));
+    const getUtcDateLabel = (date = new Date()) =>
+      date.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+    const getDaysUntil = (dateStr) => {
+      if (!dateStr) return 0;
+      const normalized = /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr))
+        ? `${dateStr}T00:00:00Z`
+        : String(dateStr);
+      const target = new Date(normalized);
+      if (Number.isNaN(target.getTime())) return 0;
+      const now = new Date();
+      const startOfTodayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      const targetUtc = Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), target.getUTCDate());
+      return Math.ceil((targetUtc - startOfTodayUtc) / (1000 * 60 * 60 * 24));
+    };
 
     const getStatusColor = (status) => {
       const colors = {
         'active': 'bg-green-100 text-green-800',
+        'assigned': 'bg-green-100 text-green-800',
+        'ASSIGNED': 'bg-green-100 text-green-800',
         'idle': 'bg-yellow-100 text-yellow-800',
+        'IDLE': 'bg-yellow-100 text-yellow-800',
         'maintenance': 'bg-red-100 text-red-800',
+        'in_maintenance': 'bg-blue-100 text-blue-800',
+        'IN_MAINTENANCE': 'bg-blue-100 text-blue-800',
+        'out_of_service': 'bg-red-100 text-red-800',
+        'OUT_OF_SERVICE': 'bg-red-100 text-red-800',
         'completed': 'bg-blue-100 text-blue-800',
         'bidding': 'bg-purple-100 text-purple-800',
         'clocked-in': 'bg-green-100 text-green-800',
@@ -529,11 +552,14 @@ const confirmDestructiveAction = (targetLabel) =>
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [currentRole, setCurrentRole] = useState('executive');
       const [showRoleSelector, setShowRoleSelector] = useState(false);
+      const [actingRoleSaving, setActingRoleSaving] = useState(false);
       const [serverNavItems, setServerNavItems] = useState([]);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
-      const [alerts, setAlerts] = useState([]);
-      const [alertsLoading, setAlertsLoading] = useState(false);
+      const [notifications, setNotifications] = useState([]);
+      const [notificationsLoading, setNotificationsLoading] = useState(false);
+      const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+      const [headerDateLabel, setHeaderDateLabel] = useState('');
 
       // Data State
       const [jobs, setJobs] = useState([]);
@@ -564,7 +590,6 @@ const confirmDestructiveAction = (targetLabel) =>
       const [safetyCreateLoading, setSafetyCreateLoading] = useState(false);
       const [safetyDeleteLoadingId, setSafetyDeleteLoadingId] = useState(null);
       const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
-      const unreadAlertsCount = alerts.filter((alert) => !alert.is_read).length;
 
       const mapServerRoleToUiRole = useCallback((role) => {
         if (role === 'admin') return 'executive';
@@ -575,19 +600,50 @@ const confirmDestructiveAction = (targetLabel) =>
         return 'executive';
       }, []);
 
-      const alertVisuals = {
-        low_inventory: {
-          icon: 'triangle-exclamation',
-          containerClass: 'bg-red-100',
-          iconClass: 'text-red-600',
+      const mapUiRoleToServerRole = useCallback((role) => {
+        if (role === 'executive') return 'admin';
+        if (role === 'operations') return 'pm';
+        if (role === 'foreman') return 'foreman';
+        if (role === 'mechanic') return 'mechanic';
+        if (role === 'operator' || role === 'field') return 'operator';
+        return 'admin';
+      }, []);
+
+      const loadNav = useCallback(async () => {
+        try {
+          const response = await fetch('/api/nav', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) return;
+          setServerNavItems(Array.isArray(payload?.items) ? payload.items : []);
+          setCurrentRole(mapServerRoleToUiRole(payload?.role));
+        } catch {
+          setServerNavItems([]);
+        }
+      }, [mapServerRoleToUiRole]);
+
+      const notificationVisuals = {
+        assignment_created: {
+          icon: 'calendar-plus',
+          containerClass: 'bg-blue-100',
+          iconClass: 'text-blue-700',
         },
-        overdue_maintenance: {
-          icon: 'screwdriver-wrench',
+        assignment_removed: {
+          icon: 'calendar-xmark',
           containerClass: 'bg-yellow-100',
           iconClass: 'text-yellow-700',
         },
-        margin_drift: {
-          icon: 'chart-line',
+        event_invited: {
+          icon: 'calendar-check',
+          containerClass: 'bg-green-100',
+          iconClass: 'text-green-700',
+        },
+        event_updated: {
+          icon: 'calendar-days',
+          containerClass: 'bg-indigo-100',
+          iconClass: 'text-indigo-700',
+        },
+        event_canceled: {
+          icon: 'calendar-xmark',
           containerClass: 'bg-red-100',
           iconClass: 'text-red-700',
         },
@@ -598,7 +654,7 @@ const confirmDestructiveAction = (targetLabel) =>
         },
       };
 
-      const formatAlertTime = (value) => {
+      const formatNotificationTime = (value) => {
         if (!value) return '';
         const date = new Date(value);
         if (Number.isNaN(date.getTime())) return '';
@@ -610,17 +666,27 @@ const confirmDestructiveAction = (targetLabel) =>
         });
       };
 
-      const loadAlerts = useCallback(async () => {
+      const loadNotifications = useCallback(async () => {
         try {
-          setAlertsLoading(true);
-          const response = await fetch('/api/alerts', { cache: 'no-store' });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload?.error || 'Failed to load alerts');
-          setAlerts(payload.items || []);
+          setNotificationsLoading(true);
+          const [listResponse, countResponse] = await Promise.all([
+            fetch('/api/notifications?limit=20', { cache: 'no-store' }),
+            fetch('/api/notifications/unread-count', { cache: 'no-store' }),
+          ]);
+          const payload = await listResponse.json();
+          const countPayload = await countResponse.json().catch(() => ({}));
+          if (!listResponse.ok) throw new Error(payload?.error || 'Failed to load notifications');
+          setNotifications(payload.items || []);
+          if (countResponse.ok) {
+            setUnreadNotificationsCount(Number(countPayload?.item?.count ?? 0));
+          } else {
+            setUnreadNotificationsCount((payload.items || []).filter((item) => !item.is_read).length);
+          }
         } catch {
-          setAlerts([]);
+          setNotifications([]);
+          setUnreadNotificationsCount(0);
         } finally {
-          setAlertsLoading(false);
+          setNotificationsLoading(false);
         }
       }, []);
 
@@ -681,24 +747,32 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       }, []);
 
-      const handleMarkAlertRead = async (alertId) => {
+      const handleMarkNotificationRead = async (notificationId) => {
         try {
-          const response = await fetch(`/api/alerts/${alertId}/read`, { method: 'POST' });
+          const response = await fetch(`/api/notifications/${notificationId}/read`, { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
           if (!response.ok) return;
-          setAlerts((prev) =>
-            prev.map((alert) =>
-              String(alert.id) === String(alertId) ? { ...alert, is_read: true } : alert
+          setNotifications((prev) =>
+            prev.map((item) =>
+              String(item.id) === String(notificationId)
+                ? { ...item, is_read: true, read_at: payload?.item?.readAt ?? item.read_at }
+                : item
             )
           );
+          const countResponse = await fetch('/api/notifications/unread-count', { cache: 'no-store' });
+          if (countResponse.ok) {
+            const countPayload = await countResponse.json().catch(() => ({}));
+            setUnreadNotificationsCount(Number(countPayload?.item?.count ?? 0));
+          }
         } catch {
           // no-op
         }
       };
 
-      const handleMarkAllAlertsRead = async () => {
-        const unreadIds = alerts.filter((alert) => !alert.is_read).map((alert) => alert.id);
+      const handleMarkAllNotificationsRead = async () => {
+        const unreadIds = notifications.filter((item) => !item.is_read).map((item) => item.id);
         if (unreadIds.length === 0) return;
-        await Promise.all(unreadIds.map((id) => handleMarkAlertRead(id)));
+        await Promise.all(unreadIds.map((id) => handleMarkNotificationRead(id)));
       };
 
       useEffect(() => {
@@ -713,7 +787,7 @@ const confirmDestructiveAction = (targetLabel) =>
               throw new Error(payload?.error || 'Failed to load jobs');
             }
             if (isMounted) {
-              setJobs(payload.jobs || []);
+              setJobs(payload.items || payload.jobs || []);
             }
           } catch {
             if (isMounted) {
@@ -734,8 +808,8 @@ const confirmDestructiveAction = (targetLabel) =>
       }, []);
 
       useEffect(() => {
-        loadAlerts();
-      }, [loadAlerts]);
+        loadNotifications();
+      }, [loadNotifications]);
 
       useEffect(() => {
         loadSafetyLogs();
@@ -998,26 +1072,32 @@ const confirmDestructiveAction = (targetLabel) =>
       }, []);
 
       useEffect(() => {
-        let isMounted = true;
-
-        const loadNav = async () => {
-          try {
-            const response = await fetch('/api/nav', { cache: 'no-store' });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok) return;
-            if (!isMounted) return;
-            setServerNavItems(Array.isArray(payload?.items) ? payload.items : []);
-            setCurrentRole(mapServerRoleToUiRole(payload?.role));
-          } catch {
-            if (isMounted) setServerNavItems([]);
-          }
-        };
-
         loadNav();
-        return () => {
-          isMounted = false;
-        };
-      }, [mapServerRoleToUiRole]);
+      }, [loadNav]);
+
+      useEffect(() => {
+        setHeaderDateLabel(getUtcDateLabel());
+      }, []);
+
+      const handleRoleSwitch = useCallback(async (nextUiRole) => {
+        try {
+          setActingRoleSaving(true);
+          const requestedRole = mapUiRoleToServerRole(nextUiRole);
+          const response = await fetch('/api/rbac/acting-role', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: requestedRole }),
+          });
+          if (!response.ok) return;
+          await loadNav();
+          setCurrentView('dashboard');
+        } catch {
+          // no-op
+        } finally {
+          setActingRoleSaving(false);
+          setShowRoleSelector(false);
+        }
+      }, [loadNav, mapUiRoleToServerRole]);
 
       const navCountsByKey = {
         messages: 3,
@@ -1119,7 +1199,7 @@ const confirmDestructiveAction = (targetLabel) =>
         switch(currentView) {
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
           case 'messages': return <MessagesView />;
-          case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} />;
+          case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} setSelectedJob={setSelectedJob} setShowModal={setShowModal} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} />;
@@ -1225,7 +1305,9 @@ const confirmDestructiveAction = (targetLabel) =>
                   </button>
                   <div>
                     <h1 className="text-lg md:text-xl font-semibold text-gray-900 capitalize">{currentView.replace('-', ' ')}</h1>
-                    <p className="text-xs sm:text-sm text-gray-500">{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                    <p className="text-xs sm:text-sm text-gray-500" suppressHydrationWarning>
+                      {headerDateLabel || getUtcDateLabel()}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
@@ -1233,6 +1315,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   <div className="relative hidden md:block">
                     <button
                       onClick={() => setShowRoleSelector(!showRoleSelector)}
+                      disabled={actingRoleSaving}
                       className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
                     >
                       <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
@@ -1247,7 +1330,8 @@ const confirmDestructiveAction = (targetLabel) =>
                         {Object.entries(ROLES).map(([key, role]) => (
                           <button
                             key={key}
-                            onClick={() => { setCurrentRole(key); setShowRoleSelector(false); setCurrentView('dashboard'); }}
+                            disabled={actingRoleSaving}
+                            onClick={() => { handleRoleSwitch(key); }}
                             className={`w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors ${currentRole === key ? 'bg-brand-50' : ''}`}
                           >
                             <Icon name={role.icon} className={`${role.color} w-5`} />
@@ -1268,14 +1352,14 @@ const confirmDestructiveAction = (targetLabel) =>
                       onClick={() => {
                         const nextValue = !showNotifications;
                         setShowNotifications(nextValue);
-                        if (nextValue) loadAlerts();
+                        if (nextValue) loadNotifications();
                       }}
                       className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
                     >
                       <Icon name="bell" />
-                      {unreadAlertsCount > 0 && (
+                      {unreadNotificationsCount > 0 && (
                         <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full text-white text-xs flex items-center justify-center font-medium">
-                          {unreadAlertsCount}
+                          {unreadNotificationsCount}
                         </span>
                       )}
                     </button>
@@ -1285,37 +1369,37 @@ const confirmDestructiveAction = (targetLabel) =>
                           <h3 className="font-semibold text-gray-900">Notifications</h3>
                           <button
                             className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                            onClick={handleMarkAllAlertsRead}
+                            onClick={handleMarkAllNotificationsRead}
                           >
                             Mark all read
                           </button>
                         </div>
                         <div className="max-h-96 overflow-y-auto">
-                          {alertsLoading ? (
-                            <div className="px-4 py-3 text-sm text-gray-500">Loading alerts...</div>
-                          ) : alerts.length === 0 ? (
-                            <div className="px-4 py-3 text-sm text-gray-500">No alerts</div>
+                          {notificationsLoading ? (
+                            <div className="px-4 py-3 text-sm text-gray-500">Loading notifications...</div>
+                          ) : notifications.length === 0 ? (
+                            <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
                           ) : (
-                            alerts.map((alert) => {
-                              const visual = alertVisuals[alert.alert_type] || alertVisuals.default;
+                            notifications.map((notification) => {
+                              const visual = notificationVisuals[notification.notification_type] || notificationVisuals.default;
                               return (
-                                <div key={alert.id} className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${!alert.is_read ? 'bg-brand-50/30' : ''}`}>
+                                <div key={notification.id} className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${!notification.is_read ? 'bg-brand-50/30' : ''}`}>
                                   <div className="flex gap-3">
                                     <div className={`w-10 h-10 rounded-full ${visual.containerClass} flex items-center justify-center flex-shrink-0`}>
                                       <Icon name={visual.icon} className={visual.iconClass} />
                                     </div>
                                     <div className="flex-1 min-w-0">
                                       <div className="flex items-center gap-2">
-                                        <p className="font-medium text-gray-900 text-sm">{alert.title}</p>
-                                        {!alert.is_read && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
+                                        <p className="font-medium text-gray-900 text-sm">{notification.title}</p>
+                                        {!notification.is_read && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
                                       </div>
-                                      <p className="text-sm text-gray-600">{alert.message}</p>
+                                      <p className="text-sm text-gray-600">{notification.message}</p>
                                       <div className="mt-1 flex items-center justify-between gap-3">
-                                        <p className="text-xs text-gray-400">{formatAlertTime(alert.created_at)}</p>
-                                        {!alert.is_read && (
+                                        <p className="text-xs text-gray-400">{formatNotificationTime(notification.created_at)}</p>
+                                        {!notification.is_read && (
                                           <button
                                             className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                                            onClick={() => handleMarkAlertRead(alert.id)}
+                                            onClick={() => handleMarkNotificationRead(notification.id)}
                                           >
                                             Mark read
                                           </button>
@@ -1389,6 +1473,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
           {/* Modals */}
           <QuickActionsModal isOpen={showModal.type === 'quick-actions'} onClose={() => setShowModal({ type: null })} setShowModal={setShowModal} />
+          <CalendarEventModal isOpen={showModal.type === 'calendar-event'} onClose={() => setShowModal({ type: null })} employees={employees} />
           <TimeClockModal isOpen={showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} setTimeEntries={setTimeEntries} />
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
@@ -1492,9 +1577,15 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // SCHEDULE VIEW (Drag & Drop Calendar)
     // ============================================
-    const ScheduleView = ({ jobs, equipment, employees, scheduleData, setScheduleData }) => {
+    const ScheduleView = ({ jobs, equipment, employees, scheduleData, setScheduleData, currentRole }) => {
       const [currentWeek, setCurrentWeek] = useState(0);
       const [dragItem, setDragItem] = useState(null);
+      const [scheduleLoading, setScheduleLoading] = useState(false);
+      const [scheduleError, setScheduleError] = useState('');
+      const [scheduleWarning, setScheduleWarning] = useState('');
+      const [scheduleSaving, setScheduleSaving] = useState(false);
+      const [eventsByDate, setEventsByDate] = useState({});
+      const [scopedJobs, setScopedJobs] = useState(null);
 
       const getWeekDates = (offset = 0) => {
         const today = new Date();
@@ -1507,27 +1598,190 @@ const confirmDestructiveAction = (targetLabel) =>
         });
       };
 
+      const asDateKey = (date) => date.toISOString().split('T')[0];
       const weekDates = getWeekDates(currentWeek);
-      const activeJobs = jobs.filter(j => j.status === 'active');
+      const weekStartKey = asDateKey(weekDates[0]);
+      const activeJobs = (scopedJobs ?? jobs).filter(j => !['completed', 'canceled'].includes((j.status || '').toLowerCase()));
+      const isFieldRole = ['foreman', 'mechanic', 'operator'].includes(currentRole);
+
+      const employeeMap = useMemo(
+        () => new Map(employees.map((employee) => [String(employee.id), employee])),
+        [employees]
+      );
+      const equipmentMap = useMemo(
+        () => new Map(equipment.map((item) => [String(item.id), item])),
+        [equipment]
+      );
+
+      const loadWeekAssignments = useCallback(async () => {
+        try {
+          setScheduleLoading(true);
+          setScheduleError('');
+          if (isFieldRole) {
+            const response = await fetch(`/api/schedule/my-week?start=${weekStartKey}`, { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+              setScheduleError(payload?.error || 'Failed to load schedule assignments.');
+              return;
+            }
+            setScheduleWarning('');
+
+            const nextSchedule = {};
+            for (const assignment of payload?.items?.assignments || []) {
+              const dateKey = assignment.date;
+              const key = `${assignment.jobId}-${dateKey}`;
+              const assigned = nextSchedule[key] || [];
+              const employee = assignment.employeeId ? employeeMap.get(String(assignment.employeeId)) : null;
+              const assignedEquipment = assignment.equipmentId ? equipmentMap.get(String(assignment.equipmentId)) : null;
+              const type = employee ? 'employee' : 'equipment';
+              const name = employee?.name || assignedEquipment?.name || 'Assigned';
+              assigned.push({
+                id: assignment.id,
+                type,
+                name,
+                employeeId: assignment.employeeId ?? null,
+                equipmentId: assignment.equipmentId ?? null,
+              });
+              nextSchedule[key] = assigned;
+            }
+            setScheduleData(nextSchedule);
+
+            const nextEventsByDate = {};
+            for (const event of payload?.items?.events || []) {
+              const eventDate = String(event.startsAt || '').split('T')[0];
+              if (!eventDate) continue;
+              const assignedEvents = nextEventsByDate[eventDate] || [];
+              assignedEvents.push(event);
+              nextEventsByDate[eventDate] = assignedEvents;
+            }
+            setEventsByDate(nextEventsByDate);
+            setScopedJobs(
+              Array.isArray(payload?.items?.jobs)
+                ? payload.items.jobs.map((job) => ({ id: job.id, name: job.title, status: job.status }))
+                : []
+            );
+            return;
+          }
+
+          const [assignmentsResponse, eventsResponse] = await Promise.all([
+            fetch(`/api/schedule/week?start=${weekStartKey}`, { cache: 'no-store' }),
+            fetch(`/api/calendar/week?start=${weekStartKey}`, { cache: 'no-store' }),
+          ]);
+
+          const assignmentsPayload = await assignmentsResponse.json().catch(() => ({}));
+          const eventsPayload = await eventsResponse.json().catch(() => ({}));
+
+          if (!assignmentsResponse.ok) {
+            setScheduleError(assignmentsPayload?.error || 'Failed to load schedule assignments.');
+            return;
+          }
+          setScheduleWarning('');
+
+          const nextSchedule = {};
+          for (const day of assignmentsPayload?.items || []) {
+            const dateKey = day.date;
+            for (const assignment of day.assignments || []) {
+              const key = `${assignment.jobId}-${dateKey}`;
+              const assigned = nextSchedule[key] || [];
+              const employee = assignment.employeeId ? employeeMap.get(String(assignment.employeeId)) : null;
+              const assignedEquipment = assignment.equipmentId ? equipmentMap.get(String(assignment.equipmentId)) : null;
+              const type = employee ? 'employee' : 'equipment';
+              const name = employee?.name || assignedEquipment?.name || 'Assigned';
+              assigned.push({
+                id: assignment.id,
+                type,
+                name,
+                employeeId: assignment.employeeId ?? null,
+                equipmentId: assignment.equipmentId ?? null,
+              });
+              nextSchedule[key] = assigned;
+            }
+          }
+          setScheduleData(nextSchedule);
+
+          if (!eventsResponse.ok) {
+            setScheduleError(eventsPayload?.error || 'Failed to load calendar events.');
+            setEventsByDate({});
+            return;
+          }
+
+          const nextEventsByDate = {};
+          for (const event of eventsPayload?.items || []) {
+            const eventDate = String(event.startsAt || '').split('T')[0];
+            if (!eventDate) continue;
+            const assignedEvents = nextEventsByDate[eventDate] || [];
+            assignedEvents.push(event);
+            nextEventsByDate[eventDate] = assignedEvents;
+          }
+          setEventsByDate(nextEventsByDate);
+          setScopedJobs(null);
+        } catch {
+          setScheduleError('Failed to load schedule assignments.');
+        } finally {
+          setScheduleLoading(false);
+        }
+      }, [equipmentMap, employeeMap, isFieldRole, setScheduleData, weekStartKey]);
+
+      useEffect(() => {
+        loadWeekAssignments();
+      }, [loadWeekAssignments]);
 
       const handleDragStart = (e, item, type) => {
         setDragItem({ ...item, type });
         e.dataTransfer.effectAllowed = 'move';
       };
 
-      const handleDrop = (e, jobId, date) => {
+      const handleDrop = async (e, jobId, date) => {
         e.preventDefault();
         e.currentTarget.classList.remove('drag-over');
         if (!dragItem) return;
 
-        const dateKey = date.toISOString().split('T')[0];
+        const dateKey = asDateKey(date);
         const key = `${jobId}-${dateKey}`;
 
-        setScheduleData(prev => ({
-          ...prev,
-          [key]: [...(prev[key] || []), { ...dragItem, id: Date.now() }]
-        }));
-        setDragItem(null);
+        try {
+          setScheduleSaving(true);
+          const body = {
+            jobId: String(jobId),
+            date: dateKey,
+            employeeId: dragItem.type === 'employee' ? String(dragItem.id) : undefined,
+            equipmentId: dragItem.type === 'equipment' ? String(dragItem.id) : undefined,
+          };
+          const response = await fetch('/api/schedule/assignments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.item) {
+            setScheduleError(payload?.error || 'Failed to create assignment.');
+            return;
+          }
+          if (Array.isArray(payload?.warnings) && payload.warnings.length > 0) {
+            setScheduleWarning(payload.warnings.join(' '));
+          } else {
+            setScheduleWarning('');
+          }
+
+          setScheduleData(prev => ({
+            ...prev,
+            [key]: [
+              ...(prev[key] || []),
+              {
+                id: payload.item.id,
+                type: dragItem.type,
+                name: dragItem.name,
+                employeeId: payload.item.employeeId ?? null,
+                equipmentId: payload.item.equipmentId ?? null,
+              },
+            ],
+          }));
+          setDragItem(null);
+        } catch {
+          setScheduleError('Failed to create assignment.');
+        } finally {
+          setScheduleSaving(false);
+        }
       };
 
       const handleDragOver = (e) => {
@@ -1539,11 +1793,30 @@ const confirmDestructiveAction = (targetLabel) =>
         e.currentTarget.classList.remove('drag-over');
       };
 
-      const removeFromSchedule = (key, itemId) => {
-        setScheduleData(prev => ({
-          ...prev,
-          [key]: prev[key].filter(item => item.id !== itemId)
-        }));
+      const removeFromSchedule = async (key, itemId) => {
+        try {
+          setScheduleSaving(true);
+          const response = await fetch(`/api/schedule/assignments/${itemId}`, { method: 'DELETE' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setScheduleError(payload?.error || 'Failed to remove assignment.');
+            return;
+          }
+          if (Array.isArray(payload?.warnings) && payload.warnings.length > 0) {
+            setScheduleWarning(payload.warnings.join(' '));
+          } else {
+            setScheduleWarning('');
+          }
+
+          setScheduleData(prev => ({
+            ...prev,
+            [key]: (prev[key] || []).filter(item => String(item.id) !== String(itemId)),
+          }));
+        } catch {
+          setScheduleError('Failed to remove assignment.');
+        } finally {
+          setScheduleSaving(false);
+        }
       };
 
       return (
@@ -1576,6 +1849,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   {equipment.filter(e => e.status !== 'maintenance').map(eq => (
                     <div
                       key={eq.id}
+                      data-testid={`schedule-resource-equipment-${eq.id}`}
                       draggable
                       onDragStart={(e) => handleDragStart(e, eq, 'equipment')}
                       className="p-2 bg-blue-50 border border-blue-200 rounded cursor-move hover:bg-blue-100 transition-colors"
@@ -1598,6 +1872,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   {employees.filter(e => e.role !== 'Mechanic').map(emp => (
                     <div
                       key={emp.id}
+                      data-testid={`schedule-resource-employee-${emp.id}`}
                       draggable
                       onDragStart={(e) => handleDragStart(e, emp, 'employee')}
                       className="p-2 bg-green-50 border border-green-200 rounded cursor-move hover:bg-green-100 transition-colors"
@@ -1632,17 +1907,19 @@ const confirmDestructiveAction = (targetLabel) =>
                 </div>
 
                 {/* Job Rows */}
-                {activeJobs.map(job => (
+                {activeJobs.map((job, jobIndex) => (
                   <div key={job.id} className="border-b border-gray-100 last:border-b-0">
                     <div className="grid grid-cols-7">
                       {weekDates.map((date, i) => {
                         const dateKey = date.toISOString().split('T')[0];
                         const key = `${job.id}-${dateKey}`;
                         const assigned = scheduleData[key] || [];
+                        const dayEvents = jobIndex === 0 ? (eventsByDate[dateKey] || []) : [];
 
                         return (
                           <div
                             key={i}
+                            data-testid={`schedule-slot-${job.id}-${dateKey}`}
                             className="min-h-[100px] p-2 border-r border-gray-100 last:border-r-0 transition-colors"
                             onDrop={(e) => handleDrop(e, job.id, date)}
                             onDragOver={handleDragOver}
@@ -1654,9 +1931,24 @@ const confirmDestructiveAction = (targetLabel) =>
                               </div>
                             )}
                             <div className="space-y-1">
+                              {dayEvents.map(event => (
+                                <div
+                                  key={`event-${event.id}-${job.id}`}
+                                  data-testid={`schedule-event-${event.id}`}
+                                  className="text-xs p-1 rounded bg-purple-100 text-purple-800 border border-purple-200"
+                                >
+                                  <div className="truncate font-medium">{event.title}</div>
+                                  <div className="truncate text-[10px] opacity-80">
+                                    {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                    {' - '}
+                                    {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                  </div>
+                                </div>
+                              ))}
                               {assigned.map(item => (
                                 <div
                                   key={item.id}
+                                  data-testid={`schedule-assignment-${item.id}`}
                                   className={`text-xs p-1 rounded flex items-center justify-between ${
                                     item.type === 'equipment' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
                                   }`}
@@ -1685,6 +1977,18 @@ const confirmDestructiveAction = (targetLabel) =>
             <Icon name="circle-info" className="mr-1" />
             Drag equipment and crew members from the left panel and drop them onto job slots to schedule.
           </p>
+          {scheduleWarning && (
+            <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700">{scheduleWarning}</p>
+          )}
+          {scheduleLoading && (
+            <p className="text-sm text-gray-500">Loading schedule assignments...</p>
+          )}
+          {scheduleSaving && (
+            <p className="text-sm text-gray-500">Saving schedule changes...</p>
+          )}
+          {scheduleError && (
+            <p className="text-sm text-red-600">{scheduleError}</p>
+          )}
         </div>
       );
     };
@@ -1710,9 +2014,9 @@ const confirmDestructiveAction = (targetLabel) =>
       const [crewActionError, setCrewActionError] = useState('');
       const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
       const [equipmentActionError, setEquipmentActionError] = useState('');
-      const [profitability, setProfitability] = useState(null);
-      const [profitabilityLoading, setProfitabilityLoading] = useState(false);
-      const [profitabilityError, setProfitabilityError] = useState('');
+      const [jobFinancialSummary, setJobFinancialSummary] = useState(null);
+      const [jobFinancialSummaryLoading, setJobFinancialSummaryLoading] = useState(false);
+      const [jobFinancialSummaryError, setJobFinancialSummaryError] = useState('');
 
       const handleCreateJob = async () => {
         try {
@@ -1780,39 +2084,39 @@ const confirmDestructiveAction = (targetLabel) =>
       useEffect(() => {
         let isMounted = true;
 
-        const loadProfitability = async () => {
+        const loadJobFinancialSummary = async () => {
           if (!selectedJob) {
             if (isMounted) {
-              setProfitability(null);
-              setProfitabilityError('');
+              setJobFinancialSummary(null);
+              setJobFinancialSummaryError('');
             }
             return;
           }
 
           try {
-            setProfitabilityLoading(true);
-            setProfitabilityError('');
-            const response = await fetch(`/api/jobs/${selectedJob.id}/profitability`, { cache: 'no-store' });
+            setJobFinancialSummaryLoading(true);
+            setJobFinancialSummaryError('');
+            const response = await fetch(`/api/jobs/${selectedJob.id}/financial-summary`, { cache: 'no-store' });
             const payload = await response.json();
             if (!response.ok || !payload?.item) {
-              throw new Error(payload?.error || 'Failed to load profitability');
+              throw new Error(payload?.error || 'Failed to load financial summary');
             }
             if (isMounted) {
-              setProfitability(payload.item);
+              setJobFinancialSummary(payload.item);
             }
           } catch (error) {
             if (isMounted) {
-              setProfitability(null);
-              setProfitabilityError(error instanceof Error ? error.message : 'Failed to load profitability');
+              setJobFinancialSummary(null);
+              setJobFinancialSummaryError(error instanceof Error ? error.message : 'Failed to load financial summary');
             }
           } finally {
             if (isMounted) {
-              setProfitabilityLoading(false);
+              setJobFinancialSummaryLoading(false);
             }
           }
         };
 
-        loadProfitability();
+        loadJobFinancialSummary();
         return () => {
           isMounted = false;
         };
@@ -2240,17 +2544,21 @@ const confirmDestructiveAction = (targetLabel) =>
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
                         <span>Budget</span>
-                        <span className="font-medium">{formatCurrency(selectedJob.budget)}</span>
+                        <span className="font-medium">{formatCurrency(jobFinancialSummary?.budgetCost || 0)}</span>
                       </div>
                       <div className="flex justify-between text-sm">
                         <span>Spent</span>
-                        <span className="font-medium">{formatCurrency(selectedJob.spent)}</span>
+                        <span className="font-medium">{formatCurrency(jobFinancialSummary?.spentCost || 0)}</span>
                       </div>
-                      <ProgressBar value={selectedJob.spent} max={selectedJob.budget} color="auto" />
+                      <ProgressBar
+                        value={Number(jobFinancialSummary?.spentCost || 0)}
+                        max={Math.max(Number(jobFinancialSummary?.budgetCost || 0), 1)}
+                        color="auto"
+                      />
                       <div className="flex justify-between text-sm">
                         <span>Remaining</span>
-                        <span className={`font-medium ${selectedJob.budget - selectedJob.spent > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {formatCurrency(selectedJob.budget - selectedJob.spent)}
+                        <span className={`font-medium ${Number(jobFinancialSummary?.remainingCost || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {formatCurrency(jobFinancialSummary?.remainingCost || 0)}
                         </span>
                       </div>
                     </div>
@@ -2258,35 +2566,41 @@ const confirmDestructiveAction = (targetLabel) =>
 
                   <div>
                     <p className="text-xs text-gray-500 mb-2">Profitability</p>
-                    {profitabilityLoading ? (
+                    {jobFinancialSummaryLoading ? (
                       <p className="text-sm text-gray-400">Loading profitability...</p>
-                    ) : profitabilityError ? (
-                      <p className="text-sm text-red-600">{profitabilityError}</p>
-                    ) : profitability ? (
+                    ) : jobFinancialSummaryError ? (
+                      <p className="text-sm text-red-600">{jobFinancialSummaryError}</p>
+                    ) : jobFinancialSummary?.visible ? (
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
+                          <span>Contract</span>
+                          <span className="font-medium">{formatCurrency(jobFinancialSummary.contractValue || 0)}</span>
+                        </div>
+                        <div className="flex justify-between text-sm">
                           <span>Cost</span>
-                          <span className="font-medium">{formatCurrency(profitability.cost_to_date || 0)}</span>
+                          <span className="font-medium">{formatCurrency(jobFinancialSummary.spentCost || 0)}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span>Revenue</span>
-                          <span className="font-medium">{formatCurrency(profitability.revenue_to_date || 0)}</span>
+                          <span className="font-medium">{formatCurrency(jobFinancialSummary.revenueTotal || 0)}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span>Profit</span>
-                          <span className={`font-medium ${Number(profitability.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(profitability.profit || 0)}
+                          <span className={`font-medium ${Number(jobFinancialSummary.profit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(jobFinancialSummary.profit || 0)}
                           </span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span>Margin</span>
                           <span className="font-medium">
-                            {profitability.margin_percent === null || profitability.margin_percent === undefined
+                            {jobFinancialSummary.marginPct === null || jobFinancialSummary.marginPct === undefined
                               ? '—'
-                              : `${Number(profitability.margin_percent).toFixed(1)}%`}
+                              : `${Number(jobFinancialSummary.marginPct).toFixed(1)}%`}
                           </span>
                         </div>
                       </div>
+                    ) : jobFinancialSummary ? (
+                      <p className="text-sm text-gray-400" data-testid="job-financial-hidden">Financial summary unavailable for your role.</p>
                     ) : (
                       <p className="text-sm text-gray-400">No profitability data yet.</p>
                     )}
@@ -2424,6 +2738,9 @@ const confirmDestructiveAction = (targetLabel) =>
       const [filter, setFilter] = useState('all');
       const [selectedEquipmentId, setSelectedEquipmentId] = useState(null);
       const [viewMode, setViewMode] = useState('grid');
+      const [fleetItems, setFleetItems] = useState([]);
+      const [fleetItemsLoading, setFleetItemsLoading] = useState(false);
+      const [fleetItemsError, setFleetItemsError] = useState('');
       const [equipmentForm, setEquipmentForm] = useState({
         name: '',
         type: '',
@@ -2440,10 +2757,30 @@ const confirmDestructiveAction = (targetLabel) =>
       const [deleteLoading, setDeleteLoading] = useState(false);
       const [equipmentActionError, setEquipmentActionError] = useState('');
 
-      const filteredEquipment = equipment.filter(eq => filter === 'all' || eq.status === filter);
+      const filteredEquipment = fleetItems;
       const selectedEquipment = equipment.find(e => e.id === selectedEquipmentId);
+      const selectedFleetItem = fleetItems.find((item) => String(item.id) === String(selectedEquipmentId));
       const equipmentJob = selectedEquipment ? jobs.find(j => j.id === selectedEquipment.jobId) : null;
       const equipmentWorkOrders = selectedEquipment ? workOrders.filter(w => w.equipmentId === selectedEquipment.id) : [];
+
+      const loadFleetItems = useCallback(async (activeFilter = 'all') => {
+        try {
+          setFleetItemsLoading(true);
+          setFleetItemsError('');
+          const statusParam = activeFilter === 'maintenance' ? 'in_maintenance' : activeFilter;
+          const response = await fetch(`/api/fleet/equipment?status=${encodeURIComponent(statusParam)}`, { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok || !Array.isArray(payload?.items)) {
+            throw new Error(payload?.error || 'Failed to load fleet status');
+          }
+          setFleetItems(payload.items);
+        } catch (error) {
+          setFleetItems([]);
+          setFleetItemsError(error instanceof Error ? error.message : 'Failed to load fleet status');
+        } finally {
+          setFleetItemsLoading(false);
+        }
+      }, []);
 
       useEffect(() => {
         if (!selectedEquipment) return;
@@ -2461,6 +2798,10 @@ const confirmDestructiveAction = (targetLabel) =>
         });
         setEquipmentActionError('');
       }, [selectedEquipment]);
+
+      useEffect(() => {
+        loadFleetItems(filter);
+      }, [filter, loadFleetItems]);
 
       const handleCreateEquipment = async () => {
         try {
@@ -2496,6 +2837,7 @@ const confirmDestructiveAction = (targetLabel) =>
           }
           setEquipment((prev) => [payload.equipment, ...prev]);
           setSelectedEquipmentId(payload.equipment.id);
+          await loadFleetItems(filter);
         } catch (error) {
           setEquipmentActionError('Failed to create equipment');
           console.warn('Create equipment failed', error);
@@ -2544,6 +2886,7 @@ const confirmDestructiveAction = (targetLabel) =>
           setEquipment((prev) =>
             prev.map((item) => (item.id === selectedEquipment.id ? payload.equipment : item))
           );
+          await loadFleetItems(filter);
         } catch {
           setEquipmentActionError('Failed to save equipment');
         } finally {
@@ -2575,6 +2918,7 @@ const confirmDestructiveAction = (targetLabel) =>
           }
           setEquipment((prev) => prev.filter((item) => item.id !== selectedEquipment.id));
           setSelectedEquipmentId(null);
+          await loadFleetItems(filter);
         } catch {
           setEquipmentActionError('Failed to delete equipment');
         } finally {
@@ -2583,10 +2927,10 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const stats = {
-        total: equipment.length,
-        active: equipment.filter(e => e.status === 'active').length,
-        idle: equipment.filter(e => e.status === 'idle').length,
-        maintenance: equipment.filter(e => e.status === 'maintenance').length,
+        total: fleetItems.length,
+        active: fleetItems.filter(e => e.derivedStatus === 'ASSIGNED').length,
+        idle: fleetItems.filter(e => e.derivedStatus === 'IDLE').length,
+        maintenance: fleetItems.filter(e => e.derivedStatus === 'IN_MAINTENANCE' || e.derivedStatus === 'OUT_OF_SERVICE').length,
         totalValue: equipment.reduce((sum, e) => sum + (e.purchasePrice || 0), 0),
       };
 
@@ -2605,7 +2949,7 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
               <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
-                {['all', 'active', 'idle', 'maintenance'].map(status => (
+                {['all', 'assigned', 'idle', 'maintenance'].map(status => (
                   <button
                     key={status}
                     onClick={() => setFilter(status)}
@@ -2639,27 +2983,35 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Equipment Grid/List */}
             <div className={`lg:col-span-2 ${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3'}`}>
-              {equipmentLoading ? (
+              {equipmentLoading || fleetItemsLoading ? (
                 <LoadingBlock testId="fleet-loading">Loading equipment...</LoadingBlock>
               ) : filteredEquipment.length === 0 ? (
                 <EmptyState testId="fleet-empty">No equipment yet.</EmptyState>
               ) : filteredEquipment.map(eq => {
-                const job = jobs.find(j => j.id === eq.jobId);
                 const hoursToService = eq.nextService - eq.hours;
 
                 return viewMode === 'grid' ? (
                   <Card
                     key={eq.id}
+                    data-testid={`fleet-row-${eq.id}`}
                     className={`p-4 cursor-pointer transition-all ${selectedEquipmentId === eq.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
                     onClick={() => setSelectedEquipmentId(eq.id)}
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                          eq.status === 'active' ? 'bg-green-100' : eq.status === 'idle' ? 'bg-yellow-100' : 'bg-red-100'
+                          eq.derivedStatus === 'ASSIGNED'
+                            ? 'bg-green-100'
+                            : eq.derivedStatus === 'IDLE'
+                              ? 'bg-yellow-100'
+                              : 'bg-red-100'
                         }`}>
                           <Icon name="truck-monster" className={`${
-                            eq.status === 'active' ? 'text-green-600' : eq.status === 'idle' ? 'text-yellow-600' : 'text-red-600'
+                            eq.derivedStatus === 'ASSIGNED'
+                              ? 'text-green-600'
+                              : eq.derivedStatus === 'IDLE'
+                                ? 'text-yellow-600'
+                                : 'text-red-600'
                           }`} />
                         </div>
                         <div>
@@ -2667,7 +3019,7 @@ const confirmDestructiveAction = (targetLabel) =>
                           <p className="text-xs text-gray-500">{eq.type}</p>
                         </div>
                       </div>
-                      <Badge className={getStatusColor(eq.status)}>{eq.status}</Badge>
+                      <Badge className={getStatusColor(eq.derivedStatus)}>{eq.derivedStatus}</Badge>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-sm mb-3">
@@ -2684,10 +3036,10 @@ const confirmDestructiveAction = (targetLabel) =>
                       </div>
                     </div>
 
-                    {job && (
+                    {eq.currentJob && (
                       <div className="text-xs text-gray-500 flex items-center gap-1">
                         <Icon name="location-dot" />
-                        {job.name}
+                        {eq.currentJob.name}
                       </div>
                     )}
 
@@ -2701,15 +3053,24 @@ const confirmDestructiveAction = (targetLabel) =>
                 ) : (
                   <Card
                     key={eq.id}
+                    data-testid={`fleet-row-${eq.id}`}
                     className={`p-3 cursor-pointer transition-all ${selectedEquipmentId === eq.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
                     onClick={() => setSelectedEquipmentId(eq.id)}
                   >
                     <div className="flex items-center gap-4">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                        eq.status === 'active' ? 'bg-green-100' : eq.status === 'idle' ? 'bg-yellow-100' : 'bg-red-100'
+                        eq.derivedStatus === 'ASSIGNED'
+                          ? 'bg-green-100'
+                          : eq.derivedStatus === 'IDLE'
+                            ? 'bg-yellow-100'
+                            : 'bg-red-100'
                       }`}>
                         <Icon name="truck-monster" className={`${
-                          eq.status === 'active' ? 'text-green-600' : eq.status === 'idle' ? 'text-yellow-600' : 'text-red-600'
+                          eq.derivedStatus === 'ASSIGNED'
+                            ? 'text-green-600'
+                            : eq.derivedStatus === 'IDLE'
+                              ? 'text-yellow-600'
+                              : 'text-red-600'
                         }`} />
                       </div>
                       <div className="flex-1">
@@ -2717,8 +3078,8 @@ const confirmDestructiveAction = (targetLabel) =>
                         <p className="text-xs text-gray-500">{eq.type} • {eq.hours.toLocaleString()} hrs</p>
                       </div>
                       <div className="text-right">
-                        <Badge className={getStatusColor(eq.status)}>{eq.status}</Badge>
-                        {job && <p className="text-xs text-gray-500 mt-1">{job.name}</p>}
+                        <Badge className={getStatusColor(eq.derivedStatus)}>{eq.derivedStatus}</Badge>
+                        {eq.currentJob && <p className="text-xs text-gray-500 mt-1">{eq.currentJob.name}</p>}
                       </div>
                     </div>
                   </Card>
@@ -2729,12 +3090,14 @@ const confirmDestructiveAction = (targetLabel) =>
             {/* Equipment Detail */}
             {selectedEquipment ? (
               <Card className="p-4 h-fit sticky top-4">
-                <div className="flex items-start justify-between mb-4">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
-                    <p className="text-sm text-gray-500">{selectedEquipment.type}</p>
-                  </div>
-                  <Badge className={getStatusColor(selectedEquipment.status)}>{selectedEquipment.status}</Badge>
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
+                      <p className="text-sm text-gray-500">{selectedEquipment.type}</p>
+                    </div>
+                  <Badge className={getStatusColor(selectedFleetItem?.derivedStatus || selectedEquipment.status)}>
+                    {selectedFleetItem?.derivedStatus || selectedEquipment.status}
+                  </Badge>
                 </div>
 
                 <div className="space-y-4">
@@ -2811,7 +3174,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Current Assignment</p>
-                    <p className="text-sm font-medium">{equipmentJob?.name || 'Unassigned'}</p>
+                    <p className="text-sm font-medium">{selectedFleetItem?.currentJob?.name || equipmentJob?.name || 'Unassigned'}</p>
                   </div>
 
                   <div>
@@ -2869,6 +3232,9 @@ const confirmDestructiveAction = (targetLabel) =>
                   {equipmentActionError && (
                     <InlineError>{equipmentActionError}</InlineError>
                   )}
+                  {fleetItemsError && (
+                    <InlineError>{fleetItemsError}</InlineError>
+                  )}
 
                   <div className="flex gap-2 pt-4">
                     <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveEquipment} disabled={saveLoading || deleteLoading}>
@@ -2902,31 +3268,70 @@ const confirmDestructiveAction = (targetLabel) =>
       const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
       const [employeeActionLoading, setEmployeeActionLoading] = useState(false);
       const [employeeActionError, setEmployeeActionError] = useState('');
+      const [teamItems, setTeamItems] = useState([]);
+      const [teamLoading, setTeamLoading] = useState(false);
+      const [teamError, setTeamError] = useState('');
 
-      const filteredEmployees = employees.filter(emp => {
+      const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
-        if (filter === 'on-site') return emp.status === 'clocked-in';
-        if (filter === 'off') return emp.status === 'off';
+        if (filter === 'on-site') return emp.status === 'active';
+        if (filter === 'off') return emp.status === 'inactive';
         return emp.role.toLowerCase().includes(filter.toLowerCase());
       });
 
-      const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
-      const employeeJob = selectedEmployee ? jobs.find(j => j.id === selectedEmployee.jobId) : null;
+      const selectedEmployee = teamItems.find(e => String(e.id) === String(selectedEmployeeId));
+      const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
 
       const stats = {
-        total: employees.length,
-        onSite: employees.filter(e => e.status === 'clocked-in').length,
-        roles: [...new Set(employees.map(e => e.role))],
+        total: teamItems.length,
+        onSite: teamItems.filter(e => e.status === 'active').length,
+        roles: [...new Set(teamItems.map(e => e.role))],
       };
 
       const expiringCerts = selectedEmployee?.certifications.filter(c => getDaysUntil(c.expires) < 90) || [];
 
+      const loadTeamItems = useCallback(async () => {
+        try {
+          setTeamLoading(true);
+          setTeamError('');
+          const response = await fetch('/api/team?limit=50', { cache: 'no-store' });
+          const payload = await response.json();
+          if (!response.ok || !Array.isArray(payload?.items)) {
+            throw new Error(payload?.error || 'Failed to load team');
+          }
+          const mappedItems = payload.items.map((item) => ({
+            id: item.id,
+            name: item.displayName || '',
+            role: item.role || 'operator',
+            status: item.status || 'inactive',
+            assignedToday: item.assignedToday || null,
+            hoursThisWeek: Number(item.hoursThisWeek || 0),
+            pay: item.pay || { visible: false, hourlyRate: 0, loadedHourlyCost: 0 },
+            hourlyRate: Number(item.pay?.hourlyRate || 0),
+            certifications: [],
+            phone: item.phone || '',
+            email: item.email || '',
+            clockedInAt: item.clockedInAt,
+          }));
+          setTeamItems(mappedItems);
+        } catch (error) {
+          setTeamItems([]);
+          setTeamError(error instanceof Error ? error.message : 'Failed to load team');
+        } finally {
+          setTeamLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        loadTeamItems();
+      }, [loadTeamItems]);
+
       useEffect(() => {
         if (!selectedEmployeeId) return;
-        if (!employees.some((employee) => employee.id === selectedEmployeeId)) {
+        if (!teamItems.some((employee) => String(employee.id) === String(selectedEmployeeId))) {
           setSelectedEmployeeId(null);
         }
-      }, [employees, selectedEmployeeId]);
+      }, [teamItems, selectedEmployeeId]);
 
       const handleCreateEmployee = async () => {
         const name = window.prompt('Employee name');
@@ -2954,6 +3359,7 @@ const confirmDestructiveAction = (targetLabel) =>
           }
           setEmployees((prev) => [payload.employee, ...prev]);
           setSelectedEmployeeId(payload.employee.id);
+          await loadTeamItems();
         } catch {
           setEmployeeActionError('Failed to create employee');
         } finally {
@@ -2993,6 +3399,7 @@ const confirmDestructiveAction = (targetLabel) =>
           setEmployees((prev) =>
             prev.map((employee) => (employee.id === selectedEmployee.id ? payload.employee : employee))
           );
+          await loadTeamItems();
         } catch {
           setEmployeeActionError('Failed to update employee');
         } finally {
@@ -3006,8 +3413,8 @@ const confirmDestructiveAction = (targetLabel) =>
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="users" label="Total Employees" value={stats.total} color="brand" />
             <StatCard icon="user-check" label="On Site Today" value={stats.onSite} color="green" />
-            <StatCard icon="hard-hat" label="Foremen" value={employees.filter(e => e.role === 'Foreman').length} color="blue" />
-            <StatCard icon="id-card" label="Expiring Certs" value={employees.flatMap(e => e.certifications.filter(c => getDaysUntil(c.expires) < 60)).length} color="red" />
+            <StatCard icon="hard-hat" label="Foremen" value={teamItems.filter(e => String(e.role).toLowerCase() === 'foreman').length} color="blue" />
+            <StatCard icon="id-card" label="Expiring Certs" value={teamItems.flatMap(e => (e.certifications || []).filter(c => getDaysUntil(c.expires) < 60)).length} color="red" />
           </StatGrid>
 
           {/* Filters */}
@@ -3040,7 +3447,7 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Employee List */}
             <div className="lg:col-span-2 space-y-3">
-              {employeesLoading ? (
+              {employeesLoading || teamLoading ? (
                 <LoadingBlock testId="team-loading">Loading employees...</LoadingBlock>
               ) : filteredEmployees.length === 0 ? (
                 <EmptyState testId="team-empty">No employees yet.</EmptyState>
@@ -3056,27 +3463,28 @@ const confirmDestructiveAction = (targetLabel) =>
                   >
                     <div className="flex items-center gap-4">
                       <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-medium ${
-                        emp.status === 'clocked-in' ? 'bg-green-500' : 'bg-gray-400'
+                        emp.status === 'active' ? 'bg-green-500' : 'bg-gray-400'
                       }`}>
                         {emp.name.split(' ').map(n => n[0]).join('')}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <h4 className="font-medium text-gray-900">{emp.name}</h4>
-                          {emp.status === 'clocked-in' && (
+                          {emp.status === 'active' && emp.clockedInAt && (
                             <span className="text-xs text-green-600 flex items-center gap-1">
                               <span className="w-2 h-2 bg-green-500 rounded-full pulse-dot"></span>
-                              Since {emp.clockedInAt}
+                              Since {formatDate(emp.clockedInAt)}
                             </span>
                           )}
                         </div>
                         <p className="text-sm text-gray-500">{emp.role}</p>
+                        <p className="text-xs text-gray-500">Hours This Week: {Number(emp.hoursThisWeek || 0).toFixed(1)}</p>
                       </div>
                       <div className="text-right">
-                        {job && (
+                        {emp.assignedToday && (
                           <p className="text-sm text-gray-600 flex items-center gap-1">
                             <Icon name="location-dot" className="text-brand-500" />
-                            {job.name}
+                            {emp.assignedToday.jobName}
                           </p>
                         )}
                         {expiringSoon.length > 0 && (
@@ -3097,14 +3505,14 @@ const confirmDestructiveAction = (targetLabel) =>
               <Card className="p-4 h-fit sticky top-4">
                 <div className="text-center mb-4">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 ${
-                    selectedEmployee.status === 'clocked-in' ? 'bg-green-500' : 'bg-gray-400'
+                    selectedEmployee.status === 'active' ? 'bg-green-500' : 'bg-gray-400'
                   }`}>
                     {selectedEmployee.name.split(' ').map(n => n[0]).join('')}
                   </div>
                   <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>
                   <p className="text-sm text-gray-500">{selectedEmployee.role}</p>
                   <Badge className={`mt-2 ${getStatusColor(selectedEmployee.status)}`}>
-                    {selectedEmployee.status === 'clocked-in' ? 'On Site' : 'Off'}
+                    {selectedEmployee.status === 'active' ? 'On Site' : 'Off'}
                   </Badge>
                 </div>
 
@@ -3121,8 +3529,15 @@ const confirmDestructiveAction = (targetLabel) =>
                   </div>
 
                   <div>
+                    <p className="text-xs text-gray-500 mb-1">Hours This Week</p>
+                    <p className="text-sm font-medium">{Number(selectedEmployee.hoursThisWeek || 0).toFixed(1)} hrs</p>
+                  </div>
+
+                  <div>
                     <p className="text-xs text-gray-500 mb-1">Hourly Rate</p>
-                    <p className="text-lg font-semibold text-brand-600">${selectedEmployee.hourlyRate}/hr</p>
+                    <p className="text-lg font-semibold text-brand-600">
+                      {selectedEmployee.pay?.visible ? `$${Number(selectedEmployee.hourlyRate || 0)}/hr` : '—'}
+                    </p>
                   </div>
 
                   <div className="pt-4 border-t border-gray-200">
@@ -3157,6 +3572,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     </Button>
                   </div>
                   {employeeActionError && <InlineError>{employeeActionError}</InlineError>}
+                  {teamError && <InlineError>{teamError}</InlineError>}
                 </div>
               </Card>
             ) : (
@@ -7274,10 +7690,15 @@ const confirmDestructiveAction = (targetLabel) =>
                     { date: '2026-02-25', title: 'Spring Equipment Showcase', location: 'Equipment Yard', crew: 'Refined Video Team' },
                   ].map((shoot, i) => (
                     <div key={i} className="flex items-center gap-4 p-3 bg-gray-50 rounded-lg">
+                      {(() => {
+                        const utcDate = new Date(`${shoot.date}T00:00:00Z`);
+                        return (
                       <div className="text-center min-w-[60px]">
-                        <p className="text-xs text-gray-500 uppercase">{new Date(shoot.date).toLocaleDateString('en-US', { month: 'short' })}</p>
-                        <p className="text-2xl font-bold text-gray-900">{new Date(shoot.date).getDate()}</p>
+                        <p className="text-xs text-gray-500 uppercase">{utcDate.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}</p>
+                        <p className="text-2xl font-bold text-gray-900">{utcDate.getUTCDate()}</p>
                       </div>
+                        );
+                      })()}
                       <div className="flex-1">
                         <p className="font-medium text-gray-900">{shoot.title}</p>
                         <p className="text-sm text-gray-500">
@@ -7371,6 +7792,7 @@ const confirmDestructiveAction = (targetLabel) =>
       <Modal isOpen={isOpen} onClose={onClose} title="Quick Actions" size="sm">
         <div className="grid grid-cols-2 gap-3">
           {[
+            { icon: 'calendar-plus', label: 'Add Event', action: 'calendar-event', color: 'indigo' },
             { icon: 'clock', label: 'Time Clock', action: 'time-clock', color: 'blue' },
             { icon: 'clipboard-check', label: 'Equipment Check-In', action: 'equipment-checkin', color: 'green' },
             { icon: 'file-lines', label: 'Daily Report', action: 'daily-report', color: 'brand' },
@@ -7392,6 +7814,137 @@ const confirmDestructiveAction = (targetLabel) =>
         </div>
       </Modal>
     );
+
+    const CalendarEventModal = ({ isOpen, onClose, employees }) => {
+      const [title, setTitle] = useState('');
+      const [eventType, setEventType] = useState('meeting');
+      const [visibility, setVisibility] = useState('attendees');
+      const [startsAt, setStartsAt] = useState(new Date().toISOString().slice(0, 16));
+      const [endsAt, setEndsAt] = useState(new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
+      const [locationText, setLocationText] = useState('');
+      const [description, setDescription] = useState('');
+      const [attendeeEmployeeId, setAttendeeEmployeeId] = useState('');
+      const [saving, setSaving] = useState(false);
+      const [error, setError] = useState('');
+      const [warning, setWarning] = useState('');
+
+      const reset = () => {
+        setTitle('');
+        setEventType('meeting');
+        setVisibility('attendees');
+        setStartsAt(new Date().toISOString().slice(0, 16));
+        setEndsAt(new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
+        setLocationText('');
+        setDescription('');
+        setAttendeeEmployeeId('');
+        setError('');
+        setWarning('');
+      };
+
+      const handleSubmit = async () => {
+        if (!title.trim()) return;
+        try {
+          setSaving(true);
+          setError('');
+          const attendees = attendeeEmployeeId
+            ? [{ attendeeType: 'employee', employeeId: attendeeEmployeeId }]
+            : [];
+          const response = await fetch('/api/calendar/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: title.trim(),
+              eventType,
+              visibility,
+              startsAt: new Date(startsAt).toISOString(),
+              endsAt: new Date(endsAt).toISOString(),
+              locationText,
+              description,
+              attendees,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setError(payload?.error || 'Failed to create event');
+            return;
+          }
+          if (Array.isArray(payload?.warnings) && payload.warnings.length > 0) {
+            setWarning(payload.warnings.join(' '));
+            return;
+          }
+          reset();
+          onClose();
+        } catch {
+          setError('Failed to create event');
+        } finally {
+          setSaving(false);
+        }
+      };
+
+      return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Add Event" size="md">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Weekly planning meeting" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Starts</label>
+                <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ends</label>
+                <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                <select value={eventType} onChange={(e) => setEventType(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                  <option value="meeting">Meeting</option>
+                  <option value="client">Client</option>
+                  <option value="inspection">Inspection</option>
+                  <option value="delivery">Delivery</option>
+                  <option value="internal">Internal</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
+                <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                  <option value="attendees">Attendees</option>
+                  <option value="company">Company</option>
+                  <option value="private">Private</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Attendee (Employee)</label>
+              <select value={attendeeEmployeeId} onChange={(e) => setAttendeeEmployeeId(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <option value="">No specific attendee</option>
+                {employees.map((employee) => (
+                  <option key={employee.id} value={employee.id}>{employee.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
+              <input value={locationText} onChange={(e) => setLocationText(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Main office" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+            </div>
+            {warning && <p className="text-sm text-yellow-700">{warning}</p>}
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="flex justify-end gap-3">
+              <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
+              <Button variant="brand" onClick={handleSubmit} disabled={saving || !title.trim()}>{saving ? 'Saving...' : 'Create Event'}</Button>
+            </div>
+          </div>
+        </Modal>
+      );
+    };
 
     const TimeClockModal = ({ isOpen, onClose, employees, jobs, setTimeEntries }) => {
       const [selectedEmployee, setSelectedEmployee] = useState('');

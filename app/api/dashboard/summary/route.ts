@@ -1,15 +1,15 @@
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
-import { cookies } from "next/headers";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {
   ONBOARDING_DISMISSED_KEY,
   getOnboardingChecklistItemsForRole,
 } from "@/lib/onboarding/checklist";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import type { AppRole } from "@/lib/nav/config";
 
 export const dynamic = "force-dynamic";
 
-type Role = "admin" | "pm" | "foreman" | "mechanic" | "operator";
+type Role = AppRole;
 
 type DashboardSummary = {
   role: Role;
@@ -27,7 +27,14 @@ type DashboardSummary = {
     };
     gettingStarted?: {
       enabled: boolean;
-      items: Array<{ key: string; label: string; completed: boolean }>;
+      items: Array<{
+        key: string;
+        label: string;
+        description: string;
+        view: string;
+        scope: "company" | "user";
+        completed: boolean;
+      }>;
       completedCount: number;
       totalCount: number;
       dismissed?: boolean;
@@ -51,31 +58,6 @@ type DashboardSummary = {
     };
   };
 };
-
-const roleSchema = z.enum(["admin", "pm", "foreman", "mechanic", "operator"]);
-function normalizeRole(rawRole: unknown): Role | null {
-  const parsed = roleSchema.safeParse(rawRole);
-  if (parsed.success) return parsed.data;
-
-  const normalized = String(rawRole ?? "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z]/g, "");
-
-  if (!normalized) return null;
-
-  if (normalized.includes("admin")) return "admin";
-  if (normalized.includes("executive")) return "admin";
-  if (normalized.includes("ceo")) return "admin";
-  if (normalized.includes("operations")) return "pm";
-  if (normalized === "pm" || normalized.includes("projectmanager")) return "pm";
-  if (normalized.includes("foreman")) return "foreman";
-  if (normalized.includes("mechanic")) return "mechanic";
-  if (normalized.includes("operator")) return "operator";
-  if (normalized.includes("field")) return "operator";
-
-  return null;
-}
 
 const asNumber = (value: unknown) => {
   const num = Number(value ?? 0);
@@ -101,36 +83,13 @@ function toError(error: unknown) {
   return NextResponse.json({ error: message || "Internal server error" }, { status: 500 });
 }
 
-async function resolveRole(
-  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
-  companyId: string,
-  userId: string
-): Promise<Role> {
-  const { data, error } = await supabase
-    .from("memberships")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", userId)
-    .limit(1);
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  const normalizedRole = normalizeRole(data?.[0]?.role);
-  if (!normalizedRole) {
-    throw new TenantResolverError("Forbidden", 403);
-  }
-
-  return normalizedRole;
-}
-
 export async function GET() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
-    const cookieStore = await cookies();
-    const testRoleOverride = process.env.E2E === "true" ? cookieStore.get("e2e_role")?.value : undefined;
-    const role = normalizeRole(testRoleOverride) ?? (await resolveRole(supabase, companyId, userId));
+    const role = await getEffectiveRole();
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const activeJobsQuery = supabase
       .from("jobs")
@@ -182,7 +141,7 @@ export async function GET() {
 
     const onboardingQuery = supabase
       .from("onboarding_checklist")
-      .select("key, completed_at")
+      .select("key, user_id, completed_at")
       .eq("company_id", companyId);
 
     const inventoryLowPartsCountQuery = supabase
@@ -279,14 +238,20 @@ export async function GET() {
     const onboardingRows = onboardingResult.error ? [] : onboardingResult.data ?? [];
     const completedMap = new Map<string, { completed_at: string | null }>();
     for (const row of onboardingRows) {
-      completedMap.set(String(row.key), { completed_at: row.completed_at });
+      const key = `${String(row.key)}::${row.user_id ? String(row.user_id) : "__company__"}`;
+      completedMap.set(key, { completed_at: row.completed_at });
     }
-    const onboardingDismissed = Boolean(completedMap.get(ONBOARDING_DISMISSED_KEY)?.completed_at);
+    const onboardingDismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
     const roleChecklistItems = getOnboardingChecklistItemsForRole(role);
     const checklistItems = roleChecklistItems.map((item) => ({
       key: item.key,
       label: item.label,
-      completed: Boolean(completedMap.get(item.key)?.completed_at),
+      description: item.description,
+      view: item.view,
+      scope: item.scope,
+      completed: Boolean(
+        completedMap.get(`${item.key}::${item.scope === "company" ? "__company__" : userId}`)?.completed_at
+      ),
     }));
     const completedCount = checklistItems.filter((item) => item.completed).length;
 
@@ -319,6 +284,7 @@ export async function GET() {
       };
       sections.quickActions = {
         items: [
+          { key: "add_event", label: "Add Event", href: "calendar-event" },
           { key: "time_clock", label: "Time Clock", href: "time-clock" },
           { key: "check_in", label: "Check-In", href: "equipment-checkin" },
           { key: "daily_report", label: "Daily Report", href: "daily-report" },
@@ -374,6 +340,7 @@ export async function GET() {
       };
       sections.quickActions = {
         items: [
+          { key: "add_event", label: "Add Event", href: "calendar-event" },
           { key: "time_clock", label: "Time Clock", href: "time-clock" },
           { key: "check_in", label: "Check-In", href: "equipment-checkin" },
           { key: "daily_report", label: "Daily Report", href: "daily-report" },

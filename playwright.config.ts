@@ -33,13 +33,13 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm dev',
-    url: BASE_URL,
-    reuseExistingServer: !process.env.CI,
+    command: 'pnpm dev --port 3000',
+    port: 3000,
+    reuseExistingServer: true,
     timeout: 120_000,
     env: {
       ...process.env,
-      E2E: "true",
+      E2E: 'true',
     },
   },
 });

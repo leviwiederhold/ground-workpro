@@ -10,6 +10,14 @@ const querySchema = z.object({
 });
 
 type DerivedStatus = "ASSIGNED" | "IDLE" | "IN_MAINTENANCE" | "OUT_OF_SERVICE";
+type EquipmentNotesMeta = {
+  fuelLevel?: number;
+  nextService?: number;
+  lastUpdate?: string;
+  dailyRate?: number;
+  purchasePrice?: number;
+  purchaseDate?: string;
+};
 
 const OPEN_WORK_ORDER_STATUSES = new Set(["open", "in_progress", "in-progress", "scheduled", "pending"]);
 const OUT_OF_SERVICE_STATUSES = new Set(["out_of_service", "out-of-service", "down"]);
@@ -26,6 +34,22 @@ const mapDerivedStatusFilter = (statusFilter: "all" | "assigned" | "idle" | "in_
 };
 
 const normalizeId = (value: unknown) => String(value ?? "");
+const EQUIPMENT_META_PREFIX = "\n<!--GW_EQUIP_META:";
+const EQUIPMENT_META_SUFFIX = "-->";
+
+function parseEquipmentNotes(raw: unknown): EquipmentNotesMeta {
+  const text = typeof raw === "string" ? raw : "";
+  const start = text.indexOf(EQUIPMENT_META_PREFIX);
+  const end = start >= 0 ? text.indexOf(EQUIPMENT_META_SUFFIX, start + EQUIPMENT_META_PREFIX.length) : -1;
+  if (start < 0 || end < 0) return {};
+  const jsonText = text.slice(start + EQUIPMENT_META_PREFIX.length, end).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as EquipmentNotesMeta;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 const isMissingSchemaError = (message: string | undefined) =>
   /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
     message ?? ""
@@ -212,6 +236,7 @@ export async function GET(request: Request) {
         const currentJobId = assignment?.job_id ? normalizeId(assignment.job_id) : null;
         const currentJobName = currentJobId ? jobNameById.get(currentJobId) ?? "Job" : null;
 
+        const notesMeta = parseEquipmentNotes(row.notes);
         return {
           id: equipmentId,
           name: String(row.name ?? ""),
@@ -229,13 +254,13 @@ export async function GET(request: Request) {
           status: String(row.status ?? "active"),
           type: String(row.type ?? "Equipment"),
           jobId: row.job_id ?? null,
-          hours: Number(row.hours ?? 0),
-          nextService: Number(row.next_service ?? 0),
-          fuelLevel: Number(row.fuel_level ?? 0),
+          hours: Number(row.hours ?? row.hour_meter ?? 0),
+          nextService: Number(row.next_service ?? notesMeta.nextService ?? 0),
+          fuelLevel: Number(row.fuel_level ?? notesMeta.fuelLevel ?? 0),
           dailyRate: Number(row.daily_rate ?? 0),
-          purchasePrice: Number(row.purchase_price ?? 0),
-          purchaseDate: String(row.purchase_date ?? ""),
-          lastUpdate: String(row.last_update ?? "just now"),
+          purchasePrice: Number(row.purchase_price ?? notesMeta.purchasePrice ?? 0),
+          purchaseDate: String(row.purchase_date ?? notesMeta.purchaseDate ?? ""),
+          lastUpdate: String(row.last_update ?? notesMeta.lastUpdate ?? "just now"),
         };
       })
       .filter((item) => (requestedStatus ? item.derivedStatus === requestedStatus : true));

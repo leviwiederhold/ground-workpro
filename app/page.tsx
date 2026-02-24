@@ -167,6 +167,18 @@ const confirmDestructiveAction = (targetLabel) =>
       return colors[priority] || 'text-gray-600';
     };
 
+    const CONTACT_CIRCLE_COLORS = ['bg-brand-500', 'bg-green-500', 'bg-blue-500', 'bg-red-500'];
+    const getContactCircleColor = (seedValue) => {
+      const seed = String(seedValue || '');
+      if (!seed) return CONTACT_CIRCLE_COLORS[0];
+      let hash = 0;
+      for (let index = 0; index < seed.length; index += 1) {
+        hash = (hash << 5) - hash + seed.charCodeAt(index);
+        hash |= 0;
+      }
+      return CONTACT_CIRCLE_COLORS[Math.abs(hash) % CONTACT_CIRCLE_COLORS.length];
+    };
+
     // ============================================
     // ICON COMPONENT
     // ============================================
@@ -2690,6 +2702,18 @@ const confirmDestructiveAction = (targetLabel) =>
     // FLEET VIEW
     // ============================================
     const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal }) => {
+      const EQUIPMENT_TYPE_OPTIONS = useMemo(
+        () => [
+          'Excavator',
+          'Dozer',
+          'Haul Truck',
+          'Backhoe',
+          'Loader',
+          'Grader',
+          'Compactor',
+        ],
+        []
+      );
       const [filter, setFilter] = useState('all');
       const [selectedEquipmentId, setSelectedEquipmentId] = useState(null);
       const [viewMode, setViewMode] = useState('grid');
@@ -2711,6 +2735,109 @@ const confirmDestructiveAction = (targetLabel) =>
       const [saveLoading, setSaveLoading] = useState(false);
       const [deleteLoading, setDeleteLoading] = useState(false);
       const [equipmentActionError, setEquipmentActionError] = useState('');
+      const [selectedTypeOption, setSelectedTypeOption] = useState('Excavator');
+      const [customTypeInput, setCustomTypeInput] = useState('');
+
+      const EquipmentTypeGlyph = useCallback(({ type, className = '' }) => {
+        const normalized = String(type || '').trim().toLowerCase();
+        const shared = {
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.8,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          className: `w-6 h-6 ${className}`,
+          'aria-hidden': true,
+        };
+
+        if (normalized.includes('excavator')) {
+          return (
+            <svg {...shared}>
+              <rect x="3" y="14.5" width="10" height="3.5" rx="1.2" />
+              <path d="M13 12l4-3.2 2 1.2-2.2 3.8" />
+              <path d="M9 10.5h4v4H9z" />
+              <circle cx="6.5" cy="19" r="1.2" />
+              <circle cx="10.5" cy="19" r="1.2" />
+            </svg>
+          );
+        }
+        if (normalized.includes('dozer')) {
+          return (
+            <svg {...shared}>
+              <rect x="3" y="14.5" width="9" height="3.5" rx="1.2" />
+              <path d="M12 14.5h4l2 2.2-1.8 1.3H12z" />
+              <path d="M8 10.5h5v4H8z" />
+              <circle cx="6" cy="19" r="1.2" />
+              <circle cx="10" cy="19" r="1.2" />
+            </svg>
+          );
+        }
+        if (normalized.includes('haul') || normalized.includes('truck')) {
+          return (
+            <svg {...shared}>
+              <rect x="3" y="12.5" width="11" height="4.5" rx="1" />
+              <path d="M14 13h4l2 2v2h-2" />
+              <circle cx="7" cy="18.5" r="1.4" />
+              <circle cx="16.5" cy="18.5" r="1.4" />
+            </svg>
+          );
+        }
+        if (normalized.includes('backhoe')) {
+          return (
+            <svg {...shared}>
+              <rect x="4" y="13.5" width="8" height="4" rx="1" />
+              <path d="M12 13.5h3.5l1.5 1.7-1.6 1.8H12z" />
+              <path d="M6 11h4v2.5H6z" />
+              <path d="M17 11l2.2-1.8 1.3 1.1-1.7 2.8" />
+              <circle cx="7" cy="18.2" r="1.2" />
+              <circle cx="10.5" cy="18.2" r="1.2" />
+            </svg>
+          );
+        }
+        if (normalized.includes('loader')) {
+          return (
+            <svg {...shared}>
+              <rect x="4" y="13.5" width="9" height="4" rx="1" />
+              <path d="M13 14h4.2l1.3 1.7-1.6 1.4H13z" />
+              <path d="M6.5 10.5h4.5v3H6.5z" />
+              <circle cx="7" cy="18.2" r="1.2" />
+              <circle cx="11" cy="18.2" r="1.2" />
+            </svg>
+          );
+        }
+        if (normalized.includes('grader')) {
+          return (
+            <svg {...shared}>
+              <path d="M3.5 15h11.5" />
+              <path d="M8 12h4.5v3H8z" />
+              <path d="M15 15l4.5-1.6" />
+              <path d="M10.5 15.2l-2.2 2.2h5.1l2.1-2.2z" />
+              <circle cx="6" cy="18.4" r="1.2" />
+              <circle cx="13.8" cy="18.4" r="1.2" />
+            </svg>
+          );
+        }
+        if (normalized.includes('compactor')) {
+          return (
+            <svg {...shared}>
+              <rect x="4" y="12.8" width="8.5" height="4.4" rx="1" />
+              <circle cx="8" cy="18.5" r="1.2" />
+              <circle cx="15.8" cy="17.8" r="2.1" />
+              <path d="M12.5 14.8h2.5" />
+              <path d="M7 10.8h4.2v2" />
+            </svg>
+          );
+        }
+        return (
+          <svg {...shared}>
+            <rect x="4" y="12.5" width="11" height="4.5" rx="1" />
+            <path d="M15 13h3.8l1.8 2v2h-2" />
+            <circle cx="7.2" cy="18.5" r="1.3" />
+            <circle cx="16.2" cy="18.5" r="1.3" />
+          </svg>
+        );
+      }, []);
 
       const filteredEquipment = fleetItems;
       const selectedEquipment = equipment.find(e => e.id === selectedEquipmentId);
@@ -2751,8 +2878,19 @@ const confirmDestructiveAction = (targetLabel) =>
           purchaseDate: selectedEquipment.purchaseDate || '',
           lastUpdate: selectedEquipment.lastUpdate || 'just now',
         });
+        const existingType = String(selectedEquipment.type || '').trim();
+        if (EQUIPMENT_TYPE_OPTIONS.includes(existingType)) {
+          setSelectedTypeOption(existingType);
+          setCustomTypeInput('');
+        } else if (existingType) {
+          setSelectedTypeOption('Custom / Misc');
+          setCustomTypeInput(existingType);
+        } else {
+          setSelectedTypeOption('Excavator');
+          setCustomTypeInput('');
+        }
         setEquipmentActionError('');
-      }, [selectedEquipment]);
+      }, [EQUIPMENT_TYPE_OPTIONS, selectedEquipment]);
 
       useEffect(() => {
         loadFleetItems(filter);
@@ -2883,9 +3021,9 @@ const confirmDestructiveAction = (targetLabel) =>
 
       const stats = {
         total: fleetItems.length,
-        active: fleetItems.filter(e => e.derivedStatus === 'ASSIGNED').length,
-        idle: fleetItems.filter(e => e.derivedStatus === 'IDLE').length,
-        maintenance: fleetItems.filter(e => e.derivedStatus === 'IN_MAINTENANCE' || e.derivedStatus === 'OUT_OF_SERVICE').length,
+        active: fleetItems.filter(e => String(e.status || '').toLowerCase() === 'active').length,
+        idle: fleetItems.filter(e => String(e.status || '').toLowerCase() === 'idle').length,
+        maintenance: fleetItems.filter(e => ['maintenance', 'in_maintenance', 'out_of_service'].includes(String(e.status || '').toLowerCase())).length,
         totalValue: equipment.reduce((sum, e) => sum + (e.purchasePrice || 0), 0),
       };
 
@@ -2954,14 +3092,14 @@ const confirmDestructiveAction = (targetLabel) =>
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
                           eq.derivedStatus === 'ASSIGNED'
                             ? 'bg-green-100'
                             : eq.derivedStatus === 'IDLE'
                               ? 'bg-yellow-100'
                               : 'bg-red-100'
                         }`}>
-                          <Icon name="truck-monster" className={`${
+                          <EquipmentTypeGlyph type={eq.type} className={`${
                             eq.derivedStatus === 'ASSIGNED'
                               ? 'text-green-600'
                               : eq.derivedStatus === 'IDLE'
@@ -2974,7 +3112,7 @@ const confirmDestructiveAction = (targetLabel) =>
                           <p className="text-xs text-gray-500">{eq.type}</p>
                         </div>
                       </div>
-                      <Badge className={getStatusColor(eq.derivedStatus)}>{eq.derivedStatus}</Badge>
+                      <Badge className={getStatusColor(eq.status)}>{eq.status}</Badge>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2 text-sm mb-3">
@@ -2996,6 +3134,9 @@ const confirmDestructiveAction = (targetLabel) =>
                         <Icon name="location-dot" />
                         {eq.currentJob.name}
                       </div>
+                    )}
+                    {!eq.currentJob && (
+                      <div className="text-xs text-gray-500">Utilization: {String(eq.derivedStatus || 'IDLE').toLowerCase()}</div>
                     )}
 
                     {hoursToService < 150 && (
@@ -3020,7 +3161,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             ? 'bg-yellow-100'
                             : 'bg-red-100'
                       }`}>
-                        <Icon name="truck-monster" className={`${
+                        <EquipmentTypeGlyph type={eq.type} className={`${
                           eq.derivedStatus === 'ASSIGNED'
                             ? 'text-green-600'
                             : eq.derivedStatus === 'IDLE'
@@ -3033,7 +3174,7 @@ const confirmDestructiveAction = (targetLabel) =>
                         <p className="text-xs text-gray-500">{eq.type} • {eq.hours.toLocaleString()} hrs</p>
                       </div>
                       <div className="text-right">
-                        <Badge className={getStatusColor(eq.derivedStatus)}>{eq.derivedStatus}</Badge>
+                        <Badge className={getStatusColor(eq.status)}>{eq.status}</Badge>
                         {eq.currentJob && <p className="text-xs text-gray-500 mt-1">{eq.currentJob.name}</p>}
                       </div>
                     </div>
@@ -3044,14 +3185,14 @@ const confirmDestructiveAction = (targetLabel) =>
 
             {/* Equipment Detail */}
             {selectedEquipment ? (
-              <Card className="p-4 h-fit sticky top-4">
+              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
                       <p className="text-sm text-gray-500">{selectedEquipment.type}</p>
                     </div>
-                  <Badge className={getStatusColor(selectedFleetItem?.derivedStatus || selectedEquipment.status)}>
-                    {selectedFleetItem?.derivedStatus || selectedEquipment.status}
+                  <Badge className={getStatusColor(selectedEquipment.status)}>
+                    {selectedEquipment.status}
                   </Badge>
                 </div>
 
@@ -3068,12 +3209,40 @@ const confirmDestructiveAction = (targetLabel) =>
 
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Type</p>
-                    <input
-                      type="text"
-                      value={equipmentForm.type}
-                      onChange={(e) => setEquipmentForm({ ...equipmentForm, type: e.target.value })}
+                    <select
+                      value={selectedTypeOption}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setSelectedTypeOption(next);
+                        if (next !== 'Custom / Misc') {
+                          setCustomTypeInput('');
+                          setEquipmentForm({ ...equipmentForm, type: next });
+                        } else {
+                          setEquipmentForm({ ...equipmentForm, type: customTypeInput || '' });
+                        }
+                      }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
+                    >
+                      {EQUIPMENT_TYPE_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                      <option value="Custom / Misc">Custom / Misc</option>
+                    </select>
+                    {selectedTypeOption === 'Custom / Misc' && (
+                      <input
+                        type="text"
+                        value={customTypeInput}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setCustomTypeInput(value);
+                          setEquipmentForm({ ...equipmentForm, type: value });
+                        }}
+                        placeholder="e.g. Four Wheeler"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-2"
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -3231,6 +3400,17 @@ const confirmDestructiveAction = (targetLabel) =>
       const [assignLoading, setAssignLoading] = useState(false);
       const [assignError, setAssignError] = useState('');
       const [assignSuccess, setAssignSuccess] = useState('');
+      const [employeeForm, setEmployeeForm] = useState({
+        name: '',
+        role: 'operator',
+        phone: '',
+        email: '',
+        hourlyRate: 0,
+        jobId: '',
+        status: 'active',
+      });
+      const [employeeSaveLoading, setEmployeeSaveLoading] = useState(false);
+      const [inviteFeedback, setInviteFeedback] = useState('');
 
       const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
@@ -3240,8 +3420,11 @@ const confirmDestructiveAction = (targetLabel) =>
       });
 
       const selectedEmployee = teamItems.find(e => String(e.id) === String(selectedEmployeeId));
+      const selectedEmployeeRecord = employees.find((employee) => String(employee.id) === String(selectedEmployeeId));
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
+      const canManageTeamProfiles = ['executive', 'operations', 'admin', 'pm'].includes(String(currentRole || '').toLowerCase());
+      const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
 
       const stats = {
         total: teamItems.length,
@@ -3294,6 +3477,26 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       }, [teamItems, selectedEmployeeId]);
 
+      useEffect(() => {
+        if (!selectedEmployee) return;
+        setEmployeeForm({
+          name: selectedEmployeeRecord?.name || selectedEmployee.name || '',
+          role: selectedEmployeeRecord?.role || selectedEmployee.role || 'operator',
+          phone: selectedEmployeeRecord?.phone || selectedEmployee.phone || '',
+          email: selectedEmployeeRecord?.email || selectedEmployee.email || '',
+          hourlyRate: Number(selectedEmployeeRecord?.hourlyRate || selectedEmployee.hourlyRate || 0),
+          jobId:
+            selectedEmployeeRecord?.jobId
+              ? String(selectedEmployeeRecord.jobId)
+              : selectedEmployee.assignedToday?.jobId
+                ? String(selectedEmployee.assignedToday.jobId)
+                : '',
+          status: selectedEmployee.status === 'inactive' ? 'inactive' : 'active',
+        });
+        setEmployeeActionError('');
+        setInviteFeedback('');
+      }, [selectedEmployee, selectedEmployeeRecord]);
+
       const handleCreateEmployee = async () => {
         const name = window.prompt('Employee name');
         if (!name || !name.trim()) return;
@@ -3328,22 +3531,25 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       };
 
-      const handleEditEmployee = async () => {
+      const handleSaveEmployee = async () => {
         if (!selectedEmployee) return;
-        const nextName = window.prompt('Employee name', selectedEmployee.name || '');
-        if (!nextName || !nextName.trim()) return;
-        const nextRole = window.prompt('Role', selectedEmployee.role || 'Laborer');
-        if (!nextRole || !nextRole.trim()) return;
-        setEmployeeActionLoading(true);
+        setEmployeeSaveLoading(true);
         setEmployeeActionError('');
         try {
+          const requestBody = {
+            name: employeeForm.name.trim() || selectedEmployee.name || '',
+            role: employeeForm.role || selectedEmployee.role || 'operator',
+            phone: employeeForm.phone || '',
+            email: employeeForm.email || '',
+            ...(canEditPay ? { hourlyRate: Number(employeeForm.hourlyRate || 0) } : {}),
+            jobId: employeeForm.jobId || null,
+            status: employeeForm.status,
+          };
+
           const response = await fetch(`/api/employees/${selectedEmployee.id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: nextName.trim(),
-              role: nextRole.trim(),
-            }),
+            body: JSON.stringify(requestBody),
           });
           const raw = await response.text();
           let payload = null;
@@ -3354,7 +3560,7 @@ const confirmDestructiveAction = (targetLabel) =>
           }
           if (!response.ok || !payload?.employee) {
             setEmployeeActionError(payload?.error || raw || 'Failed to update employee');
-            setEmployeeActionLoading(false);
+            setEmployeeSaveLoading(false);
             return;
           }
           setEmployees((prev) =>
@@ -3364,7 +3570,65 @@ const confirmDestructiveAction = (targetLabel) =>
         } catch {
           setEmployeeActionError('Failed to update employee');
         } finally {
-          setEmployeeActionLoading(false);
+          setEmployeeSaveLoading(false);
+        }
+      };
+
+      const getInvitePayload = () => {
+        const email = (employeeForm.email || selectedEmployee?.email || '').trim();
+        const name = (employeeForm.name || selectedEmployee?.name || '').trim();
+        const role = String(employeeForm.role || selectedEmployee?.role || 'operator').toLowerCase();
+        return { email, name, role };
+      };
+
+      const buildInviteLink = () => {
+        const { email, name, role } = getInvitePayload();
+        const params = new URLSearchParams();
+        params.set('invite', '1');
+        if (email) params.set('email', email);
+        if (name) params.set('name', name);
+        if (role) params.set('role', role);
+        const origin = typeof window !== 'undefined' ? window.location.origin : '';
+        return `${origin}/signup?${params.toString()}`;
+      };
+
+      const copyText = async (value) => {
+        if (!value) throw new Error('Nothing to copy');
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(value);
+          return;
+        }
+        const tempInput = document.createElement('textarea');
+        tempInput.value = value;
+        tempInput.style.position = 'fixed';
+        tempInput.style.opacity = '0';
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+      };
+
+      const handleCopyInviteLink = async () => {
+        setInviteFeedback('');
+        try {
+          await copyText(buildInviteLink());
+          setInviteFeedback('Invite link copied.');
+        } catch {
+          setInviteFeedback('Failed to copy invite link.');
+        }
+      };
+
+      const handleCopyInviteMessage = async () => {
+        setInviteFeedback('');
+        try {
+          const { name, role } = getInvitePayload();
+          const greeting = name ? `Hi ${name},` : 'Hi,';
+          const roleLine = role ? `role: ${role}` : 'role: team member';
+          const message = `${greeting}\n\nYou are invited to Groundwork Pro (${roleLine}).\nUse this link to create your account:\n${buildInviteLink()}`;
+          await copyText(message);
+          setInviteFeedback('Invite message copied.');
+        } catch {
+          setInviteFeedback('Failed to copy invite message.');
         }
       };
 
@@ -3475,9 +3739,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     onClick={() => setSelectedEmployeeId(emp.id)}
                   >
                     <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-medium ${
-                        emp.status === 'active' ? 'bg-green-500' : 'bg-gray-400'
-                      }`}>
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-medium ${getContactCircleColor(emp.id || emp.name)}`}>
                         {emp.name.split(' ').map(n => n[0]).join('')}
                       </div>
                       <div className="flex-1">
@@ -3528,11 +3790,9 @@ const confirmDestructiveAction = (targetLabel) =>
 
             {/* Employee Detail */}
             {selectedEmployee ? (
-              <Card className="p-4 h-fit sticky top-4">
+              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
                 <div className="text-center mb-4">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 ${
-                    selectedEmployee.status === 'active' ? 'bg-green-500' : 'bg-gray-400'
-                  }`}>
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
                     {selectedEmployee.name.split(' ').map(n => n[0]).join('')}
                   </div>
                   <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>
@@ -3544,26 +3804,101 @@ const confirmDestructiveAction = (targetLabel) =>
 
                 <div className="space-y-4">
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Contact</p>
-                    <p className="text-sm">{selectedEmployee.phone}</p>
-                    <p className="text-sm text-gray-600">{selectedEmployee.email}</p>
+                    <p className="text-xs text-gray-500 mb-1">Name</p>
+                    <input
+                      type="text"
+                      value={employeeForm.name}
+                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, name: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      disabled={!canManageTeamProfiles}
+                    />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Current Assignment</p>
-                    <p className="text-sm font-medium">{employeeJob?.name || 'Unassigned'}</p>
+                    <p className="text-xs text-gray-500 mb-1">Role</p>
+                    <select
+                      value={employeeForm.role}
+                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, role: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      disabled={!canManageTeamProfiles}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="pm">PM</option>
+                      <option value="foreman">Foreman</option>
+                      <option value="mechanic">Mechanic</option>
+                      <option value="operator">Operator</option>
+                      <option value="Laborer">Laborer</option>
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Phone</p>
+                      <input
+                        type="text"
+                        value={employeeForm.phone}
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, phone: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        disabled={!canManageTeamProfiles}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Email</p>
+                      <input
+                        type="email"
+                        value={employeeForm.email}
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, email: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        disabled={!canManageTeamProfiles}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Hourly Rate</p>
+                      <input
+                        type="number"
+                        value={employeeForm.hourlyRate}
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, hourlyRate: Number(e.target.value) || 0 }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        disabled={!canEditPay}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">Status</p>
+                      <select
+                        value={employeeForm.status}
+                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, status: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        disabled={!canManageTeamProfiles}
+                      >
+                        <option value="active">active</option>
+                        <option value="inactive">inactive</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Assigned Job</p>
+                    <select
+                      value={employeeForm.jobId}
+                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, jobId: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      disabled={!canManageTeamProfiles}
+                    >
+                      <option value="">Unassigned</option>
+                      {jobs.map((job) => (
+                        <option key={job.id} value={job.id}>
+                          {job.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Hours This Week</p>
                     <p className="text-sm font-medium">{Number(selectedEmployee.hoursThisWeek || 0).toFixed(1)} hrs</p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Hourly Rate</p>
-                    <p className="text-lg font-semibold text-brand-600">
-                      {selectedEmployee.pay?.visible ? `$${Number(selectedEmployee.hourlyRate || 0)}/hr` : '—'}
-                    </p>
                   </div>
 
                   <div className="pt-4 border-t border-gray-200">
@@ -3593,10 +3928,23 @@ const confirmDestructiveAction = (targetLabel) =>
                     <Button variant="secondary" size="sm" className="flex-1">
                       <Icon name="clock-rotate-left" className="mr-1" /> Timesheet
                     </Button>
-                    <Button variant="secondary" size="sm" className="flex-1" onClick={handleEditEmployee} disabled={employeeActionLoading}>
-                      <Icon name="pen-to-square" className="mr-1" /> Edit
-                    </Button>
+                    {canManageTeamProfiles && (
+                      <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveEmployee} disabled={employeeSaveLoading}>
+                        <Icon name="floppy-disk" className="mr-1" /> {employeeSaveLoading ? 'Saving...' : 'Save'}
+                      </Button>
+                    )}
                   </div>
+                  {canManageTeamProfiles && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
+                        <Icon name="link" className="mr-1" /> Copy Invite Link
+                      </Button>
+                      <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage}>
+                        <Icon name="envelope" className="mr-1" /> Copy Invite Message
+                      </Button>
+                    </div>
+                  )}
+                  {inviteFeedback && <p className="text-xs text-gray-600">{inviteFeedback}</p>}
                   {employeeActionError && <InlineError>{employeeActionError}</InlineError>}
                   {teamError && <InlineError>{teamError}</InlineError>}
                 </div>

@@ -4,7 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 
-const employeeStatusSchema = z.enum(["clocked-in", "off"]);
+const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
 const updateEmployeeSchema = z
   .object({
@@ -50,6 +50,18 @@ const mapEmployee = (row: any) => ({
   status: row.status ?? "off",
   clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
 });
+
+const isStatusCheckError = (message: string | undefined) =>
+  /employees_status_check|violates check constraint .*status/i.test(message ?? "");
+
+const getStatusCandidates = (value: unknown) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "clocked-in") return ["clocked-in", "active", "off", "inactive"];
+  if (normalized === "active") return ["active", "clocked-in", "off", "inactive"];
+  if (normalized === "off") return ["off", "inactive", "active", "clocked-in"];
+  if (normalized === "inactive") return ["inactive", "off", "active", "clocked-in"];
+  return [normalized];
+};
 
 async function updateWithColumnFallback(
   supabase: any,
@@ -130,12 +142,41 @@ export async function PATCH(
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.clockedInAt !== undefined) updatePayload.clocked_in_at = payload.clockedInAt;
 
-    const { data, error } = await updateWithColumnFallback(
+    let { data, error } = await updateWithColumnFallback(
       supabase,
       companyId,
       normalizeId(id),
       updatePayload
     );
+
+    if (error && payload.status !== undefined && isStatusCheckError(error.message)) {
+      const statusCandidates = getStatusCandidates(payload.status);
+      for (const candidate of statusCandidates.slice(1)) {
+        const nextPayload = { ...updatePayload, status: candidate };
+        const retry = await updateWithColumnFallback(
+          supabase,
+          companyId,
+          normalizeId(id),
+          nextPayload
+        );
+        data = retry.data;
+        error = retry.error;
+        if (!error) break;
+      }
+    }
+
+    if (error && payload.status !== undefined && isStatusCheckError(error.message)) {
+      const retryWithoutStatusPayload = { ...updatePayload };
+      delete retryWithoutStatusPayload.status;
+      const retryWithoutStatus = await updateWithColumnFallback(
+        supabase,
+        companyId,
+        normalizeId(id),
+        retryWithoutStatusPayload
+      );
+      data = retryWithoutStatus.data;
+      error = retryWithoutStatus.error;
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });

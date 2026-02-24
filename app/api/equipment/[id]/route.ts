@@ -27,6 +27,48 @@ const updateEquipmentSchema = z
     message: "At least one field is required",
   });
 
+type EquipmentNotesMeta = {
+  fuelLevel?: number;
+  nextService?: number;
+  lastUpdate?: string;
+  dailyRate?: number;
+  purchasePrice?: number;
+  purchaseDate?: string;
+};
+
+const EQUIPMENT_META_PREFIX = "\n<!--GW_EQUIP_META:";
+const EQUIPMENT_META_SUFFIX = "-->";
+
+function parseEquipmentNotes(raw: unknown): { plainNotes: string; meta: EquipmentNotesMeta } {
+  const text = typeof raw === "string" ? raw : "";
+  const start = text.indexOf(EQUIPMENT_META_PREFIX);
+  const end = start >= 0 ? text.indexOf(EQUIPMENT_META_SUFFIX, start + EQUIPMENT_META_PREFIX.length) : -1;
+  if (start < 0 || end < 0) {
+    return { plainNotes: text, meta: {} };
+  }
+  const plainNotes = text.slice(0, start).trimEnd();
+  const jsonText = text.slice(start + EQUIPMENT_META_PREFIX.length, end).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as EquipmentNotesMeta;
+    return { plainNotes, meta: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch {
+    return { plainNotes, meta: {} };
+  }
+}
+
+function buildEquipmentNotes(plainNotes: string, meta: EquipmentNotesMeta): string {
+  const compactMeta: EquipmentNotesMeta = {};
+  if (Number.isFinite(meta.fuelLevel)) compactMeta.fuelLevel = Number(meta.fuelLevel);
+  if (Number.isFinite(meta.nextService)) compactMeta.nextService = Number(meta.nextService);
+  if (meta.lastUpdate) compactMeta.lastUpdate = meta.lastUpdate;
+  if (Number.isFinite(meta.dailyRate)) compactMeta.dailyRate = Number(meta.dailyRate);
+  if (Number.isFinite(meta.purchasePrice)) compactMeta.purchasePrice = Number(meta.purchasePrice);
+  if (meta.purchaseDate) compactMeta.purchaseDate = meta.purchaseDate;
+  const base = plainNotes?.trimEnd() ?? "";
+  if (Object.keys(compactMeta).length === 0) return base;
+  return `${base}${EQUIPMENT_META_PREFIX}${JSON.stringify(compactMeta)}${EQUIPMENT_META_SUFFIX}`;
+}
+
 const mapEquipment = (row: any) => ({
   id: row.id,
   name: row.name ?? "",
@@ -40,15 +82,15 @@ const mapEquipment = (row: any) => ({
       : Number.isNaN(Number(row.job_id))
       ? row.job_id
       : Number(row.job_id),
-  hours: Number(row.hours ?? 0),
-  nextService: Number(row.next_service ?? row.nextService ?? 0),
-  fuelLevel: Number(row.fuel_level ?? row.fuelLevel ?? 0),
+  hours: Number(row.hours ?? row.hour_meter ?? 0),
+  nextService: Number(row.next_service ?? row.nextService ?? parseEquipmentNotes(row.notes).meta.nextService ?? 0),
+  fuelLevel: Number(row.fuel_level ?? row.fuelLevel ?? parseEquipmentNotes(row.notes).meta.fuelLevel ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
-  lastUpdate: row.last_update ?? row.lastUpdate ?? "just now",
-  dailyRate: Number(row.daily_rate ?? row.dailyRate ?? 0),
-  purchasePrice: Number(row.purchase_price ?? row.purchasePrice ?? 0),
-  purchaseDate: row.purchase_date ?? row.purchaseDate ?? "",
+  lastUpdate: row.last_update ?? row.lastUpdate ?? parseEquipmentNotes(row.notes).meta.lastUpdate ?? "just now",
+  dailyRate: Number(row.daily_rate ?? row.dailyRate ?? row.hourly_cost ?? parseEquipmentNotes(row.notes).meta.dailyRate ?? 0),
+  purchasePrice: Number(row.purchase_price ?? row.purchasePrice ?? parseEquipmentNotes(row.notes).meta.purchasePrice ?? 0),
+  purchaseDate: row.purchase_date ?? row.purchaseDate ?? parseEquipmentNotes(row.notes).meta.purchaseDate ?? "",
 });
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
@@ -67,6 +109,13 @@ async function updateWithColumnFallback(
 ) {
   const currentPayload = { ...payload };
   let lastResult: any = null;
+  const parseMissingColumn = (message: string): string | null => {
+    const supabaseMatch = message.match(/Could not find the '([^']+)' column/);
+    if (supabaseMatch?.[1]) return supabaseMatch[1];
+    const genericMatch = message.match(/column "?([a-zA-Z0-9_]+)"? does not exist/i);
+    if (genericMatch?.[1]) return genericMatch[1];
+    return null;
+  };
 
   for (let i = 0; i < 12; i += 1) {
     const result = await supabase
@@ -74,15 +123,13 @@ async function updateWithColumnFallback(
       .update(currentPayload)
       .eq("company_id", companyId)
       .eq("id", id)
-      .select("*")
-      .single();
+      .select("*");
     lastResult = result;
     const message = result.error?.message || "";
-    const match = message.match(/Could not find the '([^']+)' column/);
-    if (!match) {
+    const missingColumn = parseMissingColumn(message);
+    if (!missingColumn) {
       return result;
     }
-    const missingColumn = match[1];
     if (!(missingColumn in currentPayload)) {
       return result;
     }
@@ -157,12 +204,49 @@ export async function PATCH(
 
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
+    const normalizedId = normalizeId(id);
+    const { data: beforeRow } = await supabase
+      .from("equipment")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", normalizedId)
+      .maybeSingle();
+    const beforeNotes = parseEquipmentNotes(beforeRow?.notes);
+    const resolvedMeta: EquipmentNotesMeta = {
+      fuelLevel:
+        payload.fuelLevel !== undefined
+          ? payload.fuelLevel
+          : beforeNotes.meta.fuelLevel,
+      nextService:
+        payload.nextService !== undefined
+          ? payload.nextService
+          : beforeNotes.meta.nextService,
+      lastUpdate:
+        payload.lastUpdate !== undefined
+          ? payload.lastUpdate
+          : beforeNotes.meta.lastUpdate,
+      dailyRate:
+        payload.dailyRate !== undefined
+          ? payload.dailyRate
+          : beforeNotes.meta.dailyRate,
+      purchasePrice:
+        payload.purchasePrice !== undefined
+          ? payload.purchasePrice
+          : beforeNotes.meta.purchasePrice,
+      purchaseDate:
+        payload.purchaseDate !== undefined
+          ? payload.purchaseDate
+          : beforeNotes.meta.purchaseDate,
+    };
 
     const updatePayload: Record<string, unknown> = {};
     if (payload.name !== undefined) updatePayload.name = payload.name;
     if (payload.type !== undefined) updatePayload.type = payload.type;
     if (payload.status !== undefined) updatePayload.status = payload.status;
-    if (payload.hours !== undefined) updatePayload.hours = payload.hours;
+    if (payload.hours !== undefined) {
+      updatePayload.hours = payload.hours;
+      updatePayload.hour_meter = payload.hours;
+    }
     if (payload.nextService !== undefined) updatePayload.next_service = payload.nextService;
     if (payload.fuelLevel !== undefined) updatePayload.fuel_level = payload.fuelLevel;
     if (payload.dailyRate !== undefined) updatePayload.daily_rate = payload.dailyRate;
@@ -173,10 +257,12 @@ export async function PATCH(
     if (payload.lat !== undefined) updatePayload.lat = payload.lat;
     if (payload.lng !== undefined) updatePayload.lng = payload.lng;
 
+    updatePayload.notes = buildEquipmentNotes(beforeNotes.plainNotes, resolvedMeta);
+
     const { data, error } = await updateWithColumnFallback(
       supabase,
       companyId,
-      normalizeId(id),
+      normalizedId,
       updatePayload
     );
 
@@ -184,7 +270,12 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ equipment: mapEquipment(data) });
+    const updatedRow = Array.isArray(data) ? data[0] : data;
+    if (!updatedRow) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ equipment: mapEquipment(updatedRow) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

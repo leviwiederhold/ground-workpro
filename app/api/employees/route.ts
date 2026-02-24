@@ -5,7 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
-const employeeStatusSchema = z.enum(["clocked-in", "off"]);
+const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
 const createEmployeeSchema = z.object({
   name: z.string().min(1),
@@ -52,6 +52,18 @@ const mapEmployee = (row: any) => ({
   status: row.status ?? "off",
   clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
 });
+
+const isStatusCheckError = (message: string | undefined) =>
+  /employees_status_check|violates check constraint .*status/i.test(message ?? "");
+
+const getStatusCandidates = (value: unknown) => {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "clocked-in") return ["clocked-in", "active", "off", "inactive"];
+  if (normalized === "active") return ["active", "clocked-in", "off", "inactive"];
+  if (normalized === "off") return ["off", "inactive", "active", "clocked-in"];
+  if (normalized === "inactive") return ["inactive", "off", "active", "clocked-in"];
+  return [normalized];
+};
 
 async function insertWithColumnFallback(supabase: any, payload: Record<string, unknown>) {
   const currentPayload = { ...payload };
@@ -152,7 +164,19 @@ export async function POST(request: Request) {
       ...(payload.status ? { status: payload.status } : {}),
     });
 
-    if (result.error?.message?.toLowerCase().includes("status")) {
+    if (result.error && payload.status && isStatusCheckError(result.error.message)) {
+      const statusCandidates = getStatusCandidates(payload.status);
+      for (const candidate of statusCandidates.slice(1)) {
+        const retry = await insertWithColumnFallback(supabase, {
+          ...basePayload,
+          status: candidate,
+        });
+        result = retry;
+        if (!retry.error) break;
+      }
+    }
+
+    if (result.error && payload.status && isStatusCheckError(result.error.message)) {
       result = await insertWithColumnFallback(supabase, basePayload);
     }
 

@@ -24,6 +24,48 @@ const createEquipmentSchema = z.object({
   lng: z.number().nullable().optional(),
 });
 
+type EquipmentNotesMeta = {
+  fuelLevel?: number;
+  nextService?: number;
+  lastUpdate?: string;
+  dailyRate?: number;
+  purchasePrice?: number;
+  purchaseDate?: string;
+};
+
+const EQUIPMENT_META_PREFIX = "\n<!--GW_EQUIP_META:";
+const EQUIPMENT_META_SUFFIX = "-->";
+
+function parseEquipmentNotes(raw: unknown): { plainNotes: string; meta: EquipmentNotesMeta } {
+  const text = typeof raw === "string" ? raw : "";
+  const start = text.indexOf(EQUIPMENT_META_PREFIX);
+  const end = start >= 0 ? text.indexOf(EQUIPMENT_META_SUFFIX, start + EQUIPMENT_META_PREFIX.length) : -1;
+  if (start < 0 || end < 0) {
+    return { plainNotes: text, meta: {} };
+  }
+  const plainNotes = text.slice(0, start).trimEnd();
+  const jsonText = text.slice(start + EQUIPMENT_META_PREFIX.length, end).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as EquipmentNotesMeta;
+    return { plainNotes, meta: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch {
+    return { plainNotes, meta: {} };
+  }
+}
+
+function buildEquipmentNotes(plainNotes: string, meta: EquipmentNotesMeta): string {
+  const compactMeta: EquipmentNotesMeta = {};
+  if (Number.isFinite(meta.fuelLevel)) compactMeta.fuelLevel = Number(meta.fuelLevel);
+  if (Number.isFinite(meta.nextService)) compactMeta.nextService = Number(meta.nextService);
+  if (meta.lastUpdate) compactMeta.lastUpdate = meta.lastUpdate;
+  if (Number.isFinite(meta.dailyRate)) compactMeta.dailyRate = Number(meta.dailyRate);
+  if (Number.isFinite(meta.purchasePrice)) compactMeta.purchasePrice = Number(meta.purchasePrice);
+  if (meta.purchaseDate) compactMeta.purchaseDate = meta.purchaseDate;
+  const base = plainNotes?.trimEnd() ?? "";
+  if (Object.keys(compactMeta).length === 0) return base;
+  return `${base}${EQUIPMENT_META_PREFIX}${JSON.stringify(compactMeta)}${EQUIPMENT_META_SUFFIX}`;
+}
+
 const mapEquipment = (row: any) => ({
   id: row.id,
   name: row.name ?? "",
@@ -37,15 +79,15 @@ const mapEquipment = (row: any) => ({
       : Number.isNaN(Number(row.job_id))
       ? row.job_id
       : Number(row.job_id),
-  hours: Number(row.hours ?? 0),
-  nextService: Number(row.next_service ?? row.nextService ?? 0),
-  fuelLevel: Number(row.fuel_level ?? row.fuelLevel ?? 0),
+  hours: Number(row.hours ?? row.hour_meter ?? 0),
+  nextService: Number(row.next_service ?? row.nextService ?? parseEquipmentNotes(row.notes).meta.nextService ?? 0),
+  fuelLevel: Number(row.fuel_level ?? row.fuelLevel ?? parseEquipmentNotes(row.notes).meta.fuelLevel ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
-  lastUpdate: row.last_update ?? row.lastUpdate ?? "just now",
-  dailyRate: Number(row.daily_rate ?? row.dailyRate ?? 0),
-  purchasePrice: Number(row.purchase_price ?? row.purchasePrice ?? 0),
-  purchaseDate: row.purchase_date ?? row.purchaseDate ?? "",
+  lastUpdate: row.last_update ?? row.lastUpdate ?? parseEquipmentNotes(row.notes).meta.lastUpdate ?? "just now",
+  dailyRate: Number(row.daily_rate ?? row.dailyRate ?? row.hourly_cost ?? parseEquipmentNotes(row.notes).meta.dailyRate ?? 0),
+  purchasePrice: Number(row.purchase_price ?? row.purchasePrice ?? parseEquipmentNotes(row.notes).meta.purchasePrice ?? 0),
+  purchaseDate: row.purchase_date ?? row.purchaseDate ?? parseEquipmentNotes(row.notes).meta.purchaseDate ?? "",
 });
 
 const normalizeJobId = (jobId: unknown) => {
@@ -58,16 +100,22 @@ const normalizeJobId = (jobId: unknown) => {
 async function insertWithColumnFallback(supabase: any, payload: Record<string, unknown>) {
   const currentPayload = { ...payload };
   let lastResult: any = null;
+  const parseMissingColumn = (message: string): string | null => {
+    const supabaseMatch = message.match(/Could not find the '([^']+)' column/);
+    if (supabaseMatch?.[1]) return supabaseMatch[1];
+    const genericMatch = message.match(/column "?([a-zA-Z0-9_]+)"? does not exist/i);
+    if (genericMatch?.[1]) return genericMatch[1];
+    return null;
+  };
 
   for (let i = 0; i < 12; i += 1) {
     const result = await supabase.from("equipment").insert(currentPayload).select("*").single();
     lastResult = result;
     const message = result.error?.message || "";
-    const match = message.match(/Could not find the '([^']+)' column/);
-    if (!match) {
+    const missingColumn = parseMissingColumn(message);
+    if (!missingColumn) {
       return result;
     }
-    const missingColumn = match[1];
     if (!(missingColumn in currentPayload)) {
       return result;
     }
@@ -145,20 +193,32 @@ export async function POST(request: Request) {
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
 
+    const notes = buildEquipmentNotes("", {
+      fuelLevel: payload.fuelLevel ?? 100,
+      nextService: payload.nextService ?? 0,
+      lastUpdate: payload.lastUpdate ?? "just now",
+      dailyRate: payload.dailyRate ?? 0,
+      purchasePrice: payload.purchasePrice ?? 0,
+      purchaseDate: payload.purchaseDate ?? "",
+    });
+
     const basePayload = {
       company_id: companyId,
       name: payload.name,
       type: payload.type ?? "Equipment",
       hours: payload.hours ?? 0,
+      hour_meter: payload.hours ?? 0,
       next_service: payload.nextService ?? 0,
       fuel_level: payload.fuelLevel ?? 100,
       daily_rate: payload.dailyRate ?? 0,
+      hourly_cost: payload.dailyRate ?? 0,
       purchase_price: payload.purchasePrice ?? 0,
       purchase_date: payload.purchaseDate ?? "",
       last_update: payload.lastUpdate ?? "just now",
       job_id: normalizeJobId(payload.jobId),
       lat: payload.lat ?? null,
       lng: payload.lng ?? null,
+      notes,
     };
 
     let result = await insertWithColumnFallback(supabase, {

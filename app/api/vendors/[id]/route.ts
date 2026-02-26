@@ -4,7 +4,9 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 
-const vendorStatusSchema = z.enum(["active", "inactive", "preferred", "blocked"]);
+const vendorStatusSchema = z.enum(["active", "preferred", "on_hold", "inactive", "blocked"]);
+const VENDOR_STATUS_TAG_REGEX = /^__gw_vendor_status:(preferred|on_hold|blocked)__\n?/i;
+const VENDOR_META_TAG_REGEX = /^__gw_vendor_meta:([^\n]+)__\n?/i;
 
 const updateVendorSchema = z
   .object({
@@ -15,9 +17,11 @@ const updateVendorSchema = z
     contact: z.string().optional(),
     phone: z.string().optional(),
     email: z.string().optional(),
-    rating: z.number().min(0).max(5).optional(),
-    active_orders: z.number().nonnegative().optional(),
-    activeOrders: z.number().nonnegative().optional(),
+    address: z.string().optional(),
+    payment_terms: z.string().optional(),
+    rating: z.coerce.number().optional(),
+    active_orders: z.coerce.number().optional(),
+    activeOrders: z.coerce.number().optional(),
     notes: z.string().optional(),
   })
   .refine((value: any) => Object.keys(value).length > 0, {
@@ -32,20 +36,107 @@ const normalizeNumber = (value: unknown, fallback = 0) => {
   return Number.isNaN(parsed) ? fallback : parsed;
 };
 
-const mapVendor = (row: any) => ({
+const normalizeStatusForDb = (value: unknown) => {
+  if (!value) return undefined;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return undefined;
+  return raw.replace(/[\s-]+/g, "_");
+};
+
+const getStatusFallbacks = (value: unknown) => {
+  const normalized = normalizeStatusForDb(value);
+  if (!normalized) return [];
+  const candidates = [normalized];
+  if (normalized === "preferred") candidates.push("active");
+  if (normalized === "on_hold" || normalized === "blocked") candidates.push("inactive");
+  if (!candidates.includes("active")) candidates.push("active");
+  return candidates;
+};
+
+const parseVendorMeta = (notes: unknown) => {
+  const text = String(notes ?? "");
+  const line = text.match(VENDOR_META_TAG_REGEX)?.[1];
+  if (!line) return {};
+  const params = new URLSearchParams(line);
+  return {
+    category: params.get("category") ?? "",
+    payment_terms: params.get("payment_terms") ?? "",
+    rating: params.get("rating"),
+    active_orders: params.get("active_orders"),
+  };
+};
+
+const stripSystemTags = (notes: unknown) =>
+  String(notes ?? "")
+    .replace(VENDOR_STATUS_TAG_REGEX, "")
+    .replace(VENDOR_META_TAG_REGEX, "")
+    .trimStart();
+
+const getDisplayStatus = (row: any) => {
+  const tagged = String(row.notes ?? "").match(VENDOR_STATUS_TAG_REGEX)?.[1];
+  if (tagged) return tagged;
+  const normalized = normalizeStatusForDb(row.status) ?? "active";
+  if (normalized === "inactive") return "inactive";
+  return normalized;
+};
+
+const buildSystemNotes = (
+  notes: unknown,
+  displayStatus: string,
+  meta: { category?: string; payment_terms?: string; rating?: number; active_orders?: number }
+) => {
+  const cleanNotes = stripSystemTags(notes);
+  const metaParams = new URLSearchParams();
+  metaParams.set("category", String(meta.category ?? ""));
+  metaParams.set("payment_terms", String(meta.payment_terms ?? ""));
+  metaParams.set("rating", String(meta.rating ?? 0));
+  metaParams.set("active_orders", String(meta.active_orders ?? 0));
+  const lines = [`__gw_vendor_meta:${metaParams.toString()}__`];
+  if (displayStatus === "preferred" || displayStatus === "on_hold" || displayStatus === "blocked") {
+    lines.push(`__gw_vendor_status:${displayStatus}__`);
+  }
+  if (cleanNotes) lines.push(cleanNotes);
+  return lines.join("\n").trimEnd();
+};
+
+const toDbStatus = (displayStatus: string) => {
+  if (displayStatus === "preferred") return "active";
+  if (displayStatus === "on_hold" || displayStatus === "blocked") return "inactive";
+  return displayStatus;
+};
+
+const normalizeRating = (value: unknown) => {
+  const normalized = normalizeNumber(value, 0);
+  const fiveScale = normalized > 5 ? normalized / 20 : normalized;
+  return Math.max(0, Math.min(5, fiveScale));
+};
+
+const normalizeCount = (value: unknown) => {
+  const normalized = normalizeNumber(value, 0);
+  return Math.max(0, Math.floor(normalized));
+};
+
+const mapVendor = (row: any) => {
+  const meta = parseVendorMeta(row.notes ?? "");
+  const metaRating = normalizeNumber(meta.rating, 0);
+  const metaActiveOrders = normalizeNumber(meta.active_orders, 0);
+  return {
   id: row.id,
   name: row.name ?? "",
-  status: row.status ?? "active",
-  category: row.category ?? "",
+  status: getDisplayStatus(row),
+  category: row.category ?? meta.category ?? "",
   contact: row.contact_name ?? row.contact ?? "",
   contact_name: row.contact_name ?? row.contact ?? "",
   phone: row.phone ?? "",
   email: row.email ?? "",
-  rating: normalizeNumber(row.rating ?? 0),
-  activeOrders: normalizeNumber(row.active_orders ?? row.activeOrders ?? 0),
-  active_orders: normalizeNumber(row.active_orders ?? row.activeOrders ?? 0),
-  notes: row.notes ?? "",
-});
+  address: row.address ?? "",
+  payment_terms: row.payment_terms ?? row.paymentTerms ?? meta.payment_terms ?? "",
+  rating: metaRating || normalizeNumber(row.rating ?? 0),
+  activeOrders: metaActiveOrders || normalizeNumber(row.active_orders ?? row.activeOrders ?? 0),
+  active_orders: metaActiveOrders || normalizeNumber(row.active_orders ?? row.activeOrders ?? 0),
+  notes: stripSystemTags(row.notes ?? ""),
+  };
+};
 
 async function updateWithColumnFallback(
   supabase: any,
@@ -109,10 +200,29 @@ export async function PATCH(
 
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
+    const routeId = normalizeRouteId(id);
+    const { data: existingRow, error: existingError } = await supabase
+      .from("vendors")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", routeId)
+      .maybeSingle();
+
+    if (existingError) {
+      return NextResponse.json({ error: existingError.message }, { status: 400 });
+    }
+
+    if (!existingRow) {
+      return NextResponse.json({ error: "Vendor not found" }, { status: 404 });
+    }
+
+    const existingMeta = parseVendorMeta(existingRow.notes ?? "");
+    const existingDisplayStatus = getDisplayStatus(existingRow);
 
     const updatePayload: Record<string, unknown> = {};
     if (payload.name !== undefined) updatePayload.name = payload.name;
-    if (payload.status !== undefined) updatePayload.status = payload.status;
+    const displayStatus = normalizeStatusForDb(payload.status);
+    if (displayStatus !== undefined) updatePayload.status = toDbStatus(displayStatus);
     if (payload.category !== undefined) updatePayload.category = payload.category;
     if (payload.contact_name !== undefined || payload.contact !== undefined) {
       const contactName = payload.contact_name ?? payload.contact ?? "";
@@ -121,18 +231,82 @@ export async function PATCH(
     }
     if (payload.phone !== undefined) updatePayload.phone = payload.phone;
     if (payload.email !== undefined) updatePayload.email = payload.email;
-    if (payload.rating !== undefined) updatePayload.rating = normalizeNumber(payload.rating);
+    if (payload.address !== undefined) updatePayload.address = payload.address;
+    if (payload.payment_terms !== undefined) updatePayload.payment_terms = payload.payment_terms;
+    if (payload.rating !== undefined) updatePayload.rating = normalizeRating(payload.rating);
     if (payload.active_orders !== undefined || payload.activeOrders !== undefined) {
-      updatePayload.active_orders = normalizeNumber(payload.active_orders ?? payload.activeOrders);
+      updatePayload.active_orders = normalizeCount(payload.active_orders ?? payload.activeOrders);
     }
-    if (payload.notes !== undefined) updatePayload.notes = payload.notes;
+    const ratingInput =
+      payload.rating !== undefined
+        ? Math.max(0, Math.min(100, normalizeNumber(payload.rating, 0)))
+        : normalizeNumber(existingMeta.rating, normalizeNumber(existingRow.rating, 0));
+    const activeOrdersInput =
+      payload.active_orders !== undefined || payload.activeOrders !== undefined
+        ? normalizeCount(payload.active_orders ?? payload.activeOrders)
+        : normalizeNumber(existingMeta.active_orders, normalizeNumber(existingRow.active_orders ?? existingRow.activeOrders, 0));
+    const categoryInput =
+      payload.category !== undefined
+        ? payload.category
+        : (existingMeta.category || existingRow.category || "");
+    const paymentTermsInput =
+      payload.payment_terms !== undefined
+        ? payload.payment_terms
+        : (existingMeta.payment_terms || existingRow.payment_terms || existingRow.paymentTerms || "");
+    const notesBase = payload.notes !== undefined ? payload.notes : existingRow.notes;
+    updatePayload.notes = buildSystemNotes(notesBase, displayStatus ?? existingDisplayStatus, {
+      category: categoryInput,
+      payment_terms: paymentTermsInput,
+      rating: ratingInput,
+      active_orders: activeOrdersInput,
+    });
 
-    const { error } = await updateWithColumnFallback(
-      supabase,
-      companyId,
-      normalizeRouteId(id),
-      updatePayload
-    );
+    let error: any = null;
+    if ("status" in updatePayload) {
+      const statusCandidates = getStatusFallbacks(updatePayload.status);
+      const baseUpdatePayload = { ...updatePayload };
+      delete baseUpdatePayload.status;
+
+      for (const statusCandidate of statusCandidates) {
+        const attemptPayload = { ...baseUpdatePayload, status: statusCandidate };
+        const result = await updateWithColumnFallback(
+          supabase,
+          companyId,
+          routeId,
+          attemptPayload
+        );
+        error = result.error;
+        if (!error) break;
+        if (!error?.message?.includes("vendors_status_check")) break;
+      }
+
+      if (error?.message?.includes("vendors_status_check")) {
+        if (Object.keys(baseUpdatePayload).length > 0) {
+          const fallbackResult = await updateWithColumnFallback(
+            supabase,
+            companyId,
+            routeId,
+            baseUpdatePayload
+          );
+          error = fallbackResult.error;
+        }
+      }
+    } else {
+      const result = await updateWithColumnFallback(
+        supabase,
+        companyId,
+        routeId,
+        updatePayload
+      );
+      error = result.error;
+    }
+
+    if (error?.message?.includes("vendors_status_check")) {
+      return NextResponse.json(
+        { error: "Unsupported vendor status for this database. Use active/inactive." },
+        { status: 400 }
+      );
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -142,7 +316,7 @@ export async function PATCH(
       .from("vendors")
       .select("*")
       .eq("company_id", companyId)
-      .eq("id", normalizeRouteId(id))
+      .eq("id", routeId)
       .maybeSingle();
 
     if (fetchError) {
@@ -153,7 +327,8 @@ export async function PATCH(
       return NextResponse.json({ error: "Vendor not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ vendor: mapVendor(updatedRow) });
+    const mappedVendor = mapVendor(updatedRow);
+    return NextResponse.json({ item: mappedVendor, vendor: mappedVendor });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -187,7 +362,7 @@ export async function DELETE(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, item: { success: true } });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -4,7 +4,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
 
-const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document"]);
+const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
 
 const uploadUrlSchema = z.object({
   entity_type: entityTypeSchema,
@@ -34,7 +34,12 @@ const getAttachmentsBucket = () =>
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman", "mechanic"]);
+      const rolePayload = await request.clone().json().catch(() => null);
+      if (rolePayload?.entity_type === "vendor" || rolePayload?.entity_type === "document") {
+        await requireRole(["admin", "pm"]);
+      } else {
+        await requireRole(["admin", "pm", "foreman", "mechanic"]);
+      }
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

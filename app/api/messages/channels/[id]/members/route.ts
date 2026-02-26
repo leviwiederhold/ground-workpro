@@ -57,9 +57,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     const profiles = userIds.length
       ? await supabase.from("profiles").select("id, full_name").in("id", userIds)
       : { data: [], error: null };
-    if (profiles.error) return serverError();
-
-    const nameById = new Map((profiles.data ?? []).map((profile) => [String(profile.id), String(profile.full_name ?? "")])) as Map<string, string>;
+    const nameById = new Map(
+      (profiles.error ? [] : profiles.data ?? []).map((profile) => [String(profile.id), String(profile.full_name ?? "")])
+    ) as Map<string, string>;
 
     return Response.json({
       items: (memberRows.data ?? []).map((row) => ({

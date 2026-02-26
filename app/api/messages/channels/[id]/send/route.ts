@@ -110,6 +110,13 @@ export async function POST(
       return serverError();
     }
 
+    await supabase
+      .from("message_channel_members")
+      .update({ last_read_at: data.created_at })
+      .eq("company_id", companyId)
+      .eq("channel_id", channelId)
+      .eq("user_id", userId);
+
     return okItem(data, 201);
   } catch (error) {
     if (error instanceof TenantResolverError) return toTenantErrorResponse(error);

@@ -39,6 +39,11 @@ function isMissingMessagesTables(message: string) {
   );
 }
 
+function isMissingLastReadColumn(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes("column") && normalized.includes("last_read_at");
+}
+
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
@@ -194,9 +199,20 @@ export async function POST(request: Request) {
       channel_id: data.id,
       user_id: memberId,
       member_role: memberId === userId ? "owner" : "member",
+      last_read_at: now,
     }));
 
-    const membersInsert = await supabase.from("message_channel_members").insert(membershipRows);
+    let membersInsert = await supabase.from("message_channel_members").insert(membershipRows);
+    if (membersInsert.error && isMissingLastReadColumn(membersInsert.error.message || "")) {
+      membersInsert = await supabase.from("message_channel_members").insert(
+        membershipRows.map((row) => ({
+          company_id: row.company_id,
+          channel_id: row.channel_id,
+          user_id: row.user_id,
+          member_role: row.member_role,
+        }))
+      );
+    }
     if (membersInsert.error) return serverError();
 
     return okItem(data, 201);

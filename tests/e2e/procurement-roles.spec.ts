@@ -77,8 +77,7 @@ test('procurement APIs are role scoped', async ({ page }) => {
   await setRole(page, 'foreman');
 
   const foremanInventoryGet = await page.request.get('/api/inventory');
-  expect(foremanInventoryGet.status()).toBe(403);
-  expect(await foremanInventoryGet.json()).toEqual({ error: 'Forbidden' });
+  expect(foremanInventoryGet.status()).toBe(200);
 
   const foremanVendorsGet = await page.request.get('/api/vendors');
   expect(foremanVendorsGet.status()).toBe(403);
@@ -91,8 +90,7 @@ test('procurement APIs are role scoped', async ({ page }) => {
   await setRole(page, 'operator');
 
   const operatorInventoryGet = await page.request.get('/api/inventory');
-  expect(operatorInventoryGet.status()).toBe(403);
-  expect(await operatorInventoryGet.json()).toEqual({ error: 'Forbidden' });
+  expect(operatorInventoryGet.status()).toBe(200);
 
   await setRole(page, 'pm');
 

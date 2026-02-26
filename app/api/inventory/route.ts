@@ -4,6 +4,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import { buildNotesWithQtyReserved, mapInventory, normalizeId, normalizeNumber } from "./_lib/ledger";
 
 const inventoryStatusSchema = z.enum(["active", "low_stock", "out_of_stock", "inactive"]);
 
@@ -24,33 +25,6 @@ const createInventorySchema = z.object({
   job_id: z.union([z.number(), z.string()]).nullable().optional(),
   location: z.string().default("").optional(),
   status: inventoryStatusSchema.default("active").optional(),
-});
-
-const normalizeId = (id: unknown) => {
-  if (id === null || id === undefined || id === "") return null;
-  if (typeof id === "number") return id;
-  if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
-  return id;
-};
-
-const normalizeNumber = (value: unknown, fallback = 0) => {
-  if (value === null || value === undefined || value === "") return fallback;
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? fallback : parsed;
-};
-
-const mapInventory = (row: any) => ({
-  id: row.id,
-  name: row.name ?? "",
-  category: row.category ?? "Materials",
-  unit: row.unit ?? "EA",
-  qtyOnHand: normalizeNumber(row.qty_on_hand ?? row.qtyOnHand),
-  qtyReserved: normalizeNumber(row.qty_reserved ?? row.qtyReserved),
-  reorderPoint: normalizeNumber(row.reorder_point ?? row.reorderPoint),
-  unitCost: normalizeNumber(row.unit_cost ?? row.unitCost),
-  jobId: normalizeId(row.job_id ?? row.jobId),
-  location: row.location ?? "",
-  status: row.status ?? "active",
 });
 
 async function insertWithColumnFallback(supabase: any, payload: Record<string, unknown>) {
@@ -74,7 +48,7 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 export async function GET(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "pm", "foreman", "mechanic", "operator"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -102,8 +76,34 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const inventory = (data ?? []).map(mapInventory);
-    return NextResponse.json({ inventory, ...getPaginationMeta(count ?? inventory.length, page, pageSize) });
+    const itemIds = (data ?? []).map((row) => row.id);
+    let txRows: any[] = [];
+    if (itemIds.length > 0) {
+      const txResult = await supabase
+        .from("inventory_transactions")
+        .select("item_id,unit_cost,created_at")
+        .eq("company_id", companyId)
+        .in("item_id", itemIds)
+        .order("created_at", { ascending: false });
+      if (!txResult.error && Array.isArray(txResult.data)) {
+        txRows = txResult.data;
+      }
+    }
+
+    const lastUnitCostByItem = new Map<string, number>();
+    for (const tx of txRows) {
+      const key = String(tx.item_id);
+      if (!lastUnitCostByItem.has(key)) {
+        lastUnitCostByItem.set(key, normalizeNumber(tx.unit_cost));
+      }
+    }
+
+    const inventory = (data ?? []).map((row) => mapInventory(row, lastUnitCostByItem.get(String(row.id)) ?? 0));
+    return NextResponse.json({
+      items: inventory,
+      inventory,
+      ...getPaginationMeta(count ?? inventory.length, page, pageSize),
+    });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -145,12 +145,13 @@ export async function POST(request: Request) {
       name: payload.name,
       category: payload.category ?? "Materials",
       unit: payload.unit ?? "EA",
-      qty_on_hand: normalizeNumber(payload.quantity_on_hand ?? payload.qtyOnHand ?? payload.qty_on_hand),
+      quantity_on_hand: normalizeNumber(payload.quantity_on_hand ?? payload.qtyOnHand ?? payload.qty_on_hand),
       qty_reserved: normalizeNumber(payload.qtyReserved ?? payload.qty_reserved),
       reorder_point: normalizeNumber(payload.reorderPoint ?? payload.reorder_point),
       unit_cost: normalizeNumber(payload.unitCost ?? payload.unit_cost),
       job_id: normalizeId(payload.jobId ?? payload.job_id),
       location: payload.location ?? "",
+      notes: buildNotesWithQtyReserved("", normalizeNumber(payload.qtyReserved ?? payload.qty_reserved)),
     };
 
     let result = await insertWithColumnFallback(supabase, {
@@ -173,7 +174,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ item: mapInventory(data) });
+    const mapped = mapInventory(data, normalizeNumber(data?.unit_cost ?? data?.unitCost ?? 0));
+    return NextResponse.json({ item: mapped });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

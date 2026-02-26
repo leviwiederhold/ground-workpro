@@ -5,7 +5,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
-const allowedEntityTypes = ["job", "daily_report", "work_order", "document"] as const;
+const allowedEntityTypes = ["job", "daily_report", "work_order", "document", "vendor"] as const;
 type EntityType = (typeof allowedEntityTypes)[number];
 const normalizeId = (id: unknown): string | number | null => {
   if (id === null || id === undefined || id === "") return null;
@@ -38,6 +38,7 @@ const getBucketForEntityType = (entityType: EntityType) => {
   if (entityType === "job") return "job-photos";
   if (entityType === "daily_report") return "report-attachments";
   if (entityType === "document") return "report-attachments";
+  if (entityType === "vendor") return "report-attachments";
   return "work-order-attachments";
 };
 
@@ -117,6 +118,17 @@ async function assertEntityOwnership(
     return { ok: true };
   }
 
+  if (entityType === "vendor") {
+    const { data, error } = await supabase
+      .from("vendors")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("id", entityId)
+      .limit(1);
+    if (error || !data?.length) return { ok: false, error: "Vendor not found" };
+    return { ok: true };
+  }
+
   const { data, error } = await supabase
     .from("work_orders")
     .select("id")
@@ -153,7 +165,7 @@ export async function POST(request: Request) {
     const entityId = entityType === "document" ? companyId : normalizeId(entityIdRaw);
 
     try {
-      if (entityType === "document") {
+      if (entityType === "document" || entityType === "vendor") {
         await requireRole(["admin", "pm"]);
       } else {
         await requireRole(["admin", "pm", "foreman", "mechanic", "operator"]);
@@ -203,7 +215,7 @@ export async function POST(request: Request) {
       result = await insertWithColumnFallback(supabase, withoutUploadedBy);
     }
     if (
-      entityType === "document" &&
+      (entityType === "document" || entityType === "vendor") &&
       result.error?.message?.includes("attachments_entity_type_check")
     ) {
       const legacyPayload: Record<string, unknown> = {

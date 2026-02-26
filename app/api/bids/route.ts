@@ -26,6 +26,9 @@ const createBidSchema = z.object({
   bid_date: z.string().optional(),
   probability: z.number().min(0).max(100).default(0).optional(),
   notes: z.string().default("").optional(),
+  stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).default("estimating").optional(),
+  owner_user_id: z.string().uuid().nullable().optional(),
+  due_date: z.string().optional().nullable(),
 });
 
 const normalizeId = (id: unknown) => {
@@ -48,6 +51,14 @@ const normalizeDate = (value: unknown) => {
   return parsed.toISOString().slice(0, 10);
 };
 
+const statusFromStage = (stage: string | undefined) => {
+  if (!stage) return undefined;
+  if (stage === "won") return "accepted";
+  if (stage === "lost") return "rejected";
+  if (stage === "review") return "pending";
+  return "draft";
+};
+
 const mapBid = (row: any) => ({
   id: row.id,
   title: row.title ?? row.project_name ?? "",
@@ -63,6 +74,19 @@ const mapBid = (row: any) => ({
   notes: row.notes ?? "",
   job_id: normalizeId(row.job_id),
   jobId: normalizeId(row.job_id),
+  stage: row.stage ?? "estimating",
+  owner_user_id: row.owner_user_id ?? null,
+  ownerUserId: row.owner_user_id ?? null,
+  due_date: row.due_date ?? null,
+  dueDate: row.due_date ?? null,
+  review_ready_at: row.review_ready_at ?? null,
+  reviewReadyAt: row.review_ready_at ?? null,
+  review_approved_at: row.review_approved_at ?? null,
+  reviewApprovedAt: row.review_approved_at ?? null,
+  converted_job_id: normalizeId(row.converted_job_id),
+  convertedJobId: normalizeId(row.converted_job_id),
+  converted_at: row.converted_at ?? null,
+  convertedAt: row.converted_at ?? null,
 });
 
 async function insertWithColumnFallback(supabase: any, payload: Record<string, unknown>) {
@@ -85,14 +109,32 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 
 export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const stage = (url.searchParams.get("stage") || "").trim().toLowerCase();
+    const ownerUserId = (url.searchParams.get("owner_user_id") || "").trim();
+    const reviewReady = (url.searchParams.get("review_ready") || "").trim().toLowerCase();
+
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
-    let result = await supabase
+    let query = supabase
       .from("bids")
       .select("*", { count: "exact" })
       .eq("company_id", companyId)
-      .order("created_at", { ascending: false })
-      .range(from, to);
+      .order("created_at", { ascending: false });
+
+    if (["lead", "qualified", "estimating", "review", "won", "lost"].includes(stage)) {
+      query = query.eq("stage", stage);
+    }
+    if (ownerUserId) {
+      query = query.eq("owner_user_id", ownerUserId);
+    }
+    if (reviewReady === "true") {
+      query = query.not("review_ready_at", "is", null);
+    } else if (reviewReady === "false") {
+      query = query.is("review_ready_at", null);
+    }
+
+    let result = await query.range(from, to);
 
     if (result.error?.message?.toLowerCase().includes("created_at")) {
       result = await supabase
@@ -157,11 +199,14 @@ export async function POST(request: Request) {
       probability: normalizeNumber(payload.probability ?? 0),
       notes: payload.notes ?? "",
       job_id: normalizeId(payload.job_id),
+      stage: payload.stage ?? "estimating",
+      owner_user_id: payload.owner_user_id ?? userId,
+      due_date: payload.due_date ?? null,
     };
 
     let result = await insertWithColumnFallback(supabase, {
       ...basePayload,
-      ...(payload.status ? { status: payload.status } : {}),
+      ...(payload.status ? { status: payload.status } : statusFromStage(payload.stage) ? { status: statusFromStage(payload.stage) } : {}),
     });
 
     if (result.error?.message?.toLowerCase().includes("status") && payload.status) {

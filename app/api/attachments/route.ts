@@ -6,7 +6,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
-const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document"]);
+const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
 
 const normalizeId = (id: unknown): string | number | null => {
   if (id === null || id === undefined || id === "") return null;
@@ -57,10 +57,11 @@ const sanitizeFileName = (value: string) =>
     .replace(/_+/g, "_")
     .slice(0, 180);
 
-const getBucketForEntityType = (entityType: "job" | "daily_report" | "work_order" | "document") => {
+const getBucketForEntityType = (entityType: "job" | "daily_report" | "work_order" | "document" | "vendor") => {
   if (entityType === "job") return "job-photos";
   if (entityType === "daily_report") return "report-attachments";
   if (entityType === "document") return "report-attachments";
+  if (entityType === "vendor") return "report-attachments";
   return "work-order-attachments";
 };
 
@@ -95,7 +96,7 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 async function assertEntityOwnership(
   supabase: any,
   companyId: string,
-  entityType: "job" | "daily_report" | "work_order" | "document",
+  entityType: "job" | "daily_report" | "work_order" | "document" | "vendor",
   entityId: string | number | null
 ) {
   if (entityType === "document") {
@@ -123,6 +124,17 @@ async function assertEntityOwnership(
       .eq("id", entityId)
       .limit(1);
     if (error || !data?.length) return { ok: false, error: "Daily report not found" };
+    return { ok: true };
+  }
+
+  if (entityType === "vendor") {
+    const { data, error } = await supabase
+      .from("vendors")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("id", entityId)
+      .limit(1);
+    if (error || !data?.length) return { ok: false, error: "Vendor not found" };
     return { ok: true };
   }
 

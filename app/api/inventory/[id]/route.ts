@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import {
+  buildNotesWithQtyReserved,
+  mapInventory,
+  normalizeId,
+  normalizeNumber,
+  normalizeRouteId,
+  parseInventoryMeta,
+} from "../_lib/ledger";
 
 const inventoryStatusSchema = z.enum(["active", "low_stock", "out_of_stock", "inactive"]);
 
@@ -28,35 +36,6 @@ const updateInventorySchema = z
   .refine((value: any) => Object.keys(value).length > 0, {
     message: "At least one field is required",
   });
-
-const normalizeRouteId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
-
-const normalizeId = (id: unknown) => {
-  if (id === null || id === undefined || id === "") return null;
-  if (typeof id === "number") return id;
-  if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
-  return id;
-};
-
-const normalizeNumber = (value: unknown, fallback = 0) => {
-  if (value === null || value === undefined || value === "") return fallback;
-  const parsed = Number(value);
-  return Number.isNaN(parsed) ? fallback : parsed;
-};
-
-const mapInventory = (row: any) => ({
-  id: row.id,
-  name: row.name ?? "",
-  category: row.category ?? "Materials",
-  unit: row.unit ?? "EA",
-  qtyOnHand: normalizeNumber(row.qty_on_hand ?? row.qtyOnHand),
-  qtyReserved: normalizeNumber(row.qty_reserved ?? row.qtyReserved),
-  reorderPoint: normalizeNumber(row.reorder_point ?? row.reorderPoint),
-  unitCost: normalizeNumber(row.unit_cost ?? row.unitCost),
-  jobId: normalizeId(row.job_id ?? row.jobId),
-  location: row.location ?? "",
-  status: row.status ?? "active",
-});
 
 async function updateWithColumnFallback(
   supabase: any,
@@ -120,13 +99,26 @@ export async function PATCH(
 
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
+    const routeId = normalizeRouteId(id);
+    const { data: existingRow, error: existingRowError } = await supabase
+      .from("inventory")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", routeId)
+      .maybeSingle();
+    if (existingRowError) {
+      return NextResponse.json({ error: existingRowError.message }, { status: 400 });
+    }
+    if (!existingRow) {
+      return NextResponse.json({ error: "Inventory item not found" }, { status: 404 });
+    }
 
     const updatePayload: Record<string, unknown> = {};
     if (payload.name !== undefined) updatePayload.name = payload.name;
     if (payload.category !== undefined) updatePayload.category = payload.category;
     if (payload.unit !== undefined) updatePayload.unit = payload.unit;
     if (payload.quantity_on_hand !== undefined || payload.qtyOnHand !== undefined || payload.qty_on_hand !== undefined) {
-      updatePayload.qty_on_hand = normalizeNumber(
+      updatePayload.quantity_on_hand = normalizeNumber(
         payload.quantity_on_hand ?? payload.qtyOnHand ?? payload.qty_on_hand
       );
     }
@@ -144,11 +136,18 @@ export async function PATCH(
     }
     if (payload.location !== undefined) updatePayload.location = payload.location;
     if (payload.status !== undefined) updatePayload.status = payload.status;
+    const existingMeta = parseInventoryMeta(existingRow.notes ?? "");
+    const nextReserved =
+      payload.qtyReserved !== undefined || payload.qty_reserved !== undefined
+        ? normalizeNumber(payload.qtyReserved ?? payload.qty_reserved)
+        : normalizeNumber(existingMeta.qty_reserved ?? 0);
+    const nextNotes = payload.notes !== undefined ? payload.notes : existingRow.notes;
+    updatePayload.notes = buildNotesWithQtyReserved(nextNotes, nextReserved);
 
     const { error } = await updateWithColumnFallback(
       supabase,
       companyId,
-      normalizeRouteId(id),
+      routeId,
       updatePayload
     );
 
@@ -160,7 +159,7 @@ export async function PATCH(
       .from("inventory")
       .select("*")
       .eq("company_id", companyId)
-      .eq("id", normalizeRouteId(id))
+      .eq("id", routeId)
       .maybeSingle();
 
     if (fetchError) {
@@ -171,7 +170,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Inventory item not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ item: mapInventory(updatedRow) });
+    return NextResponse.json({ item: mapInventory(updatedRow, normalizeNumber(updatedRow.unit_cost ?? updatedRow.unitCost ?? 0)) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -205,7 +204,7 @@ export async function DELETE(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, item: { success: true } });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

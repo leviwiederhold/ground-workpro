@@ -8,8 +8,8 @@ import { EmptyState, InlineError, LoadingBlock, SkeletonBlock } from '@/app/comp
 
 const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 
-export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
-  const { StatGrid, StatCard, SearchInput, Card, Icon, Button, Badge, formatCurrency, getStatusColor, formatDate } = ui;
+export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) {
+  const { StatGrid, StatCard, SearchInput, Card, Icon, Button, Badge, formatCurrency, formatDate } = ui;
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [selectedBidId, setSelectedBidId] = useState(null);
@@ -33,9 +33,13 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
       const [showSendOverride, setShowSendOverride] = useState(false);
       const [sendOverrideChecked, setSendOverrideChecked] = useState(false);
       const [sendOverrideNote, setSendOverrideNote] = useState('');
+      const [pipelineLoading, setPipelineLoading] = useState(false);
+      const [analytics, setAnalytics] = useState(null);
+      const [analyticsLoading, setAnalyticsLoading] = useState(false);
       const [bidForm, setBidForm] = useState({
         title: '',
         status: 'draft',
+        stage: 'estimating',
         job_id: '',
         client: '',
         bid_date: '',
@@ -50,9 +54,14 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
       });
 
       const selectedBid = bids.find((bid) => String(bid.id) === String(selectedBidId)) || null;
+      const canSeeExecAnalytics = currentRole === 'executive';
+      const canSeePmAnalytics = currentRole === 'operations' || canSeeExecAnalytics;
+      const isEstimatorView = currentRole === 'operations';
 
       const filteredBids = bids.filter((bid) => {
-        if (filter !== 'all' && bid.status !== filter) return false;
+        const stageValue = String(bid.stage || '').toLowerCase();
+        const statusValue = String(bid.status || '').toLowerCase();
+        if (filter !== 'all' && stageValue !== filter && statusValue !== filter) return false;
         if (!search) return true;
         const query = search.toLowerCase();
         return (
@@ -62,15 +71,11 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
       });
 
       const totalPending = bids
-        .filter((bid) => bid.status === 'pending' || bid.status === 'submitted' || bid.status === 'sent')
+        .filter((bid) => ['lead', 'qualified', 'estimating', 'review'].includes(String(bid.stage || 'estimating')))
         .reduce((sum, bid) => sum + (Number(bid.amount) || 0), 0);
-      const wonCount = bids.filter((bid) => bid.status === 'won').length;
-      const closedCount = bids.filter((bid) => bid.status === 'won' || bid.status === 'lost').length;
+      const wonCount = bids.filter((bid) => (bid.stage || bid.status) === 'won').length;
+      const closedCount = bids.filter((bid) => ['won', 'lost'].includes(String(bid.stage || bid.status))).length;
       const winRate = Math.round((wonCount / closedCount) * 100) || 0;
-      const pendingBids = bids.filter((bid) => bid.status === 'pending');
-      const avgProbability = Math.round(
-        pendingBids.reduce((sum, bid) => sum + (Number(bid.probability) || 0), 0) / (pendingBids.length || 1)
-      ) || 0;
 
       const getStatusIcon = (status) => {
         const icons = {
@@ -88,10 +93,21 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
         return icons[status] || 'file';
       };
 
+      const getStageBadgeClass = (stage) => {
+        const key = String(stage || '').toLowerCase();
+        if (key === 'won') return 'bg-green-100 text-green-700';
+        if (key === 'lost') return 'bg-red-100 text-red-700';
+        if (key === 'review') return 'bg-purple-100 text-purple-700';
+        if (key === 'qualified') return 'bg-blue-100 text-blue-700';
+        if (key === 'lead') return 'bg-gray-100 text-gray-700';
+        return 'bg-amber-100 text-amber-700';
+      };
+
       const resetBidForm = () => {
         setBidForm({
           title: '',
           status: 'draft',
+          stage: 'estimating',
           job_id: '',
           client: '',
           bid_date: '',
@@ -137,6 +153,24 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
         }
         if (selectedBidId && !nextBids.some((bid) => String(bid.id) === String(selectedBidId))) {
           setSelectedBidId(nextBids[0]?.id || null);
+        }
+      };
+
+      const loadAnalytics = async () => {
+        try {
+          setAnalyticsLoading(true);
+          const response = await fetch('/api/bids/analytics', { cache: 'no-store' });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) return;
+          setAnalytics(parsed?.item || null);
+        } finally {
+          setAnalyticsLoading(false);
         }
       };
 
@@ -236,6 +270,10 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
         setSendOverrideNote('');
       }, [selectedBidId]);
 
+      useEffect(() => {
+        loadAnalytics();
+      }, []);
+
       const openCreateBid = () => {
         resetBidForm();
         setShowBidModal(true);
@@ -245,6 +283,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
         setBidForm({
           title: bid.projectName || bid.title || '',
           status: bid.status || 'draft',
+          stage: bid.stage || 'estimating',
           job_id: bid.job_id || bid.jobId || '',
           client: bid.client || '',
           bid_date: bid.bid_date || bid.bidDate || '',
@@ -275,6 +314,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
           const payload = {
             title: bidForm.title.trim(),
             status: bidForm.status,
+            stage: bidForm.stage,
             job_id: bidForm.job_id || null,
             client: bidForm.client.trim(),
             bid_date: bidForm.bid_date || null,
@@ -389,10 +429,67 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
           setSendOverrideChecked(false);
           setSendOverrideNote('');
           await Promise.all([refreshBids({ preserveSelection: true }), loadBidSummary(selectedBid.id)]);
+          await loadAnalytics();
         } catch {
           setSendError('Failed to send bid');
         } finally {
           setSendLoading(false);
+        }
+      };
+
+      const handlePipelinePatch = async (patch) => {
+        if (!selectedBid?.id) return;
+        try {
+          setPipelineLoading(true);
+          setFormError('');
+          const response = await fetch(`/api/bids/${selectedBid.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(patch),
+          });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) {
+            setFormError(parsed?.error || raw || 'Failed to update bid pipeline');
+            return;
+          }
+          await refreshBids({ preserveSelection: true });
+          await loadAnalytics();
+        } finally {
+          setPipelineLoading(false);
+        }
+      };
+
+      const handleConvertToJob = async () => {
+        if (!selectedBid?.id) return;
+        try {
+          setPipelineLoading(true);
+          setFormError('');
+          const response = await fetch(`/api/bids/${selectedBid.id}/convert`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          const raw = await response.text();
+          let parsed = {};
+          try {
+            parsed = raw ? JSON.parse(raw) : {};
+          } catch {
+            parsed = {};
+          }
+          if (!response.ok) {
+            setFormError(parsed?.error || raw || 'Failed to convert bid');
+            return;
+          }
+          await refreshBids({ preserveSelection: true });
+          await loadAnalytics();
+        } finally {
+          setPipelineLoading(false);
         }
       };
 
@@ -503,15 +600,16 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
       return (
         <div className="space-y-6">
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
-            <StatCard icon="file-invoice-dollar" label="Active Bids" value={bids.filter((bid) => bid.status === 'pending' || bid.status === 'submitted').length} color="brand" />
-            <StatCard icon="dollar-sign" label="Pending Value" value={formatCurrency(totalPending)} color="blue" />
-            <StatCard icon="trophy" label="Win Rate" value={`${winRate}%`} color="green" />
-            <StatCard icon="chart-line" label="Avg Probability" value={`${avgProbability}%`} color="yellow" />
+            <StatCard icon="file-invoice-dollar" label="Active Opportunities" value={analytics?.counts?.open ?? bids.filter((bid) => !['won', 'lost'].includes(String(bid.stage || bid.status))).length} color="brand" />
+            <StatCard icon="dollar-sign" label="Pipeline Value" value={formatCurrency((canSeePmAnalytics && analytics?.pipeline_value) || totalPending)} color="blue" />
+            <StatCard icon="trophy" label="Win Rate" value={`${(canSeePmAnalytics && analytics?.win_rate_percent) ?? winRate}%`} color="green" />
+            <StatCard icon="chart-line" label={isEstimatorView ? 'Avg Estimated Margin' : 'Cycle Time'} value={isEstimatorView ? `${(canSeePmAnalytics && analytics?.avg_estimated_margin_percent) ?? 0}%` : `${(canSeePmAnalytics && analytics?.avg_cycle_time_days) ?? 0}d`} color="yellow" />
           </StatGrid>
+          {analyticsLoading ? <LoadingBlock>Loading analytics...</LoadingBlock> : null}
 
           <div className="flex flex-wrap items-center gap-3 justify-between">
             <div className="flex flex-wrap bg-gray-100 rounded-lg p-1">
-              {['all', 'draft', 'pending', 'submitted', 'sent', 'accepted', 'rejected', 'archived', 'won', 'lost', 'canceled'].map((status) => (
+              {['all', 'lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
                 <button
                   key={status}
                   onClick={() => setFilter(status)}
@@ -558,8 +656,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
                       </div>
                       <div className="text-right">
                         <p className="text-xl font-bold text-gray-900">{formatCurrency(bid.amount || 0)}</p>
-                        <Badge className={getStatusColor(bid.status)}>{bid.status}</Badge>
-                        {(bid.status === 'pending' || bid.status === 'submitted' || bid.status === 'sent') && (
+                        <Badge className={getStageBadgeClass(bid.stage || bid.status)}>{bid.stage || bid.status}</Badge>
+                        {['lead', 'qualified', 'estimating', 'review'].includes(String(bid.stage || 'estimating')) && (
                           <p className="text-sm text-gray-500 mt-1">{bid.probability || 0}% probability</p>
                         )}
                       </div>
@@ -577,15 +675,52 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
             <Card className="p-4">
               {selectedBid ? (
                 <div className="space-y-4">
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-3">
                     <div>
                       <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
                       <p className="text-sm text-gray-500">{selectedBid.client || 'No client selected'}</p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
                         <Icon name="pen" className="mr-2" />Edit
                       </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handlePipelinePatch({ review_ready: true, stage: 'review' })}
+                        disabled={pipelineLoading || Boolean(selectedBid.reviewReadyAt)}
+                      >
+                        Review Ready
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handlePipelinePatch({ review_approved: true, stage: 'review' })}
+                        disabled={pipelineLoading || Boolean(selectedBid.reviewApprovedAt)}
+                      >
+                        Approve Review
+                      </Button>
+                      <Button
+                        variant="brand"
+                        onClick={handleConvertToJob}
+                        disabled={pipelineLoading || Boolean(selectedBid.convertedJobId)}
+                      >
+                        {selectedBid.convertedJobId ? 'Converted' : 'Convert to Job'}
+                      </Button>
+                      {canSeeExecAnalytics ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => window.open(`/api/bids/${selectedBid.id}/handoff?format=json`, '_blank')}
+                        >
+                          Export Handoff JSON
+                        </Button>
+                      ) : null}
+                      {canSeePmAnalytics ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => window.open(`/api/bids/${selectedBid.id}/handoff?format=pdf`, '_blank')}
+                        >
+                          Export Handoff PDF
+                        </Button>
+                      ) : null}
                       <Button
                         variant="brand"
                         onClick={() => handleSendBid({ override: false })}
@@ -608,8 +743,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
 
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <p className="text-gray-500">Status</p>
-                      <p className="font-semibold text-gray-900 capitalize" data-testid="bid-status-value">{selectedBid.status}</p>
+                      <p className="text-gray-500">Stage</p>
+                      <p className="font-semibold text-gray-900 capitalize" data-testid="bid-status-value">{selectedBid.stage || selectedBid.status}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Bid Date</p>
@@ -622,6 +757,14 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
                     <div>
                       <p className="text-gray-500">Total</p>
                       <p className="font-semibold text-gray-900">{formatCurrency(selectedBid.amount || 0)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Review Ready</p>
+                      <p className="font-semibold text-gray-900">{selectedBid.reviewReadyAt ? formatDate(selectedBid.reviewReadyAt) : 'No'}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Approved</p>
+                      <p className="font-semibold text-gray-900">{selectedBid.reviewApprovedAt ? formatDate(selectedBid.reviewApprovedAt) : 'No'}</p>
                     </div>
                   </div>
 
@@ -775,13 +918,13 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui }) {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Stage</label>
                       <select
-                        value={bidForm.status}
-                        onChange={(e) => setBidForm({ ...bidForm, status: e.target.value })}
+                        value={bidForm.stage}
+                        onChange={(e) => setBidForm({ ...bidForm, stage: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       >
-                        {['draft', 'pending', 'submitted', 'sent', 'accepted', 'rejected', 'archived', 'won', 'lost', 'canceled'].map((status) => (
+                        {['lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
                           <option key={status} value={status}>
                             {status.charAt(0).toUpperCase() + status.slice(1)}
                           </option>

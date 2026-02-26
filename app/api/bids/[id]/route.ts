@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 
 const bidStatusSchema = z.enum([
   "draft",
@@ -26,6 +27,11 @@ const updateBidSchema = z
     bid_date: z.string().optional(),
     probability: z.number().min(0).max(100).optional(),
     notes: z.string().optional(),
+    stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).optional(),
+    owner_user_id: z.string().uuid().nullable().optional(),
+    due_date: z.string().nullable().optional(),
+    review_ready: z.boolean().optional(),
+    review_approved: z.boolean().optional(),
   })
   .refine((value: any) => Object.keys(value).length > 0, {
     message: "At least one field is required",
@@ -68,6 +74,19 @@ const mapBid = (row: any) => ({
   notes: row.notes ?? "",
   job_id: normalizeId(row.job_id),
   jobId: normalizeId(row.job_id),
+  stage: row.stage ?? "estimating",
+  owner_user_id: row.owner_user_id ?? null,
+  ownerUserId: row.owner_user_id ?? null,
+  due_date: row.due_date ?? null,
+  dueDate: row.due_date ?? null,
+  review_ready_at: row.review_ready_at ?? null,
+  reviewReadyAt: row.review_ready_at ?? null,
+  review_approved_at: row.review_approved_at ?? null,
+  reviewApprovedAt: row.review_approved_at ?? null,
+  converted_job_id: normalizeId(row.converted_job_id),
+  convertedJobId: normalizeId(row.converted_job_id),
+  converted_at: row.converted_at ?? null,
+  convertedAt: row.converted_at ?? null,
 });
 
 async function updateWithColumnFallback(
@@ -131,7 +150,7 @@ export async function PATCH(
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
 
     const updatePayload: Record<string, unknown> = {};
@@ -145,6 +164,30 @@ export async function PATCH(
     if (payload.bid_date !== undefined) updatePayload.bid_date = normalizeDate(payload.bid_date);
     if (payload.probability !== undefined) updatePayload.probability = normalizeNumber(payload.probability);
     if (payload.notes !== undefined) updatePayload.notes = payload.notes;
+    if (payload.stage !== undefined) updatePayload.stage = payload.stage;
+    if (payload.owner_user_id !== undefined) updatePayload.owner_user_id = payload.owner_user_id;
+    if (payload.due_date !== undefined) updatePayload.due_date = payload.due_date || null;
+    if (payload.review_ready !== undefined) {
+      updatePayload.review_ready_at = payload.review_ready ? new Date().toISOString() : null;
+    }
+    if (payload.review_approved !== undefined) {
+      updatePayload.review_approved_at = payload.review_approved ? new Date().toISOString() : null;
+      if (payload.review_approved && updatePayload.stage === undefined) updatePayload.stage = "review";
+    }
+
+    if (payload.stage === "won" && payload.status === undefined) {
+      updatePayload.status = "accepted";
+    }
+    if (payload.stage === "lost" && payload.status === undefined) {
+      updatePayload.status = "rejected";
+    }
+
+    const { data: beforeBid } = await supabase
+      .from("bids")
+      .select("id, stage, status, review_ready_at, review_approved_at")
+      .eq("company_id", companyId)
+      .eq("id", bidId)
+      .maybeSingle();
 
     const { error } = await updateWithColumnFallback(supabase, companyId, bidId, updatePayload);
 
@@ -165,6 +208,27 @@ export async function PATCH(
 
     if (!updatedRow) {
       return NextResponse.json({ error: "Bid not found" }, { status: 404 });
+    }
+
+    if (payload.review_approved === true) {
+      await logAuditEvent({
+        supabase,
+        companyId,
+        actorUserId: userId,
+        eventType: "bid.review_approved",
+        entityType: "bid",
+        entityId: bidId,
+        before: {
+          stage: beforeBid?.stage ?? null,
+          status: beforeBid?.status ?? null,
+          review_approved_at: beforeBid?.review_approved_at ?? null,
+        },
+        after: {
+          stage: updatedRow.stage ?? null,
+          status: updatedRow.status ?? null,
+          review_approved_at: updatedRow.review_approved_at ?? null,
+        },
+      });
     }
 
     return NextResponse.json({ bid: mapBid(updatedRow) });

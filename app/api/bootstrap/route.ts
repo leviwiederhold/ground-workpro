@@ -20,6 +20,21 @@ export async function POST(request: Request) {
 
   const user = userData.user;
 
+  // Idempotent: if user already has membership, do not create duplicate company.
+  const { data: existingMemberships, error: existingMembershipError } = await supabase
+    .from("memberships")
+    .select("company_id")
+    .eq("user_id", user.id)
+    .limit(1);
+
+  if (existingMembershipError) {
+    return errorResponse(existingMembershipError.message, 400);
+  }
+
+  if ((existingMemberships ?? []).length > 0) {
+    return Response.json({ success: true, company_id: existingMemberships?.[0]?.company_id ?? null });
+  }
+
   // 1) Ensure profile exists
   await supabase.from("profiles").upsert({
     id: user.id,

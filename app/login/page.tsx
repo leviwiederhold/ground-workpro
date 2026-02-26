@@ -11,6 +11,34 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  async function ensureTenantContext() {
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get("invite") === "1";
+    const inviteRole = params.get("role") || undefined;
+    const inviteEmail = params.get("email") || undefined;
+    const inviteEmployeeId = params.get("employeeId") || undefined;
+    const inviteToken = params.get("token") || undefined;
+
+    if (invite) {
+      const accept = await fetch("/api/invite/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: inviteRole, email: inviteEmail, employeeId: inviteEmployeeId, token: inviteToken }),
+      });
+      if (!accept.ok) {
+        const payload = await accept.json().catch(() => ({}));
+        throw new Error(payload?.error || "Failed to accept invite");
+      }
+      return;
+    }
+
+    const bootstrap = await fetch("/api/bootstrap", { method: "POST" });
+    if (!bootstrap.ok) {
+      const payload = await bootstrap.json().catch(() => ({}));
+      throw new Error(payload?.error || "Failed to initialize company");
+    }
+  }
+
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
@@ -30,6 +58,7 @@ export default function LoginPage() {
 
       // Ensure session cookies are in place before redirecting.
       await supabase.auth.getSession();
+      await ensureTenantContext();
       router.replace("/");
       router.refresh();
     } finally {

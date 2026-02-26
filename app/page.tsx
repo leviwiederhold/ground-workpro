@@ -3665,15 +3665,24 @@ const confirmDestructiveAction = (targetLabel) =>
         return { email, name, role };
       };
 
-      const buildInviteLink = () => {
+      const buildInviteLink = async () => {
         const { email, name, role } = getInvitePayload();
-        const params = new URLSearchParams();
-        params.set('invite', '1');
-        if (email) params.set('email', email);
-        if (name) params.set('name', name);
-        if (role) params.set('role', role);
-        const origin = typeof window !== 'undefined' ? window.location.origin : '';
-        return `${origin}/signup?${params.toString()}`;
+        if (!selectedEmployee?.id) throw new Error('Select employee first');
+        if (!email) throw new Error('Employee email is required');
+        const response = await fetch('/api/invite/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employeeId: String(selectedEmployee.id), email, role }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Failed to create invite');
+        }
+        const inviteUrl = payload?.item?.url;
+        if (!inviteUrl || typeof inviteUrl !== 'string') {
+          throw new Error('Invalid invite response');
+        }
+        return inviteUrl;
       };
 
       const copyText = async (value) => {
@@ -3695,10 +3704,11 @@ const confirmDestructiveAction = (targetLabel) =>
       const handleCopyInviteLink = async () => {
         setInviteFeedback('');
         try {
-          await copyText(buildInviteLink());
+          const inviteLink = await buildInviteLink();
+          await copyText(inviteLink);
           setInviteFeedback('Invite link copied.');
-        } catch {
-          setInviteFeedback('Failed to copy invite link.');
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to copy invite link.');
         }
       };
 
@@ -3708,11 +3718,12 @@ const confirmDestructiveAction = (targetLabel) =>
           const { name, role } = getInvitePayload();
           const greeting = name ? `Hi ${name},` : 'Hi,';
           const roleLine = role ? `role: ${role}` : 'role: team member';
-          const message = `${greeting}\n\nYou are invited to Groundwork Pro (${roleLine}).\nUse this link to create your account:\n${buildInviteLink()}`;
+          const inviteLink = await buildInviteLink();
+          const message = `${greeting}\n\nYou are invited to Groundwork Pro (${roleLine}).\nUse this link to create your account:\n${inviteLink}`;
           await copyText(message);
           setInviteFeedback('Invite message copied.');
-        } catch {
-          setInviteFeedback('Failed to copy invite message.');
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to copy invite message.');
         }
       };
 
@@ -10439,6 +10450,22 @@ const confirmDestructiveAction = (targetLabel) =>
         setAuthNotice('');
         setAuthLoading(true);
         const supabase = supabaseBrowser();
+        const inviteParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const isInviteFlow = inviteParams?.get('invite') === '1';
+        const inviteRole = inviteParams?.get('role') || undefined;
+
+        const acceptInviteIfNeeded = async () => {
+          if (!isInviteFlow) return;
+          const response = await fetch('/api/invite/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: inviteRole }),
+          });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload?.error || 'Failed to accept invite');
+          }
+        };
 
         try {
           if (authMode === 'login') {
@@ -10452,6 +10479,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
 
             await supabase.auth.getSession();
+            await acceptInviteIfNeeded();
             onLogin(formData);
             return;
           }
@@ -10479,6 +10507,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
           if (data?.session) {
             await supabase.auth.getSession();
+            await acceptInviteIfNeeded();
             onSignup(formData);
             return;
           }

@@ -102,11 +102,14 @@ export async function GET(request: Request) {
 
     let items = (employeeRows ?? []).map((row: Record<string, unknown>) => {
       const normalizedRole = mapRoleForOutput(row.role);
+      const linkedUserId = row.user_id ? normalizeId(row.user_id) : null;
       return {
         id: normalizeId(row.id),
         displayName: String(row.name ?? row.full_name ?? ""),
         role: normalizedRole,
         status: mapEmployeeStatus(row.status),
+        userId: linkedUserId,
+        accountStatus: linkedUserId ? "active" : "invited",
         assignedToday: null as { jobId: string; jobName: string; href: string } | null,
         hoursThisWeek: 0,
         pay: {
@@ -205,6 +208,8 @@ export async function GET(request: Request) {
         displayName: item.displayName,
         role: item.role,
         status: item.status,
+        userId: item.userId,
+        accountStatus: item.accountStatus,
         assignedToday: item.assignedToday,
         hoursThisWeek: item.hoursThisWeek,
         pay: item.pay,

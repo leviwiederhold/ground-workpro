@@ -25,6 +25,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "integrations", label: "Integrations", href: "/integrations", iconKey: "plug" },
   { key: "documents", label: "Documents", href: "/documents", iconKey: "folder-open" },
   { key: "settings", label: "Settings", href: "/settings", iconKey: "gear" },
+  { key: "subscribe", label: "Subscribe", href: "/subscribe", iconKey: "credit-card" },
   { key: "audit", label: "Audit", href: "/audit", iconKey: "clipboard-list" },
 ];
 
@@ -43,6 +44,7 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "reports",
     "integrations",
     "settings",
+    "subscribe",
     "audit",
     "documents",
     "team",
@@ -102,6 +104,7 @@ export const ROUTE_GUARDS: Record<string, AppRole[]> = {
   "/integrations": ["admin", "pm"],
   "/documents": ["admin", "pm", "foreman", "mechanic"],
   "/settings": ["admin", "pm"],
+  "/subscribe": ["admin"],
   "/audit": ["admin", "pm"],
 };
 

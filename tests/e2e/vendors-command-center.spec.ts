@@ -3,6 +3,10 @@ import { loginViaUI } from "./helpers";
 
 test("vendors command center persists profile, status, po link, and docs", async ({ page }) => {
   await loginViaUI(page);
+  const subscriptionRes = await page.request.post('/api/test/set-subscription', {
+    data: { subscription_status: 'active' },
+  });
+  expect(subscriptionRes.status()).toBe(200);
 
   const stamp = Date.now();
   const vendorName = `Vendor Command ${stamp}`;
@@ -67,7 +71,7 @@ test("vendors command center persists profile, status, po link, and docs", async
 
   await page.goto("/");
   await page.getByTestId("nav-vendors").click();
-  await expect(page.getByText(vendorName)).toBeVisible();
+  await expect(page.getByRole("heading", { name: vendorName })).toBeVisible();
   await page.reload();
-  await expect(page.getByText(vendorName)).toBeVisible();
+  await expect(page.getByRole("heading", { name: vendorName })).toBeVisible();
 });

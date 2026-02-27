@@ -606,6 +606,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [currentRole, setCurrentRole] = useState('executive');
+      const [canSwitchRoleView, setCanSwitchRoleView] = useState(false);
       const [showRoleSelector, setShowRoleSelector] = useState(false);
       const [actingRoleSaving, setActingRoleSaving] = useState(false);
       const [serverNavItems, setServerNavItems] = useState([]);
@@ -675,6 +676,7 @@ const confirmDestructiveAction = (targetLabel) =>
           if (!response.ok) return;
           setServerNavItems(Array.isArray(payload?.items) ? payload.items : []);
           setCurrentRole(mapServerRoleToUiRole(payload?.role));
+          setCanSwitchRoleView(Boolean(payload?.canSwitchRoleView));
         } catch {
           setServerNavItems([]);
         } finally {
@@ -1318,7 +1320,10 @@ const confirmDestructiveAction = (targetLabel) =>
           case 'vendors': return <VendorsView vendors={vendors} vendorsLoading={vendorsLoading} setVendors={setVendors} jobs={jobs} inventory={inventory} />;
           case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} />;
           case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} />;
-          case 'finance': return <FinanceView />;
+          case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} />;
+          case 'subscribe': return <SubscribeView employees={employees} currentRole={currentRole} />;
+          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
+          case 'audit': return <AuditView currentRole={currentRole} />;
           case 'marketing': return <MarketingView />;
           case 'integrations': return <IntegrationsView />;
           case 'documents': return <DocumentsView currentRole={currentRole} ui={documentsViewUi} />;
@@ -1421,15 +1426,20 @@ const confirmDestructiveAction = (targetLabel) =>
                   {/* Role Selector */}
                   <div className="relative hidden md:block">
                     <button
-                      onClick={() => setShowRoleSelector(!showRoleSelector)}
-                      disabled={actingRoleSaving}
-                      className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                      onClick={() => {
+                        if (!canSwitchRoleView) return;
+                        setShowRoleSelector(!showRoleSelector);
+                      }}
+                      disabled={actingRoleSaving || !canSwitchRoleView}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                        canSwitchRoleView ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-100 opacity-80 cursor-default'
+                      }`}
                     >
                       <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
                       <span className="text-sm font-medium text-gray-700">{ROLES[currentRole].label}</span>
-                      <Icon name="chevron-down" className="text-gray-400 text-xs" />
+                      {canSwitchRoleView && <Icon name="chevron-down" className="text-gray-400 text-xs" />}
                     </button>
-                    {showRoleSelector && (
+                    {showRoleSelector && canSwitchRoleView && (
                       <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
                         <div className="px-3 py-2 border-b border-gray-100">
                           <p className="text-xs font-medium text-gray-500 uppercase">Switch Role View</p>
@@ -1449,9 +1459,15 @@ const confirmDestructiveAction = (targetLabel) =>
                       </div>
                     )}
                   </div>
-                  <Button variant="secondary" size="sm" className="hidden sm:inline-flex" onClick={() => setShowModal({ type: 'quick-actions' })}>
-                    <Icon name="bolt" className="mr-2" />
-                    Quick Actions
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="hidden sm:inline-flex"
+                    onClick={() => setShowModal({ type: 'quick-actions' })}
+                    aria-label="Quick Actions"
+                    title="Quick Actions"
+                  >
+                    <Icon name="bolt" />
                   </Button>
                   {/* Notifications */}
                   <div className="relative">
@@ -3532,6 +3548,8 @@ const confirmDestructiveAction = (targetLabel) =>
             name: item.displayName || '',
             role: item.role || 'operator',
             status: item.status || 'inactive',
+            user_id: item.userId || null,
+            accountStatus: item.accountStatus || (item.userId ? 'active' : 'invited'),
             assignedToday: item.assignedToday || null,
             hoursThisWeek: Number(item.hoursThisWeek || 0),
             pay: item.pay || { visible: false, hourlyRate: 0, loadedHourlyCost: 0 },
@@ -3848,6 +3866,9 @@ const confirmDestructiveAction = (targetLabel) =>
                           )}
                         </div>
                         <p className="text-sm text-gray-500">{emp.role}</p>
+                        <p className="text-xs text-gray-500">
+                          Account: {emp.accountStatus === 'active' ? 'Active' : 'Invite pending'}
+                        </p>
                         <p className="text-xs text-gray-500">Hours This Week: {Number(emp.hoursThisWeek || 0).toFixed(1)}</p>
                       </div>
                       <div className="text-right">
@@ -4448,6 +4469,18 @@ const confirmDestructiveAction = (targetLabel) =>
       const [entryActionLoadingByReport, setEntryActionLoadingByReport] = useState({});
       const [entryActionErrorByReport, setEntryActionErrorByReport] = useState({});
       const [entryFormByReport, setEntryFormByReport] = useState({});
+      const [reportJobFilter, setReportJobFilter] = useState('all');
+      const [reportStatusFilter, setReportStatusFilter] = useState('all');
+      const [reportSearch, setReportSearch] = useState('');
+      const [reportDateFrom, setReportDateFrom] = useState('');
+      const [reportDateTo, setReportDateTo] = useState('');
+      const [activeReportPreset, setActiveReportPreset] = useState('custom');
+
+      const normalizeJobStatusForReports = (status) => {
+        const value = String(status || '').toLowerCase();
+        if (['completed', 'complete', 'closed', 'done'].includes(value)) return 'completed';
+        return 'active';
+      };
 
       const ensureEntryForm = (reportId) => {
         setEntryFormByReport((prev) => ({
@@ -4611,6 +4644,103 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       };
 
+      const normalizedSearch = String(reportSearch || '').trim().toLowerCase();
+      const filteredJobs = jobs.filter((job) => {
+        const normalizedStatus = normalizeJobStatusForReports(job.status);
+        const matchesStatus = reportStatusFilter === 'all' || normalizedStatus === reportStatusFilter;
+        const matchesJob = reportJobFilter === 'all' || String(job.id) === String(reportJobFilter);
+        const matchesSearch =
+          !normalizedSearch ||
+          String(job.name || '').toLowerCase().includes(normalizedSearch) ||
+          String(job.client || '').toLowerCase().includes(normalizedSearch) ||
+          String(job.address || '').toLowerCase().includes(normalizedSearch);
+        return matchesStatus && matchesJob && matchesSearch;
+      });
+
+      const allowedJobIds = new Set(filteredJobs.map((job) => String(job.id)));
+      const filteredDailyReports = dailyReports.filter((report) => {
+        if (reportJobFilter !== 'all' && String(report.jobId) !== String(reportJobFilter)) return false;
+        if (!reportDateFrom && !reportDateTo) return true;
+        const reportDate = String(report.date || '').slice(0, 10);
+        if (!reportDate) return false;
+        if (reportDateFrom && reportDate < reportDateFrom) return false;
+        if (reportDateTo && reportDate > reportDateTo) return false;
+        return true;
+      });
+
+      const filteredEquipment = equipment.filter((item) => {
+        if (reportJobFilter === 'all') return true;
+        return item.jobId && allowedJobIds.has(String(item.jobId));
+      });
+
+      const exportRowsToCsv = (filename, rows) => {
+        if (!rows.length) return;
+        const headers = Object.keys(rows[0]);
+        const lines = [
+          headers.join(','),
+          ...rows.map((row) =>
+            headers
+              .map((header) => `"${String(row[header] ?? '').replace(/"/g, '""')}"`)
+              .join(',')
+          ),
+        ];
+        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
+
+      const applyPreset = useCallback((presetKey) => {
+        const now = new Date();
+        const toIsoDate = (d) => d.toISOString().slice(0, 10);
+        if (presetKey === 'ceo_weekly') {
+          const from = new Date(now);
+          from.setDate(now.getDate() - 7);
+          setReportSearch('');
+          setReportJobFilter('all');
+          setReportStatusFilter('all');
+          setReportDateFrom(toIsoDate(from));
+          setReportDateTo(toIsoDate(now));
+          setActiveReportPreset('ceo_weekly');
+          return;
+        }
+        if (presetKey === 'ops_review') {
+          const from = new Date(now);
+          from.setDate(now.getDate() - 14);
+          setReportSearch('');
+          setReportJobFilter('all');
+          setReportStatusFilter('active');
+          setReportDateFrom(toIsoDate(from));
+          setReportDateTo(toIsoDate(now));
+          setActiveReportPreset('ops_review');
+          return;
+        }
+        setActiveReportPreset('custom');
+      }, []);
+
+      useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const saved = window.localStorage.getItem('reports.defaultPreset');
+        if (saved === 'ceo_weekly' || saved === 'ops_review') {
+          applyPreset(saved);
+        }
+      }, [applyPreset]);
+
+      const saveDefaultPreset = () => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem('reports.defaultPreset', activeReportPreset === 'custom' ? 'ceo_weekly' : activeReportPreset);
+      };
+
+      const clearDefaultPreset = () => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.removeItem('reports.defaultPreset');
+      };
+
       useEffect(() => {
         let revenueChart = null;
         let utilizationChart = null;
@@ -4633,10 +4763,10 @@ const confirmDestructiveAction = (targetLabel) =>
                 revenueChart = new Chart(ctx, {
                   type: 'bar',
                   data: {
-                    labels: jobs.filter(j => j.status !== 'bidding').map(j => j.name.split(' ').slice(0, 2).join(' ')),
+                    labels: filteredJobs.filter(j => j.status !== 'bidding').map(j => j.name.split(' ').slice(0, 2).join(' ')),
                     datasets: [
-                      { label: 'Budget', data: jobs.filter(j => j.status !== 'bidding').map(j => j.budget), backgroundColor: '#e5e7eb' },
-                      { label: 'Spent', data: jobs.filter(j => j.status !== 'bidding').map(j => j.spent), backgroundColor: '#f97316' },
+                      { label: 'Budget', data: filteredJobs.filter(j => j.status !== 'bidding').map(j => j.budget), backgroundColor: '#e5e7eb' },
+                      { label: 'Spent', data: filteredJobs.filter(j => j.status !== 'bidding').map(j => j.spent), backgroundColor: '#f97316' },
                     ]
                   },
                   options: {
@@ -4661,9 +4791,9 @@ const confirmDestructiveAction = (targetLabel) =>
                     labels: ['Active', 'Idle', 'Maintenance'],
                     datasets: [{
                       data: [
-                        equipment.filter(e => e.status === 'active').length,
-                        equipment.filter(e => e.status === 'idle').length,
-                        equipment.filter(e => e.status === 'maintenance').length,
+                        filteredEquipment.filter(e => e.status === 'active').length,
+                        filteredEquipment.filter(e => e.status === 'idle').length,
+                        filteredEquipment.filter(e => e.status === 'maintenance').length,
                       ],
                       backgroundColor: ['#22c55e', '#eab308', '#ef4444'],
                     }]
@@ -4690,14 +4820,113 @@ const confirmDestructiveAction = (targetLabel) =>
           if (revenueChart) revenueChart.destroy();
           if (utilizationChart) utilizationChart.destroy();
         };
-      }, [jobs, equipment]);
+      }, [filteredJobs, filteredEquipment]);
 
       return (
         <div className="space-y-6">
+          <Card className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+              <div className="xl:col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">Search</label>
+                <input
+                  type="text"
+                  value={reportSearch}
+                  onChange={(e) => setReportSearch(e.target.value)}
+                  placeholder="Job, client, address"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Job</label>
+                <select value={reportJobFilter} onChange={(e) => setReportJobFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="all">All Jobs</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>{job.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Status</label>
+                <select value={reportStatusFilter} onChange={(e) => setReportStatusFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="all">All</option>
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">From</label>
+                <input type="date" value={reportDateFrom} onChange={(e) => setReportDateFrom(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">To</label>
+                <input type="date" value={reportDateTo} onChange={(e) => setReportDateTo(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-gray-500">
+                As of {new Date().toLocaleString()} • Jobs: {filteredJobs.length} • Reports: {filteredDailyReports.length} • Equipment: {filteredEquipment.length}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={activeReportPreset === 'ceo_weekly' ? 'brand' : 'secondary'}
+                  size="sm"
+                  onClick={() => applyPreset('ceo_weekly')}
+                >
+                  CEO Weekly
+                </Button>
+                <Button
+                  variant={activeReportPreset === 'ops_review' ? 'brand' : 'secondary'}
+                  size="sm"
+                  onClick={() => applyPreset('ops_review')}
+                >
+                  Ops Review
+                </Button>
+                <Button variant="secondary" size="sm" onClick={saveDefaultPreset}>
+                  Save Default
+                </Button>
+                <Button variant="secondary" size="sm" onClick={clearDefaultPreset}>
+                  Reset Default
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    exportRowsToCsv('jobs-report.csv', filteredJobs.map((job) => ({
+                      id: job.id,
+                      name: job.name,
+                      client: job.client || '',
+                      status: normalizeJobStatusForReports(job.status),
+                      budget: Number(job.budget || 0),
+                      spent: Number(job.spent || 0),
+                    })))
+                  }
+                >
+                  <Icon name="file-export" className="mr-2" />
+                  Export Jobs
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    exportRowsToCsv('daily-reports.csv', filteredDailyReports.map((report) => ({
+                      id: report.id,
+                      job_id: report.jobId,
+                      date: report.date || '',
+                      notes: report.notes || '',
+                    })))
+                  }
+                >
+                  <Icon name="file-export" className="mr-2" />
+                  Export Daily
+                </Button>
+              </div>
+            </div>
+          </Card>
+
           <Tabs
             tabs={[
               { id: 'overview', label: 'Overview', icon: 'chart-line' },
-              { id: 'daily', label: 'Daily Reports', icon: 'file-lines', count: dailyReports.length },
+              { id: 'daily', label: 'Daily Reports', icon: 'file-lines', count: filteredDailyReports.length },
               { id: 'labor', label: 'Labor', icon: 'users' },
               { id: 'equipment', label: 'Equipment', icon: 'truck-monster' },
             ]}
@@ -4737,18 +4966,22 @@ const confirmDestructiveAction = (targetLabel) =>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <Card className="p-4">
                   <h4 className="text-sm font-medium text-gray-500 mb-2">Total Contract Value</h4>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(jobs.reduce((s, j) => s + j.budget, 0))}</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(filteredJobs.reduce((s, j) => s + j.budget, 0))}</p>
                   <p className="text-sm text-green-600 mt-1">+15% from last month</p>
                 </Card>
                 <Card className="p-4">
                   <h4 className="text-sm font-medium text-gray-500 mb-2">Total Spent YTD</h4>
-                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(jobs.reduce((s, j) => s + j.spent, 0))}</p>
-                  <p className="text-sm text-gray-500 mt-1">{Math.round(jobs.reduce((s, j) => s + j.spent, 0) / jobs.reduce((s, j) => s + j.budget, 0) * 100)}% of budget</p>
+                  <p className="text-2xl font-bold text-gray-900">{formatCurrency(filteredJobs.reduce((s, j) => s + j.spent, 0))}</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {filteredJobs.reduce((s, j) => s + Number(j.budget || 0), 0) > 0
+                      ? `${Math.round((filteredJobs.reduce((s, j) => s + Number(j.spent || 0), 0) / filteredJobs.reduce((s, j) => s + Number(j.budget || 0), 0)) * 100)}% of budget`
+                      : '0% of budget'}
+                  </p>
                 </Card>
                 <Card className="p-4">
                   <h4 className="text-sm font-medium text-gray-500 mb-2">Projected Profit</h4>
-                  <p className="text-2xl font-bold text-green-600">{formatCurrency(jobs.reduce((s, j) => s + (j.budget - j.spent), 0))}</p>
-                  <p className="text-sm text-gray-500 mt-1">Across {jobs.filter(j => j.status === 'active').length} active jobs</p>
+                  <p className="text-2xl font-bold text-green-600">{formatCurrency(filteredJobs.reduce((s, j) => s + (j.budget - j.spent), 0))}</p>
+                  <p className="text-sm text-gray-500 mt-1">Across {filteredJobs.filter(j => normalizeJobStatusForReports(j.status) === 'active').length} active jobs</p>
                 </Card>
               </div>
             </div>
@@ -4765,14 +4998,14 @@ const confirmDestructiveAction = (targetLabel) =>
                 <Card className="p-4">
                   <p className="text-sm text-gray-500">Loading daily reports...</p>
                 </Card>
-              ) : dailyReports.length === 0 ? (
+              ) : filteredDailyReports.length === 0 ? (
                 <Card className="p-4">
                   <p className="text-sm text-gray-500 mb-3">No daily reports yet.</p>
                   <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'daily-report' })}>
                     Create your first report
                   </Button>
                 </Card>
-              ) : dailyReports.map(report => {
+              ) : filteredDailyReports.map(report => {
                 const job = jobs.find(j => j.id === report.jobId);
                 const submitter = employees.find(e => e.id === report.submittedBy);
                 const isEditing = editingReportId === report.id;
@@ -5116,7 +5349,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   { header: 'Daily Rate', render: (row) => formatCurrency(row.dailyRate) },
                   { header: 'Assignment', render: (row) => jobs.find(j => j.id === row.jobId)?.name || 'Unassigned' },
                 ]}
-                data={equipment}
+                data={filteredEquipment}
               />
             </Card>
           )}
@@ -7973,7 +8206,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // FINANCE VIEW (QBO Integration Placeholder)
     // ============================================
-    const FinanceView = () => {
+    const FinanceView = ({ jobs = [], bids = [], vendors = [], inventory = [], workOrders = [] }) => {
       const [pricingLoading, setPricingLoading] = useState(true);
       const [pricingSaving, setPricingSaving] = useState(false);
       const [pricingError, setPricingError] = useState('');
@@ -8078,6 +8311,70 @@ const confirmDestructiveAction = (targetLabel) =>
           setPricingSaving(false);
         }
       };
+
+      const activeJobs = jobs.filter((job) => String(job?.status || "").toLowerCase() !== "completed");
+      const completedJobs = jobs.filter((job) => String(job?.status || "").toLowerCase() === "completed");
+      const totalPipelineValue = bids.reduce((sum, bid) => sum + Number(bid?.total || 0), 0);
+      const wonBids = bids.filter((bid) => String(bid?.status || "").toLowerCase() === "won");
+      const pricedBids = bids.filter((bid) => Number(bid?.total || 0) > 0);
+      const avgEstimatedMarginPct =
+        pricedBids.length > 0
+          ? pricedBids.reduce((sum, bid) => {
+              const revenue = Number(bid?.total || 0);
+              const estCost = Number(bid?.estimatedCost || 0);
+              if (revenue <= 0) return sum;
+              return sum + ((revenue - estCost) / revenue) * 100;
+            }, 0) / pricedBids.length
+          : 0;
+      const openWorkOrders = workOrders.filter((wo) => String(wo?.status || "").toLowerCase() !== "completed").length;
+      const lowStockItems = inventory.filter((item) => Number(item?.qtyOnHand || 0) <= Number(item?.reorderPoint || 0)).length;
+      const activeVendors = vendors.filter((vendor) => String(vendor?.status || "").toLowerCase() !== "on_hold").length;
+      const pendingVendorApprovals = vendors.filter((vendor) => String(vendor?.status || "").toLowerCase() === "preferred").length;
+
+      const revenueToDate = activeJobs.reduce((sum, job) => sum + Number(job?.budget || 0), 0);
+      const spentToDate = activeJobs.reduce((sum, job) => sum + Number(job?.spent || 0), 0);
+      const projectedCashGap = spentToDate - revenueToDate;
+      const utilizationPct = revenueToDate > 0 ? Math.min(100, Math.round((spentToDate / revenueToDate) * 100)) : 0;
+
+      const exceptions = [
+        {
+          key: "low_stock",
+          label: "Low inventory alerts",
+          value: lowStockItems,
+          severity: lowStockItems > 0 ? "warn" : "ok",
+        },
+        {
+          key: "open_work_orders",
+          label: "Open work orders",
+          value: openWorkOrders,
+          severity: openWorkOrders > 0 ? "warn" : "ok",
+        },
+        {
+          key: "unpriced_bids",
+          label: "Bids with no total",
+          value: bids.filter((bid) => Number(bid?.total || 0) <= 0).length,
+          severity: bids.some((bid) => Number(bid?.total || 0) <= 0) ? "warn" : "ok",
+        },
+      ];
+
+      const topJobsBySpend = [...jobs]
+        .map((job) => ({
+          id: job?.id,
+          name: job?.name || "Job",
+          budget: Number(job?.budget || 0),
+          spent: Number(job?.spent || 0),
+        }))
+        .sort((a, b) => b.spent - a.spent)
+        .slice(0, 5)
+        .map((job) => {
+          const remaining = job.budget - job.spent;
+          const marginPct = job.budget > 0 ? ((job.budget - job.spent) / job.budget) * 100 : 0;
+          return {
+            ...job,
+            remaining,
+            marginPct,
+          };
+        });
 
       return (
         <div className="space-y-6">
@@ -8212,7 +8509,30 @@ const confirmDestructiveAction = (targetLabel) =>
               <Icon name="chart-line" className="mr-2 text-brand-500" />
               Financial KPIs
             </h3>
-            <p className="text-sm text-gray-500">Not configured yet</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <p className="text-xs text-gray-500">Pipeline Value</p>
+                <p className="text-lg font-semibold text-gray-900">{formatCurrency(totalPipelineValue)}</p>
+                <p className="text-xs text-gray-500">{bids.length} opportunities</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <p className="text-xs text-gray-500">Win Rate</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {bids.length > 0 ? `${Math.round((wonBids.length / bids.length) * 100)}%` : "0%"}
+                </p>
+                <p className="text-xs text-gray-500">{wonBids.length} won / {bids.length} total</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <p className="text-xs text-gray-500">Avg Estimated Margin</p>
+                <p className="text-lg font-semibold text-gray-900">{avgEstimatedMarginPct.toFixed(1)}%</p>
+                <p className="text-xs text-gray-500">Estimate quality signal</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 p-3 bg-gray-50">
+                <p className="text-xs text-gray-500">Active vs Completed Jobs</p>
+                <p className="text-lg font-semibold text-gray-900">{activeJobs.length} / {completedJobs.length}</p>
+                <p className="text-xs text-gray-500">Operational load</p>
+              </div>
+            </div>
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -8221,15 +8541,52 @@ const confirmDestructiveAction = (targetLabel) =>
                 <Icon name="money-bill-transfer" className="mr-2 text-brand-500" />
                 Accounts Overview
               </h3>
-              <p className="text-sm text-gray-500">Not configured yet</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Revenue to Date (internal)</span>
+                  <span className="font-medium text-gray-900">{formatCurrency(revenueToDate)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Spent to Date (internal)</span>
+                  <span className="font-medium text-gray-900">{formatCurrency(spentToDate)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">Projected Cash Gap</span>
+                  <span className={`font-medium ${projectedCashGap > 0 ? "text-red-600" : "text-green-600"}`}>
+                    {formatCurrency(projectedCashGap)}
+                  </span>
+                </div>
+                <div className="pt-2 border-t border-gray-100">
+                  <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
+                    <span>Budget Utilization</span>
+                    <span>{utilizationPct}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-200 overflow-hidden">
+                    <div className={`h-full ${utilizationPct > 85 ? "bg-red-500" : "bg-brand-500"}`} style={{ width: `${utilizationPct}%` }} />
+                  </div>
+                </div>
+              </div>
             </Card>
 
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-4">
                 <Icon name="receipt" className="mr-2 text-brand-500" />
-                Recent Transactions
+                Exception Feed
               </h3>
-              <p className="text-sm text-gray-500">Not configured yet</p>
+              <div className="space-y-2">
+                {exceptions.map((item) => (
+                  <div key={item.key} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${item.severity === "warn" ? "bg-amber-500" : "bg-green-500"}`} />
+                      <span className="text-sm text-gray-700">{item.label}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">{item.value}</span>
+                  </div>
+                ))}
+                <div className="pt-2 text-xs text-gray-500">
+                  Vendors active: {activeVendors} • Preferred vendors: {pendingVendorApprovals}
+                </div>
+              </div>
             </Card>
           </div>
 
@@ -8238,8 +8595,731 @@ const confirmDestructiveAction = (targetLabel) =>
               <Icon name="chart-simple" className="mr-2 text-brand-500" />
               Job Profitability
             </h3>
-            <p className="text-sm text-gray-500">Not configured yet</p>
+            {topJobsBySpend.length === 0 ? (
+              <p className="text-sm text-gray-500">No jobs available yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {topJobsBySpend.map((job) => (
+                  <div key={job.id} className="grid grid-cols-1 md:grid-cols-5 gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
+                    <div className="md:col-span-2">
+                      <p className="font-medium text-gray-900 truncate">{job.name}</p>
+                    </div>
+                    <div className="text-gray-600">Budget: <span className="font-medium text-gray-900">{formatCurrency(job.budget)}</span></div>
+                    <div className="text-gray-600">Spent: <span className="font-medium text-gray-900">{formatCurrency(job.spent)}</span></div>
+                    <div className="text-gray-600">
+                      Margin: <span className={`font-medium ${job.marginPct < 15 ? "text-red-600" : "text-green-600"}`}>{job.marginPct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
+        </div>
+      );
+    };
+
+    // ============================================
+    // SUBSCRIBE VIEW
+    // ============================================
+    const SubscribeView = ({ employees = [], currentRole }) => {
+      const isAdmin = currentRole === 'executive';
+      const [billingStatus, setBillingStatus] = useState(null);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const [actionLoading, setActionLoading] = useState('');
+      const [actionMessage, setActionMessage] = useState('');
+      const [selectedPlan, setSelectedPlan] = useState('starter');
+
+      const pricingByPlan = {
+        starter: { label: 'Starter', seatPrice: 49 },
+        professional: { label: 'Professional', seatPrice: 79 },
+      };
+
+      const seatCount = Math.max(1, Number(employees.length || 0));
+      const selectedSeatPrice = pricingByPlan[selectedPlan]?.seatPrice || pricingByPlan.starter.seatPrice;
+      const estimatedMonthly = seatCount * selectedSeatPrice;
+
+      useEffect(() => {
+        let active = true;
+        const load = async () => {
+          try {
+            setLoading(true);
+            setError('');
+            const response = await fetch('/api/billing/status', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!active) return;
+            if (!response.ok) {
+              setError(payload?.error || 'Failed to load subscription status');
+              return;
+            }
+            setBillingStatus(payload?.item || null);
+          } catch {
+            if (active) setError('Failed to load subscription status');
+          } finally {
+            if (active) setLoading(false);
+          }
+        };
+        load();
+        return () => {
+          active = false;
+        };
+      }, []);
+
+      const handleBillingAction = async (path) => {
+        try {
+          setActionLoading(path);
+          setActionMessage('');
+          setError('');
+          const response = await fetch(path, { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setError(payload?.error || 'Billing action failed');
+            return;
+          }
+          setActionMessage('Billing action started.');
+        } catch {
+          setError('Billing action failed');
+        } finally {
+          setActionLoading('');
+        }
+      };
+
+      if (!isAdmin) {
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold text-gray-900 mb-2">Subscribe</h3>
+            <p className="text-sm text-gray-600">Only the company admin can access subscription settings.</p>
+          </Card>
+        );
+      }
+
+      return (
+        <div className="space-y-6">
+          <StatGrid>
+            <StatCard
+              icon="users"
+              iconBgColor="bg-brand-100"
+              iconColor="text-brand-500"
+              value={seatCount}
+              label="Active Employee Seats"
+            />
+            <StatCard
+              icon="dollar-sign"
+              iconBgColor="bg-green-100"
+              iconColor="text-green-600"
+              value={formatCurrency(selectedSeatPrice)}
+              label="Price Per Seat / Month"
+            />
+            <StatCard
+              icon="receipt"
+              iconBgColor="bg-blue-100"
+              iconColor="text-blue-600"
+              value={formatCurrency(estimatedMonthly)}
+              label="Estimated Monthly Total"
+            />
+            <StatCard
+              icon="credit-card"
+              iconBgColor="bg-yellow-100"
+              iconColor="text-yellow-600"
+              value={String(billingStatus?.subscription_status || 'inactive')}
+              label="Current Subscription Status"
+            />
+          </StatGrid>
+
+          <Card className="p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900">Company Subscription</h3>
+              {loading && <span className="text-xs text-gray-500">Loading status...</span>}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Plan</p>
+                <select
+                  value={selectedPlan}
+                  onChange={(e) => setSelectedPlan(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                >
+                  <option value="starter">Starter - $49 / user / mo</option>
+                  <option value="professional">Professional - $79 / user / mo</option>
+                </select>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Current Plan Type</p>
+                <input
+                  value={String(billingStatus?.plan_type || 'starter')}
+                  readOnly
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Seat Count Used</p>
+                <input
+                  value={String(seatCount)}
+                  readOnly
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Projected Monthly Charge</p>
+                <input
+                  value={formatCurrency(estimatedMonthly)}
+                  readOnly
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <Button
+                variant="brand"
+                onClick={() => handleBillingAction('/api/billing/checkout')}
+                disabled={actionLoading === '/api/billing/checkout'}
+              >
+                <Icon name={actionLoading === '/api/billing/checkout' ? 'spinner' : 'credit-card'} className={`mr-2 ${actionLoading === '/api/billing/checkout' ? 'animate-spin' : ''}`} />
+                Start Subscription
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => handleBillingAction('/api/billing/portal')}
+                disabled={actionLoading === '/api/billing/portal'}
+              >
+                <Icon name={actionLoading === '/api/billing/portal' ? 'spinner' : 'arrow-up-right-from-square'} className={`mr-2 ${actionLoading === '/api/billing/portal' ? 'animate-spin' : ''}`} />
+                Manage Billing
+              </Button>
+            </div>
+            {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
+            {actionMessage && <p className="text-sm text-green-600 mt-4">{actionMessage}</p>}
+          </Card>
+        </div>
+      );
+    };
+
+    // ============================================
+    // SETTINGS VIEW
+    // ============================================
+    const SettingsView = ({ employees = [], currentUser, currentRole }) => {
+      const isAdmin = currentRole === 'executive';
+      const [activeTab, setActiveTab] = useState('company');
+      const [billingStatus, setBillingStatus] = useState(null);
+      const [integrations, setIntegrations] = useState([]);
+      const [settingsLoading, setSettingsLoading] = useState(false);
+      const [settingsError, setSettingsError] = useState('');
+      const [pricingLoading, setPricingLoading] = useState(false);
+      const [pricingSaving, setPricingSaving] = useState(false);
+      const [pricingError, setPricingError] = useState('');
+      const [pricingSuccess, setPricingSuccess] = useState('');
+      const [pricingSettings, setPricingSettings] = useState({
+        operator_labor_rate: 0,
+        labor_burden_percent: 0,
+        hauling_rate_per_hour: 0,
+        dump_fee_per_load: 0,
+        target_margin_percent: 0,
+        contingency_percent: 0,
+        markup_percent: 0,
+      });
+
+      useEffect(() => {
+        let active = true;
+        const load = async () => {
+          try {
+            setSettingsLoading(true);
+            setSettingsError('');
+            const [billingRes, integrationsRes] = await Promise.all([
+              fetch('/api/billing/status', { cache: 'no-store' }),
+              fetch('/api/integrations', { cache: 'no-store' }),
+            ]);
+            const billingPayload = await billingRes.json().catch(() => ({}));
+            const integrationsPayload = await integrationsRes.json().catch(() => ({}));
+            if (!active) return;
+            if (billingRes.ok) setBillingStatus(billingPayload?.item || null);
+            if (integrationsRes.ok) setIntegrations(integrationsPayload?.items || []);
+            if (!billingRes.ok && !integrationsRes.ok) {
+              setSettingsError(billingPayload?.error || integrationsPayload?.error || 'Failed to load settings data');
+            }
+          } catch {
+            if (active) setSettingsError('Failed to load settings data');
+          } finally {
+            if (active) setSettingsLoading(false);
+          }
+        };
+        load();
+        return () => {
+          active = false;
+        };
+      }, []);
+
+      useEffect(() => {
+        let active = true;
+        const loadPricing = async () => {
+          try {
+            setPricingLoading(true);
+            const response = await fetch('/api/pricing-settings', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!active) return;
+            if (!response.ok) return;
+            const row = payload?.pricing_settings || {};
+            setPricingSettings({
+              operator_labor_rate: Number(row.operator_labor_rate) || 0,
+              labor_burden_percent: Number(row.labor_burden_percent) || 0,
+              hauling_rate_per_hour: Number(row.hauling_rate_per_hour) || 0,
+              dump_fee_per_load: Number(row.dump_fee_per_load) || 0,
+              target_margin_percent: Number(row.target_margin_percent) || 0,
+              contingency_percent: Number(row.contingency_percent) || 0,
+              markup_percent: Number(row.markup_percent) || 0,
+            });
+          } finally {
+            if (active) setPricingLoading(false);
+          }
+        };
+        loadPricing();
+        return () => {
+          active = false;
+        };
+      }, []);
+
+      const savePricingSettings = async () => {
+        try {
+          setPricingSaving(true);
+          setPricingError('');
+          setPricingSuccess('');
+          const response = await fetch('/api/pricing-settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(pricingSettings),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setPricingError(payload?.error || 'Failed to save pricing settings');
+            return;
+          }
+          setPricingSuccess('Pricing settings saved.');
+        } catch {
+          setPricingError('Failed to save pricing settings');
+        } finally {
+          setPricingSaving(false);
+        }
+      };
+
+      const teamByRole = employees.reduce((acc, emp) => {
+        const key = String(emp?.role || 'operator').toLowerCase();
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+
+      const connectedIntegrations = integrations.filter((item) => item.connected).length;
+
+      return (
+        <div className="space-y-6">
+          <Tabs
+            tabs={[
+              { id: 'company', label: 'Company', icon: 'building' },
+              { id: 'users', label: 'Users & Roles', icon: 'users' },
+              { id: 'billing', label: 'Billing', icon: 'credit-card' },
+              { id: 'integrations', label: 'Integrations', icon: 'plug' },
+              { id: 'pricing', label: 'Pricing Defaults', icon: 'sliders' },
+              { id: 'security', label: 'Security', icon: 'shield-halved' },
+            ]}
+            activeTab={activeTab}
+            onChange={setActiveTab}
+          />
+
+          {settingsError && <InlineError>{settingsError}</InlineError>}
+
+          {activeTab === 'company' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <Card className="p-4 lg:col-span-2">
+                <h3 className="font-semibold text-gray-900 mb-3">Company Profile</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <p className="text-xs text-gray-500">Company Name</p>
+                    <p className="font-medium text-gray-900">{currentUser?.company || 'My Company'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Primary Admin</p>
+                    <p className="font-medium text-gray-900">{currentUser?.name || 'Admin User'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Admin Email</p>
+                    <p className="font-medium text-gray-900 break-all">{currentUser?.email || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Timezone</p>
+                    <p className="font-medium text-gray-900">America/New_York</p>
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">System Snapshot</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-500">Team Members</span><span className="font-medium">{employees.length}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Connected Integrations</span><span className="font-medium">{connectedIntegrations}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Billing Active</span><span className="font-medium">{billingStatus?.is_active ? 'Yes' : 'No'}</span></div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === 'users' && (
+            <Card className="p-4">
+              <h3 className="font-semibold text-gray-900 mb-3">Users & Roles</h3>
+              <p className="text-sm text-gray-500 mb-4">
+                Role changes and invites are managed through Team. Only CEO/admin can change role permissions.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+                {['admin', 'pm', 'foreman', 'mechanic', 'operator'].map((role) => (
+                  <div key={role} className="rounded-lg border border-gray-200 p-3">
+                    <p className="text-xs uppercase text-gray-500">{role}</p>
+                    <p className="text-xl font-semibold text-gray-900">{Number(teamByRole[role] || 0)}</p>
+                  </div>
+                ))}
+              </div>
+              <Button variant="secondary" onClick={() => setCurrentView('team')}>
+                <Icon name="arrow-right" className="mr-2" />
+                Open Team Management
+              </Button>
+            </Card>
+          )}
+
+          {activeTab === 'billing' && (
+            <Card className="p-4">
+              <h3 className="font-semibold text-gray-900 mb-3">Billing & Subscription</h3>
+              {settingsLoading ? (
+                <p className="text-sm text-gray-500">Loading billing status...</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                  <div className="rounded-lg border border-gray-200 p-3">
+                    <p className="text-xs text-gray-500">Plan</p>
+                    <p className="font-medium">{String(billingStatus?.plan_type || 'starter')}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-3">
+                    <p className="text-xs text-gray-500">Subscription Status</p>
+                    <p className="font-medium">{String(billingStatus?.subscription_status || 'inactive')}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-3">
+                    <p className="text-xs text-gray-500">Trial Ends</p>
+                    <p className="font-medium">{billingStatus?.trial_ends_at ? formatDate(billingStatus.trial_ends_at) : '—'}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 p-3">
+                    <p className="text-xs text-gray-500">Current Period End</p>
+                    <p className="font-medium">{billingStatus?.current_period_end ? formatDate(billingStatus.current_period_end) : '—'}</p>
+                  </div>
+                </div>
+              )}
+            </Card>
+          )}
+
+          {activeTab === 'integrations' && (
+            <Card className="p-4">
+              <h3 className="font-semibold text-gray-900 mb-3">Integrations Health</h3>
+              <div className="space-y-2">
+                {(integrations || []).slice(0, 10).map((item) => (
+                  <div key={item.provider} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
+                    <span className="text-sm text-gray-700 capitalize">{item.provider}</span>
+                    <Badge className={item.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}>
+                      {item.connected ? 'Connected' : 'Not connected'}
+                    </Badge>
+                  </div>
+                ))}
+                {integrations.length === 0 && <p className="text-sm text-gray-500">No integrations configured yet.</p>}
+              </div>
+            </Card>
+          )}
+
+          {activeTab === 'pricing' && (
+            <Card className="p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-gray-900">Pricing Defaults</h3>
+                <Button variant="brand" size="sm" onClick={savePricingSettings} disabled={!isAdmin || pricingSaving || pricingLoading}>
+                  {pricingSaving ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {[
+                  ['operator_labor_rate', 'Operator Labor Rate'],
+                  ['labor_burden_percent', 'Labor Burden %'],
+                  ['hauling_rate_per_hour', 'Hauling Rate / Hour'],
+                  ['dump_fee_per_load', 'Dump Fee / Load'],
+                  ['target_margin_percent', 'Target Margin %'],
+                  ['contingency_percent', 'Contingency %'],
+                  ['markup_percent', 'Markup %'],
+                ].map(([key, label]) => (
+                  <div key={key}>
+                    <p className="text-xs text-gray-500 mb-1">{label}</p>
+                    <input
+                      type="number"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      value={pricingSettings[key]}
+                      disabled={!isAdmin}
+                      onChange={(e) => setPricingSettings((prev) => ({ ...prev, [key]: Number(e.target.value) || 0 }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
+              {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
+              {!isAdmin && <p className="text-xs text-gray-500 mt-3">Read-only. Only CEO/admin can save pricing defaults.</p>}
+            </Card>
+          )}
+
+          {activeTab === 'security' && (
+            <Card className="p-4">
+              <h3 className="font-semibold text-gray-900 mb-3">Security & Access Policy</h3>
+              <div className="space-y-3 text-sm">
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="font-medium text-gray-900">Role switching policy</p>
+                  <p className="text-gray-600 mt-1">Only CEO/admin can use role-view switching. All other users are locked to assigned role.</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="font-medium text-gray-900">Employee role changes</p>
+                  <p className="text-gray-600 mt-1">Role promotions/demotions are admin-only and enforced server-side.</p>
+                </div>
+                <div className="rounded-lg border border-gray-200 p-3">
+                  <p className="font-medium text-gray-900">Invite flow</p>
+                  <p className="text-gray-600 mt-1">Invite links are tokenized, email-bound, and single-use with expiration.</p>
+                </div>
+              </div>
+            </Card>
+          )}
+        </div>
+      );
+    };
+
+    // ============================================
+    // AUDIT VIEW
+    // ============================================
+    const AuditView = ({ currentRole }) => {
+      const canViewAudit = currentRole === 'executive' || currentRole === 'operations';
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+      const [events, setEvents] = useState([]);
+      const [selectedEventId, setSelectedEventId] = useState(null);
+      const [search, setSearch] = useState('');
+      const [actionFilter, setActionFilter] = useState('all');
+      const [entityFilter, setEntityFilter] = useState('all');
+      const [dateFrom, setDateFrom] = useState('');
+      const [dateTo, setDateTo] = useState('');
+
+      const loadAuditLogs = useCallback(async () => {
+        if (!canViewAudit) return;
+        try {
+          setLoading(true);
+          setError('');
+          const response = await fetch('/api/audit-logs', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setError(payload?.error || 'Failed to load audit logs');
+            setEvents([]);
+            return;
+          }
+          const items = payload?.items || [];
+          setEvents(items);
+          if (items.length > 0) setSelectedEventId(items[0].id);
+        } catch {
+          setError('Failed to load audit logs');
+          setEvents([]);
+        } finally {
+          setLoading(false);
+        }
+      }, [canViewAudit]);
+
+      useEffect(() => {
+        loadAuditLogs();
+      }, [loadAuditLogs]);
+
+      const actions = useMemo(
+        () => ['all', ...Array.from(new Set(events.map((item) => String(item.action || 'unknown')))).sort()],
+        [events]
+      );
+
+      const entities = useMemo(
+        () => ['all', ...Array.from(new Set(events.map((item) => String(item.entity_type || 'system')))).sort()],
+        [events]
+      );
+
+      const normalizedSearch = String(search || '').trim().toLowerCase();
+      const filteredEvents = events.filter((event) => {
+        if (actionFilter !== 'all' && String(event.action || '') !== actionFilter) return false;
+        if (entityFilter !== 'all' && String(event.entity_type || 'system') !== entityFilter) return false;
+        if (dateFrom || dateTo) {
+          const stamp = String(event.created_at || '').slice(0, 10);
+          if (!stamp) return false;
+          if (dateFrom && stamp < dateFrom) return false;
+          if (dateTo && stamp > dateTo) return false;
+        }
+        if (!normalizedSearch) return true;
+        const haystack = [
+          event.action,
+          event.entity_type,
+          event.entity_id,
+          event.actor_user_id,
+          JSON.stringify(event.metadata || {}),
+        ]
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedSearch);
+      });
+
+      const selectedEvent = filteredEvents.find((event) => String(event.id) === String(selectedEventId)) || filteredEvents[0] || null;
+
+      const exportAuditCsv = () => {
+        if (!filteredEvents.length) return;
+        const rows = filteredEvents.map((event) => ({
+          id: event.id,
+          created_at: event.created_at || '',
+          action: event.action || '',
+          entity_type: event.entity_type || '',
+          entity_id: event.entity_id || '',
+          actor_user_id: event.actor_user_id || '',
+        }));
+        const headers = Object.keys(rows[0]);
+        const csv = [
+          headers.join(','),
+          ...rows.map((row) => headers.map((key) => `"${String(row[key] ?? '').replace(/"/g, '""')}"`).join(',')),
+        ].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'audit-log-export.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      };
+
+      if (!canViewAudit) {
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold text-gray-900 mb-2">Audit</h3>
+            <p className="text-sm text-gray-600">Forbidden. Audit logs are available to admin/pm only.</p>
+          </Card>
+        );
+      }
+
+      return (
+        <div className="space-y-4">
+          <Card className="p-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+              <div className="xl:col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">Search</label>
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Action, entity, actor, metadata"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Action</label>
+                <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  {actions.map((action) => (
+                    <option key={action} value={action}>{action}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Entity</label>
+                <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  {entities.map((entity) => (
+                    <option key={entity} value={entity}>{entity}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">From</label>
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">To</label>
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              <p className="text-xs text-gray-500">Showing {filteredEvents.length} of {events.length} events</p>
+              <div className="flex gap-2">
+                <Button variant="secondary" size="sm" onClick={loadAuditLogs}>
+                  <Icon name="rotate" className="mr-2" />
+                  Refresh
+                </Button>
+                <Button variant="secondary" size="sm" onClick={exportAuditCsv} disabled={!filteredEvents.length}>
+                  <Icon name="file-export" className="mr-2" />
+                  Export CSV
+                </Button>
+              </div>
+            </div>
+          </Card>
+
+          {loading ? (
+            <Card className="p-4">
+              <p className="text-sm text-gray-500">Loading audit logs...</p>
+            </Card>
+          ) : error ? (
+            <InlineError>{error}</InlineError>
+          ) : filteredEvents.length === 0 ? (
+            <EmptyState>No audit events match your filters.</EmptyState>
+          ) : (
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              <div className="xl:col-span-2 space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+                {filteredEvents.map((event) => {
+                  const isSelected = selectedEvent && String(selectedEvent.id) === String(event.id);
+                  return (
+                    <Card
+                      key={event.id}
+                      className={`p-3 cursor-pointer ${isSelected ? 'ring-2 ring-brand-500' : ''}`}
+                      onClick={() => setSelectedEventId(event.id)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 break-all">{event.action || 'event'}</p>
+                          <p className="text-xs text-gray-500 mt-1 break-all">
+                            {event.entity_type || 'system'} • {event.entity_id || '—'} • actor {event.actor_user_id || 'system'}
+                          </p>
+                        </div>
+                        <p className="text-xs text-gray-500 whitespace-nowrap">
+                          {event.created_at ? formatDate(event.created_at) : '-'}
+                        </p>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              <Card className="p-4 h-fit sticky top-4">
+                {selectedEvent ? (
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-gray-900">Event Detail</h3>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between gap-3"><span className="text-gray-500">Action</span><span className="font-medium text-gray-900">{selectedEvent.action || '-'}</span></div>
+                      <div className="flex justify-between gap-3"><span className="text-gray-500">Entity</span><span className="font-medium text-gray-900">{selectedEvent.entity_type || '-'}</span></div>
+                      <div className="flex justify-between gap-3"><span className="text-gray-500">Entity ID</span><span className="font-medium text-gray-900 break-all">{selectedEvent.entity_id || '-'}</span></div>
+                      <div className="flex justify-between gap-3"><span className="text-gray-500">Actor</span><span className="font-medium text-gray-900 break-all">{selectedEvent.actor_user_id || '-'}</span></div>
+                      <div className="flex justify-between gap-3"><span className="text-gray-500">When</span><span className="font-medium text-gray-900">{selectedEvent.created_at ? formatDate(selectedEvent.created_at) : '-'}</span></div>
+                    </div>
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-xs text-gray-500 mb-1">Metadata</p>
+                      <pre className="text-[11px] bg-gray-50 border border-gray-200 rounded-lg p-2 overflow-auto max-h-52 whitespace-pre-wrap break-all">
+                        {JSON.stringify(selectedEvent.metadata || {}, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-xs text-gray-500 mb-1">Before</p>
+                      <pre className="text-[11px] bg-gray-50 border border-gray-200 rounded-lg p-2 overflow-auto max-h-40 whitespace-pre-wrap break-all">
+                        {JSON.stringify(selectedEvent.before_data || {}, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="pt-2 border-t border-gray-100">
+                      <p className="text-xs text-gray-500 mb-1">After</p>
+                      <pre className="text-[11px] bg-gray-50 border border-gray-200 rounded-lg p-2 overflow-auto max-h-40 whitespace-pre-wrap break-all">
+                        {JSON.stringify(selectedEvent.after_data || {}, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Select an event to inspect details.</p>
+                )}
+              </Card>
+            </div>
+          )}
         </div>
       );
     };

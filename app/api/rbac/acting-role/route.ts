@@ -36,6 +36,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    // Only CEO/admin can switch acting role views.
+    if (realRole !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const effectiveRole = clampActingRole(realRole, requestedRole);
     const response = NextResponse.json({ item: { role: effectiveRole } });
 

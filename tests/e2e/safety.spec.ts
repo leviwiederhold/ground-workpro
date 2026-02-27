@@ -29,7 +29,7 @@ test("safety logs create/delete persists across refresh", async ({ page }) => {
     .filter({ hasText: uniqueNote })
     .first();
   await expect(createdRow).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByText(uniqueNote)).toBeVisible();
+  await expect(createdRow.getByText(uniqueNote)).toBeVisible();
 
   const deleteResponsePromise = page.waitForResponse(
     (response) =>
@@ -44,5 +44,9 @@ test("safety logs create/delete persists across refresh", async ({ page }) => {
 
   await page.reload();
   await page.getByTestId("nav-safety").click();
-  await expect(page.getByText(uniqueNote)).toHaveCount(0, { timeout: 20_000 });
+  await expect(
+    page
+      .locator('[data-testid^="safety-log-row-"]')
+      .filter({ hasText: uniqueNote })
+  ).toHaveCount(0, { timeout: 20_000 });
 });

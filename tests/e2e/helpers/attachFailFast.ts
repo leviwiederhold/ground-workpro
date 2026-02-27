@@ -15,11 +15,14 @@ export function attachFailFast(page: Page) {
           text.includes('403 (Forbidden)') ||
           text.includes('404 (Not Found)') ||
           text.includes('409 (Conflict)') ||
+          text.includes('net::ERR_CONNECTION_REFUSED') ||
           text.includes('net::ERR_FILE_NOT_FOUND'))
       ) {
         return;
       }
-      throw new Error(`[console.error] ${message.text()}`);
+      const location = message.location();
+      const source = location?.url ? ` @ ${location.url}` : '';
+      throw new Error(`[console.error] ${message.text()}${source}`);
     }
   });
 }

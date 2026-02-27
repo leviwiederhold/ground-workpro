@@ -6,7 +6,7 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
 const vendorStatusSchema = z.enum(["active", "preferred", "on_hold", "inactive", "blocked"]);
-const VENDOR_STATUS_TAG_REGEX = /^__gw_vendor_status:(preferred|on_hold|blocked)__\n?/i;
+const VENDOR_STATUS_TAG_REGEX = /__gw_vendor_status:(preferred|on_hold|blocked)__/i;
 const VENDOR_META_TAG_REGEX = /^__gw_vendor_meta:([^\n]+)__\n?/i;
 
 const createVendorSchema = z.object({

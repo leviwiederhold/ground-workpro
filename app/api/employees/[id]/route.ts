@@ -42,6 +42,7 @@ const mapEmployee = (row: any) => ({
   id: row.id,
   name: row.name ?? row.full_name ?? "",
   role: row.role ?? "Laborer",
+  user_id: row.user_id ?? null,
   phone: row.phone ?? "",
   email: row.email ?? "",
   hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? 0),
@@ -97,8 +98,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    let actorRole: "admin" | "pm" | "foreman" | "mechanic" | "operator";
     try {
-      await requireRole(["admin", "pm"]);
+      const actor = await requireRole(["admin", "pm"]);
+      actorRole = actor.role;
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -127,6 +130,11 @@ export async function PATCH(
 
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
+
+    if (payload.role !== undefined && actorRole !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const updatePayload: Record<string, unknown> = {};
 
     if (payload.name !== undefined) {

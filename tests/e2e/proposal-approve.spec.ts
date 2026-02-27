@@ -4,6 +4,11 @@ import { loginViaUI } from './helpers';
 test('public proposal page approves sent bid and prevents re-approval', async ({ page }) => {
   await loginViaUI(page);
 
+  const subscriptionRes = await page.request.post('/api/test/set-subscription', {
+    data: { subscription_status: 'active' },
+  });
+  expect(subscriptionRes.status()).toBe(200);
+
   const title = `E2E Proposal Approve ${Date.now()}`;
 
   const pricing = await page.request.put('/api/pricing-settings', {

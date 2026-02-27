@@ -5,7 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 
 const vendorStatusSchema = z.enum(["active", "preferred", "on_hold", "inactive", "blocked"]);
-const VENDOR_STATUS_TAG_REGEX = /^__gw_vendor_status:(preferred|on_hold|blocked)__\n?/i;
+const VENDOR_STATUS_TAG_REGEX = /__gw_vendor_status:(preferred|on_hold|blocked)__/i;
 const VENDOR_META_TAG_REGEX = /^__gw_vendor_meta:([^\n]+)__\n?/i;
 
 const updateVendorSchema = z

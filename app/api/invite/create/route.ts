@@ -32,13 +32,13 @@ export async function POST(request: Request) {
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
-        {
-          error: "Validation error",
-          details: parsed.error.issues.map((issue) => ({
-            path: issue.path.join("."),
-            message: issue.message,
-          })),
-        },
+            {
+              error: "Validation error",
+              details: parsed.error.issues.map((issue: { path: (string | number)[]; message: string }) => ({
+                path: issue.path.join("."),
+                message: issue.message,
+              })),
+            },
         { status: 422 }
       );
     }

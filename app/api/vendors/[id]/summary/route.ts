@@ -21,7 +21,7 @@ const normalizeNumber = (value: unknown, fallback = 0) => {
   const parsed = Number(value);
   return Number.isNaN(parsed) ? fallback : parsed;
 };
-const VENDOR_STATUS_TAG_REGEX = /^__gw_vendor_status:(preferred|on_hold|blocked)__\n?/i;
+const VENDOR_STATUS_TAG_REGEX = /__gw_vendor_status:(preferred|on_hold|blocked)__/i;
 const VENDOR_META_TAG_REGEX = /^__gw_vendor_meta:([^\n]+)__\n?/i;
 const parseVendorMeta = (notes: unknown) => {
   const text = String(notes ?? "");

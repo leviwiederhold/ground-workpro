@@ -9,12 +9,13 @@ function tenantError(error: TenantResolverError) {
 
 export async function GET() {
   try {
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
 
     const memberships = await supabase
       .from("memberships")
       .select("user_id, role")
       .eq("company_id", companyId)
+      .neq("user_id", userId)
       .order("created_at", { ascending: true });
 
     if (memberships.error) return serverError();

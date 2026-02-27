@@ -36,9 +36,10 @@ test('training course create, assign, complete persists', async ({ page }) => {
 
   await page.goto('/');
   await page.getByTestId('nav-training').click();
-  await expect(page.getByText(courseTitle)).toBeVisible({ timeout: 20_000 });
+  const courseCard = page.locator('h4', { hasText: courseTitle }).first();
+  await expect(courseCard).toBeVisible({ timeout: 20_000 });
 
-  await page.getByText(courseTitle).first().click();
+  await courseCard.click();
 
   const markCompletionSelect = page.locator('p:has-text("Mark Completion")').locator('..').locator('select');
   await markCompletionSelect.selectOption(employeeId);
@@ -53,8 +54,9 @@ test('training course create, assign, complete persists', async ({ page }) => {
 
   await page.reload();
   await page.getByTestId('nav-training').click();
-  await expect(page.getByText(courseTitle)).toBeVisible({ timeout: 20_000 });
+  const courseCardAfterReload = page.locator('h4', { hasText: courseTitle }).first();
+  await expect(courseCardAfterReload).toBeVisible({ timeout: 20_000 });
 
-  await page.getByText(courseTitle).first().click();
+  await courseCardAfterReload.click();
   await expect(page.getByText('1 of 1 employees completed')).toBeVisible({ timeout: 20_000 });
 });

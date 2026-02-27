@@ -70,10 +70,13 @@ export async function POST(request: Request) {
     type InviteRow = {
       id?: string;
       company_id?: string;
+      employee_id?: string;
       role?: string;
       name?: string;
-      full_name?: string;
+      full_name?: string | null;
       email?: string;
+      used_at?: string | null;
+      expires_at?: string | null;
     };
     type InviteResult = { data: InviteRow | null; error: { message?: string | null } | null };
     let invitation: InviteResult | null = null;
@@ -106,7 +109,7 @@ export async function POST(request: Request) {
           id: invitation.data.employee_id,
           company_id: invitation.data.company_id,
           role: invitation.data.role,
-          full_name: null,
+          full_name: undefined,
           email: invitation.data.email,
         },
         error: null,

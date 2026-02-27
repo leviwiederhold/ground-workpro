@@ -44,6 +44,7 @@ const mapEmployee = (row: any) => ({
   id: row.id,
   name: row.name ?? row.full_name ?? "",
   role: row.role ?? "Laborer",
+  user_id: row.user_id ?? null,
   phone: row.phone ?? "",
   email: row.email ?? "",
   hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? 0),

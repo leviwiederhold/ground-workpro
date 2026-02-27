@@ -30,17 +30,31 @@ export async function loginViaUI(page: Page) {
   await page.getByTestId('login-email').fill(email);
   await page.getByTestId('login-password').fill(password);
 
-  await Promise.all([
-    page.waitForURL(/\/$/, { timeout: 30_000 }),
-    page.getByTestId('login-submit').click(),
-  ]).catch(async () => {
-    const loginError = page.getByTestId('login-error');
-    if (await loginError.isVisible().catch(() => false)) {
-      const message = (await loginError.textContent())?.trim() || 'Unknown login error';
-      throw new Error(`E2E login failed: ${message}`);
-    }
-    throw new Error('E2E login failed: app did not navigate after submit.');
-  });
+  await page.getByTestId('login-submit').click();
+
+  await expect
+    .poll(
+      async () => {
+        const loginError = page.getByTestId('login-error');
+        if (await loginError.isVisible().catch(() => false)) {
+          const message = (await loginError.textContent())?.trim() || 'Unknown login error';
+          throw new Error(`E2E login failed: ${message}`);
+        }
+
+        const url = page.url();
+        if (!url.includes('/login')) {
+          return true;
+        }
+
+        return await navDashboard.isVisible().catch(() => false);
+      },
+      { timeout: 30_000, message: 'E2E login failed: app did not complete auth flow.' }
+    )
+    .toBe(true);
+
+  if (page.url().includes('/login')) {
+    await page.goto('/');
+  }
 
   await expect(navDashboard).toBeVisible({ timeout: 30_000 });
 }

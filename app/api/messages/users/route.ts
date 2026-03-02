@@ -37,13 +37,20 @@ export async function GET() {
 
     if (profiles.error) return serverError();
 
-    const employees = userIds.length
+    let employees: { data: Array<{ user_id: string; name?: string; full_name?: string }> | null; error: { message?: string } | null } = userIds.length
       ? await supabase
           .from("employees")
           .select("user_id, name, full_name")
           .eq("company_id", companyId)
           .in("user_id", userIds)
       : { data: [], error: null };
+    if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
+      employees = await supabase
+        .from("employees")
+        .select("user_id, full_name")
+        .eq("company_id", companyId)
+        .in("user_id", userIds);
+    }
     // Employees lookup is best-effort; if it fails, fall back to profiles-only names.
     const employeeRows = employees.error ? [] : employees.data ?? [];
 

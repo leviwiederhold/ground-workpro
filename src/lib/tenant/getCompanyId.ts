@@ -19,13 +19,28 @@ export async function getCompanyId() {
     throw new TenantResolverError("Not authenticated", 401);
   }
 
-  const loadMembership = async () =>
-    supabase
+  const loadMembership = async () => {
+    const preferred = await supabase
       .from("memberships")
       .select("company_id")
       .eq("user_id", userData.user.id)
-      .order("company_id", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(1);
+    if (
+      preferred.error &&
+      /column memberships\.created_at does not exist|Could not find the 'created_at' column/i.test(
+        preferred.error.message || ""
+      )
+    ) {
+      return supabase
+        .from("memberships")
+        .select("company_id")
+        .eq("user_id", userData.user.id)
+        .order("company_id", { ascending: true })
+        .limit(1);
+    }
+    return preferred;
+  };
 
   let { data: memberships, error: membershipsError } = await loadMembership();
 

@@ -46,6 +46,16 @@ pnpm verify
 pnpm verify
 ```
 
+## Schema Health Check
+
+Run this before debugging runtime API errors:
+
+```bash
+pnpm check-schema
+```
+
+It validates required Supabase tables/columns used by the app and fails fast with exact missing table/column errors.
+
 ## Testing Workflow
 
 - Default (most PRs): `pnpm check:fast`

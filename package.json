@@ -16,6 +16,7 @@
     "verify": "pnpm lint && pnpm build && pnpm test:e2e",
     "ci:local": "pnpm install && pnpm verify",
     "check-env": "node scripts/check-env.js",
+    "check-schema": "node scripts/check-schema.js",
     "build:next": "next build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

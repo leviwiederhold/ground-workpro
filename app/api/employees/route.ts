@@ -74,9 +74,11 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
     const result = await supabase.from("employees").insert(currentPayload).select("*").single();
     lastResult = result;
     const message = result.error?.message || "";
-    const match = message.match(/Could not find the '([^']+)' column/);
-    if (!match) return result;
-    const missingColumn = match[1];
+    const postgrest = message.match(/Could not find the '([^']+)' column/i);
+    const postgres = message.match(/column\s+employees\.([a-zA-Z0-9_]+)\s+does not exist/i);
+    const relation = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+of relation\s+"?employees"?\s+does not exist/i);
+    const missingColumn = postgrest?.[1] ?? postgres?.[1] ?? relation?.[1];
+    if (!missingColumn) return result;
     if (!(missingColumn in currentPayload)) return result;
     delete currentPayload[missingColumn];
   }

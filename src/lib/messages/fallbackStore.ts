@@ -68,6 +68,16 @@ export function createFallbackChannel(companyId: string, name: string, memberUse
   const store = readStore();
   const now = new Date().toISOString();
   const normalizedMemberUserIds = Array.from(new Set(memberUserIds.map((id) => String(id)).filter(Boolean)));
+  const existing = store.channels.find((row) => {
+    if (row.company_id !== companyId) return false;
+    if (String(row.name) !== String(name)) return false;
+    const rowMembers = Array.from(new Set((row.member_user_ids ?? []).map((id) => String(id)).filter(Boolean))).sort();
+    const nextMembers = [...normalizedMemberUserIds].sort();
+    return rowMembers.length === nextMembers.length && rowMembers.every((value, index) => value === nextMembers[index]);
+  });
+  if (existing) {
+    return existing;
+  }
   const channel: FallbackChannel = {
     id: crypto.randomUUID(),
     company_id: companyId,

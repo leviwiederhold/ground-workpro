@@ -1861,7 +1861,6 @@ const confirmDestructiveAction = (targetLabel) =>
       const [scheduleLoading, setScheduleLoading] = useState(false);
       const [scheduleError, setScheduleError] = useState('');
       const [scheduleWarning, setScheduleWarning] = useState('');
-      const [scheduleSaving, setScheduleSaving] = useState(false);
       const [eventsByDate, setEventsByDate] = useState({});
       const [scopedJobs, setScopedJobs] = useState(null);
 
@@ -2163,36 +2162,6 @@ const confirmDestructiveAction = (targetLabel) =>
       const getAssignmentsForDate = (dateKey) =>
         Object.entries(scheduleData).flatMap(([key, items]) => (key.endsWith(`-${dateKey}`) ? items : []));
 
-      const removeFromSchedule = async (itemId) => {
-        try {
-          setScheduleSaving(true);
-          const response = await fetch(`/api/schedule/assignments/${itemId}`, { method: 'DELETE' });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            setScheduleError(payload?.error || 'Failed to remove assignment.');
-            return;
-          }
-          if (Array.isArray(payload?.warnings) && payload.warnings.length > 0) {
-            setScheduleWarning(payload.warnings.join(' '));
-          } else {
-            setScheduleWarning('');
-          }
-
-          setScheduleData(prev =>
-            Object.fromEntries(
-              Object.entries(prev).map(([entryKey, items]) => [
-                entryKey,
-                (items || []).filter(item => String(item.id) !== String(itemId)),
-              ])
-            )
-          );
-        } catch {
-          setScheduleError('Failed to remove assignment.');
-        } finally {
-          setScheduleSaving(false);
-        }
-      };
-
       return (
         <div className="space-y-4">
           {/* Header */}
@@ -2289,27 +2258,34 @@ const confirmDestructiveAction = (targetLabel) =>
                               </div>
                             </div>
                           ))}
-                          <div className="space-y-1">
-                            {allDayAssignments.map(item => (
-                              <div
-                                key={item.id}
-                                data-testid={`schedule-assignment-${item.id}`}
-                                className={`text-xs p-1.5 rounded-md flex items-center justify-between border ${
-                                  item.type === 'equipment'
-                                    ? 'bg-blue-50 text-blue-800 border-blue-200'
-                                    : 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                                }`}
-                              >
-                                <span className="truncate">{item.name}</span>
-                                <button
-                                  onClick={() => removeFromSchedule(item.id)}
-                                  className="ml-1 hover:text-red-600"
-                                >
-                                  <Icon name="xmark" className="text-[10px]" />
-                                </button>
+                          {allDayAssignments.length > 0 && (
+                            <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5">
+                              <div className="text-[11px] font-semibold text-gray-700">
+                                {allDayAssignments.length} assignment{allDayAssignments.length === 1 ? '' : 's'}
                               </div>
-                            ))}
-                          </div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {allDayAssignments.slice(0, 3).map(item => (
+                                  <span
+                                    key={item.id}
+                                    data-testid={`schedule-assignment-${item.id}`}
+                                    className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                                      item.type === 'equipment'
+                                        ? 'bg-blue-100 text-blue-700'
+                                        : 'bg-emerald-100 text-emerald-700'
+                                    }`}
+                                    title={item.name}
+                                  >
+                                    {item.type === 'equipment' ? 'Equip' : 'Crew'}
+                                  </span>
+                                ))}
+                                {allDayAssignments.length > 3 && (
+                                  <span className="inline-flex items-center rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-700">
+                                    +{allDayAssignments.length - 3}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div
                           className="relative"
@@ -2396,9 +2372,6 @@ const confirmDestructiveAction = (targetLabel) =>
           )}
           {scheduleLoading && (
             <p className="text-sm text-gray-500">Loading schedule assignments...</p>
-          )}
-          {scheduleSaving && (
-            <p className="text-sm text-gray-500">Saving schedule changes...</p>
           )}
           {scheduleError && (
             <p className="text-sm text-red-600">{scheduleError}</p>
@@ -9968,8 +9941,8 @@ const confirmDestructiveAction = (targetLabel) =>
       const filteredChannels = channels.filter((channel) =>
         String(channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
-      const filteredContacts = contactOptions.filter((contact) =>
-        normalized(contact.label).includes(normalized(searchTerm))
+      const filteredContacts = contactOptions.filter(
+        (contact) => contact.hasAccount && normalized(contact.label).includes(normalized(searchTerm))
       );
 
       const startDirectChat = async (contact) => {
@@ -9983,7 +9956,7 @@ const confirmDestructiveAction = (targetLabel) =>
             String(channel.kind || '') === 'direct' &&
             String(channel.other_user_id || '') === String(contact.userId)
         );
-        if (existing) {
+        if (existing && (existing.last_message_at || existing.last_message_preview || Number(existing.message_count || 0) > 0)) {
           setPendingDirectContact(null);
           setActiveChannel(existing);
           return;
@@ -10167,9 +10140,9 @@ const confirmDestructiveAction = (targetLabel) =>
                     >
                       <div>
                         <p className="text-sm text-gray-100 truncate">{contact.label}</p>
-                        <p className="text-xs text-gray-500 truncate">{contact.subtitle || (contact.hasAccount ? 'Account ready' : 'Placeholder only')}</p>
+                        <p className="text-xs text-gray-500 truncate">{contact.subtitle || 'Team member'}</p>
                       </div>
-                      <span className="text-[10px] text-gray-500">{contact.hasAccount ? 'Chat' : 'Placeholder'}</span>
+                      <span className="text-[10px] text-gray-500">Chat</span>
                     </button>
                   ))}
                 </div>

@@ -284,12 +284,7 @@ export async function GET(request: Request) {
     }));
     const employeeRoleById = new Map<string, AppRole | null>();
     for (const employee of employees) {
-      const roleValue = String(
-        employee.role ??
-          employee.name ??
-          employee.full_name ??
-          ""
-      ).toLowerCase();
+      const roleValue = String(employee.role ?? "").toLowerCase();
       const normalizedRole: AppRole | null =
         roleValue.includes("admin") || roleValue.includes("ceo")
           ? "admin"

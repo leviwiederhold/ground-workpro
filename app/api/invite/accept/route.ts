@@ -139,7 +139,18 @@ export async function POST(request: Request) {
         ""
     ).trim();
     if (profileName) {
-      await client.from("profiles").upsert({ id: userId, full_name: profileName });
+      let profileUpsert = await client
+        .from("profiles")
+        .upsert({ id: userId, full_name: profileName, email });
+      if (
+        profileUpsert.error &&
+        /column .*email.* does not exist|Could not find the 'email' column/i.test(profileUpsert.error.message || "")
+      ) {
+        profileUpsert = await client.from("profiles").upsert({ id: userId, full_name: profileName });
+      }
+      if (profileUpsert.error) {
+        return NextResponse.json({ error: profileUpsert.error.message }, { status: 400 });
+      }
     }
 
     let employeeUpdate = await client

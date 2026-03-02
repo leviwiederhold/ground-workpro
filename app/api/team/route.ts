@@ -167,7 +167,7 @@ export async function GET(request: Request) {
 
     const inviteStatusResult = await supabase
       .from("invite_tokens")
-      .select("employee_id, used_at, expires_at")
+      .select("employee_id, email, used_at, expires_at")
       .eq("company_id", companyId)
       .in("employee_id", employeeIds)
       .order("created_at", { ascending: false });
@@ -181,6 +181,7 @@ export async function GET(request: Request) {
     }
     const pendingInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmployeeIds = new Set<string>();
+    const acceptedInviteEmails = new Set<string>();
     for (const row of (inviteStatusRows ?? []) as Array<Record<string, unknown>>) {
       const employeeId = normalizeId(row.employee_id);
       if (!employeeId) continue;
@@ -188,6 +189,8 @@ export async function GET(request: Request) {
       const expiresAt = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.POSITIVE_INFINITY;
       if (usedAt) {
         acceptedInviteEmployeeIds.add(employeeId);
+        const usedEmail = String(row.email ?? "").trim().toLowerCase();
+        if (usedEmail) acceptedInviteEmails.add(usedEmail);
         continue;
       }
       if (expiresAt > Date.now()) {
@@ -195,12 +198,42 @@ export async function GET(request: Request) {
       }
     }
 
+    const employeeEmails = Array.from(
+      new Set(
+        items
+          .map((item) => String(item.email ?? "").trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+    if (employeeEmails.length > 0) {
+      const acceptedByEmailResult = await supabase
+        .from("invite_tokens")
+        .select("email")
+        .eq("company_id", companyId)
+        .not("used_at", "is", null)
+        .in("email", employeeEmails);
+      if (!acceptedByEmailResult.error) {
+        for (const row of (acceptedByEmailResult.data ?? []) as Array<Record<string, unknown>>) {
+          const value = String(row.email ?? "").trim().toLowerCase();
+          if (value) acceptedInviteEmails.add(value);
+        }
+      }
+    }
+
     const companyMemberEmails = new Set<string>();
+    const companyUserIdByEmail = new Map<string, string>();
+    const membershipRoleByUserId = new Map<string, string>();
     const membershipsResult = await supabase
       .from("memberships")
-      .select("user_id")
+      .select("user_id, role")
       .eq("company_id", companyId);
     if (!membershipsResult.error) {
+      for (const row of (membershipsResult.data ?? []) as Array<Record<string, unknown>>) {
+        const membershipUserId = normalizeId(row.user_id);
+        if (!membershipUserId) continue;
+        const membershipRole = mapRoleForOutput(row.role);
+        if (membershipRole) membershipRoleByUserId.set(membershipUserId, membershipRole);
+      }
       const memberUserIds = Array.from(
         new Set((membershipsResult.data ?? []).map((row: Record<string, unknown>) => normalizeId(row.user_id)).filter(Boolean))
       );
@@ -213,6 +246,8 @@ export async function GET(request: Request) {
           for (const row of (profilesResult.data ?? []) as Array<Record<string, unknown>>) {
             const email = String(row.email ?? "").trim().toLowerCase();
             if (email) companyMemberEmails.add(email);
+            const profileUserId = normalizeId(row.id);
+            if (email && profileUserId) companyUserIdByEmail.set(email, profileUserId);
           }
         }
       }
@@ -286,9 +321,19 @@ export async function GET(request: Request) {
     // Time entries table is not present in current schema; keep deterministic placeholder.
     for (const item of items) {
       const employeeEmail = String(item.email ?? "").trim().toLowerCase();
+      const linkedUserId =
+        String(item.userId ?? "").trim() ||
+        companyUserIdByEmail.get(employeeEmail) ||
+        "";
+      const membershipRole = linkedUserId ? membershipRoleByUserId.get(linkedUserId) : null;
+      if (membershipRole) {
+        item.role = membershipRole;
+      }
       if (item.userId) {
         item.accountStatus = "active";
       } else if (employeeEmail && companyMemberEmails.has(employeeEmail)) {
+        item.accountStatus = "active";
+      } else if (employeeEmail && acceptedInviteEmails.has(employeeEmail)) {
         item.accountStatus = "active";
       } else if (pendingInviteEmployeeIds.has(item.id)) {
         item.accountStatus = "pending";

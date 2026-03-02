@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { createFallbackEvent } from "@/lib/calendar/fallbackStore";
 
 type AttendeeInput = {
   attendeeType: "user" | "employee" | "external";
@@ -120,14 +122,17 @@ function isMissingScheduleAssignmentsTable(message: string) {
   return normalized.includes("schedule_assignments") && (normalized.includes("does not exist") || normalized.includes("not find"));
 }
 
+function isMissingCalendarTables(message: string) {
+  const normalized = message.toLowerCase();
+  const referencesCalendarTables =
+    normalized.includes("calendar_events") || normalized.includes("calendar_event_attendees");
+  return referencesCalendarTables && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
 export async function POST(request: Request) {
   try {
-    let access: Awaited<ReturnType<typeof requireRole>>;
-    try {
-      access = await requireRole(["admin", "pm"]);
-    } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const role = await getEffectiveRole();
+    if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const body = await request.json().catch(() => null);
     const parsedBody = createEventSchema.safeParse(body);
@@ -145,10 +150,85 @@ export async function POST(request: Request) {
     }
 
     const { supabase, companyId } = await getCompanyId();
+    const authUserResult = await supabase.auth.getUser();
+    const authEmail = String(authUserResult.data?.user?.email ?? "").trim().toLowerCase();
     const payload = parsedBody.data;
+    const isAdminOrPm = role === "admin" || role === "pm";
+    if (!isAdminOrPm && payload.visibility === "company") {
+      payload.visibility = "attendees";
+    }
+    let access: Awaited<ReturnType<typeof requireRole>> | { userId: string };
+    if (isAdminOrPm) {
+      try {
+        access = await requireRole(["admin", "pm"]);
+      } catch {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    } else {
+      const tenant = await getCompanyId();
+      access = { userId: tenant.userId };
+    }
     const warnings: string[] = [];
 
-    const employeeAttendeeIds = payload.attendees
+    const uniqueEmployeeIds = Array.from(
+      new Set(
+        payload.attendees
+          .filter((attendee: AttendeeInput) => attendee.attendeeType === "employee" && attendee.employeeId)
+          .map((attendee: AttendeeInput) => String(attendee.employeeId))
+      )
+    );
+
+    const userIdByEmployeeId = new Map<string, string>();
+    if (uniqueEmployeeIds.length > 0) {
+      const employeeUsersResult = await supabase
+        .from("employees")
+        .select("id, user_id, email")
+        .eq("company_id", companyId)
+        .in("id", uniqueEmployeeIds);
+      if (!employeeUsersResult.error) {
+        for (const row of employeeUsersResult.data ?? []) {
+          const employeeId = String((row as { id?: string }).id ?? "");
+          const linkedUserId = String((row as { user_id?: string | null }).user_id ?? "").trim();
+          const employeeEmail = String((row as { email?: string | null }).email ?? "").trim().toLowerCase();
+          const inferredUserId = !linkedUserId && authEmail && employeeEmail === authEmail ? String(access.userId) : "";
+          if (employeeId && linkedUserId) {
+            userIdByEmployeeId.set(employeeId, linkedUserId);
+          } else if (employeeId && inferredUserId) {
+            userIdByEmployeeId.set(employeeId, inferredUserId);
+          }
+        }
+      }
+    }
+
+    const normalizedAttendeesRaw = payload.attendees.flatMap((attendee: AttendeeInput) => {
+      if (attendee.attendeeType !== "employee" || !attendee.employeeId) return [attendee];
+      const employeeId = String(attendee.employeeId);
+      const linkedUserId = userIdByEmployeeId.get(employeeId);
+      if (!linkedUserId) return [attendee];
+      return [
+        attendee,
+        {
+          attendeeType: "user" as const,
+          userId: linkedUserId,
+          responseStatus: attendee.responseStatus ?? "invited",
+        },
+      ];
+    });
+    const seenAttendees = new Set<string>();
+    const normalizedAttendees: AttendeeInput[] = [];
+    for (const attendee of normalizedAttendeesRaw) {
+      const key =
+        attendee.attendeeType === "user"
+          ? `user:${String(attendee.userId || "")}`
+          : attendee.attendeeType === "employee"
+            ? `employee:${String(attendee.employeeId || "")}`
+            : `external:${String(attendee.externalName || "").toLowerCase()}:${String(attendee.externalContact || "").toLowerCase()}`;
+      if (seenAttendees.has(key)) continue;
+      seenAttendees.add(key);
+      normalizedAttendees.push(attendee);
+    }
+
+    const employeeAttendeeIds = normalizedAttendees
       .filter((attendee: AttendeeInput) => attendee.attendeeType === "employee" && attendee.employeeId)
       .map((attendee: AttendeeInput) => String(attendee.employeeId));
     if (employeeAttendeeIds.length > 0) {
@@ -187,10 +267,54 @@ export async function POST(request: Request) {
       .single();
 
     if (insertEventResult.error || !insertEventResult.data) {
+      if (insertEventResult.error && isMissingCalendarTables(insertEventResult.error.message)) {
+        const fallbackEvent = createFallbackEvent({
+          company_id: companyId,
+          title: payload.title,
+          description: payload.description ?? "",
+          location_text: payload.locationText ?? "",
+          starts_at: payload.startsAt,
+          ends_at: payload.endsAt,
+          event_type: payload.eventType,
+          visibility: payload.visibility,
+          created_by: access.userId,
+          attendees: normalizedAttendees.map((attendee: AttendeeInput) => ({
+            attendee_type: attendee.attendeeType!,
+            user_id: attendee.userId ?? null,
+            employee_id: attendee.employeeId ?? null,
+            external_name: attendee.externalName ?? null,
+            external_contact: attendee.externalContact ?? null,
+            response_status: attendee.responseStatus ?? "invited",
+          })),
+        });
+        const item = mapEvent(
+          {
+            id: fallbackEvent.id,
+            title: fallbackEvent.title,
+            description: fallbackEvent.description,
+            location_text: fallbackEvent.location_text,
+            starts_at: fallbackEvent.starts_at,
+            ends_at: fallbackEvent.ends_at,
+            event_type: fallbackEvent.event_type,
+            visibility: fallbackEvent.visibility,
+            created_by: fallbackEvent.created_by,
+            created_at: fallbackEvent.created_at,
+          },
+          fallbackEvent.attendees.map((attendee) => ({
+            attendee_type: attendee.attendee_type,
+            user_id: attendee.user_id,
+            employee_id: attendee.employee_id,
+            external_name: attendee.external_name,
+            external_contact: attendee.external_contact,
+            response_status: attendee.response_status,
+          }))
+        );
+        return NextResponse.json({ item });
+      }
       return NextResponse.json({ error: insertEventResult.error?.message ?? "Failed to create event" }, { status: 400 });
     }
 
-    const attendeesPayload = payload.attendees.map((attendee: AttendeeInput) => ({
+    const attendeesPayload = normalizedAttendees.map((attendee: AttendeeInput) => ({
       company_id: companyId,
       event_id: insertEventResult.data.id,
       attendee_type: attendee.attendeeType,
@@ -224,7 +348,7 @@ export async function POST(request: Request) {
     const recipientUserIds = Array.from(
       new Set([
         access.userId,
-        ...payload.attendees
+        ...normalizedAttendees
           .filter((attendee: AttendeeInput) => attendee.attendeeType === "user" && attendee.userId)
           .map((attendee: AttendeeInput) => String(attendee.userId)),
       ])

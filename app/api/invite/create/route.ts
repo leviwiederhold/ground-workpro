@@ -61,6 +61,16 @@ export async function POST(request: Request) {
 
     const email = String(payload.email).trim().toLowerCase();
     const role = normalizeRole(payload.role ?? employeeRow.data.role ?? "operator");
+
+    const employeeUpdate = await supabase
+      .from("employees")
+      .update({ email, role })
+      .eq("company_id", companyId)
+      .eq("id", payload.employeeId);
+    if (employeeUpdate.error) {
+      return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
+    }
+
     const token = randomBytes(24).toString("base64url");
 
     const insertResult = await supabase.from("invite_tokens").insert({

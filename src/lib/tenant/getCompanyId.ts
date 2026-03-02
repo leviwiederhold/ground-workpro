@@ -120,5 +120,5 @@ export async function getCompanyId() {
   Sentry.setTag("companyId", String(companyId));
   Sentry.setTag("userId", String(userData.user.id));
 
-  return { supabase, companyId, userId: userData.user.id };
+  return { supabase, companyId, userId: userData.user.id, userEmail: String(userData.user.email ?? "").trim().toLowerCase() };
 }

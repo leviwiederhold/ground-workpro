@@ -62,7 +62,7 @@ export async function GET(request: Request) {
 
     if (memberships.error) {
       if (isMissingMessagesTables(memberships.error.message || "")) {
-        const fallbackItems = listFallbackChannels(companyId).map((channel) => {
+        const fallbackItems = listFallbackChannels(companyId, userId).map((channel) => {
           const channelMessages = listFallbackMessages(companyId, String(channel.id));
           const latest = channelMessages[channelMessages.length - 1];
           return {
@@ -130,7 +130,7 @@ export async function GET(request: Request) {
 
     const memberCountsResult = await supabase
       .from("message_channel_members")
-      .select("channel_id")
+      .select("channel_id, user_id")
       .eq("company_id", companyId)
       .in("channel_id", channelIds);
     if (memberCountsResult.error) {
@@ -165,18 +165,68 @@ export async function GET(request: Request) {
     }
 
     const memberCountByChannel = new Map<string, number>();
+    const memberUserIdsByChannel = new Map<string, string[]>();
     for (const member of memberCountsResult.data ?? []) {
       const key = String(member.channel_id);
       memberCountByChannel.set(key, (memberCountByChannel.get(key) ?? 0) + 1);
+      const users = memberUserIdsByChannel.get(key) ?? [];
+      users.push(String(member.user_id));
+      memberUserIdsByChannel.set(key, users);
     }
 
-    const items = (channelsResult.data ?? []).map((channel) => {
+    const otherUserIds = Array.from(
+      new Set(
+        Array.from(memberUserIdsByChannel.values())
+          .flat()
+          .filter((id) => id && id !== String(userId))
+      )
+    );
+
+    const profilesResult = otherUserIds.length
+      ? await supabase.from("profiles").select("id, full_name, email").in("id", otherUserIds)
+      : { data: [], error: null };
+    if (profilesResult.error) return serverError();
+    const employeeNamesResult = otherUserIds.length
+      ? await supabase
+          .from("employees")
+          .select("user_id, name, full_name")
+          .eq("company_id", companyId)
+          .in("user_id", otherUserIds)
+      : { data: [], error: null };
+    const employeeRows = employeeNamesResult.error ? [] : employeeNamesResult.data ?? [];
+
+    const displayNameByUserId = new Map<string, string>();
+    for (const row of profilesResult.data ?? []) {
+      const fullName = String(row.full_name ?? "").trim();
+      const email = String(row.email ?? "").trim();
+      const emailName = email ? email.split("@")[0] : "";
+      displayNameByUserId.set(String(row.id), fullName || emailName || "Team Member");
+    }
+    for (const row of employeeRows) {
+      const employeeName = String((row as { name?: string; full_name?: string }).name ?? (row as { name?: string; full_name?: string }).full_name ?? "").trim();
+      if (employeeName) displayNameByUserId.set(String((row as { user_id: string }).user_id), employeeName);
+    }
+
+    const rawItems = (channelsResult.data ?? []).map((channel) => {
       const key = String(channel.id);
       const latest = latestByChannel.get(key);
+      const rawName = String(channel.name ?? "");
+      const isLegacyDmName = rawName.toLowerCase().startsWith("dm-");
+      const effectiveKind = channel.kind === "direct" || isLegacyDmName ? "direct" : channel.kind || "channel";
+      let otherUserId: string | null = null;
+      if (effectiveKind === "direct") {
+        const members = memberUserIdsByChannel.get(key) ?? [];
+        const other = members.find((id) => id !== String(userId));
+        otherUserId = other ?? null;
+      }
+      const resolvedDirectName =
+        effectiveKind === "direct"
+          ? displayNameByUserId.get(String(otherUserId ?? "")) || "Direct Message"
+          : rawName;
       return {
         id: channel.id,
-        kind: channel.kind || "channel",
-        name: channel.name,
+        kind: effectiveKind,
+        name: resolvedDirectName,
         created_at: channel.created_at,
         updated_at: channel.updated_at,
         message_count: messageCountByChannel.get(key) ?? 0,
@@ -184,10 +234,29 @@ export async function GET(request: Request) {
         last_message_at: latest?.createdAt ?? null,
         last_message_preview: latest?.body ?? null,
         member_count: memberCountByChannel.get(key) ?? 0,
-        other_user_id: null,
+        other_user_id: otherUserId,
       };
     });
 
+    const dedupedByDirectTarget = new Map<string, (typeof rawItems)[number]>();
+    const passThroughItems: (typeof rawItems) = [];
+    for (const item of rawItems) {
+      if (item.kind !== "direct") {
+        passThroughItems.push(item);
+        continue;
+      }
+      const key = String(item.other_user_id || item.name || item.id);
+      const prev = dedupedByDirectTarget.get(key);
+      if (!prev) {
+        dedupedByDirectTarget.set(key, item);
+        continue;
+      }
+      const prevTs = String(prev.last_message_at || prev.created_at || "");
+      const itemTs = String(item.last_message_at || item.created_at || "");
+      if (itemTs >= prevTs) dedupedByDirectTarget.set(key, item);
+    }
+
+    const items = [...passThroughItems, ...Array.from(dedupedByDirectTarget.values())];
     items.sort((a, b) => String(b.last_message_at || b.created_at).localeCompare(String(a.last_message_at || a.created_at)));
     const totalUnread = items.reduce((sum, item) => sum + Number(item.unread_count ?? 0), 0);
     return Response.json({

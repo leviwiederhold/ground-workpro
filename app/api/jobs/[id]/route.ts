@@ -106,6 +106,9 @@ const parseMissingColumn = (message: string | undefined): string | null => {
   return null;
 };
 
+const isMissingTableError = (message: string | undefined) =>
+  /relation .* does not exist|Could not find the table/i.test(message ?? "");
+
 async function updateJobWithSchemaFallback(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
@@ -364,6 +367,32 @@ export async function DELETE(
       .eq("id", normalizedId)
       .maybeSingle();
 
+    const dependentCleanup = async (table: string) => {
+      const result = await supabase
+        .from(table)
+        .delete()
+        .eq("company_id", companyId)
+        .eq("job_id", normalizedId);
+      if (result.error && !isMissingTableError(result.error.message)) {
+        return result.error.message;
+      }
+      return null;
+    };
+
+    const cleanupErrors = await Promise.all([
+      dependentCleanup("job_employees"),
+      dependentCleanup("job_equipment"),
+      dependentCleanup("schedule_assignments"),
+      dependentCleanup("daily_reports"),
+      dependentCleanup("safety_logs"),
+      dependentCleanup("inventory_transactions"),
+      dependentCleanup("purchase_order_items"),
+    ]);
+    const firstCleanupError = cleanupErrors.find(Boolean);
+    if (firstCleanupError) {
+      return NextResponse.json({ error: firstCleanupError }, { status: 400 });
+    }
+
     const { data: deletedRow, error } = await supabase
       .from("jobs")
       .delete()
@@ -377,15 +406,19 @@ export async function DELETE(
     }
 
     if (deletedRow || beforeRow) {
-      await logAuditEvent({
-        supabase,
-        companyId,
-        actorUserId: userId,
-        eventType: "job.deleted",
-        entityType: "job",
-        entityId: normalizedId as string | number,
-        before: mapJob((deletedRow ?? beforeRow) as any),
-      });
+      try {
+        await logAuditEvent({
+          supabase,
+          companyId,
+          actorUserId: userId,
+          eventType: "job.deleted",
+          entityType: "job",
+          entityId: normalizedId as string | number,
+          before: mapJob((deletedRow ?? beforeRow) as any),
+        });
+      } catch {
+        // Do not fail deletion when optional audit infrastructure is unavailable.
+      }
     }
 
     return NextResponse.json({ success: true });

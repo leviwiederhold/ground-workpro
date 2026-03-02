@@ -24,11 +24,26 @@ test('mobile critical flows run without console errors', async ({ page }) => {
   await page.getByTestId('login-email').fill(email);
   await page.getByTestId('login-password').fill(password);
   await page.getByTestId('login-submit').click();
-  await page.waitForURL('**/');
+  try {
+    await page.waitForURL('**/', { timeout: 20_000 });
+  } catch {
+    await expect(page.getByTestId('nav-dashboard')).toBeVisible();
+  }
 
-  const subRes = await page.request.post('/api/test/set-subscription', {
+  const roleRes = await page.request.post('/api/test/set-role', { data: { role: 'admin' } });
+  expect(roleRes.status()).toBe(200);
+  await page.context().addCookies([{ name: 'e2e_role', value: 'admin', url: process.env.E2E_BASE_URL || 'http://localhost:3000' }]);
+
+  let subRes = await page.request.post('/api/test/set-subscription', {
     data: { subscription_status: 'active' },
+    timeout: 30_000,
   });
+  if (!subRes.ok()) {
+    subRes = await page.request.post('/api/test/set-subscription', {
+      data: { subscription_status: 'active' },
+      timeout: 30_000,
+    });
+  }
   expect(subRes.status()).toBe(200);
 
   const createBidRes = await page.request.post('/api/bids', {

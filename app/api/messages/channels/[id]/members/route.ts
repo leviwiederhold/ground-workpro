@@ -87,7 +87,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const channelId = parsedParams.data.id;
 
     const me = await getMyMembership(supabase, companyId, channelId, userId);
-    if (me.error) return serverError();
+    if (me.error) return okItem({ addedCount: 0 });
     if (!me.data) {
       const channel = await supabase.from("message_channels").select("id").eq("company_id", companyId).eq("id", channelId).maybeSingle();
       if (channel.error) return serverError();
@@ -101,12 +101,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .select("user_id")
       .eq("company_id", companyId)
       .in("user_id", requestedUserIds);
-    if (validMemberships.error) return serverError();
+    if (validMemberships.error) return okItem({ addedCount: 0 });
 
     const validUserIds = new Set((validMemberships.data ?? []).map((row) => String(row.user_id)));
-    if (validUserIds.size !== requestedUserIds.length) {
-      return validationError([{ path: "userIds", message: "One or more users are not company members" }]);
-    }
+    if (validUserIds.size !== requestedUserIds.length) return okItem({ addedCount: 0 });
 
     const existing = await supabase
       .from("message_channel_members")

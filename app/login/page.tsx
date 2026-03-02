@@ -61,6 +61,10 @@ export default function LoginPage() {
       await ensureTenantContext();
       router.replace("/");
       router.refresh();
+    } catch (submitError) {
+      const message =
+        submitError instanceof Error ? submitError.message : "Failed to sign in. Please try again.";
+      setError(message);
     } finally {
       setLoading(false);
     }

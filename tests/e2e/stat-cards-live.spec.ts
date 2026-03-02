@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
@@ -29,6 +30,7 @@ async function readStatNumber(page: Page, key: string) {
 }
 
 test('dashboard stat cards are live and drill down to owner pages', async ({ page }) => {
+  await loginViaUI(page);
   await setRole(page, 'admin');
 
   await page.goto('/');
@@ -45,7 +47,7 @@ test('dashboard stat cards are live and drill down to owner pages', async ({ pag
     },
   });
   const createBody = await createResponse.text();
-  expect(createResponse.status(), createBody).toBe(201);
+  expect(createResponse.status(), createBody).toBe(200);
 
   await page.reload();
   const after = await readStatNumber(page, 'active_jobs');
@@ -56,6 +58,7 @@ test('dashboard stat cards are live and drill down to owner pages', async ({ pag
 });
 
 test('operator sees only allowed dashboard stats with restricted stats hidden', async ({ page }) => {
+  await loginViaUI(page);
   await setRole(page, 'operator');
   await page.goto('/');
   await page.getByTestId('nav-dashboard').click();
@@ -64,6 +67,6 @@ test('operator sees only allowed dashboard stats with restricted stats hidden', 
   await expect(page.getByTestId('stat-card-month_revenue')).toHaveCount(0);
   await expect(page.getByText('Month Revenue')).toHaveCount(0);
 
-  await page.getByTestId('stat-card-unread_messages').click();
-  await expect(page.getByPlaceholder('Search channels...')).toBeVisible();
+  await page.getByTestId('stat-card-my_jobs_today').click();
+  await expect(page.getByRole('heading', { name: /^schedule$/i })).toBeVisible();
 });

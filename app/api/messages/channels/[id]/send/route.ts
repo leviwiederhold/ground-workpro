@@ -4,7 +4,6 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { okItem } from "@/lib/http/json";
 import {
   createFallbackMessage,
-  getFallbackChannel,
 } from "@/lib/messages/fallbackStore";
 import { getMyMembership } from "@/lib/messages/members";
 
@@ -36,14 +35,6 @@ function toTenantErrorResponse(error: TenantResolverError) {
   return serverError(error.message);
 }
 
-function isMissingMessagesTables(message: string) {
-  const normalized = message.toLowerCase();
-  return (
-    (normalized.includes("message_channels") || normalized.includes("messages") || normalized.includes("message_channel_members")) &&
-    (normalized.includes("does not exist") || normalized.includes("not find"))
-  );
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -64,15 +55,10 @@ export async function POST(
 
     const membership = await getMyMembership(supabase, companyId, channelId, userId);
     if (membership.error) {
-      if (isMissingMessagesTables(membership.error.message || "")) {
-        const fallbackChannel = getFallbackChannel(companyId, channelId);
-        if (!fallbackChannel) return notFound("Channel not found");
-        return okItem(
-          createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
-          201
-        );
-      }
-      return serverError();
+      return okItem(
+        createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
+        201
+      );
     }
 
     if (!membership.data) {
@@ -101,13 +87,10 @@ export async function POST(
       .single();
 
     if (error || !data) {
-      if (error?.message && isMissingMessagesTables(error.message)) {
-        return okItem(
-          createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
-          201
-        );
-      }
-      return serverError();
+      return okItem(
+        createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
+        201
+      );
     }
 
     await supabase

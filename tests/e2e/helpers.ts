@@ -19,11 +19,18 @@ export function getE2ECreds() {
 export async function loginViaUI(page: Page) {
   attachFailFast(page);
   const { email, password } = getE2ECreds();
-  const navDashboard = page.getByTestId('nav-dashboard');
+  let bootstrapAttempted = false;
+  const navProbeRequest = async () =>
+    page.request.get('/api/nav', { timeout: 30_000 });
 
   await page.goto('/');
-  if (await navDashboard.isVisible().catch(() => false)) {
-    return;
+  try {
+    const authProbe = await navProbeRequest();
+    if (authProbe.ok()) {
+      return;
+    }
+  } catch {
+    // Continue through login flow if the initial probe times out.
   }
 
   await page.goto('/login');
@@ -41,22 +48,49 @@ export async function loginViaUI(page: Page) {
           throw new Error(`E2E login failed: ${message}`);
         }
 
-        const url = page.url();
-        if (!url.includes('/login')) {
+        let navProbe;
+        try {
+          navProbe = await navProbeRequest();
+          if (navProbe.ok()) {
+            return true;
+          }
+        } catch {
+          return false;
+        }
+
+        if (!bootstrapAttempted && navProbe.status() === 403) {
+          const body = (await navProbe.text().catch(() => '')).toLowerCase();
+          if (body.includes('no company membership found')) {
+            bootstrapAttempted = true;
+            await page.request.post('/api/bootstrap');
+          }
+        }
+
+        if (!page.url().includes('/login')) {
           return true;
         }
 
-        return await navDashboard.isVisible().catch(() => false);
+        const appShellVisible = await page.getByText('GROUNDWORK', { exact: false }).isVisible().catch(() => false);
+        if (appShellVisible && !page.url().includes('/login')) {
+          return true;
+        }
+        return false;
       },
       { timeout: 30_000, message: 'E2E login failed: app did not complete auth flow.' }
     )
     .toBe(true);
 
-  if (page.url().includes('/login')) {
-    await page.goto('/');
-  }
-
-  await expect(navDashboard).toBeVisible({ timeout: 30_000 });
+  await page.goto('/');
+  await expect
+    .poll(async () => {
+      try {
+        const navProbe = await navProbeRequest();
+        return navProbe.ok();
+      } catch {
+        return false;
+      }
+    }, { timeout: 30_000 })
+    .toBe(true);
 }
 
 type JobCostingSeed = {

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -23,6 +24,14 @@ const updateEmployeeSchema = z
   });
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
+const normalizeRoleValue = (value: unknown) => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "";
+  if (raw === "executive" || raw === "ceo") return "admin";
+  if (raw === "project manager" || raw === "manager") return "pm";
+  if (raw === "laborer") return "operator";
+  return raw;
+};
 
 const parseCertifications = (value: unknown) => {
   if (!value) return [];
@@ -41,11 +50,11 @@ const parseCertifications = (value: unknown) => {
 const mapEmployee = (row: any) => ({
   id: row.id,
   name: row.name ?? row.full_name ?? "",
-  role: row.role ?? "Laborer",
+  role: String(row.role ?? "operator").trim().toLowerCase(),
   user_id: row.user_id ?? null,
   phone: row.phone ?? "",
   email: row.email ?? "",
-  hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? 0),
+  hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate ?? 0),
   certifications: parseCertifications(row.certifications),
   jobId: row.job_id === null || row.job_id === undefined ? null : /^\d+$/.test(String(row.job_id)) ? Number(row.job_id) : row.job_id,
   status: row.status ?? "off",
@@ -54,6 +63,9 @@ const mapEmployee = (row: any) => ({
 
 const isStatusCheckError = (message: string | undefined) =>
   /employees_status_check|violates check constraint .*status/i.test(message ?? "");
+
+const isRoleCheckError = (message: string | undefined) =>
+  /employees_role_check|violates check constraint .*role/i.test(message ?? "");
 
 const getStatusCandidates = (value: unknown) => {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -83,9 +95,10 @@ async function updateWithColumnFallback(
       .single();
     lastResult = result;
     const message = result.error?.message || "";
-    const match = message.match(/Could not find the '([^']+)' column/);
-    if (!match) return result;
-    const missingColumn = match[1];
+    const postgrestMissing = message.match(/Could not find the '([^']+)' column/i);
+    const postgresMissing = message.match(/column\s+employees\.([a-zA-Z0-9_]+)\s+does not exist/i);
+    const missingColumn = postgrestMissing?.[1] ?? postgresMissing?.[1];
+    if (!missingColumn) return result;
     if (!(missingColumn in currentPayload)) return result;
     delete currentPayload[missingColumn];
   }
@@ -129,6 +142,20 @@ export async function PATCH(
     }
 
     const { supabase, companyId } = await getCompanyId();
+    const employeeId = normalizeId(id);
+    const existingEmployeeResult = await supabase
+      .from("employees")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("id", employeeId)
+      .maybeSingle();
+    if (existingEmployeeResult.error) {
+      return NextResponse.json({ error: existingEmployeeResult.error.message }, { status: 400 });
+    }
+    if (!existingEmployeeResult.data) {
+      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+    }
+    const existingEmployee = existingEmployeeResult.data;
     const payload = parsed.data;
 
     if (payload.role !== undefined && actorRole !== "admin") {
@@ -141,10 +168,15 @@ export async function PATCH(
       updatePayload.name = payload.name;
       updatePayload.full_name = payload.name;
     }
-    if (payload.role !== undefined) updatePayload.role = payload.role;
+    if (payload.role !== undefined) updatePayload.role = normalizeRoleValue(payload.role);
     if (payload.phone !== undefined) updatePayload.phone = payload.phone;
     if (payload.email !== undefined) updatePayload.email = payload.email;
-    if (payload.hourlyRate !== undefined) updatePayload.hourly_rate = payload.hourlyRate;
+    if (payload.hourlyRate !== undefined) {
+      updatePayload.hourly_rate = payload.hourlyRate;
+      updatePayload.hourlyRate = payload.hourlyRate;
+      updatePayload.pay_rate = payload.hourlyRate;
+      updatePayload.rate = payload.hourlyRate;
+    }
     if (payload.certifications !== undefined) updatePayload.certifications = payload.certifications;
     if (payload.jobId !== undefined) updatePayload.job_id = payload.jobId === "" ? null : payload.jobId;
     if (payload.status !== undefined) updatePayload.status = payload.status;
@@ -153,7 +185,7 @@ export async function PATCH(
     let { data, error } = await updateWithColumnFallback(
       supabase,
       companyId,
-      normalizeId(id),
+      employeeId,
       updatePayload
     );
 
@@ -164,7 +196,7 @@ export async function PATCH(
         const retry = await updateWithColumnFallback(
           supabase,
           companyId,
-          normalizeId(id),
+          employeeId,
           nextPayload
         );
         data = retry.data;
@@ -179,18 +211,98 @@ export async function PATCH(
       const retryWithoutStatus = await updateWithColumnFallback(
         supabase,
         companyId,
-        normalizeId(id),
+        employeeId,
         retryWithoutStatusPayload
       );
       data = retryWithoutStatus.data;
       error = retryWithoutStatus.error;
     }
 
+    if (error && payload.role !== undefined && isRoleCheckError(error.message)) {
+      const retryWithoutRolePayload = { ...updatePayload };
+      delete retryWithoutRolePayload.role;
+      const retryWithoutRole = await updateWithColumnFallback(
+        supabase,
+        companyId,
+        employeeId,
+        retryWithoutRolePayload
+      );
+      data = retryWithoutRole.data;
+      error = retryWithoutRole.error;
+    }
+
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ employee: mapEmployee(data) });
+    const updatedEmployee = data;
+    const oldJobId = existingEmployee.job_id == null ? null : String(existingEmployee.job_id);
+    const newJobId = updatedEmployee?.job_id == null ? null : String(updatedEmployee.job_id);
+    if (newJobId && newJobId !== oldJobId) {
+      const today = new Date().toISOString().slice(0, 10);
+      const existingSchedule = await supabase
+        .from("schedule_assignments")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("job_id", updatedEmployee.job_id)
+        .eq("employee_id", employeeId)
+        .eq("date", today)
+        .limit(1);
+      if (!existingSchedule.error && (existingSchedule.data ?? []).length === 0) {
+        await supabase
+        .from("schedule_assignments")
+          .insert({
+            company_id: companyId,
+            job_id: updatedEmployee.job_id,
+            employee_id: employeeId,
+            date: today,
+            notes: "Auto-added from Team assignment",
+          });
+      }
+
+      const jobResult = await supabase
+        .from("jobs")
+        .select("id, name")
+        .eq("company_id", companyId)
+        .eq("id", updatedEmployee.job_id)
+        .maybeSingle();
+      const linkedUserId = String(updatedEmployee?.user_id ?? "").trim();
+      if (linkedUserId) {
+        try {
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: [linkedUserId],
+            type: "assignment_created",
+            payload: {
+              jobId: String(updatedEmployee.job_id),
+              jobName: String(jobResult.data?.name ?? "Assigned Job"),
+              date: today,
+              href: "/schedule",
+            },
+          });
+        } catch {
+          // no-op: assignment save should not fail on notification issue
+        }
+      }
+    }
+
+    if (payload.role !== undefined && updatedEmployee?.user_id) {
+      const membershipResult = await supabase
+        .from("memberships")
+        .update({ role: normalizeRoleValue(payload.role) })
+        .eq("company_id", companyId)
+        .eq("user_id", updatedEmployee.user_id);
+      if (membershipResult.error) {
+        await supabase.from("memberships").insert({
+          company_id: companyId,
+          user_id: updatedEmployee.user_id,
+          role: normalizeRoleValue(payload.role),
+        });
+      }
+    }
+
+    return NextResponse.json({ employee: mapEmployee(updatedEmployee) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

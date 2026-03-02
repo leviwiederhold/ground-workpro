@@ -616,6 +616,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [notifications, setNotifications] = useState([]);
       const [notificationsLoading, setNotificationsLoading] = useState(false);
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+      const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
 
       // Data State
@@ -710,6 +711,16 @@ const confirmDestructiveAction = (targetLabel) =>
           containerClass: 'bg-red-100',
           iconClass: 'text-red-700',
         },
+        safety_log_created: {
+          icon: 'shield-halved',
+          containerClass: 'bg-emerald-100',
+          iconClass: 'text-emerald-700',
+        },
+        work_order_reported: {
+          icon: 'screwdriver-wrench',
+          containerClass: 'bg-orange-100',
+          iconClass: 'text-orange-700',
+        },
         default: {
           icon: 'bell',
           containerClass: 'bg-gray-100',
@@ -733,7 +744,7 @@ const confirmDestructiveAction = (targetLabel) =>
         try {
           setNotificationsLoading(true);
           const [listResponse, countResponse] = await Promise.all([
-            fetch('/api/notifications?limit=20', { cache: 'no-store' }),
+            fetch('/api/activity/feed?limit=30', { cache: 'no-store' }),
             fetch('/api/notifications/unread-count', { cache: 'no-store' }),
           ]);
           const payload = await listResponse.json();
@@ -743,7 +754,7 @@ const confirmDestructiveAction = (targetLabel) =>
           if (countResponse.ok) {
             setUnreadNotificationsCount(Number(countPayload?.item?.count ?? 0));
           } else {
-            setUnreadNotificationsCount((payload.items || []).filter((item) => !item.is_read).length);
+            setUnreadNotificationsCount((payload.items || []).filter((item) => item.source === 'notification' && !item.is_read).length);
           }
         } catch {
           setNotifications([]);
@@ -844,8 +855,11 @@ const confirmDestructiveAction = (targetLabel) =>
       }, []);
 
       const handleMarkNotificationRead = async (notificationId) => {
+        const notification = notifications.find((item) => String(item.id) === String(notificationId));
+        if (!notification || notification.source !== 'notification') return;
+        const rawId = String(notification.id).startsWith('n:') ? String(notification.id).slice(2) : String(notification.id);
         try {
-          const response = await fetch(`/api/notifications/${notificationId}/read`, { method: 'POST' });
+          const response = await fetch(`/api/notifications/${rawId}/read`, { method: 'POST' });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) return;
           setNotifications((prev) =>
@@ -866,10 +880,77 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleMarkAllNotificationsRead = async () => {
-        const unreadIds = notifications.filter((item) => !item.is_read).map((item) => item.id);
+        const unreadIds = notifications
+          .filter((item) => item.source === 'notification' && !item.is_read)
+          .map((item) => item.id);
         if (unreadIds.length === 0) return;
         await Promise.all(unreadIds.map((id) => handleMarkNotificationRead(id)));
       };
+
+      const notificationItems = useMemo(() => {
+        if (notificationFilter === 'unread') {
+          return notifications.filter((item) => !item.is_read);
+        }
+        return notifications;
+      }, [notifications, notificationFilter]);
+
+      const handleOpenNotification = useCallback(async (notification) => {
+        const href = String(notification?.payload?.href || '').trim();
+        if (!href) return;
+        const routeMap = {
+          '/jobs': 'jobs',
+          '/maintenance': 'maintenance',
+          '/safety': 'safety',
+          '/messages': 'messages',
+          '/inventory': 'inventory',
+          '/schedule': 'schedule',
+          '/fleet': 'fleet',
+          '/team': 'team',
+          '/reports': 'reports',
+          '/vendors': 'vendors',
+          '/bids': 'bids',
+          '/documents': 'documents',
+        };
+        const [path] = href.split('?');
+        setCurrentView(routeMap[path] || 'dashboard');
+        setShowNotifications(false);
+        if (!notification.is_read) {
+          await handleMarkNotificationRead(notification.id);
+        }
+      }, [setCurrentView]);
+
+      const handleRespondToEventInvite = useCallback(async (notification, responseStatus) => {
+        const eventId = String(notification?.payload?.eventId || '').trim();
+        if (!eventId) return;
+        try {
+          const response = await fetch(`/api/calendar/events/${eventId}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ responseStatus }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) return;
+          setNotifications((prev) =>
+            prev.map((item) =>
+              String(item.id) === String(notification.id)
+                ? {
+                    ...item,
+                    is_read: true,
+                    read_at: new Date().toISOString(),
+                    message:
+                      responseStatus === 'accepted'
+                        ? 'You accepted this event invitation.'
+                        : 'You declined this event invitation.',
+                  }
+                : item
+            )
+          );
+          await loadNotifications();
+          setCalendarRefreshVersion((prev) => prev + 1);
+        } catch {
+          // no-op
+        }
+      }, [loadNotifications]);
 
       useEffect(() => {
         let isMounted = true;
@@ -905,6 +986,28 @@ const confirmDestructiveAction = (targetLabel) =>
 
       useEffect(() => {
         loadNotifications();
+      }, [loadNotifications]);
+
+      useEffect(() => {
+        const poll = () => {
+          if (typeof document !== 'undefined' && document.hidden) return;
+          loadNotifications();
+        };
+        const intervalId = setInterval(poll, 30000);
+        const onVisibilityChange = () => {
+          if (!document.hidden) {
+            loadNotifications();
+          }
+        };
+        if (typeof document !== 'undefined') {
+          document.addEventListener('visibilitychange', onVisibilityChange);
+        }
+        return () => {
+          clearInterval(intervalId);
+          if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+          }
+        };
       }, [loadNotifications]);
 
       useEffect(() => {
@@ -1497,13 +1600,27 @@ const confirmDestructiveAction = (targetLabel) =>
                             Mark all read
                           </button>
                         </div>
+                        <div className="px-3 py-2 border-b border-gray-100 bg-white flex items-center gap-2">
+                          <button
+                            className={`px-2 py-1 text-xs rounded ${notificationFilter === 'all' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                            onClick={() => setNotificationFilter('all')}
+                          >
+                            All
+                          </button>
+                          <button
+                            className={`px-2 py-1 text-xs rounded ${notificationFilter === 'unread' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                            onClick={() => setNotificationFilter('unread')}
+                          >
+                            Unread
+                          </button>
+                        </div>
                         <div className="max-h-96 overflow-y-auto">
                           {notificationsLoading ? (
                             <div className="px-4 py-3 text-sm text-gray-500">Loading notifications...</div>
-                          ) : notifications.length === 0 ? (
+                          ) : notificationItems.length === 0 ? (
                             <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
                           ) : (
-                            notifications.map((notification) => {
+                            notificationItems.map((notification) => {
                               const visual = notificationVisuals[notification.notification_type] || notificationVisuals.default;
                               return (
                                 <div key={notification.id} className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${!notification.is_read ? 'bg-brand-50/30' : ''}`}>
@@ -1516,17 +1633,49 @@ const confirmDestructiveAction = (targetLabel) =>
                                         <p className="font-medium text-gray-900 text-sm">{notification.title}</p>
                                         {!notification.is_read && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
                                       </div>
+                                      {notification.actorName && (
+                                        <p className="text-xs text-gray-500">{notification.actorName}</p>
+                                      )}
                                       <p className="text-sm text-gray-600">{notification.message}</p>
                                       <div className="mt-1 flex items-center justify-between gap-3">
                                         <p className="text-xs text-gray-400">{formatNotificationTime(notification.created_at)}</p>
-                                        {!notification.is_read && (
-                                          <button
-                                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                                            onClick={() => handleMarkNotificationRead(notification.id)}
-                                          >
-                                            Mark read
-                                          </button>
-                                        )}
+                                        <div className="flex items-center gap-3">
+                                          {notification.source === 'notification' &&
+                                            notification.notification_type === 'event_invited' &&
+                                            !notification.is_read &&
+                                            notification?.payload?.eventId && (
+                                              <>
+                                                <button
+                                                  className="text-xs text-emerald-700 hover:text-emerald-800 font-medium"
+                                                  onClick={() => handleRespondToEventInvite(notification, 'accepted')}
+                                                >
+                                                  Accept
+                                                </button>
+                                                <button
+                                                  className="text-xs text-red-600 hover:text-red-700 font-medium"
+                                                  onClick={() => handleRespondToEventInvite(notification, 'declined')}
+                                                >
+                                                  Decline
+                                                </button>
+                                              </>
+                                            )}
+                                          {notification?.payload?.href && (
+                                            <button
+                                              className="text-xs text-gray-600 hover:text-gray-800 font-medium"
+                                              onClick={() => handleOpenNotification(notification)}
+                                            >
+                                              Open
+                                            </button>
+                                          )}
+                                          {!notification.is_read && (
+                                            <button
+                                              className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                                              onClick={() => handleMarkNotificationRead(notification.id)}
+                                            >
+                                              Mark read
+                                            </button>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
                                   </div>
@@ -1600,6 +1749,7 @@ const confirmDestructiveAction = (targetLabel) =>
             isOpen={showModal.type === 'calendar-event'}
             onClose={() => setShowModal({ type: null })}
             employees={employees}
+            currentRole={currentRole}
             initialData={showModal.data}
             onCreated={() => setCalendarRefreshVersion((prev) => prev + 1)}
           />
@@ -1717,12 +1867,16 @@ const confirmDestructiveAction = (targetLabel) =>
 
       const TIME_GRID_START_HOUR = 6;
       const TIME_GRID_END_HOUR = 18;
+      const TIME_SLOT_HEIGHT = 46;
       const timeGridHours = Array.from({ length: TIME_GRID_END_HOUR - TIME_GRID_START_HOUR }, (_, index) => TIME_GRID_START_HOUR + index);
+      const timelineHeight = timeGridHours.length * TIME_SLOT_HEIGHT;
 
       const getWeekDates = (offset = 0) => {
         const today = new Date();
         const monday = new Date(today);
-        monday.setDate(today.getDate() - today.getDay() + 1 + (offset * 7));
+        const day = today.getDay();
+        const offsetToMonday = day === 0 ? -6 : 1 - day;
+        monday.setDate(today.getDate() + offsetToMonday + (offset * 7));
         return Array.from({ length: 7 }, (_, i) => {
           const date = new Date(monday);
           date.setDate(monday.getDate() + i);
@@ -1730,7 +1884,12 @@ const confirmDestructiveAction = (targetLabel) =>
         });
       };
 
-      const asDateKey = (date) => date.toISOString().split('T')[0];
+      const asDateKey = (date) => {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
       const weekDates = getWeekDates(currentWeek);
       const weekStartKey = asDateKey(weekDates[0]);
       const activeJobs = (scopedJobs ?? jobs).filter(j => !['completed', 'canceled'].includes((j.status || '').toLowerCase()));
@@ -1780,14 +1939,15 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             setScheduleData(nextSchedule);
 
-            const nextEventsByDate = {};
-            for (const event of payload?.items?.events || []) {
-              const eventDate = String(event.startsAt || '').split('T')[0];
-              if (!eventDate) continue;
-              const assignedEvents = nextEventsByDate[eventDate] || [];
-              assignedEvents.push(event);
-              nextEventsByDate[eventDate] = assignedEvents;
-            }
+          const nextEventsByDate = {};
+          for (const event of payload?.items?.events || []) {
+            const start = new Date(event.startsAt);
+            const eventDate = Number.isNaN(start.getTime()) ? '' : asDateKey(start);
+            if (!eventDate) continue;
+            const assignedEvents = nextEventsByDate[eventDate] || [];
+            assignedEvents.push(event);
+            nextEventsByDate[eventDate] = assignedEvents;
+          }
             setEventsByDate(nextEventsByDate);
             setScopedJobs(
               Array.isArray(payload?.items?.jobs)
@@ -1837,13 +1997,13 @@ const confirmDestructiveAction = (targetLabel) =>
 
           if (!eventsResponse.ok) {
             setScheduleError(eventsPayload?.error || 'Failed to load calendar events.');
-            setEventsByDate({});
             return;
           }
 
           const nextEventsByDate = {};
           for (const event of eventsPayload?.items || []) {
-            const eventDate = String(event.startsAt || '').split('T')[0];
+            const start = new Date(event.startsAt);
+            const eventDate = Number.isNaN(start.getTime()) ? '' : asDateKey(start);
             if (!eventDate) continue;
             const assignedEvents = nextEventsByDate[eventDate] || [];
             assignedEvents.push(event);
@@ -1871,6 +2031,119 @@ const confirmDestructiveAction = (targetLabel) =>
         const start = new Date(startsAt);
         if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
         return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
+      };
+
+      const getEventStartHour = (startsAt) => {
+        const start = new Date(startsAt);
+        if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
+        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
+      };
+
+      const getEventEndHour = (endsAt) => {
+        const end = new Date(endsAt);
+        if (Number.isNaN(end.getTime())) return TIME_GRID_START_HOUR + 1;
+        const rounded = end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours();
+        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, rounded));
+      };
+
+      const getEventTypeClasses = (eventType) => {
+        const type = String(eventType || '').toLowerCase();
+        if (type === 'client') return { chip: 'bg-cyan-200 text-cyan-900 border-cyan-300', cell: 'bg-cyan-100 border-cyan-300 ring-1 ring-cyan-300' };
+        if (type === 'inspection') return { chip: 'bg-amber-200 text-amber-900 border-amber-300', cell: 'bg-amber-100 border-amber-300 ring-1 ring-amber-300' };
+        if (type === 'delivery') return { chip: 'bg-emerald-200 text-emerald-900 border-emerald-300', cell: 'bg-emerald-100 border-emerald-300 ring-1 ring-emerald-300' };
+        if (type === 'internal') return { chip: 'bg-slate-300 text-slate-900 border-slate-400', cell: 'bg-slate-200 border-slate-400 ring-1 ring-slate-400' };
+        return { chip: 'bg-indigo-200 text-indigo-900 border-indigo-300', cell: 'bg-indigo-100 border-indigo-300 ring-1 ring-indigo-300' };
+      };
+
+      const getMinutesSinceGridStart = (dateTimeValue) => {
+        const point = new Date(dateTimeValue);
+        if (Number.isNaN(point.getTime())) return 0;
+        const minutes = (point.getHours() - TIME_GRID_START_HOUR) * 60 + point.getMinutes();
+        return Math.max(0, Math.min((TIME_GRID_END_HOUR - TIME_GRID_START_HOUR) * 60, minutes));
+      };
+
+      const getEventBlockStyle = (event) => {
+        const startMinutes = getMinutesSinceGridStart(event.startsAt);
+        let endMinutes = getMinutesSinceGridStart(event.endsAt);
+        if (endMinutes <= startMinutes) {
+          endMinutes = Math.min(startMinutes + 60, (TIME_GRID_END_HOUR - TIME_GRID_START_HOUR) * 60);
+        }
+        const topPx = (startMinutes / 60) * TIME_SLOT_HEIGHT;
+        const heightPx = Math.max(30, ((endMinutes - startMinutes) / 60) * TIME_SLOT_HEIGHT);
+        return { topPx, heightPx, startMinutes, endMinutes };
+      };
+
+      const buildEventLanes = (timedEvents) => {
+        const sortedEvents = [...timedEvents].sort((a, b) => {
+          const aStart = getMinutesSinceGridStart(a.startsAt);
+          const bStart = getMinutesSinceGridStart(b.startsAt);
+          if (aStart !== bStart) return aStart - bStart;
+          const aEnd = getMinutesSinceGridStart(a.endsAt);
+          const bEnd = getMinutesSinceGridStart(b.endsAt);
+          return aEnd - bEnd;
+        });
+
+        const lanes = [];
+        const groups = [];
+
+        for (const event of sortedEvents) {
+          const block = getEventBlockStyle(event);
+          let laneIndex = lanes.findIndex((laneEnd) => laneEnd <= block.startMinutes);
+          if (laneIndex === -1) {
+            laneIndex = lanes.length;
+            lanes.push(block.endMinutes);
+          } else {
+            lanes[laneIndex] = block.endMinutes;
+          }
+
+          let group = groups.find((entry) => entry.endMinutes > block.startMinutes);
+          if (!group) {
+            group = { startMinutes: block.startMinutes, endMinutes: block.endMinutes, eventIds: [] };
+            groups.push(group);
+          } else {
+            group.endMinutes = Math.max(group.endMinutes, block.endMinutes);
+          }
+          group.eventIds.push(event.id);
+        }
+
+        const laneById = new Map();
+        for (const event of sortedEvents) {
+          const block = getEventBlockStyle(event);
+          let laneIndex = 0;
+          for (const priorEvent of sortedEvents) {
+            if (priorEvent.id === event.id) break;
+            const prior = getEventBlockStyle(priorEvent);
+            const overlaps = prior.startMinutes < block.endMinutes && block.startMinutes < prior.endMinutes;
+            if (overlaps) {
+              laneIndex += 1;
+            }
+          }
+
+          const group = groups.find((entry) => entry.eventIds.includes(event.id));
+          const maxConcurrent = group ? group.eventIds.reduce((max, eventId) => {
+            const target = sortedEvents.find((item) => item.id === eventId);
+            if (!target) return max;
+            const targetBlock = getEventBlockStyle(target);
+            const concurrent = group.eventIds.filter((otherId) => {
+              const other = sortedEvents.find((item) => item.id === otherId);
+              if (!other) return false;
+              const otherBlock = getEventBlockStyle(other);
+              return targetBlock.startMinutes < otherBlock.endMinutes && otherBlock.startMinutes < targetBlock.endMinutes;
+            }).length;
+            return Math.max(max, concurrent);
+          }, 1) : 1;
+
+          laneById.set(event.id, { laneIndex, laneCount: Math.max(1, maxConcurrent) });
+        }
+
+        return laneById;
+      };
+
+      const getHourFromClickPosition = (clickEvent) => {
+        const bounds = clickEvent.currentTarget.getBoundingClientRect();
+        const relativeY = clickEvent.clientY - bounds.top;
+        const hourOffset = Math.floor(relativeY / TIME_SLOT_HEIGHT);
+        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, TIME_GRID_START_HOUR + hourOffset));
       };
 
       const openEventModalAtSlot = (dateKey, startHour) => {
@@ -1948,7 +2221,8 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="overflow-x-auto">
               <Card className="p-0 min-w-[880px] border border-gray-200/80 shadow-sm">
                 {/* Days Header */}
-                <div className="grid grid-cols-7 border-b border-gray-200 bg-gray-50/70">
+                <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] border-b border-gray-200 bg-gray-50/70">
+                  <div className="border-r border-gray-200" />
                   {weekDates.map((date, i) => {
                     const isToday = date.toDateString() === new Date().toDateString();
                     return (
@@ -1960,11 +2234,33 @@ const confirmDestructiveAction = (targetLabel) =>
                   })}
                 </div>
 
-                <div className="grid grid-cols-7">
+                <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))]">
+                  <div className="relative border-r border-gray-200 bg-gray-50/40" style={{ height: `${timelineHeight + 96}px` }}>
+                    <div className="px-2 py-2 text-[10px] uppercase tracking-wide text-gray-400">All Day</div>
+                    <div className="relative" style={{ height: `${timelineHeight}px` }}>
+                      {timeGridHours.map((hour) => {
+                        const top = (hour - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT;
+                        return (
+                          <div key={`time-label-${hour}`} className="absolute inset-x-0" style={{ top: `${top}px` }}>
+                            <div className="h-px bg-transparent" />
+                            <div className="px-2 pt-1 text-[10px] font-medium text-gray-500">{formatHourLabel(hour)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                   {weekDates.map((date, i) => {
-                    const dateKey = date.toISOString().split('T')[0];
+                    const dateKey = asDateKey(date);
                     const assigned = getAssignmentsForDate(dateKey);
                     const dayEvents = eventsByDate[dateKey] || [];
+                    const allDayEvents = dayEvents.filter((event) => {
+                      const start = new Date(event.startsAt);
+                      const end = new Date(event.endsAt);
+                      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+                      return end.getTime() - start.getTime() >= 23 * 60 * 60 * 1000;
+                    });
+                    const timedEvents = dayEvents.filter((event) => !allDayEvents.includes(event));
+                    const eventLaneMap = buildEventLanes(timedEvents);
                     const allDayAssignments = assigned.filter((item) => !item.startsAt || !item.endsAt);
                     const timedAssignments = assigned.filter((item) => item.startsAt && item.endsAt);
 
@@ -1972,14 +2268,18 @@ const confirmDestructiveAction = (targetLabel) =>
                       <div
                         key={i}
                         data-testid={`schedule-day-${dateKey}`}
-                        className="min-h-[620px] p-2 border-r border-gray-200 last:border-r-0 transition-colors bg-white"
+                        className="border-r border-gray-200 last:border-r-0 transition-colors bg-white"
                       >
-                        <div className="space-y-1">
-                          {dayEvents.map(event => (
+                        <div className="p-2 space-y-1 min-h-[96px] border-b border-gray-100">
+                          {allDayEvents.map(event => (
                             <div
                               key={`event-${event.id}-${dateKey}`}
                               data-testid={`schedule-event-${event.id}`}
-                              className="text-xs p-1.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-[0_1px_0_rgba(0,0,0,0.03)]"
+                              className={`text-xs p-1.5 rounded-md border shadow-[0_1px_0_rgba(0,0,0,0.03)] cursor-pointer hover:brightness-95 ${getEventTypeClasses(event.eventType).chip}`}
+                              onClick={(clickEvent) => {
+                                clickEvent.stopPropagation();
+                                setShowModal({ type: 'calendar-event', data: event });
+                              }}
                             >
                               <div className="truncate font-medium">{event.title}</div>
                               <div className="truncate text-[10px] opacity-80 mt-0.5">
@@ -1989,9 +2289,6 @@ const confirmDestructiveAction = (targetLabel) =>
                               </div>
                             </div>
                           ))}
-                        </div>
-                        <div className="mt-2">
-                          <div className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">All Day</div>
                           <div className="space-y-1">
                             {allDayAssignments.map(item => (
                               <div
@@ -2014,31 +2311,72 @@ const confirmDestructiveAction = (targetLabel) =>
                             ))}
                           </div>
                         </div>
-                        <div className="mt-2 space-y-1">
+                        <div
+                          className="relative"
+                          style={{ height: `${timelineHeight}px` }}
+                          onClick={(clickEvent) => openEventModalAtSlot(dateKey, getHourFromClickPosition(clickEvent))}
+                        >
                           {timeGridHours.map((hour) => {
-                            const hourAssignments = timedAssignments.filter((item) => getTimedHour(item.startsAt) === hour);
+                            const top = (hour - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT;
                             return (
                               <div
-                                key={`${dateKey}-hour-${hour}`}
+                                key={`${dateKey}-hour-line-${hour}`}
                                 data-testid={`schedule-time-cell-${dateKey}-${hour}`}
-                                className="h-8 border border-gray-200/90 rounded-md px-1.5 hover:bg-brand-50/40 cursor-pointer transition-colors"
-                                onClick={() => openEventModalAtSlot(dateKey, hour)}
+                                className="absolute inset-x-0 border-t border-gray-100"
+                                style={{ top: `${top}px`, height: `${TIME_SLOT_HEIGHT}px` }}
+                              />
+                            );
+                          })}
+
+                          {timedAssignments.map((item) => {
+                            const top = (getTimedHour(item.startsAt) - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT + 4;
+                            return (
+                              <div
+                                key={`assignment-pill-${item.id}`}
+                                data-testid={`schedule-time-assignment-${item.id}`}
+                                className={`absolute left-2 right-2 z-10 text-[10px] truncate rounded px-2 py-0.5 border ${
+                                  item.type === 'equipment'
+                                    ? 'bg-blue-100/95 text-blue-800 border-blue-300'
+                                    : 'bg-emerald-100/95 text-emerald-800 border-emerald-300'
+                                }`}
+                                style={{ top: `${top}px` }}
+                                onClick={(clickEvent) => clickEvent.stopPropagation()}
+                                title={item.name}
                               >
-                                <div className="flex items-center justify-between text-[10px] text-gray-400">
-                                  <span>{formatHourLabel(hour)}</span>
-                                </div>
-                                {hourAssignments.map((item) => (
-                                  <div
-                                    key={`${item.id}-${hour}`}
-                                    data-testid={`schedule-time-assignment-${item.id}`}
-                                    className={`text-[10px] truncate rounded px-1 ${
-                                      item.type === 'equipment' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'
-                                    }`}
-                                  >
-                                    {item.name}
-                                  </div>
-                                ))}
+                                {item.name}
                               </div>
+                            );
+                          })}
+
+                          {timedEvents.map((event) => {
+                            const blockStyle = getEventBlockStyle(event);
+                            const laneData = eventLaneMap.get(event.id) || { laneIndex: 0, laneCount: 1 };
+                            const laneWidth = 100 / laneData.laneCount;
+                            const inset = 6;
+                            return (
+                              <button
+                                type="button"
+                                key={`timed-event-${event.id}-${dateKey}`}
+                                data-testid={`schedule-time-event-${event.id}`}
+                                aria-label={`Schedule event ${event.title}`}
+                                className={`absolute z-20 rounded-md border px-2 py-1 text-left shadow-sm hover:brightness-95 ${getEventTypeClasses(event.eventType).chip}`}
+                                style={{
+                                  top: `${blockStyle.topPx}px`,
+                                  height: `${blockStyle.heightPx}px`,
+                                  left: `calc(${laneData.laneIndex * laneWidth}% + ${inset}px)`,
+                                  width: `calc(${laneWidth}% - ${inset * 2}px)`,
+                                }}
+                                title={`${event.title} (${new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`}
+                                onClick={(clickEvent) => {
+                                  clickEvent.stopPropagation();
+                                  setShowModal({ type: 'calendar-event', data: event });
+                                }}
+                              >
+                                <div className="text-[11px] font-semibold truncate">{event.title}</div>
+                                <div className="text-[10px] opacity-80 truncate">
+                                  {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                                </div>
+                              </button>
                             );
                           })}
                         </div>
@@ -3510,6 +3848,7 @@ const confirmDestructiveAction = (targetLabel) =>
         status: 'active',
       });
       const [employeeSaveLoading, setEmployeeSaveLoading] = useState(false);
+      const [employeeDeleteLoading, setEmployeeDeleteLoading] = useState(false);
       const [inviteFeedback, setInviteFeedback] = useState('');
 
       const filteredEmployees = teamItems.filter(emp => {
@@ -3532,7 +3871,12 @@ const confirmDestructiveAction = (targetLabel) =>
         roles: [...new Set(teamItems.map(e => e.role))],
       };
 
-      const expiringCerts = selectedEmployee?.certifications.filter(c => getDaysUntil(c.expires) < 90) || [];
+      const selectedEmployeeCertifications = Array.isArray(selectedEmployeeRecord?.certifications)
+        ? selectedEmployeeRecord.certifications
+        : Array.isArray(selectedEmployee?.certifications)
+          ? selectedEmployee.certifications
+          : [];
+      const expiringCerts = selectedEmployeeCertifications.filter(c => getDaysUntil(c.expires) < 90) || [];
 
       const loadTeamItems = useCallback(async () => {
         try {
@@ -3553,8 +3897,8 @@ const confirmDestructiveAction = (targetLabel) =>
             assignedToday: item.assignedToday || null,
             hoursThisWeek: Number(item.hoursThisWeek || 0),
             pay: item.pay || { visible: false, hourlyRate: 0, loadedHourlyCost: 0 },
-            hourlyRate: Number(item.pay?.hourlyRate || 0),
-            certifications: [],
+            hourlyRate: Number(item.hourlyRate ?? item.pay?.hourlyRate ?? 0),
+            certifications: Array.isArray(item.certifications) ? item.certifications : [],
             phone: item.phone || '',
             email: item.email || '',
             clockedInAt: item.clockedInAt,
@@ -3567,6 +3911,19 @@ const confirmDestructiveAction = (targetLabel) =>
           setTeamLoading(false);
         }
       }, []);
+
+      const refreshEmployees = useCallback(async () => {
+        try {
+          const response = await fetch('/api/employees', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || 'Failed to refresh employees');
+          }
+          setEmployees(Array.isArray(payload?.employees) ? payload.employees : []);
+        } catch (error) {
+          setEmployeeActionError(error instanceof Error ? error.message : 'Failed to refresh employees');
+        }
+      }, [setEmployees]);
 
       useEffect(() => {
         loadTeamItems();
@@ -3638,15 +3995,37 @@ const confirmDestructiveAction = (targetLabel) =>
         setEmployeeSaveLoading(true);
         setEmployeeActionError('');
         try {
-          const requestBody = {
-            name: employeeForm.name.trim() || selectedEmployee.name || '',
-            role: employeeForm.role || selectedEmployee.role || 'operator',
-            phone: employeeForm.phone || '',
-            email: employeeForm.email || '',
-            ...(canEditPay ? { hourlyRate: Number(employeeForm.hourlyRate || 0) } : {}),
-            jobId: employeeForm.jobId || null,
-            status: employeeForm.status,
-          };
+          const baselineName = selectedEmployeeRecord?.name || selectedEmployee.name || '';
+          const baselineRole = (selectedEmployeeRecord?.role || selectedEmployee.role || 'operator').toLowerCase();
+          const baselinePhone = selectedEmployeeRecord?.phone || selectedEmployee.phone || '';
+          const baselineEmail = selectedEmployeeRecord?.email || selectedEmployee.email || '';
+          const baselineHourlyRate = Number(selectedEmployeeRecord?.hourlyRate ?? selectedEmployee.hourlyRate ?? 0);
+          const baselineJobId = selectedEmployeeRecord?.jobId
+            ? String(selectedEmployeeRecord.jobId)
+            : selectedEmployee.assignedToday?.jobId
+              ? String(selectedEmployee.assignedToday.jobId)
+              : '';
+          const baselineStatus = selectedEmployee.status === 'inactive' ? 'inactive' : 'active';
+
+          const requestBody = {};
+          if ((employeeForm.name || '').trim() !== String(baselineName)) requestBody.name = (employeeForm.name || '').trim();
+          if (String(employeeForm.role || '').toLowerCase() !== String(baselineRole)) requestBody.role = employeeForm.role || 'operator';
+          if ((employeeForm.phone || '') !== String(baselinePhone)) requestBody.phone = employeeForm.phone || '';
+          if ((employeeForm.email || '') !== String(baselineEmail)) requestBody.email = employeeForm.email || '';
+          if (canEditPay && Number(employeeForm.hourlyRate || 0) !== Number(baselineHourlyRate)) {
+            requestBody.hourlyRate = Number(employeeForm.hourlyRate || 0);
+          }
+          if (String(employeeForm.jobId || '') !== String(baselineJobId || '')) {
+            requestBody.jobId = employeeForm.jobId || null;
+          }
+          if (String(employeeForm.status || '') !== String(baselineStatus || '')) {
+            requestBody.status = employeeForm.status || 'active';
+          }
+
+          if (Object.keys(requestBody).length === 0) {
+            setEmployeeSaveLoading(false);
+            return;
+          }
 
           const response = await fetch(`/api/employees/${selectedEmployee.id}`, {
             method: 'PATCH',
@@ -3666,13 +4045,38 @@ const confirmDestructiveAction = (targetLabel) =>
             return;
           }
           setEmployees((prev) =>
-            prev.map((employee) => (employee.id === selectedEmployee.id ? payload.employee : employee))
+            prev.map((employee) => (String(employee.id) === String(selectedEmployee.id) ? payload.employee : employee))
           );
+          await refreshEmployees();
           await loadTeamItems();
         } catch {
           setEmployeeActionError('Failed to update employee');
         } finally {
           setEmployeeSaveLoading(false);
+        }
+      };
+
+      const handleDeleteEmployee = async () => {
+        if (!selectedEmployee?.id) return;
+        const confirmed = confirmDestructiveAction('this team member');
+        if (!confirmed) return;
+        setEmployeeDeleteLoading(true);
+        setEmployeeActionError('');
+        try {
+          const response = await fetch(`/api/employees/${selectedEmployee.id}`, { method: 'DELETE' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setEmployeeActionError(payload?.error || 'Failed to delete employee');
+            setEmployeeDeleteLoading(false);
+            return;
+          }
+          setSelectedEmployeeId(null);
+          await refreshEmployees();
+          await loadTeamItems();
+        } catch {
+          setEmployeeActionError('Failed to delete employee');
+        } finally {
+          setEmployeeDeleteLoading(false);
         }
       };
 
@@ -3943,7 +4347,7 @@ const confirmDestructiveAction = (targetLabel) =>
                       <option value="foreman">Foreman</option>
                       <option value="mechanic">Mechanic</option>
                       <option value="operator">Operator</option>
-                      <option value="Laborer">Laborer</option>
+                      <option value="operator">Laborer</option>
                     </select>
                   </div>
 
@@ -4020,7 +4424,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   <div className="pt-4 border-t border-gray-200">
                     <p className="text-xs text-gray-500 mb-2">Certifications</p>
                     <div className="space-y-2">
-                      {(selectedEmployee.certifications || []).map((cert, i) => {
+                      {selectedEmployeeCertifications.map((cert, i) => {
                         const daysLeft = getDaysUntil(cert.expires);
                         const isExpiring = daysLeft < 60;
                         const isExpired = daysLeft < 0;
@@ -4050,6 +4454,19 @@ const confirmDestructiveAction = (targetLabel) =>
                       </Button>
                     )}
                   </div>
+                  {canManageTeamProfiles && (
+                    <div className="pt-2">
+                      <Button
+                        variant="danger"
+                        size="sm"
+                        className="w-full"
+                        onClick={handleDeleteEmployee}
+                        disabled={employeeDeleteLoading || employeeSaveLoading}
+                      >
+                        <Icon name="trash" className="mr-1" /> {employeeDeleteLoading ? 'Deleting...' : 'Delete Team Member'}
+                      </Button>
+                    </div>
+                  )}
                   {canManageTeamProfiles && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
@@ -8407,104 +8824,6 @@ const confirmDestructiveAction = (targetLabel) =>
           </Card>
 
           <Card className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-900">
-                <Icon name="sliders" className="mr-2 text-brand-500" />
-                Pricing Settings
-              </h3>
-              <Button variant="brand" size="sm" onClick={handleSavePricingSettings} disabled={pricingSaving || pricingLoading}>
-                <Icon name={pricingSaving ? 'spinner' : 'floppy-disk'} className={`mr-2 ${pricingSaving ? 'animate-spin' : ''}`} />
-                {pricingSaving ? 'Saving...' : 'Save Rates'}
-              </Button>
-            </div>
-            {pricingLoading ? (
-              <p className="text-sm text-gray-500">Loading pricing settings...</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Operator Labor Rate</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.operator_labor_rate}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, operator_labor_rate: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Labor Burden %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.labor_burden_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, labor_burden_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Hauling Rate / Hour</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.hauling_rate_per_hour}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, hauling_rate_per_hour: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Dump Fee / Load</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.dump_fee_per_load}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, dump_fee_per_load: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Target Margin %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.target_margin_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, target_margin_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Contingency %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.contingency_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, contingency_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Markup %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.markup_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, markup_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  />
-                </div>
-              </div>
-            )}
-            {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
-            {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
-          </Card>
-
-          <Card className="p-4">
             <h3 className="font-semibold text-gray-900 mb-2">
               <Icon name="chart-line" className="mr-2 text-brand-500" />
               Financial KPIs
@@ -8614,6 +8933,104 @@ const confirmDestructiveAction = (targetLabel) =>
               </div>
             )}
           </Card>
+
+          <Card className="p-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900">
+                <Icon name="sliders" className="mr-2 text-brand-500" />
+                Pricing Settings
+              </h3>
+              <Button variant="brand" size="sm" onClick={handleSavePricingSettings} disabled={pricingSaving || pricingLoading}>
+                <Icon name={pricingSaving ? 'spinner' : 'floppy-disk'} className={`mr-2 ${pricingSaving ? 'animate-spin' : ''}`} />
+                {pricingSaving ? 'Saving...' : 'Save Rates'}
+              </Button>
+            </div>
+            {pricingLoading ? (
+              <p className="text-sm text-gray-500">Loading pricing settings...</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Operator Labor Rate</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.operator_labor_rate}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, operator_labor_rate: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Labor Burden %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.labor_burden_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, labor_burden_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Hauling Rate / Hour</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.hauling_rate_per_hour}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, hauling_rate_per_hour: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Dump Fee / Load</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.dump_fee_per_load}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, dump_fee_per_load: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Target Margin %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.target_margin_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, target_margin_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Contingency %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.contingency_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, contingency_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Markup %</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={pricingSettings.markup_percent}
+                    onChange={(e) => setPricingSettings({ ...pricingSettings, markup_percent: Number(e.target.value) || 0 })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            )}
+            {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
+            {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
+          </Card>
         </div>
       );
     };
@@ -8635,9 +9052,12 @@ const confirmDestructiveAction = (targetLabel) =>
         professional: { label: 'Professional', seatPrice: 79 },
       };
 
-      const seatCount = Math.max(1, Number(employees.length || 0));
+      const billableEmployees = (employees || []).filter((employee) => String(employee?.status || '').toLowerCase() !== 'inactive');
+      const seatCount = Math.max(1, Number(billableEmployees.length || 0));
+      const currentPlanKey = String(billingStatus?.plan_type || selectedPlan || 'starter');
       const selectedSeatPrice = pricingByPlan[selectedPlan]?.seatPrice || pricingByPlan.starter.seatPrice;
-      const estimatedMonthly = seatCount * selectedSeatPrice;
+      const currentSeatPrice = pricingByPlan[currentPlanKey]?.seatPrice || selectedSeatPrice;
+      const estimatedMonthly = seatCount * currentSeatPrice;
 
       useEffect(() => {
         let active = true;
@@ -8653,6 +9073,10 @@ const confirmDestructiveAction = (targetLabel) =>
               return;
             }
             setBillingStatus(payload?.item || null);
+            const loadedPlan = String(payload?.item?.plan_type || '');
+            if (loadedPlan && pricingByPlan[loadedPlan]) {
+              setSelectedPlan(loadedPlan);
+            }
           } catch {
             if (active) setError('Failed to load subscription status');
           } finally {
@@ -8673,10 +9097,15 @@ const confirmDestructiveAction = (targetLabel) =>
           const response = await fetch(path, { method: 'POST' });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) {
-            setError(payload?.error || 'Billing action failed');
+            const reason = payload?.error || 'Billing action failed';
+            setError(reason);
             return;
           }
-          setActionMessage('Billing action started.');
+          setActionMessage(
+            path.includes('/checkout')
+              ? 'Checkout session requested. Once Stripe is configured, this will redirect to checkout.'
+              : 'Billing portal requested. Once Stripe is configured, this will open customer billing portal.'
+          );
         } catch {
           setError('Billing action failed');
         } finally {
@@ -8707,7 +9136,7 @@ const confirmDestructiveAction = (targetLabel) =>
               icon="dollar-sign"
               iconBgColor="bg-green-100"
               iconColor="text-green-600"
-              value={formatCurrency(selectedSeatPrice)}
+              value={formatCurrency(currentSeatPrice)}
               label="Price Per Seat / Month"
             />
             <StatCard
@@ -8768,6 +9197,14 @@ const confirmDestructiveAction = (targetLabel) =>
                 />
               </div>
             </div>
+            <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+              <p className="text-xs text-gray-600">
+                Billing model: <span className="font-medium text-gray-800">per employee seat</span>. Billable seats are active team members.
+                Current estimate: <span className="font-semibold text-gray-900">{seatCount}</span> seats ×
+                <span className="font-semibold text-gray-900"> {formatCurrency(currentSeatPrice)}</span> ={' '}
+                <span className="font-semibold text-gray-900">{formatCurrency(estimatedMonthly)}/mo</span>.
+              </p>
+            </div>
             <div className="flex gap-2 mt-5">
               <Button
                 variant="brand"
@@ -8775,7 +9212,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 disabled={actionLoading === '/api/billing/checkout'}
               >
                 <Icon name={actionLoading === '/api/billing/checkout' ? 'spinner' : 'credit-card'} className={`mr-2 ${actionLoading === '/api/billing/checkout' ? 'animate-spin' : ''}`} />
-                Start Subscription
+                Start Seat Subscription
               </Button>
               <Button
                 variant="secondary"
@@ -9350,9 +9787,13 @@ const confirmDestructiveAction = (targetLabel) =>
       const [membersError, setMembersError] = useState('');
       const [selectedAddMembers, setSelectedAddMembers] = useState([]);
       const [myUserId, setMyUserId] = useState('');
+      const [newIncomingCount, setNewIncomingCount] = useState(0);
+      const [pendingDirectContact, setPendingDirectContact] = useState(null);
       const messagesEndRef = useRef(null);
+      const previousUnreadRef = useRef(0);
 
       const normalized = (value) => String(value || '').trim().toLowerCase();
+      const looksLikeDmName = (value) => normalized(value).startsWith('dm-') || normalized(value) === 'direct message';
 
       const contactOptions = useMemo(() => {
         const userById = new Map((availableUsers || []).map((user) => [String(user.userId), user]));
@@ -9360,17 +9801,21 @@ const confirmDestructiveAction = (targetLabel) =>
 
         for (const employee of employees || []) {
           const explicitUserId = employee?.user_id ? String(employee.user_id) : null;
+          if (explicitUserId && myUserId && explicitUserId === myUserId) continue;
           const matchedUser = explicitUserId ? userById.get(explicitUserId) : null;
+          const preferredLabel = matchedUser?.displayName || employee?.name || employee?.full_name || "Team Member";
+          const preferredRole = matchedUser?.role || employee?.role || "";
           options.push({
             key: explicitUserId ? `user:${explicitUserId}` : `employee:${employee.id}`,
-            label: String(employee.name || employee.full_name || 'Team Member'),
-            subtitle: String(employee.role || ''),
+            label: String(preferredLabel),
+            subtitle: String(preferredRole),
             userId: explicitUserId || null,
             hasAccount: Boolean(matchedUser || explicitUserId),
           });
         }
 
         for (const user of availableUsers || []) {
+          if (myUserId && String(user.userId) === myUserId) continue;
           const key = `user:${user.userId}`;
           if (options.some((item) => item.key === key)) continue;
           options.push({
@@ -9383,7 +9828,29 @@ const confirmDestructiveAction = (targetLabel) =>
         }
 
         return options.sort((a, b) => a.label.localeCompare(b.label));
-      }, [availableUsers, employees]);
+      }, [availableUsers, employees, myUserId]);
+
+      const userDisplayNameById = useMemo(
+        () =>
+          new Map(
+            (availableUsers || []).map((user) => [String(user.userId), String(user.displayName || 'Team Member')])
+          ),
+        [availableUsers]
+      );
+
+      const getChannelDisplayName = useCallback(
+        (channel) => {
+          if (!channel) return 'Direct Message';
+          if (String(channel.kind || '') !== 'direct') return String(channel.name || '');
+          const otherUserId = String(channel.other_user_id || '');
+          if (otherUserId && userDisplayNameById.has(otherUserId)) {
+            return String(userDisplayNameById.get(otherUserId));
+          }
+          if (looksLikeDmName(channel.name)) return 'Direct Message';
+          return String(channel.name || 'Direct Message');
+        },
+        [userDisplayNameById]
+      );
 
       const loadUsers = useCallback(async () => {
         const response = await fetch('/api/messages/users', { cache: 'no-store' });
@@ -9402,10 +9869,21 @@ const confirmDestructiveAction = (targetLabel) =>
           const nextChannels = payload.items || [];
           setChannels(nextChannels);
           setActiveChannel((prev) => {
-            if (!prev) return nextChannels[0] || null;
+            if (!prev) return null;
             const refreshed = nextChannels.find((c) => String(c.id) === String(prev.id));
-            return refreshed || (nextChannels[0] || null);
+            return refreshed || null;
           });
+          const totalUnread = nextChannels.reduce(
+            (sum, channel) => sum + Number(channel.unread_count || 0),
+            0
+          );
+          if (
+            previousUnreadRef.current > 0 &&
+            totalUnread > previousUnreadRef.current
+          ) {
+            setNewIncomingCount((count) => count + (totalUnread - previousUnreadRef.current));
+          }
+          previousUnreadRef.current = totalUnread;
         } catch (error) {
           setChannels([]);
           setChannelsError(error instanceof Error ? error.message : 'Failed to load channels');
@@ -9474,6 +9952,7 @@ const confirmDestructiveAction = (targetLabel) =>
           setMembers([]);
           return;
         }
+        setNewIncomingCount(0);
         loadMessages(activeChannel.id);
       }, [activeChannel, loadMessages]);
 
@@ -9494,34 +9973,26 @@ const confirmDestructiveAction = (targetLabel) =>
       );
 
       const startDirectChat = async (contact) => {
-        try {
-          setCreateChannelLoading(true);
-          setCreateChannelError('');
-          if (!contact.userId) {
-            throw new Error('This team member does not have an account yet');
-          }
-          const existing = channels.find((channel) => String(channel.kind || '') === 'direct' && String(channel.other_user_id || '') === String(contact.userId));
-          if (existing) {
-            setActiveChannel(existing);
-            return;
-          }
-
-          const response = await fetch('/api/messages/direct/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              userId: contact.userId,
-            }),
-          });
-          const payload = await response.json();
-          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to create chat');
-          await loadChannels();
-          setActiveChannel(payload.item);
-        } catch (error) {
-          setCreateChannelError(error instanceof Error ? error.message : 'Failed to create chat');
-        } finally {
-          setCreateChannelLoading(false);
+        setCreateChannelError('');
+        if (!contact.userId) {
+          setCreateChannelError('This team member does not have an account yet');
+          return;
         }
+        const existing = channels.find(
+          (channel) =>
+            String(channel.kind || '') === 'direct' &&
+            String(channel.other_user_id || '') === String(contact.userId)
+        );
+        if (existing) {
+          setPendingDirectContact(null);
+          setActiveChannel(existing);
+          return;
+        }
+        setActiveChannel(null);
+        setPendingDirectContact({
+          userId: String(contact.userId),
+          label: String(contact.label || 'Team Member'),
+        });
       };
 
       const handleCreateChannel = async () => {
@@ -9537,18 +10008,15 @@ const confirmDestructiveAction = (targetLabel) =>
             )
           );
           if (memberUserIds.length === 1) {
-            const directResponse = await fetch('/api/messages/direct/start', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: memberUserIds[0] }),
-            });
-            const directPayload = await directResponse.json();
-            if (!directResponse.ok || !directPayload?.item) throw new Error(directPayload?.error || 'Failed to create direct chat');
             setShowNewChannel(false);
             setNewChannelName('');
             setSelectedNewChatUsers([]);
-            await loadChannels();
-            setActiveChannel(directPayload.item);
+            const selected = selectedParticipants[0];
+            setActiveChannel(null);
+            setPendingDirectContact({
+              userId: String(memberUserIds[0]),
+              label: String(selected?.label || 'Team Member'),
+            });
             return;
           }
 
@@ -9571,6 +10039,7 @@ const confirmDestructiveAction = (targetLabel) =>
           setNewChannelName('');
           setSelectedNewChatUsers([]);
           await loadChannels();
+          setPendingDirectContact(null);
           setActiveChannel(payload.item);
         } catch (error) {
           setCreateChannelError(error instanceof Error ? error.message : 'Failed to create channel');
@@ -9580,11 +10049,26 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleSendMessage = async () => {
-        if (!messageText.trim() || !activeChannel?.id) return;
+        if (!messageText.trim()) return;
         try {
           setSendLoading(true);
           setSendError('');
-          const response = await fetch(`/api/messages/threads/${activeChannel.id}/send`, {
+          let channelId = activeChannel?.id ? String(activeChannel.id) : '';
+          if (!channelId && pendingDirectContact?.userId) {
+            const createResponse = await fetch('/api/messages/direct/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userId: pendingDirectContact.userId }),
+            });
+            const createPayload = await createResponse.json();
+            if (!createResponse.ok || !createPayload?.item?.id) {
+              throw new Error(createPayload?.error || 'Failed to create direct chat');
+            }
+            channelId = String(createPayload.item.id);
+          }
+          if (!channelId) return;
+
+          const response = await fetch(`/api/messages/threads/${channelId}/send`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ body: messageText.trim() }),
@@ -9592,8 +10076,10 @@ const confirmDestructiveAction = (targetLabel) =>
           const payload = await response.json();
           if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
           setMessageText('');
-          await loadMessages(activeChannel.id);
+          await loadMessages(channelId);
           await loadChannels();
+          setPendingDirectContact(null);
+          setActiveChannel((prev) => prev && String(prev.id) === channelId ? prev : { id: channelId, name: pendingDirectContact?.label || prev?.name || 'Direct message', kind: 'direct', message_count: 0 });
         } catch (error) {
           setSendError(error instanceof Error ? error.message : 'Failed to send message');
         } finally {
@@ -9648,6 +10134,11 @@ const confirmDestructiveAction = (targetLabel) =>
                   <Icon name="pen-to-square" />
                 </Button>
               </div>
+              {newIncomingCount > 0 && (
+                <p className="text-xs text-emerald-300">
+                  {newIncomingCount} new message{newIncomingCount > 1 ? 's' : ''} received
+                </p>
+              )}
               <div className="relative">
                 <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs" />
                 <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full pl-8 pr-3 py-2 bg-[#141922] border border-gray-800 rounded-lg text-sm text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500" />
@@ -9658,7 +10149,7 @@ const confirmDestructiveAction = (targetLabel) =>
               {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
                 <button key={channel.id} onClick={() => setActiveChannel(channel)} className={`w-full text-left px-4 py-3 border-b border-gray-800/70 hover:bg-[#151b26] ${activeChannel?.id === channel.id ? 'bg-brand-600/85' : ''}`} data-testid={`messages-channel-${channel.id}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}>{channel.kind === 'direct' ? channel.name : `# ${channel.name}`}</span>
+                    <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}>{channel.kind === 'direct' ? getChannelDisplayName(channel) : `# ${channel.name}`}</span>
                     {(channel.unread_count ?? channel.message_count) > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-800 text-gray-300'}`}>{channel.unread_count ?? channel.message_count}</span>}
                   </div>
                   <p className={`text-xs truncate ${activeChannel?.id === channel.id ? 'text-white/80' : 'text-gray-500'}`}>{channel.last_message_preview || 'No messages yet'}</p>
@@ -9690,7 +10181,7 @@ const confirmDestructiveAction = (targetLabel) =>
             <div className="flex-1 flex flex-col bg-[#11151d]">
               <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
                 <div>
-                  <h3 className="font-semibold text-gray-100" data-testid="messages-active-channel">{activeChannel.kind === 'direct' ? activeChannel.name : `# ${activeChannel.name}`}</h3>
+                  <h3 className="font-semibold text-gray-100" data-testid="messages-active-channel">{activeChannel.kind === 'direct' ? getChannelDisplayName(activeChannel) : `# ${activeChannel.name}`}</h3>
                   <p className="text-xs text-gray-400">{activeChannel.message_count || 0} messages</p>
                 </div>
                 <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
@@ -9716,7 +10207,31 @@ const confirmDestructiveAction = (targetLabel) =>
               <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
                 <div className="flex items-end gap-3">
                   <div className="flex-1 relative">
-                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={activeChannel.kind === 'direct' ? `Message ${activeChannel.name}` : `Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
+                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={activeChannel.kind === 'direct' ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
+                  </div>
+                  <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+                    <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+                {sendError && <p className="text-xs text-red-400 mt-2">{sendError}</p>}
+                <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
+              </div>
+            </div>
+          ) : pendingDirectContact ? (
+            <div className="flex-1 flex flex-col bg-[#11151d]">
+              <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
+                <div>
+                  <h3 className="font-semibold text-gray-100">Message {pendingDirectContact.label}</h3>
+                  <p className="text-xs text-gray-400">No messages yet</p>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gradient-to-b from-[#131824] to-[#0f131b]">
+                <div className="text-sm text-gray-500">Send the first message to start this chat.</div>
+              </div>
+              <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
+                <div className="flex items-end gap-3">
+                  <div className="flex-1 relative">
+                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
                   </div>
                   <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                     <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
@@ -9754,7 +10269,6 @@ const confirmDestructiveAction = (targetLabel) =>
                           }
                         />
                         <span>{contact.label}</span>
-                        {!contact.hasAccount && <span className="text-xs text-gray-400">(placeholder)</span>}
                       </label>
                     ))}
                   </div>
@@ -10621,7 +11135,7 @@ const confirmDestructiveAction = (targetLabel) =>
       </Modal>
     );
 
-    const CalendarEventModal = ({ isOpen, onClose, employees, initialData, onCreated }) => {
+    const CalendarEventModal = ({ isOpen, onClose, employees, currentRole, initialData, onCreated }) => {
       const [title, setTitle] = useState('');
       const [eventType, setEventType] = useState('meeting');
       const [visibility, setVisibility] = useState('attendees');
@@ -10636,8 +11150,12 @@ const confirmDestructiveAction = (targetLabel) =>
       const [externalName, setExternalName] = useState('');
       const [externalContact, setExternalContact] = useState('');
       const [saving, setSaving] = useState(false);
+      const [deleting, setDeleting] = useState(false);
       const [error, setError] = useState('');
       const [warning, setWarning] = useState('');
+      const isEditMode = Boolean(initialData?.id);
+      const canEditExisting = ['executive', 'operations', 'admin', 'pm'].includes(String(currentRole || '').toLowerCase());
+      const isReadOnly = isEditMode && !canEditExisting;
 
       useEffect(() => {
         if (!isOpen || typeof window === 'undefined') return;
@@ -10654,6 +11172,11 @@ const confirmDestructiveAction = (targetLabel) =>
 
       useEffect(() => {
         if (!isOpen) return;
+        if (initialData?.title !== undefined) setTitle(String(initialData.title || ''));
+        if (initialData?.eventType !== undefined) setEventType(String(initialData.eventType || 'meeting'));
+        if (initialData?.visibility !== undefined) setVisibility(String(initialData.visibility || 'attendees'));
+        if (initialData?.locationText !== undefined) setLocationText(String(initialData.locationText || ''));
+        if (initialData?.description !== undefined) setDescription(String(initialData.description || ''));
         if (!initialData?.startsAt) return;
         const start = new Date(initialData.startsAt);
         if (Number.isNaN(start.getTime())) return;
@@ -10752,8 +11275,9 @@ const confirmDestructiveAction = (targetLabel) =>
               externalContact: attendee.contact || undefined,
             })),
           ];
-          const response = await fetch('/api/calendar/events', {
-            method: 'POST',
+          const eventUrl = isEditMode ? `/api/calendar/events/${initialData.id}` : '/api/calendar/events';
+          const response = await fetch(eventUrl, {
+            method: isEditMode ? 'PATCH' : 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               title: title.trim(),
@@ -10763,7 +11287,7 @@ const confirmDestructiveAction = (targetLabel) =>
               endsAt: new Date(endsAt).toISOString(),
               locationText,
               description,
-              attendees,
+              ...(isEditMode ? {} : { attendees }),
             }),
           });
           const payload = await response.json().catch(() => ({}));
@@ -10779,18 +11303,44 @@ const confirmDestructiveAction = (targetLabel) =>
           if (typeof onCreated === 'function') onCreated();
           onClose();
         } catch {
-          setError('Failed to create event');
+          setError(isEditMode ? 'Failed to update event' : 'Failed to create event');
         } finally {
           setSaving(false);
         }
       };
 
+      const handleDelete = async () => {
+        if (!isEditMode || isReadOnly || !initialData?.id) return;
+        if (typeof window !== 'undefined') {
+          const confirmed = window.confirm('Delete this event? This cannot be undone.');
+          if (!confirmed) return;
+        }
+
+        try {
+          setDeleting(true);
+          setError('');
+          const response = await fetch(`/api/calendar/events/${initialData.id}`, { method: 'DELETE' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            setError(payload?.error || 'Failed to delete event');
+            return;
+          }
+          reset();
+          if (typeof onCreated === 'function') onCreated();
+          onClose();
+        } catch {
+          setError('Failed to delete event');
+        } finally {
+          setDeleting(false);
+        }
+      };
+
       return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Add Event" size="md">
+        <Modal isOpen={isOpen} onClose={onClose} title={isEditMode ? (isReadOnly ? 'Event Details' : 'Edit Event') : 'Add Event'} size="md">
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Weekly planning meeting" />
+              <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" placeholder="Weekly planning meeting" />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -10799,6 +11349,7 @@ const confirmDestructiveAction = (targetLabel) =>
                   type="datetime-local"
                   value={startsAt}
                   onChange={(e) => {
+                    if (isReadOnly) return;
                     const nextStart = e.target.value;
                     setStartsAt(nextStart);
                     const startDate = new Date(nextStart);
@@ -10807,18 +11358,19 @@ const confirmDestructiveAction = (targetLabel) =>
                       setEndsAt(toLocalInputValue(nextEndDate));
                     }
                   }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                  disabled={isReadOnly}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ends</label>
-                <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" />
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                <select value={eventType} onChange={(e) => setEventType(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <select value={eventType} onChange={(e) => setEventType(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100">
                   <option value="meeting">Meeting</option>
                   <option value="client">Client</option>
                   <option value="inspection">Inspection</option>
@@ -10828,13 +11380,14 @@ const confirmDestructiveAction = (targetLabel) =>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
-                <select value={visibility} onChange={(e) => setVisibility(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <select value={visibility} onChange={(e) => setVisibility(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100">
                   <option value="attendees">Attendees</option>
                   <option value="company">Company</option>
                   <option value="private">Private</option>
                 </select>
               </div>
             </div>
+            {!isEditMode && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium text-gray-700">Attendees</label>
@@ -10919,6 +11472,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 </div>
               )}
             </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">External attendees (placeholder)</label>
@@ -10956,17 +11510,24 @@ const confirmDestructiveAction = (targetLabel) =>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-              <input value={locationText} onChange={(e) => setLocationText(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Main office" />
+              <input value={locationText} onChange={(e) => setLocationText(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" placeholder="Main office" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2" />
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={isReadOnly} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" />
             </div>
             {warning && <p className="text-sm text-yellow-700">{warning}</p>}
             {error && <p className="text-sm text-red-600">{error}</p>}
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-              <Button variant="brand" onClick={handleSubmit} disabled={saving || !title.trim()}>{saving ? 'Saving...' : 'Create Event'}</Button>
+              {!isReadOnly && isEditMode && (
+                <Button variant="danger" onClick={handleDelete} disabled={saving || deleting}>
+                  {deleting ? 'Deleting...' : 'Delete Event'}
+                </Button>
+              )}
+              <Button variant="secondary" onClick={onClose} disabled={saving || deleting}>{isReadOnly ? 'Close' : 'Cancel'}</Button>
+              {!isReadOnly && (
+                <Button variant="brand" onClick={handleSubmit} disabled={saving || deleting || !title.trim()}>{saving ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Event')}</Button>
+              )}
             </div>
           </div>
         </Modal>

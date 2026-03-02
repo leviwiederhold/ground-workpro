@@ -44,6 +44,11 @@ function isMissingLastReadColumn(message: string) {
   return normalized.includes("column") && normalized.includes("last_read_at");
 }
 
+function missingColumn(message: string) {
+  const match = String(message || "").match(/Could not find the '([^']+)' column/i);
+  return match?.[1] ?? null;
+}
+
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
@@ -58,7 +63,7 @@ export async function GET(request: Request) {
     if (memberRows.error) {
       const message = memberRows.error?.message || "";
       if (isMissingMessagesTables(message)) {
-        const fallback = listFallbackChannels(companyId).map((channel) => ({
+        const fallback = listFallbackChannels(companyId, userId).map((channel) => ({
           ...channel,
           message_count: 0,
           last_message_at: null,
@@ -172,7 +177,7 @@ export async function POST(request: Request) {
       return validationError([{ path: "memberUserIds", message: "One or more users are not members of this company" }]);
     }
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       company_id: companyId,
       name: parsedBody.data.name,
       created_at: now,
@@ -181,17 +186,29 @@ export async function POST(request: Request) {
       created_by: userId,
     };
 
-    const { data, error } = await supabase
+    let insertResult = await supabase
       .from("message_channels")
       .insert(payload)
       .select("id, name, created_at, updated_at")
       .single();
+    for (let i = 0; i < 8; i += 1) {
+      if (!insertResult.error) break;
+      const missing = missingColumn(insertResult.error.message || "");
+      if (!missing || !(missing in payload)) break;
+      delete payload[missing];
+      insertResult = await supabase
+        .from("message_channels")
+        .insert(payload)
+        .select("id, name, created_at, updated_at")
+        .single();
+    }
+    const { data, error } = insertResult;
 
     if (error || !data) {
       if (error?.message && isMissingMessagesTables(error.message)) {
-        return okItem(createFallbackChannel(companyId, parsedBody.data.name), 201);
+        return okItem(createFallbackChannel(companyId, parsedBody.data.name, memberUserIds), 201);
       }
-      return serverError();
+      return Response.json({ error: error?.message || "Internal server error" }, { status: 400 });
     }
 
     const membershipRows = memberUserIds.map((memberId) => ({
@@ -213,7 +230,9 @@ export async function POST(request: Request) {
         }))
       );
     }
-    if (membersInsert.error) return serverError();
+    if (membersInsert.error) {
+      return Response.json({ error: membersInsert.error.message || "Failed to add members" }, { status: 400 });
+    }
 
     return okItem(data, 201);
   } catch (error) {

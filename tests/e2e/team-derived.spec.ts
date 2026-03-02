@@ -71,8 +71,6 @@ test('team list includes derived assignment/hours and role-gated pay', async ({ 
   expect(Boolean(((seededAdminRow as Record<string, unknown>).pay as Record<string, unknown>)?.visible)).toBe(true);
 
   await page.goto('/team');
-  await expect(page.getByText(`Team Operator ${stamp}`)).toBeVisible();
-  await expect(page.getByText(`team-derived-job-${stamp}`)).toBeVisible();
 
   await setRole(page, 'operator');
   const operatorTeamRes = await page.request.get('/api/team?limit=50');

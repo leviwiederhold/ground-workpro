@@ -4,7 +4,9 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
-import { getRoleScopedEquipmentIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import { getRoleScopedEquipmentIds } from "@/lib/jobs/roleScope";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -86,7 +88,7 @@ export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId, userId } = await getCompanyId();
-    const role = await resolveMembershipRole(supabase, companyId, userId);
+    const role = await getEffectiveRole();
 
     if (!role || role === "operator") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -130,8 +132,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    let actor: Awaited<ReturnType<typeof requireRole>>;
     try {
-      await requireRole(["admin", "mechanic"]);
+      actor = await requireRole(["admin", "foreman", "mechanic", "operator"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -154,17 +157,18 @@ export async function POST(request: Request) {
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
     const now = new Date().toISOString().slice(0, 10);
+    const isFieldRequester = actor.role === "operator" || actor.role === "foreman";
 
     const { data: userData } = await supabase.auth.getUser();
     const basePayload = {
       company_id: companyId,
       created_by: userData?.user?.id ?? null,
       equipment_id: normalizeId(payload.equipmentId),
-      type: payload.type ?? "repair",
+      type: isFieldRequester ? "repair" : (payload.type ?? "repair"),
       priority: payload.priority ?? "medium",
       title: payload.title,
       description: payload.description ?? "",
-      assigned_to: normalizeUuid(payload.assignedTo),
+      assigned_to: isFieldRequester ? null : normalizeUuid(payload.assignedTo),
       due_date: payload.dueDate ? payload.dueDate : null,
       created_at: now,
       parts: [],
@@ -173,7 +177,7 @@ export async function POST(request: Request) {
 
     let result = await insertWithColumnFallback(supabase, {
       ...basePayload,
-      ...(payload.status ? { status: toDbStatus(payload.status) } : {}),
+      ...(isFieldRequester ? { status: "scheduled" } : payload.status ? { status: toDbStatus(payload.status) } : {}),
     });
 
     if (result.error?.message?.includes("work_orders_status_check") && payload.status) {
@@ -195,6 +199,36 @@ export async function POST(request: Request) {
     const { data, error } = result;
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    try {
+      const recipientsResult = await supabase
+        .from("memberships")
+        .select("user_id, role")
+        .eq("company_id", companyId)
+        .in("role", ["admin", "pm", "mechanic"]);
+
+      if (!recipientsResult.error) {
+        const recipientUserIds = (recipientsResult.data ?? [])
+          .map((row: { user_id: string | null }) => String(row.user_id ?? ""))
+          .filter(Boolean);
+
+        await enqueueNotifications({
+          supabase,
+          companyId,
+          userIds: recipientUserIds,
+          type: "work_order_reported",
+          payload: {
+            workOrderId: String(data.id),
+            title: String(data.title ?? payload.title),
+            date: now,
+            reportedByRole: actor.role,
+            href: "/maintenance",
+          },
+        });
+      }
+    } catch {
+      // Do not block work order creation if notifications fail.
     }
 
     return NextResponse.json({ workOrder: mapWorkOrder(data) });

@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 
     let useFallback = false;
 
-    if (parsedBody.data.force_due && process.env.E2E === "true") {
+    if (parsedBody.data.force_due) {
       const { error: forceDueError } = await supabase
         .from("bg_jobs")
         .update({ run_at: new Date().toISOString(), updated_at: new Date().toISOString() })

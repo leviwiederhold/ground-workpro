@@ -6,6 +6,7 @@ import { okItem } from "@/lib/http/json";
 import { createFallbackSafetyLog, listFallbackSafetyLogs } from "@/lib/safety/fallbackStore";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,9 @@ function toValidationDetails(error: { issues: ValidationIssue[] }) {
 }
 
 function toTenantErrorResponse(error: TenantResolverError) {
+  if (error.status === 401) {
+    return Response.json({ items: [], ...getPaginationMeta(0, 1, 50) });
+  }
   if (error.status === 404) return notFound(error.message);
   if (error.status === 403) return forbidden(error.message);
   return serverError(error.message);
@@ -189,7 +193,8 @@ export async function GET(request: Request) {
     if (error instanceof TenantResolverError) {
       return toTenantErrorResponse(error);
     }
-    return serverError();
+    const { page, pageSize } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
+    return Response.json({ items: [], ...getPaginationMeta(0, page, pageSize) });
   }
 }
 
@@ -267,6 +272,36 @@ export async function POST(request: Request) {
         severity: parsedBody.data.severity,
       });
       return okItem(fallbackItem, 201);
+    }
+
+    try {
+      const membersResult = await supabase
+        .from("memberships")
+        .select("user_id, role")
+        .eq("company_id", companyId)
+        .in("role", ["admin", "pm"]);
+      if (!membersResult.error) {
+        const recipientIds = (membersResult.data ?? [])
+          .map((row) => String(row.user_id ?? ""))
+          .filter((id) => Boolean(id) && id !== String(userId));
+        if (recipientIds.length > 0) {
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: recipientIds,
+            type: "safety_log_created",
+            payload: {
+              id: String((data as Record<string, unknown>).id ?? ""),
+              summary: parsedBody.data.summary,
+              severity: parsedBody.data.severity,
+              date: parsedBody.data.occurred_on,
+              href: "/safety",
+            },
+          });
+        }
+      }
+    } catch {
+      // Non-blocking: safety log persistence succeeds even if notification fanout fails.
     }
 
     return okItem(normalizeSafetyLog(data as Record<string, unknown>), 201);

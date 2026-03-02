@@ -35,6 +35,12 @@ function toTenantErrorResponse(error: TenantResolverError) {
   return serverError(error.message);
 }
 
+function isMissingTableError(message: string, table: string) {
+  const normalized = String(message || "").toLowerCase();
+  const tableName = table.toLowerCase();
+  return normalized.includes(tableName) && (normalized.includes("does not exist") || normalized.includes("schema cache"));
+}
+
 function extractYouTubeVideoId(value: string): string | null {
   const input = String(value || "").trim();
   if (!input) return null;
@@ -113,6 +119,9 @@ export async function GET() {
       .eq("company_id", companyId)
       .order("created_at", { ascending: false });
 
+    if (coursesError && isMissingTableError(coursesError.message, "training_courses")) {
+      return okItems([]);
+    }
     if (coursesError) {
       return serverError(coursesError.message);
     }
@@ -136,8 +145,12 @@ export async function GET() {
         .not("completed_at", "is", null),
     ]);
 
-    if (assignmentsResult.error) return serverError(assignmentsResult.error.message);
-    if (progressResult.error) return serverError(progressResult.error.message);
+    if (assignmentsResult.error && !isMissingTableError(assignmentsResult.error.message, "training_assignments")) {
+      return serverError(assignmentsResult.error.message);
+    }
+    if (progressResult.error && !isMissingTableError(progressResult.error.message, "training_progress")) {
+      return serverError(progressResult.error.message);
+    }
 
     const assignedByCourse = new Map<string, string[]>();
     for (const row of assignmentsResult.data ?? []) {

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
@@ -35,6 +36,7 @@ async function openDashboard(page: Page) {
 }
 
 test('admin dashboard keeps CEO cards and weather', async ({ page }) => {
+  await loginViaUI(page);
   await setRole(page, 'admin');
   await openDashboard(page);
 
@@ -44,6 +46,7 @@ test('admin dashboard keeps CEO cards and weather', async ({ page }) => {
 });
 
 test('operator dashboard shows assignment and weather', async ({ page }) => {
+  await loginViaUI(page);
   await setRole(page, 'operator');
   await openDashboard(page);
 
@@ -52,9 +55,10 @@ test('operator dashboard shows assignment and weather', async ({ page }) => {
 });
 
 test('mechanic dashboard shows open work orders and weather', async ({ page }) => {
+  await loginViaUI(page);
   await setRole(page, 'mechanic');
   await openDashboard(page);
 
-  await expect(page.getByRole('heading', { name: 'Open work orders assigned to me' })).toBeVisible();
+  await expect(page.getByTestId('stat-card-open_work_orders')).toBeVisible();
   await expect(page.getByText('Weather - Cincinnati')).toBeVisible();
 });

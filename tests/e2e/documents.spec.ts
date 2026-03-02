@@ -26,7 +26,7 @@ test("documents upload/list/download/delete works with attachments backend", asy
 
   await page.reload();
   await page.getByTestId("nav-documents").click();
-  await expect(page.getByText(fileName)).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: fileName })).toBeVisible({ timeout: 20_000 });
 
   const listResponse = await page.request.get("/api/attachments?entity_type=document");
   expect(listResponse.status()).toBe(200);

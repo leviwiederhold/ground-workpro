@@ -5,8 +5,13 @@ type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
 
 async function setRole(page: Page, role: Role) {
-  const response = await page.request.post('/api/test/set-role', { data: { role } });
-  const body = await response.text();
+  let response = await page.request.post('/api/test/set-role', { data: { role } });
+  let body = await response.text();
+  if (response.status() === 403 && body.includes('No company membership found')) {
+    await page.request.post('/api/bootstrap');
+    response = await page.request.post('/api/test/set-role', { data: { role } });
+    body = await response.text();
+  }
   expect(response.status(), body).toBe(200);
 
   const payload = JSON.parse(body);
@@ -19,6 +24,15 @@ async function setRole(page: Page, role: Role) {
       url: BASE_URL,
     },
   ]);
+}
+
+async function openHomeWithRetry(page: Page) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto('/');
+    if (await page.getByTestId('nav-dashboard').isVisible().catch(() => false)) return;
+    await page.reload();
+  }
+  await expect(page.getByTestId('nav-dashboard')).toBeVisible();
 }
 
 function readJobItems(json: unknown): Array<{ id: string; name: string }> {
@@ -37,7 +51,7 @@ test('jobs list is role scoped and jobs nav visibility is correct', async ({ pag
   await loginViaUI(page);
 
   await setRole(page, 'admin');
-  await page.goto('/');
+  await openHomeWithRetry(page);
 
   await expect(page.getByTestId('nav-jobs')).toBeVisible();
 
@@ -100,7 +114,7 @@ test('jobs list is role scoped and jobs nav visibility is correct', async ({ pag
   expect(foremanJobs.some((job) => job.id === String(unassignedJob.id))).toBe(false);
 
   await setRole(page, 'operator');
-  await page.goto('/');
+  await openHomeWithRetry(page);
   await expect(page.getByTestId('nav-jobs')).toHaveCount(0);
 
   const blockedJobsRoute = await page.request.get('/jobs');

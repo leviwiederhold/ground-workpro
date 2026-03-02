@@ -12,6 +12,14 @@ function tenantError(error: TenantResolverError) {
   return serverError(error.message);
 }
 
+function isMissingMessagesTables(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    (normalized.includes("message_channels") || normalized.includes("messages") || normalized.includes("message_channel_members")) &&
+    (normalized.includes("does not exist") || normalized.includes("not find"))
+  );
+}
+
 export async function DELETE(_: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const parsedParams = paramsSchema.safeParse(await params);
@@ -22,10 +30,16 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     const channelId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
     const me = await getMyMembership(supabase, companyId, channelId, userId);
-    if (me.error) return serverError();
+    if (me.error) {
+      if (isMissingMessagesTables(me.error.message || "")) return okSuccess();
+      return serverError();
+    }
     if (!me.data) {
       const channel = await supabase.from("message_channels").select("id").eq("company_id", companyId).eq("id", channelId).maybeSingle();
-      if (channel.error) return serverError();
+      if (channel.error) {
+        if (isMissingMessagesTables(channel.error.message || "")) return okSuccess();
+        return serverError();
+      }
       if (!channel.data) return notFound("Channel not found");
       return forbidden();
     }
@@ -37,7 +51,10 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
       .eq("channel_id", channelId)
       .eq("user_id", userId);
 
-    if (leave.error) return serverError();
+    if (leave.error) {
+      if (isMissingMessagesTables(leave.error.message || "")) return okSuccess();
+      return serverError();
+    }
     return okSuccess();
   } catch (error) {
     if (error instanceof TenantResolverError) return tenantError(error);

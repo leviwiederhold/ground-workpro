@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { loginViaUI } from './helpers';
+import { getE2ECreds, loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
@@ -10,6 +10,7 @@ async function setRole(page: Page, role: Role) {
 }
 
 test('operator is blocked from company week and only sees personal week data', async ({ page }) => {
+  const { email } = getE2ECreds();
   await loginViaUI(page);
   await setRole(page, 'admin');
 
@@ -34,7 +35,7 @@ test('operator is blocked from company week and only sees personal week data', a
 
   const [operatorRes, foremanRes] = await Promise.all([
     page.request.post('/api/employees', {
-      data: { name: `Week Operator ${stamp}`, role: 'Operator' },
+      data: { name: `Week Operator ${stamp}`, role: 'Operator', email },
     }),
     page.request.post('/api/employees', {
       data: { name: `Week Foreman ${stamp}`, role: 'Foreman' },

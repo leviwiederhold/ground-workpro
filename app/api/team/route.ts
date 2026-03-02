@@ -21,8 +21,12 @@ const mapEmployeeStatus = (value: unknown): "active" | "inactive" => {
   return "inactive";
 };
 
-const mapRoleForOutput = (rawRole: unknown): AppRole => {
-  return normalizeAppRole(rawRole) ?? "operator";
+const mapRoleForOutput = (rawRole: unknown): string => {
+  const raw = String(rawRole ?? "").trim();
+  if (!raw) return "operator";
+  const normalized = normalizeAppRole(raw);
+  if (normalized) return normalized;
+  return raw.toLowerCase();
 };
 
 const isPayVisibleRole = (role: AppRole | null) => role === "admin" || role === "pm";
@@ -31,6 +35,20 @@ const toNumber = (value: unknown) => {
   if (value === null || value === undefined || value === "") return 0;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const parseCertifications = (value: unknown): Array<{ name: string; expires: string }> => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value as Array<{ name: string; expires: string }>;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as Array<{ name: string; expires: string }>) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 };
 
 const isMissingSchemaError = (message: string | undefined) =>
@@ -100,11 +118,17 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: employeesError.message }, { status: 400 });
     }
 
+    const employeeJobIdById = new Map<string, string>();
     let items = (employeeRows ?? []).map((row: Record<string, unknown>) => {
       const normalizedRole = mapRoleForOutput(row.role);
       const linkedUserId = row.user_id ? normalizeId(row.user_id) : null;
+      const employeeId = normalizeId(row.id);
+      const fallbackJobId = normalizeId(row.job_id);
+      if (employeeId && fallbackJobId) {
+        employeeJobIdById.set(employeeId, fallbackJobId);
+      }
       return {
-        id: normalizeId(row.id),
+        id: employeeId,
         displayName: String(row.name ?? row.full_name ?? ""),
         role: normalizedRole,
         status: mapEmployeeStatus(row.status),
@@ -114,17 +138,23 @@ export async function GET(request: Request) {
         hoursThisWeek: 0,
         pay: {
           visible: isPayVisibleRole(effectiveRole),
-          hourlyRate: isPayVisibleRole(effectiveRole) ? toNumber(row.hourly_rate) : 0,
+          hourlyRate: isPayVisibleRole(effectiveRole)
+            ? toNumber(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate)
+            : 0,
           loadedHourlyCost: 0,
         },
         email: String(row.email ?? ""),
         phone: String(row.phone ?? ""),
         clockedInAt: row.clocked_in_at ? String(row.clocked_in_at) : null,
+        certifications: parseCertifications(row.certifications),
       };
     });
 
     if (queryInput.role !== "all") {
-      items = items.filter((item) => item.role === queryInput.role);
+      items = items.filter((item) => {
+        const normalized = normalizeAppRole(item.role);
+        return item.role === queryInput.role || normalized === queryInput.role;
+      });
     }
     if (queryInput.status !== "all") {
       items = items.filter((item) => item.status === queryInput.status);
@@ -133,6 +163,59 @@ export async function GET(request: Request) {
     const employeeIds = items.map((item) => item.id);
     if (employeeIds.length === 0) {
       return NextResponse.json({ items: [] });
+    }
+
+    const inviteStatusResult = await supabase
+      .from("invite_tokens")
+      .select("employee_id, used_at, expires_at")
+      .eq("company_id", companyId)
+      .in("employee_id", employeeIds)
+      .order("created_at", { ascending: false });
+    let inviteStatusRows = inviteStatusResult.data;
+    if (inviteStatusResult.error) {
+      if (isMissingSchemaError(inviteStatusResult.error.message)) {
+        inviteStatusRows = [];
+      } else {
+        return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
+      }
+    }
+    const pendingInviteEmployeeIds = new Set<string>();
+    const acceptedInviteEmployeeIds = new Set<string>();
+    for (const row of (inviteStatusRows ?? []) as Array<Record<string, unknown>>) {
+      const employeeId = normalizeId(row.employee_id);
+      if (!employeeId) continue;
+      const usedAt = row.used_at ? String(row.used_at) : "";
+      const expiresAt = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.POSITIVE_INFINITY;
+      if (usedAt) {
+        acceptedInviteEmployeeIds.add(employeeId);
+        continue;
+      }
+      if (expiresAt > Date.now()) {
+        pendingInviteEmployeeIds.add(employeeId);
+      }
+    }
+
+    const companyMemberEmails = new Set<string>();
+    const membershipsResult = await supabase
+      .from("memberships")
+      .select("user_id")
+      .eq("company_id", companyId);
+    if (!membershipsResult.error) {
+      const memberUserIds = Array.from(
+        new Set((membershipsResult.data ?? []).map((row: Record<string, unknown>) => normalizeId(row.user_id)).filter(Boolean))
+      );
+      if (memberUserIds.length > 0) {
+        const profilesResult = await supabase
+          .from("profiles")
+          .select("id, email")
+          .in("id", memberUserIds);
+        if (!profilesResult.error) {
+          for (const row of (profilesResult.data ?? []) as Array<Record<string, unknown>>) {
+            const email = String(row.email ?? "").trim().toLowerCase();
+            if (email) companyMemberEmails.add(email);
+          }
+        }
+      }
     }
 
     const today = new Date().toISOString().slice(0, 10);
@@ -144,9 +227,11 @@ export async function GET(request: Request) {
       .in("employee_id", employeeIds)
       .order("created_at", { ascending: true });
     let assignmentRows = assignmentResult.data;
+    let scheduleAssignmentsMissing = false;
     if (assignmentResult.error) {
       if (isMissingSchemaError(assignmentResult.error.message)) {
         assignmentRows = [];
+        scheduleAssignmentsMissing = true;
       } else {
         return NextResponse.json({ error: assignmentResult.error.message }, { status: 400 });
       }
@@ -157,6 +242,22 @@ export async function GET(request: Request) {
       const employeeId = normalizeId(row.employee_id);
       if (!employeeId || assignmentByEmployeeId.has(employeeId)) continue;
       assignmentByEmployeeId.set(employeeId, { jobId: normalizeId(row.job_id) });
+    }
+
+    if (scheduleAssignmentsMissing) {
+      const jobEmployeesResult = await supabase
+        .from("job_employees")
+        .select("employee_id, job_id, created_at")
+        .eq("company_id", companyId)
+        .in("employee_id", employeeIds)
+        .order("created_at", { ascending: true });
+      if (!jobEmployeesResult.error) {
+        for (const row of (jobEmployeesResult.data ?? []) as Array<Record<string, unknown>>) {
+          const employeeId = normalizeId(row.employee_id);
+          if (!employeeId || assignmentByEmployeeId.has(employeeId)) continue;
+          assignmentByEmployeeId.set(employeeId, { jobId: normalizeId(row.job_id) });
+        }
+      }
     }
 
     const assignedJobIds = Array.from(
@@ -184,12 +285,26 @@ export async function GET(request: Request) {
 
     // Time entries table is not present in current schema; keep deterministic placeholder.
     for (const item of items) {
+      const employeeEmail = String(item.email ?? "").trim().toLowerCase();
+      if (item.userId) {
+        item.accountStatus = "active";
+      } else if (employeeEmail && companyMemberEmails.has(employeeEmail)) {
+        item.accountStatus = "active";
+      } else if (pendingInviteEmployeeIds.has(item.id)) {
+        item.accountStatus = "pending";
+      } else if (acceptedInviteEmployeeIds.has(item.id)) {
+        item.accountStatus = "active";
+      } else {
+        item.accountStatus = "invited";
+      }
+
       const assignment = assignmentByEmployeeId.get(item.id);
-      if (assignment?.jobId) {
+      const resolvedJobId = assignment?.jobId || employeeJobIdById.get(item.id) || "";
+      if (resolvedJobId) {
         item.assignedToday = {
-          jobId: assignment.jobId,
-          jobName: jobNameById.get(assignment.jobId) ?? "Job",
-          href: `/jobs/${assignment.jobId}`,
+          jobId: resolvedJobId,
+          jobName: jobNameById.get(resolvedJobId) ?? "Job",
+          href: `/jobs/${resolvedJobId}`,
         };
       }
       item.hoursThisWeek = 0;
@@ -216,6 +331,7 @@ export async function GET(request: Request) {
         email: item.email,
         phone: item.phone,
         clockedInAt: item.clockedInAt,
+        certifications: item.certifications,
       })),
     });
   } catch (error) {

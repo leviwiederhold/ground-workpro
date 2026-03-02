@@ -53,6 +53,10 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   );
   const totalCount = onboardingItems.length;
   const completionPercent = totalCount ? Math.round((completedCount / totalCount) * 100) : 0;
+  const activeOnboardingItems = useMemo(
+    () => onboardingItems.filter((item) => !item.completed),
+    [onboardingItems]
+  );
 
   const loadDashboardSummary = useCallback(async () => {
     setSummaryLoading(true);
@@ -177,8 +181,26 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   };
 
   const goToChecklistItem = (item) => {
-    if (item?.view) {
-      setCurrentView(item.view);
+    const view = String(item?.view || '').toLowerCase();
+    const viewMap = {
+      dashboard: 'dashboard',
+      jobs: 'jobs',
+      bids: 'bids',
+      fleet: 'fleet',
+      vendors: 'vendors',
+      reports: 'reports',
+      safety: 'safety',
+      maintenance: 'maintenance',
+      documents: 'documents',
+      team: 'team',
+      schedule: 'schedule',
+      messages: 'messages',
+      inventory: 'inventory',
+      finance: 'finance',
+      settings: 'settings',
+    };
+    if (viewMap[view]) {
+      setCurrentView(viewMap[view]);
     }
   };
 
@@ -210,7 +232,11 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
     }
   };
 
-  const kpis = (dashboardSummary?.kpis ?? []).filter((kpi) => kpi.visible !== false);
+  const kpis = (
+    dashboardSummary?.kpis ??
+    dashboardSummary?.sections?.kpis?.items ??
+    []
+  ).filter((kpi) => kpi.visible !== false);
   const primaryItems = dashboardSummary?.sections?.primary?.items ?? [];
   const activeJobsSection = dashboardSummary?.sections?.activeJobs ?? primaryItems.find((item) => item.type === 'active_jobs')?.meta;
   const quickActionsSection = dashboardSummary?.sections?.quickActions ?? primaryItems.find((item) => item.type === 'quick_actions')?.meta;
@@ -329,14 +355,22 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                       </div>
                       <ProgressBar value={completionPercent} max={100} color="brand" size="sm" />
                       <div className="space-y-2">
-                        {onboardingItems.map((item) => (
-                          <div key={item.key} className="flex items-start gap-2 p-2 rounded-lg border border-gray-100" data-testid={`onboarding-item-${item.key}`}>
+                        {activeOnboardingItems.map((item) => (
+                          <div
+                            key={item.key}
+                            className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50"
+                            data-testid={`onboarding-item-${item.key}`}
+                            onClick={() => goToChecklistItem(item)}
+                          >
                             <button
                               type="button"
                               disabled={onboardingSavingKey === item.key}
                               data-testid={`onboarding-toggle-${item.key}`}
                               className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center ${item.completed ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 text-transparent'} disabled:opacity-50`}
-                              onClick={() => completeChecklistItem(item.key, !item.completed)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                completeChecklistItem(item.key, !item.completed);
+                              }}
                             >
                               <Icon name="check" className="text-[10px]" />
                             </button>
@@ -345,11 +379,21 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                                 {item.label}
                               </p>
                             </div>
-                            <Button variant="ghost" size="sm" onClick={() => goToChecklistItem(item)}>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                goToChecklistItem(item);
+                              }}
+                            >
                               Go
                             </Button>
                           </div>
                         ))}
+                        {activeOnboardingItems.length === 0 && (
+                          <EmptyState>All checklist items complete.</EmptyState>
+                        )}
                       </div>
                       {onboardingError && <p className="text-sm text-red-600">{onboardingError}</p>}
                     </div>

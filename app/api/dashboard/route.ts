@@ -7,6 +7,7 @@ import {
   ONBOARDING_DISMISSED_KEY,
   getOnboardingChecklistItemsForRole,
 } from "@/lib/onboarding/checklist";
+import { getDashboardWeather } from "@/lib/weather/dashboardWeather";
 
 export const dynamic = "force-dynamic";
 
@@ -62,15 +63,6 @@ function toError(error: unknown) {
 
 const normalizeEmail = (email: string | null | undefined) => String(email ?? "").trim().toLowerCase();
 
-const makeWeather = () => ({
-  visible: true as const,
-  locationLabel: "Cincinnati",
-  tempF: 47,
-  condition: "Partly Cloudy",
-  highF: 52,
-  lowF: 39,
-});
-
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -94,6 +86,16 @@ export async function GET(request: Request) {
     const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(now.getDate() - 7);
 
+    let activityQuery = supabase
+      .from("notifications")
+      .select("type, payload, created_at")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(5);
+    if (role !== "admin" && role !== "pm") {
+      activityQuery = activityQuery.eq("user_id", userId);
+    }
+
     const [
       activeJobsResult,
       activeJobsCountResult,
@@ -109,6 +111,7 @@ export async function GET(request: Request) {
       assignmentsWeekResult,
       authUserResult,
       dailyReportTodayResult,
+      recentActivityResult,
     ] = await Promise.all([
       supabase
         .from("jobs")
@@ -171,6 +174,7 @@ export async function GET(request: Request) {
         .eq("company_id", companyId)
         .eq("report_date", dateKey)
         .limit(200),
+      activityQuery,
     ]);
 
     if (activeJobsResult.error && !isMissingTable(activeJobsResult.error.message, "jobs")) {
@@ -267,6 +271,25 @@ export async function GET(request: Request) {
     const kpis: DashboardResponse["item"]["sections"]["kpis"]["items"] = [];
     const primary: DashboardResponse["item"]["sections"]["primary"]["items"] = [];
     const alerts: DashboardResponse["item"]["sections"]["alerts"]["items"] = [];
+    const weather = await getDashboardWeather();
+    const recentActivityRows = recentActivityResult.error ? [] : recentActivityResult.data ?? [];
+    const recentActivityAlerts = recentActivityRows.slice(0, 3).map((row, index) => {
+      const payload = (row.payload ?? {}) as Record<string, unknown>;
+      const summary =
+        typeof payload.summary === "string"
+          ? payload.summary
+          : typeof payload.jobName === "string"
+            ? payload.jobName
+            : typeof payload.eventTitle === "string"
+              ? payload.eventTitle
+              : "";
+      return {
+        type: `activity_${index}`,
+        message: summary ? `Recent: ${summary}` : `Recent: ${String(row.type ?? "Activity")}`,
+        href: typeof payload.href === "string" ? payload.href : undefined,
+        severity: "info" as const,
+      };
+    });
 
     if (role === "admin") {
       kpis.push(
@@ -338,6 +361,7 @@ export async function GET(request: Request) {
         { type: "maintenance_due", message: `Maintenance Due Soon: ${maintenanceDueSoonCount}`, href: "/maintenance", severity: "warn" },
         { type: "safety_7d", message: `Safety Logs (7d): ${safetyCount}`, href: "/safety", severity: "info" }
       );
+      alerts.push(...recentActivityAlerts);
     }
 
     if (role === "operator") {
@@ -388,6 +412,7 @@ export async function GET(request: Request) {
       );
 
       alerts.push({ type: "operator_safety", message: `Safety items (7d): ${safetyCount}`, href: "/safety", severity: "info" });
+      alerts.push(...recentActivityAlerts);
       kpis.push({ key: "my_jobs_today", label: "My Jobs Today", value: String(myTodayAssignments.length), href: "/schedule" });
     }
 
@@ -425,6 +450,7 @@ export async function GET(request: Request) {
         { key: "parts_low", label: "Parts Low", value: String(lowPartsCount), href: "/inventory" }
       );
       alerts.push({ type: "maintenance_due", message: `Maintenance due soon: ${maintenanceDueSoonCount}`, href: "/maintenance", severity: "warn" });
+      alerts.push(...recentActivityAlerts);
     }
 
     if (role === "foreman") {
@@ -458,6 +484,7 @@ export async function GET(request: Request) {
 
       kpis.push({ key: "my_active_jobs", label: "My Active Jobs", value: String(myJobIds.size), href: "/schedule" });
       alerts.push({ type: "safety_7d", message: `Safety logs (7d): ${safetyCount}`, href: "/safety", severity: "info" });
+      alerts.push(...recentActivityAlerts);
     }
 
     if (role === "pm") {
@@ -493,12 +520,20 @@ export async function GET(request: Request) {
         { key: "crew_on_site", label: "Crew On-Site", value: String(employeesOnSite), href: "/team" }
       );
       alerts.push({ type: "pm_alerts", message: `Maintenance Due Soon: ${maintenanceDueSoonCount}`, href: "/maintenance", severity: "warn" });
+      alerts.push(...recentActivityAlerts);
     }
 
     const response: DashboardResponse = {
       item: {
         role,
-        weather: makeWeather(),
+        weather: {
+          visible: true,
+          locationLabel: weather.locationLabel,
+          tempF: weather.tempF,
+          condition: weather.condition,
+          highF: weather.highF,
+          lowF: weather.lowF,
+        },
         sections: {
           kpis: { items: kpis },
           primary: { items: primary },

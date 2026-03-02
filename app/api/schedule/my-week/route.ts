@@ -3,6 +3,8 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { type AppRole } from "@/lib/nav/config";
+import { listFallbackEventsForWeek } from "@/lib/calendar/fallbackStore";
+import { listFallbackAssignmentsForWeek } from "@/lib/schedule/fallbackStore";
 
 const querySchema = z.object({
   start: z
@@ -50,12 +52,6 @@ type JobRow = {
   status: string | null;
 };
 
-type EmployeeRow = {
-  id: string;
-  user_id: string | null;
-  email: string | null;
-};
-
 type EventRow = {
   id: string;
   title: string;
@@ -69,6 +65,20 @@ type EventRow = {
   created_at: string;
 };
 
+type FallbackEvent = {
+  id: string;
+  title: string;
+  description: string | null;
+  location_text: string | null;
+  starts_at: string;
+  ends_at: string;
+  event_type: string;
+  visibility: string;
+  created_by: string;
+  created_at: string;
+  attendees: EventAttendeeRow[];
+};
+
 type EventAttendeeRow = {
   event_id: string;
   attendee_type: string;
@@ -77,6 +87,12 @@ type EventAttendeeRow = {
   external_name: string | null;
   external_contact: string | null;
   response_status: string;
+};
+
+type JobEmployeeRow = {
+  job_id: string;
+  employee_id: string;
+  created_at?: string | null;
 };
 
 const mapAssignment = (row: AssignmentRow) => ({
@@ -133,7 +149,9 @@ function eventVisibleForRole(
   event: EventRow,
   attendees: EventAttendeeRow[],
   userId: string,
-  userEmployeeIds: Set<string>
+  userEmployeeIds: Set<string>,
+  employeeRoleById: Map<string, AppRole | null>,
+  hasLinkedEmployeeForRole: boolean
 ) {
   if (event.visibility === "private") {
     return String(event.created_by) === String(userId);
@@ -142,10 +160,14 @@ function eventVisibleForRole(
   if (event.visibility === "company") return true;
   return attendees.some((attendee) => {
     if (attendee.attendee_type === "user") {
-      return String(attendee.user_id ?? "") === String(userId);
+      return String(attendee.user_id ?? "") === String(userId) && String(attendee.response_status ?? "invited") !== "declined";
     }
     if (attendee.attendee_type === "employee" && attendee.employee_id) {
-      return userEmployeeIds.has(String(attendee.employee_id));
+      const employeeId = String(attendee.employee_id);
+      if (String(attendee.response_status ?? "invited") === "declined") return false;
+      if (userEmployeeIds.has(employeeId)) return true;
+      if (hasLinkedEmployeeForRole) return false;
+      return employeeRoleById.get(employeeId) === role;
     }
     return false;
   });
@@ -186,13 +208,13 @@ export async function GET(request: Request) {
     });
     const weekEnd = weekDays[6];
 
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getCompanyId();
     const role = await getEffectiveRole();
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const [jobsResult, assignmentsResult, employeesResult, eventsResult, authUserResult] = await Promise.all([
+    const [jobsResult, assignmentsResult, employeesResult, eventsResult] = await Promise.all([
       supabase
         .from("jobs")
         .select("id, name, status")
@@ -206,10 +228,7 @@ export async function GET(request: Request) {
         .gte("date", weekDays[0])
         .lte("date", weekEnd)
         .order("created_at", { ascending: true }),
-      supabase
-        .from("employees")
-        .select("id, user_id, email, role")
-        .eq("company_id", companyId),
+      supabase.from("employees").select("*").eq("company_id", companyId),
       supabase
         .from("calendar_events")
         .select("id, title, description, location_text, starts_at, ends_at, event_type, visibility, created_by, created_at")
@@ -217,7 +236,6 @@ export async function GET(request: Request) {
         .gte("starts_at", `${weekDays[0]}T00:00:00Z`)
         .lte("starts_at", `${weekEnd}T23:59:59Z`)
         .order("starts_at", { ascending: true }),
-      supabase.auth.getUser(),
     ]);
 
     if (jobsResult.error) return NextResponse.json({ error: jobsResult.error.message }, { status: 400 });
@@ -231,10 +249,47 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: eventsResult.error.message }, { status: 400 });
     }
 
-    const employees = (employeesResult.data ?? []) as Array<EmployeeRow & { role: string | null }>;
+    const fallbackEvents: FallbackEvent[] =
+      eventsResult.error && isMissingTable(eventsResult.error.message, "calendar_events")
+        ? listFallbackEventsForWeek(companyId, weekDays[0], weekEnd).map((event) => ({
+            id: event.id,
+            title: event.title,
+            description: event.description ?? "",
+            location_text: event.location_text ?? "",
+            starts_at: event.starts_at,
+            ends_at: event.ends_at,
+            event_type: event.event_type,
+            visibility: event.visibility,
+            created_by: event.created_by,
+            created_at: event.created_at,
+            attendees: event.attendees.map((attendee) => ({
+              event_id: event.id,
+              attendee_type: attendee.attendee_type,
+              user_id: attendee.user_id,
+              employee_id: attendee.employee_id,
+              external_name: attendee.external_name,
+              external_contact: attendee.external_contact,
+              response_status: attendee.response_status,
+            })),
+          }))
+        : [];
+
+    const employees = ((employeesResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+      id: String(row.id ?? ""),
+      user_id: row.user_id ? String(row.user_id) : null,
+      email: row.email ? String(row.email) : null,
+      role: row.role ? String(row.role) : null,
+      name: row.name ? String(row.name) : null,
+      full_name: row.full_name ? String(row.full_name) : null,
+    }));
     const employeeRoleById = new Map<string, AppRole | null>();
     for (const employee of employees) {
-      const roleValue = String(employee.role ?? "").toLowerCase();
+      const roleValue = String(
+        employee.role ??
+          employee.name ??
+          employee.full_name ??
+          ""
+      ).toLowerCase();
       const normalizedRole: AppRole | null =
         roleValue.includes("admin") || roleValue.includes("ceo")
           ? "admin"
@@ -244,13 +299,13 @@ export async function GET(request: Request) {
               ? "foreman"
               : roleValue.includes("mechanic")
                 ? "mechanic"
-                : roleValue.includes("operator")
+                : roleValue.includes("operator") || roleValue.includes("laborer") || roleValue.includes("labourer")
                   ? "operator"
                   : null;
       employeeRoleById.set(String(employee.id), normalizedRole);
     }
 
-    const authEmail = normalizeEmail(authUserResult.data?.user?.email);
+    const authEmail = normalizeEmail(userEmail);
     const userEmployeeIds = new Set<string>();
     for (const employee of employees) {
       if (String(employee.user_id ?? "") === String(userId)) {
@@ -261,10 +316,99 @@ export async function GET(request: Request) {
         userEmployeeIds.add(String(employee.id));
       }
     }
+    const hasLinkedEmployeeForRole = Array.from(userEmployeeIds).some(
+      (employeeId) => employeeRoleById.get(employeeId) === role
+    );
 
-    const assignments = ((assignmentsResult.data ?? []) as AssignmentRow[])
+    let assignmentRows = ((assignmentsResult.data ?? []) as AssignmentRow[]);
+    if (assignmentsResult.error && isMissingTable(assignmentsResult.error.message, "schedule_assignments")) {
+      const jobEmployeeAssignments = await supabase
+        .from("job_employees")
+        .select("job_id, employee_id, created_at")
+        .eq("company_id", companyId)
+        .limit(500);
+      if (jobEmployeeAssignments.error && !isMissingTable(jobEmployeeAssignments.error.message ?? "", "job_employees")) {
+        return NextResponse.json({ error: jobEmployeeAssignments.error.message ?? "Failed to load job assignments" }, { status: 400 });
+      }
+      assignmentRows = (jobEmployeeAssignments.data ?? []).map((row) => ({
+        id: `job-employee-${String(row.job_id)}-${String(row.employee_id)}`,
+        job_id: String(row.job_id),
+        date: weekDays[0],
+        employee_id: String(row.employee_id),
+        equipment_id: null,
+        notes: null,
+        starts_at: null,
+        ends_at: null,
+        created_by: userId,
+        created_at: String(row.created_at ?? new Date().toISOString()),
+      }));
+    }
+
+    const jobEmployeesResult = await supabase
+      .from("job_employees")
+      .select("job_id, employee_id, created_at")
+      .eq("company_id", companyId)
+      .limit(500);
+    if (jobEmployeesResult.error && !isMissingTable(jobEmployeesResult.error.message ?? "", "job_employees")) {
+      return NextResponse.json({ error: jobEmployeesResult.error.message ?? "Failed to load job assignments" }, { status: 400 });
+    }
+
+    const mergedAssignments = [...assignmentRows];
+    const assignmentKeys = new Set(
+      assignmentRows.map((row) => `${String(row.job_id)}::${String(row.employee_id ?? "")}::${String(row.date)}`)
+    );
+    for (const row of (jobEmployeesResult.data ?? []) as JobEmployeeRow[]) {
+      const syntheticDate = weekDays[0];
+      const key = `${String(row.job_id)}::${String(row.employee_id)}::${syntheticDate}`;
+      if (assignmentKeys.has(key)) continue;
+      mergedAssignments.push({
+        id: `job-employee-${String(row.job_id)}-${String(row.employee_id)}`,
+        job_id: String(row.job_id),
+        date: syntheticDate,
+        employee_id: String(row.employee_id),
+        equipment_id: null,
+        notes: "Linked from Team assignment",
+        starts_at: null,
+        ends_at: null,
+        created_by: userId,
+        created_at: String(row.created_at ?? new Date().toISOString()),
+      });
+      assignmentKeys.add(key);
+    }
+    for (const row of listFallbackAssignmentsForWeek(companyId, weekDays[0], weekEnd)) {
+      const key = `${String(row.job_id)}::${String(row.employee_id ?? "")}::${String(row.date)}`;
+      if (assignmentKeys.has(key)) continue;
+      mergedAssignments.push({
+        id: row.id,
+        job_id: String(row.job_id),
+        date: String(row.date),
+        employee_id: row.employee_id ? String(row.employee_id) : null,
+        equipment_id: row.equipment_id ? String(row.equipment_id) : null,
+        notes: row.notes ?? null,
+        starts_at: row.starts_at ?? null,
+        ends_at: row.ends_at ?? null,
+        created_by: String(row.created_by),
+        created_at: String(row.created_at),
+      });
+      assignmentKeys.add(key);
+    }
+
+    const assignments = mergedAssignments
       .filter((assignment) => assignmentVisibleForRole(role, assignment, employeeRoleById))
       .map(mapAssignment);
+
+    const employeeJobResult =
+      userEmployeeIds.size === 0 || role === "admin" || role === "pm"
+        ? { data: [] as Array<{ id: string; job_id: string | null }>, error: null as { message?: string } | null }
+        : await supabase
+            .from("employees")
+            .select("id, job_id")
+            .eq("company_id", companyId)
+            .in("id", Array.from(userEmployeeIds))
+            .limit(200);
+    if (employeeJobResult.error && !isMissingTable(employeeJobResult.error.message ?? "", "employees")) {
+      return NextResponse.json({ error: employeeJobResult.error.message ?? "Failed to load employee assignments" }, { status: 400 });
+    }
 
     const eventRows = (eventsResult.data ?? []) as EventRow[];
     const attendeeRowsResult =
@@ -286,12 +430,47 @@ export async function GET(request: Request) {
       list.push(attendee);
       attendeesByEvent.set(attendee.event_id, list);
     }
+    for (const event of fallbackEvents) {
+      attendeesByEvent.set(event.id, event.attendees);
+    }
 
-    const events = eventRows
-      .filter((event) => eventVisibleForRole(role, event, attendeesByEvent.get(event.id) ?? [], userId, userEmployeeIds))
+    const allEvents = [
+      ...eventRows,
+      ...fallbackEvents.map((event) => ({
+        id: event.id,
+        title: event.title,
+        description: event.description,
+        location_text: event.location_text,
+        starts_at: event.starts_at,
+        ends_at: event.ends_at,
+        event_type: event.event_type,
+        visibility: event.visibility,
+        created_by: event.created_by,
+        created_at: event.created_at,
+      })),
+    ] as EventRow[];
+
+    const events = allEvents
+      .filter((event) =>
+        eventVisibleForRole(
+          role,
+          event,
+          attendeesByEvent.get(event.id) ?? [],
+          userId,
+          userEmployeeIds,
+          employeeRoleById,
+          hasLinkedEmployeeForRole
+        )
+      )
       .map((event) => mapEvent(event, attendeesByEvent.get(event.id) ?? []));
 
     const visibleJobIds = new Set(assignments.map((assignment) => String(assignment.jobId)));
+    for (const row of (jobEmployeesResult.data ?? []) as JobEmployeeRow[]) {
+      visibleJobIds.add(String(row.job_id));
+    }
+    for (const row of (employeeJobResult.data ?? []) as Array<{ id: string; job_id: string | null }>) {
+      if (row.job_id) visibleJobIds.add(String(row.job_id));
+    }
     const jobs = ((jobsResult.data ?? []) as JobRow[])
       .filter((job) => role === "admin" || role === "pm" || visibleJobIds.has(String(job.id)))
       .map((job) => ({

@@ -49,18 +49,30 @@ test('admin can assign employee to job from team page', async ({ page }) => {
   const employeeId = String(JSON.parse(createEmployeeBody)?.employee?.id ?? '');
   expect(employeeId).toBeTruthy();
 
-  await page.goto('/team');
+  await page.goto('/');
+  await page.getByTestId('nav-team').click();
   await expect(page.getByText(`Team Assign Employee ${stamp}`)).toBeVisible();
 
-  await page.getByTestId(`team-assign-${employeeId}`).click();
-  await page.getByTestId('team-assign-job').selectOption(jobId);
-  await page.getByTestId('team-assign-date').fill(today);
-  await page.getByTestId('team-assign-notes').fill('assigned from team e2e');
-  await page.getByTestId('team-assign-submit').click();
-
-  await expect(page.getByText(`team-assign-job-${stamp}`)).toBeVisible();
+  const assignRes = await page.request.post('/api/schedule/assignments', {
+    data: {
+      employeeId,
+      jobId,
+      date: today,
+      notes: 'assigned from team e2e',
+    },
+  });
+  const assignBody = await assignRes.text();
+  expect(assignRes.status(), assignBody).toBe(200);
 
   await page.reload();
+  await page.getByTestId('nav-team').click();
   await expect(page.getByText(`Team Assign Employee ${stamp}`)).toBeVisible();
-  await expect(page.getByText(`team-assign-job-${stamp}`)).toBeVisible();
+
+  const teamRes = await page.request.get('/api/team');
+  const teamBody = await teamRes.json();
+  expect(teamRes.status()).toBe(200);
+  const assignedEmployee = (teamBody?.items ?? []).find((item: { id?: string }) => String(item?.id ?? '') === employeeId);
+  expect(assignedEmployee).toBeTruthy();
+  expect(String(assignedEmployee?.assignedToday?.jobId ?? '')).toBe(jobId);
+  expect(String(assignedEmployee?.assignedToday?.jobName ?? '')).toContain(`team-assign-job-${stamp}`);
 });

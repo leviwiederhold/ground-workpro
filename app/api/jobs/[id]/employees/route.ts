@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const assignEmployeeSchema = z.object({
   employee_id: z.union([z.number(), z.string()]),
@@ -168,7 +169,7 @@ export async function POST(
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const jobId = normalizeId(id);
     const employeeId = normalizeId(parsed.data.employee_id);
     if (jobId === null || employeeId === null) {
@@ -237,6 +238,46 @@ export async function POST(
         return NextResponse.json({ error: message }, { status: 400 });
       }
 
+      const employeeUserId = String((employee as any).user_id ?? "").trim();
+      if (employeeUserId) {
+        try {
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: [employeeUserId],
+            type: "assignment_created",
+            payload: {
+              jobId: String(jobId),
+              jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
+              date: new Date().toISOString().slice(0, 10),
+              href: "/schedule",
+            },
+          });
+        } catch {
+          // Keep assignment successful even if notifications table is unavailable.
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const existingScheduleResult = await supabase
+        .from("schedule_assignments")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("job_id", jobId)
+        .eq("employee_id", employeeId)
+        .eq("date", today)
+        .limit(1);
+      if (!existingScheduleResult.error && (existingScheduleResult.data ?? []).length === 0) {
+        await supabase.from("schedule_assignments").insert({
+          company_id: companyId,
+          job_id: jobId,
+          employee_id: employeeId,
+          date: today,
+          created_by: userId,
+          notes: "Auto-added from job assignment",
+        });
+      }
+
       return NextResponse.json({
         employee: { ...mapEmployee(employee), assigned_role: parsed.data.assigned_role ?? null, jobId: jobId },
       });
@@ -288,6 +329,46 @@ export async function POST(
       const updated = (updateResult.data ?? [])[0];
       if (!updated) {
         return NextResponse.json({ error: "Employee update was blocked or not found" }, { status: 400 });
+      }
+
+      const employeeUserId = String((updated as any).user_id ?? (employee as any).user_id ?? "").trim();
+      if (employeeUserId) {
+        try {
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: [employeeUserId],
+            type: "assignment_created",
+            payload: {
+              jobId: String(jobId),
+              jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
+              date: new Date().toISOString().slice(0, 10),
+              href: "/schedule",
+            },
+          });
+        } catch {
+          // Keep assignment successful even if notifications table is unavailable.
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const existingScheduleResult = await supabase
+        .from("schedule_assignments")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("job_id", jobId)
+        .eq("employee_id", employeeId)
+        .eq("date", today)
+        .limit(1);
+      if (!existingScheduleResult.error && (existingScheduleResult.data ?? []).length === 0) {
+        await supabase.from("schedule_assignments").insert({
+          company_id: companyId,
+          job_id: jobId,
+          employee_id: employeeId,
+          date: today,
+          created_by: userId,
+          notes: "Auto-added from job assignment",
+        });
       }
       return NextResponse.json({ employee: mapEmployee(updated) });
     }

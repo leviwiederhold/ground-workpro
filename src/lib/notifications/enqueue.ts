@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { NotificationPayload, NotificationType } from '@/lib/notifications/format';
+import { createFallbackNotifications } from '@/lib/notifications/fallbackStore';
 
 type EnqueueInput = {
   supabase: SupabaseClient;
@@ -22,6 +23,19 @@ export async function enqueueNotifications(input: EnqueueInput): Promise<void> {
 
   const { error } = await input.supabase.from('notifications').insert(rows);
   if (error) {
+    const normalized = String(error.message ?? "").toLowerCase();
+    if (
+      normalized.includes("notifications") &&
+      (normalized.includes("does not exist") || normalized.includes("not find"))
+    ) {
+      createFallbackNotifications({
+        companyId: input.companyId,
+        userIds: uniqueUserIds,
+        type: input.type,
+        payload: input.payload,
+      });
+      return;
+    }
     throw new Error(error.message);
   }
 }

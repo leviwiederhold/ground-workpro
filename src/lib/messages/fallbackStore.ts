@@ -5,6 +5,7 @@ type FallbackChannel = {
   id: string;
   company_id: string;
   name: string;
+  member_user_ids: string[];
   created_at: string;
   updated_at: string;
 };
@@ -52,19 +53,26 @@ function writeStore(store: FallbackStore) {
   }
 }
 
-export function listFallbackChannels(companyId: string) {
+export function listFallbackChannels(companyId: string, userId?: string) {
   return readStore()
-    .channels.filter((row) => row.company_id === companyId)
+    .channels.filter((row) => {
+      if (row.company_id !== companyId) return false;
+      if (!userId) return true;
+      if (!Array.isArray(row.member_user_ids) || row.member_user_ids.length === 0) return false;
+      return row.member_user_ids.includes(String(userId));
+    })
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 }
 
-export function createFallbackChannel(companyId: string, name: string) {
+export function createFallbackChannel(companyId: string, name: string, memberUserIds: string[] = []) {
   const store = readStore();
   const now = new Date().toISOString();
+  const normalizedMemberUserIds = Array.from(new Set(memberUserIds.map((id) => String(id)).filter(Boolean)));
   const channel: FallbackChannel = {
     id: crypto.randomUUID(),
     company_id: companyId,
     name,
+    member_user_ids: normalizedMemberUserIds,
     created_at: now,
     updated_at: now,
   };

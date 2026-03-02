@@ -44,6 +44,14 @@ const formatCurrency = (amount: number) =>
     maximumFractionDigits: 0,
   }).format(amount);
 
+function isMissingTable(message: string, table: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes(table) &&
+    (normalized.includes('does not exist') || normalized.includes('not find'))
+  );
+}
+
 export async function getStatsForRole({
   supabase,
   companyId,
@@ -107,12 +115,20 @@ export async function getStatsForRole({
       .in('status', ['accepted', 'approved']),
   ]);
 
-  if (activeJobsCountResult.error) throw new Error(activeJobsCountResult.error.message);
-  if (equipmentResult.error) throw new Error(equipmentResult.error.message);
-  if (employeesOnSiteCountResult.error) throw new Error(employeesOnSiteCountResult.error.message);
-  if (openWorkOrdersCountResult.error) throw new Error(openWorkOrdersCountResult.error.message);
+  if (activeJobsCountResult.error && !isMissingTable(activeJobsCountResult.error.message, 'jobs')) {
+    throw new Error(activeJobsCountResult.error.message);
+  }
+  if (equipmentResult.error && !isMissingTable(equipmentResult.error.message, 'equipment')) {
+    throw new Error(equipmentResult.error.message);
+  }
+  if (employeesOnSiteCountResult.error && !isMissingTable(employeesOnSiteCountResult.error.message, 'employees')) {
+    throw new Error(employeesOnSiteCountResult.error.message);
+  }
+  if (openWorkOrdersCountResult.error && !isMissingTable(openWorkOrdersCountResult.error.message, 'work_orders')) {
+    throw new Error(openWorkOrdersCountResult.error.message);
+  }
 
-  const equipmentRows = equipmentResult.data ?? [];
+  const equipmentRows = equipmentResult.error ? [] : equipmentResult.data ?? [];
   const activeEquipmentCount = equipmentRows.filter((row) => String(row.status ?? '') === 'active').length;
   const equipmentDownCount = equipmentRows.filter((row) => {
     const status = String(row.status ?? '');
@@ -138,11 +154,11 @@ export async function getStatsForRole({
     ? 0
     : (acceptedBidsResult.data ?? []).reduce((sum, row) => sum + asNumber(row.revenue), 0);
 
-  const activeJobs = activeJobsCountResult.count ?? 0;
+  const activeJobs = activeJobsCountResult.error ? 0 : activeJobsCountResult.count ?? 0;
   const unreadMessages = unreadNotificationsResult.error ? 0 : unreadNotificationsResult.count ?? 0;
-  const crewOnSite = employeesOnSiteCountResult.count ?? 0;
+  const crewOnSite = employeesOnSiteCountResult.error ? 0 : employeesOnSiteCountResult.count ?? 0;
   const safety7d = safetyCountResult.error ? 0 : safetyCountResult.count ?? 0;
-  const openWorkOrders = openWorkOrdersCountResult.count ?? 0;
+  const openWorkOrders = openWorkOrdersCountResult.error ? 0 : openWorkOrdersCountResult.count ?? 0;
 
   return {
     active_jobs: { value: activeJobs, href: '/jobs?status=active', visible: role === 'admin' || role === 'pm' },

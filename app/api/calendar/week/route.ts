@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { listFallbackEventsForWeek } from "@/lib/calendar/fallbackStore";
 
 const querySchema = z.object({
   start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -73,25 +74,28 @@ const normalizeEmail = (email: string | null | undefined) => String(email ?? "")
 async function resolveUserEmployeeIds(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
-  userId: string
+  userId: string,
+  currentUserEmail: string
 ) {
-  const { data: authData } = await supabase.auth.getUser();
-  const userEmail = normalizeEmail(authData?.user?.email);
+  const userEmail = normalizeEmail(currentUserEmail);
 
-  const employeesResult = await supabase
-    .from("employees")
-    .select("id, user_id, email")
-    .eq("company_id", companyId);
+  const employeesResult = await supabase.from("employees").select("*").eq("company_id", companyId);
+  const employeesError = employeesResult.error;
+  const employeesData = ((employeesResult.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    id: String(row.id ?? ""),
+    email: row.email ? String(row.email) : null,
+    user_id: row.user_id ? String(row.user_id) : null,
+  })) as EmployeeRow[];
 
-  if (employeesResult.error) {
-    if (isMissingEmployeesTable(employeesResult.error.message)) {
+  if (employeesError) {
+    if (isMissingEmployeesTable(employeesError.message)) {
       return { ids: new Set<string>(), error: null };
     }
-    return { ids: new Set<string>(), error: employeesResult.error.message };
+    return { ids: new Set<string>(), error: employeesError.message };
   }
 
   const ids = new Set<string>();
-  for (const employee of (employeesResult.data ?? []) as EmployeeRow[]) {
+  for (const employee of employeesData) {
     if (String(employee.user_id ?? "") === String(userId)) {
       ids.add(String(employee.id));
       continue;
@@ -130,7 +134,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Validation error", details: [{ path: "start", message: "Invalid date" }] }, { status: 422 });
     }
 
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getCompanyId();
     const effectiveRole = await getEffectiveRole();
     if (!effectiveRole) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -149,7 +153,41 @@ export async function GET(request: Request) {
 
     if (eventsResult.error) {
       if (isMissingCalendarTables(eventsResult.error.message)) {
-        return NextResponse.json({ items: [] });
+        const userEmployeeIdsResult = await resolveUserEmployeeIds(supabase, companyId, userId, userEmail);
+        if (userEmployeeIdsResult.error) {
+          return NextResponse.json({ error: userEmployeeIdsResult.error }, { status: 400 });
+        }
+        const userEmployeeIds = userEmployeeIdsResult.ids;
+
+        const fallbackItems = listFallbackEventsForWeek(companyId, weekDays[0], weekEnd)
+          .filter((event) => {
+            if (event.visibility === "private") return String(event.created_by) === String(userId);
+            if (effectiveRole === "admin" || effectiveRole === "pm") return true;
+            if (event.visibility === "company") return true;
+            return event.attendees.some((attendee) => {
+              if (attendee.attendee_type === "user") {
+                return String(attendee.user_id ?? "") === String(userId) && String(attendee.response_status ?? "invited") !== "declined";
+              }
+              if (attendee.attendee_type === "employee" && attendee.employee_id) {
+                return (
+                  userEmployeeIds.has(String(attendee.employee_id)) &&
+                  String(attendee.response_status ?? "invited") !== "declined"
+                );
+              }
+              return false;
+            });
+          })
+          .map((event) => ({
+            id: event.id,
+            title: event.title,
+            startsAt: event.starts_at,
+            endsAt: event.ends_at,
+            locationText: event.location_text ?? "",
+            eventType: event.event_type,
+            visibility: event.visibility,
+            attendeesCount: event.attendees.length,
+          }));
+        return NextResponse.json({ items: fallbackItems });
       }
       return NextResponse.json({ error: eventsResult.error.message }, { status: 400 });
     }
@@ -182,7 +220,7 @@ export async function GET(request: Request) {
       attendeesByEvent.set(attendee.event_id, list);
     }
 
-    const userEmployeeIdsResult = await resolveUserEmployeeIds(supabase, companyId, userId);
+    const userEmployeeIdsResult = await resolveUserEmployeeIds(supabase, companyId, userId, userEmail);
     if (userEmployeeIdsResult.error) {
       return NextResponse.json({ error: userEmployeeIdsResult.error }, { status: 400 });
     }
@@ -197,10 +235,10 @@ export async function GET(request: Request) {
       const attendees = attendeesByEvent.get(event.id) ?? [];
       return attendees.some((attendee) => {
         if (attendee.attendee_type === "user") {
-          return String(attendee.user_id ?? "") === String(userId);
+          return String(attendee.user_id ?? "") === String(userId) && String(attendee.response_status ?? "invited") !== "declined";
         }
         if (attendee.attendee_type === "employee" && attendee.employee_id) {
-          return userEmployeeIds.has(String(attendee.employee_id));
+          return userEmployeeIds.has(String(attendee.employee_id)) && String(attendee.response_status ?? "invited") !== "declined";
         }
         return false;
       });

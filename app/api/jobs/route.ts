@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
 
@@ -208,11 +209,12 @@ export async function GET(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const role = await resolveMembershipRole(supabase, companyId, userId);
+    const effectiveRole = await getEffectiveRole();
 
-    if (!role) {
+    if (!role || !effectiveRole) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (role === "operator" || role === "mechanic") {
+    if (effectiveRole === "operator" || effectiveRole === "mechanic") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

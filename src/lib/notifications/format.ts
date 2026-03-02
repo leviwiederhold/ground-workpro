@@ -3,7 +3,9 @@ export type NotificationType =
   | 'assignment_removed'
   | 'event_invited'
   | 'event_updated'
-  | 'event_canceled';
+  | 'event_canceled'
+  | 'work_order_reported'
+  | 'safety_log_created';
 
 export type NotificationPayload = Record<string, unknown>;
 
@@ -48,6 +50,16 @@ export function formatNotification(type: NotificationType, payload: Notification
       return {
         title: 'Event Canceled',
         message: `${eventTitle} was canceled.`,
+      };
+    case 'work_order_reported':
+      return {
+        title: 'Maintenance Request',
+        message: `${asString(payload.title, 'New issue')} was reported.`,
+      };
+    case 'safety_log_created':
+      return {
+        title: 'Safety Log',
+        message: `${asString(payload.summary, 'New safety log')} was submitted.`,
       };
     default:
       return {

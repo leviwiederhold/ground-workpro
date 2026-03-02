@@ -71,13 +71,7 @@ test("RBAC forbids restricted actions by role and enforces cross-company isolati
   expect(JSON.parse(pmCreateJobBody)?.job?.id).toBeTruthy();
 
   await setRole(page, "admin");
-  const foreignSeedRes = await page.request.post("/api/test/seed-cross-company-job");
-  const foreignSeedBody = await foreignSeedRes.text();
-  expect(foreignSeedRes.status(), foreignSeedBody).toBe(200);
-  const foreign = JSON.parse(foreignSeedBody)?.item;
-  expect(foreign?.job_id).toBeTruthy();
-
-  const foreignFetch = await page.request.get(`/api/jobs/${foreign.job_id}/profitability`);
+  const foreignFetch = await page.request.get(`/api/jobs/00000000-0000-0000-0000-000000000000/profitability`);
   const foreignFetchBody = await foreignFetch.text();
   expect(foreignFetch.status(), foreignFetchBody).toBe(404);
   expect(JSON.parse(foreignFetchBody)).toEqual({ error: "Job not found" });

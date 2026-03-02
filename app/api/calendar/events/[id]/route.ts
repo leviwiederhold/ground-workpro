@@ -3,6 +3,7 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { deleteFallbackEvent, getFallbackEventById, updateFallbackEvent } from "@/lib/calendar/fallbackStore";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -51,6 +52,13 @@ const mapEvent = (event: {
 });
 
 export const dynamic = "force-dynamic";
+
+function isMissingCalendarTables(message: string) {
+  const normalized = String(message || "").toLowerCase();
+  const referencesCalendarTables =
+    normalized.includes("calendar_events") || normalized.includes("calendar_event_attendees");
+  return referencesCalendarTables && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
 
 export async function PATCH(
   request: Request,
@@ -120,6 +128,34 @@ export async function PATCH(
       .single();
 
     if (updateResult.error || !updateResult.data) {
+      if (updateResult.error && isMissingCalendarTables(updateResult.error.message)) {
+        const fallbackUpdated = updateFallbackEvent(companyId, parsedParams.data.id, {
+          ...(payload.title !== undefined ? { title: payload.title } : {}),
+          ...(payload.description !== undefined ? { description: payload.description } : {}),
+          ...(payload.locationText !== undefined ? { location_text: payload.locationText } : {}),
+          ...(payload.startsAt !== undefined ? { starts_at: payload.startsAt } : {}),
+          ...(payload.endsAt !== undefined ? { ends_at: payload.endsAt } : {}),
+          ...(payload.eventType !== undefined ? { event_type: payload.eventType } : {}),
+          ...(payload.visibility !== undefined ? { visibility: payload.visibility } : {}),
+        });
+        if (!fallbackUpdated) {
+          return NextResponse.json({ error: "Event not found" }, { status: 404 });
+        }
+        return NextResponse.json({
+          item: mapEvent({
+            id: fallbackUpdated.id,
+            title: fallbackUpdated.title,
+            description: fallbackUpdated.description,
+            location_text: fallbackUpdated.location_text,
+            starts_at: fallbackUpdated.starts_at,
+            ends_at: fallbackUpdated.ends_at,
+            event_type: fallbackUpdated.event_type,
+            visibility: fallbackUpdated.visibility,
+            created_by: fallbackUpdated.created_by,
+            created_at: fallbackUpdated.created_at,
+          }),
+        });
+      }
       return NextResponse.json({ error: updateResult.error?.message ?? "Event not found" }, { status: 404 });
     }
 
@@ -189,6 +225,17 @@ export async function DELETE(
       .maybeSingle();
 
     if (eventResult.error) {
+      if (isMissingCalendarTables(eventResult.error.message)) {
+        const fallbackEvent = getFallbackEventById(companyId, parsedParams.data.id);
+        if (!fallbackEvent) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        const deleted = deleteFallbackEvent(companyId, parsedParams.data.id);
+        if (!deleted) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
+        return NextResponse.json({ success: true });
+      }
       return NextResponse.json({ error: eventResult.error.message }, { status: 400 });
     }
     if (!eventResult.data) {

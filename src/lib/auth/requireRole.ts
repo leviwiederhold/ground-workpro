@@ -1,4 +1,5 @@
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import * as Sentry from "@sentry/nextjs";
 
 export type Role = "admin" | "pm" | "foreman" | "mechanic" | "operator";
@@ -21,20 +22,8 @@ export async function requireRole(allowed: Role[]): Promise<{
   companyId: string;
   role: Role;
 }> {
-  const { supabase, companyId, userId } = await getCompanyId();
-
-  const { data: membership, error } = await supabase
-    .from("memberships")
-    .select("role")
-    .eq("company_id", companyId)
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    throw new ForbiddenError();
-  }
-
-  const role = membership?.role as Role | undefined;
+  const { companyId, userId } = await getCompanyId();
+  const role = (await getEffectiveRole()) as Role | null;
   if (!role || !hasRole(role, allowed)) {
     throw new ForbiddenError();
   }

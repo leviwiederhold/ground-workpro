@@ -4,6 +4,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {
   ACTING_ROLE_COOKIE,
   clampActingRole,
+  getEffectiveRole,
   resolveRealRole,
 } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole } from "@/lib/nav/config";
@@ -31,13 +32,14 @@ export async function POST(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const realRole = await resolveRealRole(supabase, companyId, userId);
     const requestedRole = normalizeAppRole(parsed.data.role);
+    const currentEffectiveRole = await getEffectiveRole();
 
-    if (!realRole || !requestedRole) {
+    if (!realRole || !requestedRole || !currentEffectiveRole) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Only CEO/admin can switch acting role views.
-    if (realRole !== "admin") {
+    if (realRole !== "admin" || currentEffectiveRole !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

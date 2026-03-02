@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { getE2ECreds } from './helpers';
+import { getE2ECreds, loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
@@ -48,6 +48,7 @@ test('work orders role workflow is enforced', async ({ page }) => {
   const { email } = getE2ECreds();
   const stamp = Date.now();
 
+  await loginViaUI(page);
   await setRole(page, 'admin');
 
   const assignedJobRes = await page.request.post('/api/jobs', {

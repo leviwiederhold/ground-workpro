@@ -7,6 +7,7 @@ import {
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import type { AppRole } from "@/lib/nav/config";
 import { getStatsForRole } from "@/lib/stats/getStats";
+import { getDashboardWeather } from "@/lib/weather/dashboardWeather";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,7 @@ type DashboardSummary = {
     };
     weather?: {
       enabled: boolean;
-      mode: "placeholder";
+      mode: "placeholder" | "live";
       locationLabel: string;
       item: { tempF: number; condition: string; note?: string };
     };
@@ -251,6 +252,17 @@ export async function GET() {
 
     const kpis: DashboardSummary["kpis"] = [];
     const sections: DashboardSummary["sections"] = {};
+    const weather = await getDashboardWeather();
+    const weatherSection = {
+      enabled: true,
+      mode: weather.mode,
+      locationLabel: weather.locationLabel,
+      item: {
+        tempF: weather.tempF,
+        condition: weather.condition,
+        ...(weather.note ? { note: weather.note } : {}),
+      },
+    } as const;
 
     if (role === "admin") {
       kpis.push(
@@ -292,12 +304,7 @@ export async function GET() {
           { key: "safety_7d", label: "Safety Logs (7d)", value: safetyCount, href: "/safety" },
         ],
       };
-      sections.weather = {
-        enabled: true,
-        mode: "placeholder",
-        locationLabel: "Cincinnati",
-        item: { tempF: 47, condition: "Partly Cloudy", note: "Not connected to external weather provider" },
-      };
+      sections.weather = weatherSection;
       sections.equipmentLocations = { enabled: true, mode: "placeholder" };
       sections.openWorkOrders = {
         items: workOrderItems.map((item) => ({
@@ -348,12 +355,7 @@ export async function GET() {
           { key: "safety_7d", label: "Safety Logs (7d)", value: safetyCount, href: "/safety" },
         ],
       };
-      sections.weather = {
-        enabled: true,
-        mode: "placeholder",
-        locationLabel: "Cincinnati",
-        item: { tempF: 47, condition: "Partly Cloudy", note: "Not connected to external weather provider" },
-      };
+      sections.weather = weatherSection;
       sections.equipmentLocations = { enabled: true, mode: "placeholder" };
       sections.openWorkOrders = {
         items: workOrderItems.map((item) => ({
@@ -403,12 +405,7 @@ export async function GET() {
           { key: "unread_messages", label: "Unread Messages", value: Number(stats.unread_messages?.value ?? 0), href: "/messages" },
         ],
       };
-      sections.weather = {
-        enabled: true,
-        mode: "placeholder",
-        locationLabel: "Cincinnati",
-        item: { tempF: 47, condition: "Partly Cloudy", note: "Not connected to external weather provider" },
-      };
+      sections.weather = weatherSection;
       sections.equipmentLocations = { enabled: false, mode: "placeholder" };
     }
 
@@ -484,12 +481,7 @@ export async function GET() {
           { key: "unread_messages", label: "Unread Messages", value: Number(stats.unread_messages?.value ?? 0), href: "/messages" },
         ],
       };
-      sections.weather = {
-        enabled: true,
-        mode: "placeholder",
-        locationLabel: "Cincinnati",
-        item: { tempF: 47, condition: "Partly Cloudy", note: "Not connected to external weather provider" },
-      };
+      sections.weather = weatherSection;
       sections.equipmentLocations = { enabled: false, mode: "placeholder" };
     }
 

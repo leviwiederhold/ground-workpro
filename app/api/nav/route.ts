@@ -18,7 +18,7 @@ export async function GET() {
       items: toNavItems(role),
       role,
       realRole,
-      canSwitchRoleView: realRole === "admin",
+      canSwitchRoleView: role === "admin",
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {

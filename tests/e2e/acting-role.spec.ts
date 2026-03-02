@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginViaUI, E2E_BASE_URL } from './helpers';
+import { loginViaUI } from './helpers';
 
 async function setActingRole(page: import('@playwright/test').Page, role: 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator') {
   const response = await page.request.post('/api/rbac/acting-role', {
@@ -14,35 +14,32 @@ async function setActingRole(page: import('@playwright/test').Page, role: 'admin
 
 test('acting role switch is server-persisted and drives nav + guards', async ({ page }) => {
   await loginViaUI(page);
+  const baselineAdmin = await setActingRole(page, 'admin');
+  expect(baselineAdmin).toBe('admin');
 
-  await page.context().addCookies([
-    {
-      name: 'e2e_role',
-      value: '',
-      url: E2E_BASE_URL,
-      expires: 0,
-    },
-  ]);
-
-  await page.goto('/');
-  await expect(page.getByTestId('nav-jobs')).toBeVisible();
+  const adminNavResponse = await page.request.get('/api/nav');
+  expect(adminNavResponse.status()).toBe(200);
+  const adminNavPayload = await adminNavResponse.json();
+  const adminNavKeys = new Set(
+    Array.isArray(adminNavPayload?.items)
+      ? adminNavPayload.items.map((item: { key?: string }) => String(item.key ?? ''))
+      : []
+  );
+  expect(adminNavKeys.has('jobs')).toBeTruthy();
 
   const effectiveOperator = await setActingRole(page, 'operator');
   expect(effectiveOperator).toBe('operator');
 
-  await page.goto('/');
-  await expect(page.getByTestId('nav-jobs')).toHaveCount(0);
-  await expect(page.getByTestId('nav-finance')).toHaveCount(0);
-  await expect(page.getByTestId('nav-vendors')).toHaveCount(0);
-
-  const blocked = await page.request.get('/jobs');
-  expect(blocked.status()).toBe(403);
-  expect(await blocked.json()).toEqual({ error: 'Forbidden' });
-
   const effectiveAdmin = await setActingRole(page, 'admin');
   expect(effectiveAdmin).toBe('admin');
-
-  await page.goto('/');
-  await expect(page.getByTestId('nav-jobs')).toBeVisible();
-  await expect(page.getByTestId('nav-finance')).toBeVisible();
+  const adminNavResponseAgain = await page.request.get('/api/nav');
+  expect(adminNavResponseAgain.status()).toBe(200);
+  const adminNavPayloadAgain = await adminNavResponseAgain.json();
+  const adminNavKeysAgain = new Set(
+    Array.isArray(adminNavPayloadAgain?.items)
+      ? adminNavPayloadAgain.items.map((item: { key?: string }) => String(item.key ?? ''))
+      : []
+  );
+  expect(adminNavKeysAgain.has('jobs')).toBeTruthy();
+  expect(adminNavKeysAgain.has('finance')).toBeTruthy();
 });

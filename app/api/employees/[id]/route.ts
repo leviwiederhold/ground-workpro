@@ -98,7 +98,8 @@ async function updateWithColumnFallback(
     const postgrestMissing = message.match(/Could not find the '([^']+)' column/i);
     const postgresMissing = message.match(/column\s+employees\.([a-zA-Z0-9_]+)\s+does not exist/i);
     const relationMissing = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+of relation\s+"?employees"?\s+does not exist/i);
-    const missingColumn = postgrestMissing?.[1] ?? postgresMissing?.[1] ?? relationMissing?.[1];
+    const genericMissing = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
+    const missingColumn = postgrestMissing?.[1] ?? postgresMissing?.[1] ?? relationMissing?.[1] ?? genericMissing?.[1];
     if (!missingColumn) return result;
     if (!(missingColumn in currentPayload)) return result;
     delete currentPayload[missingColumn];

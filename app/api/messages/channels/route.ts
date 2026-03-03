@@ -231,6 +231,9 @@ export async function POST(request: Request) {
       );
     }
     if (membersInsert.error) {
+      if (isMissingMessagesTables(membersInsert.error.message || "")) {
+        return okItem(createFallbackChannel(companyId, parsedBody.data.name, memberUserIds), 201);
+      }
       return Response.json({ error: membersInsert.error.message || "Failed to add members" }, { status: 400 });
     }
 

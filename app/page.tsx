@@ -9749,6 +9749,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [channelsError, setChannelsError] = useState('');
       const [messagesLoading, setMessagesLoading] = useState(false);
       const [messagesError, setMessagesError] = useState('');
+      const [invalidChannelIds, setInvalidChannelIds] = useState([]);
       const [createChannelLoading, setCreateChannelLoading] = useState(false);
       const [createChannelError, setCreateChannelError] = useState('');
       const [sendLoading, setSendLoading] = useState(false);
@@ -9843,6 +9844,7 @@ const confirmDestructiveAction = (targetLabel) =>
           setChannels(nextChannels);
           setActiveChannel((prev) => {
             if (!prev) return null;
+            if (invalidChannelIds.includes(String(prev.id))) return null;
             const refreshed = nextChannels.find((c) => String(c.id) === String(prev.id));
             return refreshed || null;
           });
@@ -9857,13 +9859,14 @@ const confirmDestructiveAction = (targetLabel) =>
             setNewIncomingCount((count) => count + (totalUnread - previousUnreadRef.current));
           }
           previousUnreadRef.current = totalUnread;
+          return nextChannels;
         } catch (error) {
-          setChannels([]);
           setChannelsError(error instanceof Error ? error.message : 'Failed to load channels');
+          return channels;
         } finally {
           setChannelsLoading(false);
         }
-      }, []);
+      }, [channels, invalidChannelIds]);
 
       const markThreadRead = useCallback(async (channelId) => {
         if (!channelId) return;
@@ -9880,8 +9883,18 @@ const confirmDestructiveAction = (targetLabel) =>
           setMessages(payload.items || []);
           await markThreadRead(channelId);
         } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to load messages';
+          if (String(errorMessage).toLowerCase().includes('channel not found')) {
+            setInvalidChannelIds((prev) => (
+              prev.includes(String(channelId)) ? prev : [...prev, String(channelId)]
+            ));
+            setChannels((prev) => prev.filter((channel) => String(channel.id) !== String(channelId)));
+            setActiveChannel((prev) => (prev && String(prev.id) === String(channelId) ? null : prev));
+            setMessagesError('');
+            return;
+          }
           setMessages([]);
-          setMessagesError(error instanceof Error ? error.message : 'Failed to load messages');
+          setMessagesError(errorMessage);
         } finally {
           setMessagesLoading(false);
         }
@@ -9912,12 +9925,25 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [loadChannels, loadUsers]);
 
       useEffect(() => {
-        const timer = setInterval(() => {
+        const refreshInbox = () => {
+          if (typeof document !== 'undefined' && document.hidden) return;
           loadChannels();
-          if (activeChannel?.id) loadMessages(activeChannel.id);
-        }, 12000);
-        return () => clearInterval(timer);
-      }, [activeChannel?.id, loadChannels, loadMessages]);
+        };
+
+        const timer = setInterval(refreshInbox, 30000);
+        if (typeof window !== 'undefined') {
+          window.addEventListener('focus', refreshInbox);
+          document.addEventListener('visibilitychange', refreshInbox);
+        }
+
+        return () => {
+          clearInterval(timer);
+          if (typeof window !== 'undefined') {
+            window.removeEventListener('focus', refreshInbox);
+            document.removeEventListener('visibilitychange', refreshInbox);
+          }
+        };
+      }, [loadChannels]);
 
       useEffect(() => {
         if (!activeChannel?.id) {
@@ -9925,9 +9951,13 @@ const confirmDestructiveAction = (targetLabel) =>
           setMembers([]);
           return;
         }
+        if (invalidChannelIds.includes(String(activeChannel.id))) {
+          setActiveChannel(null);
+          return;
+        }
         setNewIncomingCount(0);
         loadMessages(activeChannel.id);
-      }, [activeChannel, loadMessages]);
+      }, [activeChannel, invalidChannelIds, loadMessages]);
 
       useEffect(() => {
         if (!showMembers || !activeChannel?.id) return;
@@ -10050,9 +10080,10 @@ const confirmDestructiveAction = (targetLabel) =>
           if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
           setMessageText('');
           await loadMessages(channelId);
-          await loadChannels();
+          const nextChannels = await loadChannels();
           setPendingDirectContact(null);
-          setActiveChannel((prev) => prev && String(prev.id) === channelId ? prev : { id: channelId, name: pendingDirectContact?.label || prev?.name || 'Direct message', kind: 'direct', message_count: 0 });
+          const refreshed = (nextChannels || []).find((channel) => String(channel.id) === String(channelId));
+          if (refreshed) setActiveChannel(refreshed);
         } catch (error) {
           setSendError(error instanceof Error ? error.message : 'Failed to send message');
         } finally {
@@ -10120,7 +10151,7 @@ const confirmDestructiveAction = (targetLabel) =>
             </div>
             <div className="flex-1 overflow-y-auto">
               {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
-                <button key={channel.id} onClick={() => setActiveChannel(channel)} className={`w-full text-left px-4 py-3 border-b border-gray-800/70 hover:bg-[#151b26] ${activeChannel?.id === channel.id ? 'bg-brand-600/85' : ''}`} data-testid={`messages-channel-${channel.id}`}>
+                <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full text-left px-4 py-3 border-b border-gray-800/70 hover:bg-[#151b26] ${activeChannel?.id === channel.id ? 'bg-brand-600/85' : ''}`} data-testid={`messages-channel-${channel.id}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}>{channel.kind === 'direct' ? getChannelDisplayName(channel) : `# ${channel.name}`}</span>
                     {(channel.unread_count ?? channel.message_count) > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-800 text-gray-300'}`}>{channel.unread_count ?? channel.message_count}</span>}

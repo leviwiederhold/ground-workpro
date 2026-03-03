@@ -76,6 +76,53 @@ export async function POST(request: Request) {
     if (!(memberResult.data ?? []).length) return notFound("User not found");
 
     const [dmUserA, dmUserB] = [userId, otherUserId].sort();
+    const ensureDirectMembers = async (channelId: string) => {
+      const existingMembers = await supabase
+        .from("message_channel_members")
+        .select("user_id")
+        .eq("company_id", companyId)
+        .eq("channel_id", channelId)
+        .in("user_id", [userId, otherUserId]);
+      if (existingMembers.error) return;
+
+      const existingSet = new Set((existingMembers.data ?? []).map((row) => String(row.user_id)));
+      const missingRows: Array<{ company_id: string; channel_id: string; user_id: string; member_role: string; last_read_at?: string }> = [];
+      if (!existingSet.has(userId)) {
+        missingRows.push({
+          company_id: companyId,
+          channel_id: channelId,
+          user_id: userId,
+          member_role: "owner",
+          last_read_at: new Date().toISOString(),
+        });
+      }
+      if (!existingSet.has(otherUserId)) {
+        missingRows.push({
+          company_id: companyId,
+          channel_id: channelId,
+          user_id: otherUserId,
+          member_role: "member",
+          last_read_at: new Date().toISOString(),
+        });
+      }
+      if (missingRows.length === 0) return;
+
+      let insertResult = await supabase.from("message_channel_members").insert(missingRows);
+      if (insertResult.error && isMissingLastReadColumn(insertResult.error.message || "")) {
+        insertResult = await supabase.from("message_channel_members").insert(
+          missingRows.map((row) => ({
+            company_id: row.company_id,
+            channel_id: row.channel_id,
+            user_id: row.user_id,
+            member_role: row.member_role,
+          }))
+        );
+      }
+      if (insertResult.error) {
+        throw new Error(insertResult.error.message || "Failed to sync direct chat members");
+      }
+    };
+
     let existing: { data: Array<{ id: string; name?: string | null; kind?: string | null; created_at?: string | null; updated_at?: string | null }> | null; error: { message?: string } | null } = await supabase
       .from("message_channels")
       .select("id, name, kind, created_at, updated_at")
@@ -105,7 +152,10 @@ export async function POST(request: Request) {
     const existingRows = existing.data ?? [];
     if (existingRows.length > 0) {
       const legacyChannel = existingRows.find((row: { id: string }) => Boolean(row?.id));
-      if (legacyChannel) return okItem(legacyChannel);
+      if (legacyChannel) {
+        await ensureDirectMembers(String(legacyChannel.id));
+        return okItem(legacyChannel);
+      }
     }
 
     // Hard reuse guard: find any existing channel where BOTH users are already members.
@@ -147,6 +197,7 @@ export async function POST(request: Request) {
               .order("updated_at", { ascending: false })
               .limit(1);
             if (!sharedChannel.error && (sharedChannel.data ?? []).length > 0) {
+              await ensureDirectMembers(String(sharedChannel.data?.[0]?.id || ""));
               return okItem(sharedChannel.data?.[0]);
             }
           }
@@ -224,6 +275,7 @@ export async function POST(request: Request) {
     if (membersInsert.error) {
       return Response.json({ error: membersInsert.error.message || "Failed to add direct chat members" }, { status: 400 });
     }
+    await ensureDirectMembers(String(channelInsert.data.id));
 
     return okItem(channelInsert.data, 201);
   } catch (error) {

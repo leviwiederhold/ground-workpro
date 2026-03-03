@@ -86,17 +86,14 @@ export async function GET(request: Request) {
     }
 
     const queryInput = parsedQuery.data;
-    let employeesQuery = supabase
+    const employeesQuery = supabase
       .from("employees")
       .select("*")
       .eq("company_id", companyId)
       .order("created_at", { ascending: false })
       .limit(queryInput.limit);
 
-    if (queryInput.q) {
-      const escaped = queryInput.q.replace(/[%_]/g, "");
-      employeesQuery = employeesQuery.or(`name.ilike.%${escaped}%,full_name.ilike.%${escaped}%,email.ilike.%${escaped}%`);
-    }
+    const normalizedSearch = String(queryInput.q ?? "").trim().toLowerCase();
 
     let { data: employeeRows, error: employeesError } = await employeesQuery;
     if (employeesError && isMissingSchemaError(employeesError.message)) {
@@ -106,10 +103,6 @@ export async function GET(request: Request) {
         .eq("company_id", companyId)
         .order("id", { ascending: false })
         .limit(queryInput.limit);
-      if (queryInput.q) {
-        const escaped = queryInput.q.replace(/[%_]/g, "");
-        fallbackQuery.or(`name.ilike.%${escaped}%,full_name.ilike.%${escaped}%,email.ilike.%${escaped}%`);
-      }
       const fallbackResult = await fallbackQuery;
       employeeRows = fallbackResult.data;
       employeesError = fallbackResult.error;
@@ -149,6 +142,14 @@ export async function GET(request: Request) {
         certifications: parseCertifications(row.certifications),
       };
     });
+
+    if (normalizedSearch) {
+      items = items.filter((item) =>
+        [item.displayName, item.email, item.phone, item.role]
+          .map((value) => String(value ?? "").toLowerCase())
+          .some((value) => value.includes(normalizedSearch))
+      );
+    }
 
     if (queryInput.role !== "all") {
       items = items.filter((item) => {
@@ -335,10 +336,10 @@ export async function GET(request: Request) {
         item.accountStatus = "active";
       } else if (employeeEmail && acceptedInviteEmails.has(employeeEmail)) {
         item.accountStatus = "active";
-      } else if (pendingInviteEmployeeIds.has(item.id)) {
-        item.accountStatus = "pending";
       } else if (acceptedInviteEmployeeIds.has(item.id)) {
         item.accountStatus = "active";
+      } else if (pendingInviteEmployeeIds.has(item.id)) {
+        item.accountStatus = "pending";
       } else {
         item.accountStatus = "invited";
       }

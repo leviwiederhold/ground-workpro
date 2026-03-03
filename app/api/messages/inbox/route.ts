@@ -256,15 +256,7 @@ export async function GET(request: Request) {
       if (itemTs >= prevTs) dedupedByDirectTarget.set(key, item);
     }
 
-    const items = [...passThroughItems, ...Array.from(dedupedByDirectTarget.values())].filter((item) => {
-      if (item.kind !== "direct") return true;
-      return (
-        Number(item.message_count ?? 0) > 0 ||
-        Number(item.unread_count ?? 0) > 0 ||
-        Boolean(item.last_message_at) ||
-        Boolean(item.last_message_preview)
-      );
-    });
+    const items = [...passThroughItems, ...Array.from(dedupedByDirectTarget.values())];
     items.sort((a, b) => String(b.last_message_at || b.created_at).localeCompare(String(a.last_message_at || a.created_at)));
     const totalUnread = items.reduce((sum, item) => sum + Number(item.unread_count ?? 0), 0);
     return Response.json({

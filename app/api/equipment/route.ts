@@ -170,7 +170,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "mechanic"]);
+      await requireRole(["admin", "pm", "mechanic"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -158,52 +158,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Hard reuse guard: find any existing channel where BOTH users are already members.
-    // This prevents duplicate DMs even when legacy rows are missing direct-chat columns.
-    const currentUserMemberships = await supabase
-      .from("message_channel_members")
-      .select("channel_id")
-      .eq("company_id", companyId)
-      .eq("user_id", userId);
-    if (currentUserMemberships.error) {
-      if (!isMissingMessagesTables(currentUserMemberships.error.message || "")) {
-        return Response.json({ error: currentUserMemberships.error.message || "Failed to locate direct channel" }, { status: 400 });
-      }
-    } else {
-      const candidateChannelIds = Array.from(
-        new Set((currentUserMemberships.data ?? []).map((row) => String(row.channel_id)).filter(Boolean))
-      );
-      if (candidateChannelIds.length > 0) {
-        const otherUserMemberships = await supabase
-          .from("message_channel_members")
-          .select("channel_id")
-          .eq("company_id", companyId)
-          .eq("user_id", otherUserId)
-          .in("channel_id", candidateChannelIds);
-        if (otherUserMemberships.error) {
-          if (!isMissingMessagesTables(otherUserMemberships.error.message || "")) {
-            return Response.json({ error: otherUserMemberships.error.message || "Failed to locate direct channel" }, { status: 400 });
-          }
-        } else {
-          const sharedChannelIds = Array.from(
-            new Set((otherUserMemberships.data ?? []).map((row) => String(row.channel_id)).filter(Boolean))
-          );
-          if (sharedChannelIds.length > 0) {
-            const sharedChannel = await supabase
-              .from("message_channels")
-              .select("id, name, kind, created_at, updated_at")
-              .eq("company_id", companyId)
-              .in("id", sharedChannelIds)
-              .order("updated_at", { ascending: false })
-              .limit(1);
-            if (!sharedChannel.error && (sharedChannel.data ?? []).length > 0) {
-              await ensureDirectMembers(String(sharedChannel.data?.[0]?.id || ""));
-              return okItem(sharedChannel.data?.[0]);
-            }
-          }
-        }
-      }
-    }
+    // Do not reuse arbitrary shared channels for 1:1 DM.
+    // Direct chat must be pair-scoped only.
 
     const now = new Date().toISOString();
     const channelPayload: Record<string, unknown> = {

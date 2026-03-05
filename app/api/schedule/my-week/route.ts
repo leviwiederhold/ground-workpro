@@ -207,6 +207,10 @@ export async function GET(request: Request) {
       return asDateKey(next);
     });
     const weekEnd = weekDays[6];
+    const weekStartIso = `${weekDays[0]}T00:00:00Z`;
+    const weekEndExclusiveDate = new Date(`${weekEnd}T00:00:00Z`);
+    weekEndExclusiveDate.setUTCDate(weekEndExclusiveDate.getUTCDate() + 1);
+    const weekEndExclusiveIso = `${asDateKey(weekEndExclusiveDate)}T00:00:00Z`;
 
     const { supabase, companyId, userId, userEmail } = await getCompanyId();
     const role = await getEffectiveRole();
@@ -233,8 +237,9 @@ export async function GET(request: Request) {
         .from("calendar_events")
         .select("id, title, description, location_text, starts_at, ends_at, event_type, visibility, created_by, created_at")
         .eq("company_id", companyId)
-        .gte("starts_at", `${weekDays[0]}T00:00:00Z`)
-        .lte("starts_at", `${weekEnd}T23:59:59Z`)
+        // Include events that overlap the week even if they start earlier.
+        .lt("starts_at", weekEndExclusiveIso)
+        .gt("ends_at", weekStartIso)
         .order("starts_at", { ascending: true }),
     ]);
 

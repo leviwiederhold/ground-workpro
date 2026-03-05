@@ -35,6 +35,16 @@ function toTenantErrorResponse(error: TenantResolverError) {
   return serverError(error.message);
 }
 
+function isMissingMessagesTables(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    (normalized.includes("message_channels") ||
+      normalized.includes("messages") ||
+      normalized.includes("message_channel_members")) &&
+    (normalized.includes("does not exist") || normalized.includes("not find"))
+  );
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -55,6 +65,9 @@ export async function POST(
 
     const membership = await getMyMembership(supabase, companyId, channelId, userId);
     if (membership.error) {
+      if (!isMissingMessagesTables(membership.error.message || "")) {
+        return serverError();
+      }
       return okItem(
         createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
         201
@@ -87,6 +100,9 @@ export async function POST(
       .single();
 
     if (error || !data) {
+      if (error && !isMissingMessagesTables(error.message || "")) {
+        return serverError();
+      }
       return okItem(
         createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
         201

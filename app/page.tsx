@@ -4,12 +4,29 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
 
 import { Fragment, useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
-import { DashboardView } from '@/app/components/views/DashboardView';
-import { BidsView } from '@/app/components/views/BidsView';
-import { DocumentsView } from '@/app/components/views/DocumentsView';
+
+const DashboardView = dynamic(
+  () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
+);
+const BidsView = dynamic(
+  () => import('@/app/components/views/BidsView').then((mod) => mod.BidsView)
+);
+const DocumentsView = dynamic(
+  () => import('@/app/components/views/DocumentsView').then((mod) => mod.DocumentsView)
+);
+const MessagesView = dynamic(
+  () => import('@/app/components/views/MessagesView').then((mod) => mod.MessagesView)
+);
+const ScheduleView = dynamic(
+  () => import('@/app/components/views/ScheduleView').then((mod) => mod.ScheduleView)
+);
+const JobsView = dynamic(
+  () => import('@/app/components/views/JobsView').then((mod) => mod.JobsView)
+);
 
 const confirmDestructiveAction = (targetLabel) =>
   window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
@@ -651,6 +668,19 @@ const confirmDestructiveAction = (targetLabel) =>
       const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
       const [trainingLoading, setTrainingLoading] = useState(true);
       const [trainingError, setTrainingError] = useState('');
+      const moduleLoadedRef = useRef({
+        jobs: false,
+        costCodes: false,
+        bids: false,
+        vendors: false,
+        inventory: false,
+        employees: false,
+        dailyReports: false,
+        workOrders: false,
+        equipment: false,
+        safety: false,
+        training: false,
+      });
 
       const mapServerRoleToUiRole = useCallback((role) => {
         if (role === 'admin') return 'executive';
@@ -954,6 +984,13 @@ const confirmDestructiveAction = (targetLabel) =>
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad =
+          currentView === 'dashboard' ||
+          currentView === 'jobs' ||
+          currentView === 'schedule' ||
+          currentView === 'reports' ||
+          currentView === 'team';
+        if (!shouldLoad || moduleLoadedRef.current.jobs) return () => { isMounted = false; };
 
         const loadJobs = async () => {
           try {
@@ -965,6 +1002,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setJobs(payload.items || payload.jobs || []);
+              moduleLoadedRef.current.jobs = true;
             }
           } catch {
             if (isMounted) {
@@ -982,7 +1020,7 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         loadNotifications();
@@ -1011,15 +1049,25 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [loadNotifications]);
 
       useEffect(() => {
-        loadSafetyLogs();
-      }, [loadSafetyLogs]);
+        const shouldLoad = currentView === 'dashboard' || currentView === 'safety';
+        if (!shouldLoad || moduleLoadedRef.current.safety) return;
+        loadSafetyLogs().finally(() => {
+          moduleLoadedRef.current.safety = true;
+        });
+      }, [currentView, loadSafetyLogs]);
 
       useEffect(() => {
-        loadTraining();
-      }, [loadTraining]);
+        const shouldLoad = currentView === 'dashboard' || currentView === 'training';
+        if (!shouldLoad || moduleLoadedRef.current.training) return;
+        loadTraining().finally(() => {
+          moduleLoadedRef.current.training = true;
+        });
+      }, [currentView, loadTraining]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad = currentView === 'dashboard' || currentView === 'bids' || currentView === 'reports';
+        if (!shouldLoad || moduleLoadedRef.current.costCodes) return () => { isMounted = false; };
 
         const loadCostCodes = async () => {
           try {
@@ -1031,6 +1079,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setCostCodes(payload.cost_codes || []);
+              moduleLoadedRef.current.costCodes = true;
             }
           } catch {
             if (isMounted) {
@@ -1048,10 +1097,12 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad = currentView === 'dashboard' || currentView === 'bids';
+        if (!shouldLoad || moduleLoadedRef.current.bids) return () => { isMounted = false; };
 
         const loadBids = async () => {
           try {
@@ -1063,6 +1114,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setBids(payload.bids || []);
+              moduleLoadedRef.current.bids = true;
             }
           } catch {
             if (isMounted) {
@@ -1080,10 +1132,12 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad = currentView === 'dashboard' || currentView === 'vendors';
+        if (!shouldLoad || moduleLoadedRef.current.vendors) return () => { isMounted = false; };
 
         const loadVendors = async () => {
           try {
@@ -1095,6 +1149,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setVendors(payload.items || payload.vendors || []);
+              moduleLoadedRef.current.vendors = true;
             }
           } catch {
             if (isMounted) {
@@ -1112,10 +1167,12 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad = currentView === 'dashboard' || currentView === 'inventory' || currentView === 'maintenance';
+        if (!shouldLoad || moduleLoadedRef.current.inventory) return () => { isMounted = false; };
 
         const loadInventory = async () => {
           try {
@@ -1127,6 +1184,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setInventory(payload.items || payload.inventory || []);
+              moduleLoadedRef.current.inventory = true;
             }
           } catch {
             if (isMounted) {
@@ -1144,10 +1202,18 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad =
+          currentView === 'dashboard' ||
+          currentView === 'team' ||
+          currentView === 'jobs' ||
+          currentView === 'schedule' ||
+          currentView === 'messages' ||
+          currentView === 'training';
+        if (!shouldLoad || moduleLoadedRef.current.employees) return () => { isMounted = false; };
 
         const loadEmployees = async () => {
           try {
@@ -1159,6 +1225,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setEmployees(payload.employees || []);
+              moduleLoadedRef.current.employees = true;
             }
           } catch {
             if (isMounted) {
@@ -1176,10 +1243,12 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad = currentView === 'dashboard' || currentView === 'reports';
+        if (!shouldLoad || moduleLoadedRef.current.dailyReports) return () => { isMounted = false; };
 
         const loadDailyReports = async () => {
           try {
@@ -1191,6 +1260,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setDailyReports(payload.dailyReports || []);
+              moduleLoadedRef.current.dailyReports = true;
             }
           } catch {
             if (isMounted) {
@@ -1208,10 +1278,12 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad = currentView === 'dashboard' || currentView === 'maintenance' || currentView === 'fleet';
+        if (!shouldLoad || moduleLoadedRef.current.workOrders) return () => { isMounted = false; };
 
         const loadWorkOrders = async () => {
           try {
@@ -1223,6 +1295,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setWorkOrders(payload.workOrders || []);
+              moduleLoadedRef.current.workOrders = true;
             }
           } catch {
             if (isMounted) {
@@ -1240,10 +1313,17 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         let isMounted = true;
+        const shouldLoad =
+          currentView === 'dashboard' ||
+          currentView === 'fleet' ||
+          currentView === 'jobs' ||
+          currentView === 'schedule' ||
+          currentView === 'maintenance';
+        if (!shouldLoad || moduleLoadedRef.current.equipment) return () => { isMounted = false; };
 
         const loadEquipment = async () => {
           try {
@@ -1255,6 +1335,7 @@ const confirmDestructiveAction = (targetLabel) =>
             }
             if (isMounted) {
               setEquipment(payload.equipment || []);
+              moduleLoadedRef.current.equipment = true;
             }
           } catch {
             if (isMounted) {
@@ -1272,7 +1353,7 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [currentView]);
 
       useEffect(() => {
         loadNav();
@@ -1406,13 +1487,22 @@ const confirmDestructiveAction = (targetLabel) =>
         Card,
         formatDate,
       };
+      const sharedViewUi = {
+        SearchInput,
+        Card,
+        Button,
+        Icon,
+        Badge,
+        AttachmentPanel,
+        formatDate,
+      };
 
       const renderView = () => {
         switch(currentView) {
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
-          case 'messages': return <MessagesView employees={employees} />;
-          case 'schedule': return <ScheduleView jobs={jobs} equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} calendarRefreshVersion={calendarRefreshVersion} />;
-          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} setSelectedJob={setSelectedJob} setShowModal={setShowModal} />;
+          case 'messages': return <MessagesView employees={employees} ui={sharedViewUi} />;
+          case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
+          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
@@ -1856,1261 +1946,6 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // SCHEDULE VIEW (Click-to-Add Calendar)
     // ============================================
-    const ScheduleView = ({ jobs, equipment, employees, scheduleData, setScheduleData, currentRole, setShowModal, calendarRefreshVersion }) => {
-      const [currentWeek, setCurrentWeek] = useState(0);
-      const [scheduleLoading, setScheduleLoading] = useState(false);
-      const [scheduleError, setScheduleError] = useState('');
-      const [scheduleWarning, setScheduleWarning] = useState('');
-      const [eventsByDate, setEventsByDate] = useState({});
-      const [scopedJobs, setScopedJobs] = useState(null);
-
-      const TIME_GRID_START_HOUR = 6;
-      const TIME_GRID_END_HOUR = 18;
-      const TIME_SLOT_HEIGHT = 46;
-      const timeGridHours = Array.from({ length: TIME_GRID_END_HOUR - TIME_GRID_START_HOUR }, (_, index) => TIME_GRID_START_HOUR + index);
-      const timelineHeight = timeGridHours.length * TIME_SLOT_HEIGHT;
-
-      const getWeekDates = (offset = 0) => {
-        const today = new Date();
-        const monday = new Date(today);
-        const day = today.getDay();
-        const offsetToMonday = day === 0 ? -6 : 1 - day;
-        monday.setDate(today.getDate() + offsetToMonday + (offset * 7));
-        return Array.from({ length: 7 }, (_, i) => {
-          const date = new Date(monday);
-          date.setDate(monday.getDate() + i);
-          return date;
-        });
-      };
-
-      const asDateKey = (date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-      const weekDates = getWeekDates(currentWeek);
-      const weekStartKey = asDateKey(weekDates[0]);
-      const activeJobs = (scopedJobs ?? jobs).filter(j => !['completed', 'canceled'].includes((j.status || '').toLowerCase()));
-      const isFieldRole = ['foreman', 'mechanic', 'operator'].includes(currentRole);
-
-      const employeeMap = useMemo(
-        () => new Map(employees.map((employee) => [String(employee.id), employee])),
-        [employees]
-      );
-      const equipmentMap = useMemo(
-        () => new Map(equipment.map((item) => [String(item.id), item])),
-        [equipment]
-      );
-
-      const loadWeekAssignments = useCallback(async () => {
-        try {
-          setScheduleLoading(true);
-          setScheduleError('');
-          if (isFieldRole) {
-            const response = await fetch(`/api/schedule/my-week?start=${weekStartKey}`, { cache: 'no-store' });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok) {
-              setScheduleError(payload?.error || 'Failed to load schedule assignments.');
-              return;
-            }
-            setScheduleWarning('');
-
-            const nextSchedule = {};
-            for (const assignment of payload?.items?.assignments || []) {
-              const dateKey = assignment.date;
-              const key = `${assignment.jobId}-${dateKey}`;
-              const assigned = nextSchedule[key] || [];
-              const employee = assignment.employeeId ? employeeMap.get(String(assignment.employeeId)) : null;
-              const assignedEquipment = assignment.equipmentId ? equipmentMap.get(String(assignment.equipmentId)) : null;
-              const type = employee ? 'employee' : 'equipment';
-              const name = employee?.name || assignedEquipment?.name || 'Assigned';
-              assigned.push({
-                id: assignment.id,
-                type,
-                name,
-                employeeId: assignment.employeeId ?? null,
-                equipmentId: assignment.equipmentId ?? null,
-                startsAt: assignment.startsAt ?? null,
-                endsAt: assignment.endsAt ?? null,
-              });
-              nextSchedule[key] = assigned;
-            }
-            setScheduleData(nextSchedule);
-
-          const nextEventsByDate = {};
-          for (const event of payload?.items?.events || []) {
-            const start = new Date(event.startsAt);
-            const eventDate = Number.isNaN(start.getTime()) ? '' : asDateKey(start);
-            if (!eventDate) continue;
-            const assignedEvents = nextEventsByDate[eventDate] || [];
-            assignedEvents.push(event);
-            nextEventsByDate[eventDate] = assignedEvents;
-          }
-            setEventsByDate(nextEventsByDate);
-            setScopedJobs(
-              Array.isArray(payload?.items?.jobs)
-                ? payload.items.jobs.map((job) => ({ id: job.id, name: job.title, status: job.status }))
-                : []
-            );
-            return;
-          }
-
-          const [assignmentsResponse, eventsResponse] = await Promise.all([
-            fetch(`/api/schedule/week?start=${weekStartKey}`, { cache: 'no-store' }),
-            fetch(`/api/calendar/week?start=${weekStartKey}`, { cache: 'no-store' }),
-          ]);
-
-          const assignmentsPayload = await assignmentsResponse.json().catch(() => ({}));
-          const eventsPayload = await eventsResponse.json().catch(() => ({}));
-
-          if (!assignmentsResponse.ok) {
-            setScheduleError(assignmentsPayload?.error || 'Failed to load schedule assignments.');
-            return;
-          }
-          setScheduleWarning('');
-
-          const nextSchedule = {};
-          for (const day of assignmentsPayload?.items || []) {
-            const dateKey = day.date;
-            for (const assignment of day.assignments || []) {
-              const key = `${assignment.jobId}-${dateKey}`;
-              const assigned = nextSchedule[key] || [];
-              const employee = assignment.employeeId ? employeeMap.get(String(assignment.employeeId)) : null;
-              const assignedEquipment = assignment.equipmentId ? equipmentMap.get(String(assignment.equipmentId)) : null;
-              const type = employee ? 'employee' : 'equipment';
-              const name = employee?.name || assignedEquipment?.name || 'Assigned';
-              assigned.push({
-                id: assignment.id,
-                type,
-                name,
-                employeeId: assignment.employeeId ?? null,
-                equipmentId: assignment.equipmentId ?? null,
-                startsAt: assignment.startsAt ?? null,
-                endsAt: assignment.endsAt ?? null,
-              });
-              nextSchedule[key] = assigned;
-            }
-          }
-          setScheduleData(nextSchedule);
-
-          if (!eventsResponse.ok) {
-            setScheduleError(eventsPayload?.error || 'Failed to load calendar events.');
-            return;
-          }
-
-          const nextEventsByDate = {};
-          for (const event of eventsPayload?.items || []) {
-            const start = new Date(event.startsAt);
-            const eventDate = Number.isNaN(start.getTime()) ? '' : asDateKey(start);
-            if (!eventDate) continue;
-            const assignedEvents = nextEventsByDate[eventDate] || [];
-            assignedEvents.push(event);
-            nextEventsByDate[eventDate] = assignedEvents;
-          }
-          setEventsByDate(nextEventsByDate);
-          setScopedJobs(null);
-        } catch {
-          setScheduleError('Failed to load schedule assignments.');
-        } finally {
-          setScheduleLoading(false);
-        }
-      }, [equipmentMap, employeeMap, isFieldRole, setScheduleData, weekStartKey, calendarRefreshVersion]);
-
-      useEffect(() => {
-        loadWeekAssignments();
-      }, [loadWeekAssignments]);
-
-      const formatHourLabel = (hour) => {
-        const date = new Date(Date.UTC(2026, 0, 1, hour, 0, 0));
-        return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
-      };
-
-      const getTimedHour = (startsAt) => {
-        const start = new Date(startsAt);
-        if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
-        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
-      };
-
-      const getEventStartHour = (startsAt) => {
-        const start = new Date(startsAt);
-        if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
-        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
-      };
-
-      const getEventEndHour = (endsAt) => {
-        const end = new Date(endsAt);
-        if (Number.isNaN(end.getTime())) return TIME_GRID_START_HOUR + 1;
-        const rounded = end.getMinutes() > 0 ? end.getHours() + 1 : end.getHours();
-        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, rounded));
-      };
-
-      const getEventTypeClasses = (eventType) => {
-        const type = String(eventType || '').toLowerCase();
-        if (type === 'client') return { chip: 'bg-cyan-200 text-cyan-900 border-cyan-300', cell: 'bg-cyan-100 border-cyan-300 ring-1 ring-cyan-300' };
-        if (type === 'inspection') return { chip: 'bg-amber-200 text-amber-900 border-amber-300', cell: 'bg-amber-100 border-amber-300 ring-1 ring-amber-300' };
-        if (type === 'delivery') return { chip: 'bg-emerald-200 text-emerald-900 border-emerald-300', cell: 'bg-emerald-100 border-emerald-300 ring-1 ring-emerald-300' };
-        if (type === 'internal') return { chip: 'bg-slate-300 text-slate-900 border-slate-400', cell: 'bg-slate-200 border-slate-400 ring-1 ring-slate-400' };
-        return { chip: 'bg-indigo-200 text-indigo-900 border-indigo-300', cell: 'bg-indigo-100 border-indigo-300 ring-1 ring-indigo-300' };
-      };
-
-      const getMinutesSinceGridStart = (dateTimeValue) => {
-        const point = new Date(dateTimeValue);
-        if (Number.isNaN(point.getTime())) return 0;
-        const minutes = (point.getHours() - TIME_GRID_START_HOUR) * 60 + point.getMinutes();
-        return Math.max(0, Math.min((TIME_GRID_END_HOUR - TIME_GRID_START_HOUR) * 60, minutes));
-      };
-
-      const getEventBlockStyle = (event) => {
-        const startMinutes = getMinutesSinceGridStart(event.startsAt);
-        let endMinutes = getMinutesSinceGridStart(event.endsAt);
-        if (endMinutes <= startMinutes) {
-          endMinutes = Math.min(startMinutes + 60, (TIME_GRID_END_HOUR - TIME_GRID_START_HOUR) * 60);
-        }
-        const topPx = (startMinutes / 60) * TIME_SLOT_HEIGHT;
-        const heightPx = Math.max(30, ((endMinutes - startMinutes) / 60) * TIME_SLOT_HEIGHT);
-        return { topPx, heightPx, startMinutes, endMinutes };
-      };
-
-      const buildEventLanes = (timedEvents) => {
-        const sortedEvents = [...timedEvents].sort((a, b) => {
-          const aStart = getMinutesSinceGridStart(a.startsAt);
-          const bStart = getMinutesSinceGridStart(b.startsAt);
-          if (aStart !== bStart) return aStart - bStart;
-          const aEnd = getMinutesSinceGridStart(a.endsAt);
-          const bEnd = getMinutesSinceGridStart(b.endsAt);
-          return aEnd - bEnd;
-        });
-
-        const lanes = [];
-        const groups = [];
-
-        for (const event of sortedEvents) {
-          const block = getEventBlockStyle(event);
-          let laneIndex = lanes.findIndex((laneEnd) => laneEnd <= block.startMinutes);
-          if (laneIndex === -1) {
-            laneIndex = lanes.length;
-            lanes.push(block.endMinutes);
-          } else {
-            lanes[laneIndex] = block.endMinutes;
-          }
-
-          let group = groups.find((entry) => entry.endMinutes > block.startMinutes);
-          if (!group) {
-            group = { startMinutes: block.startMinutes, endMinutes: block.endMinutes, eventIds: [] };
-            groups.push(group);
-          } else {
-            group.endMinutes = Math.max(group.endMinutes, block.endMinutes);
-          }
-          group.eventIds.push(event.id);
-        }
-
-        const laneById = new Map();
-        for (const event of sortedEvents) {
-          const block = getEventBlockStyle(event);
-          let laneIndex = 0;
-          for (const priorEvent of sortedEvents) {
-            if (priorEvent.id === event.id) break;
-            const prior = getEventBlockStyle(priorEvent);
-            const overlaps = prior.startMinutes < block.endMinutes && block.startMinutes < prior.endMinutes;
-            if (overlaps) {
-              laneIndex += 1;
-            }
-          }
-
-          const group = groups.find((entry) => entry.eventIds.includes(event.id));
-          const maxConcurrent = group ? group.eventIds.reduce((max, eventId) => {
-            const target = sortedEvents.find((item) => item.id === eventId);
-            if (!target) return max;
-            const targetBlock = getEventBlockStyle(target);
-            const concurrent = group.eventIds.filter((otherId) => {
-              const other = sortedEvents.find((item) => item.id === otherId);
-              if (!other) return false;
-              const otherBlock = getEventBlockStyle(other);
-              return targetBlock.startMinutes < otherBlock.endMinutes && otherBlock.startMinutes < targetBlock.endMinutes;
-            }).length;
-            return Math.max(max, concurrent);
-          }, 1) : 1;
-
-          laneById.set(event.id, { laneIndex, laneCount: Math.max(1, maxConcurrent) });
-        }
-
-        return laneById;
-      };
-
-      const getHourFromClickPosition = (clickEvent) => {
-        const bounds = clickEvent.currentTarget.getBoundingClientRect();
-        const relativeY = clickEvent.clientY - bounds.top;
-        const hourOffset = Math.floor(relativeY / TIME_SLOT_HEIGHT);
-        return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, TIME_GRID_START_HOUR + hourOffset));
-      };
-
-      const openEventModalAtSlot = (dateKey, startHour) => {
-        const start = new Date(`${dateKey}T00:00:00`);
-        start.setHours(startHour, 0, 0, 0);
-        const end = new Date(start);
-        end.setHours(end.getHours() + 1);
-        setShowModal({
-          type: 'calendar-event',
-          data: {
-            startsAt: start.toISOString(),
-            endsAt: end.toISOString(),
-          },
-        });
-      };
-
-      const getAssignmentsForDate = (dateKey) =>
-        Object.entries(scheduleData).flatMap(([key, items]) => (key.endsWith(`-${dateKey}`) ? items : []));
-
-      return (
-        <div className="space-y-4">
-          {/* Header */}
-          <Card className="p-3 sm:p-4 bg-white/90 backdrop-blur border border-gray-200/80 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-                <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w - 1)}>
-                  <Icon name="chevron-left" />
-                </Button>
-                <h2 className="text-base sm:text-lg font-semibold tracking-tight">
-                  {weekDates[0].toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - {weekDates[6].toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                </h2>
-                <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w + 1)}>
-                  <Icon name="chevron-right" />
-                </Button>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(0)}>Today</Button>
-                <Button variant="brand" size="sm" onClick={() => setShowModal({ type: 'calendar-event' })}>
-                  <Icon name="calendar-plus" className="mr-2" /> Add Event
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          <div className="overflow-x-auto">
-              <Card className="p-0 min-w-[880px] border border-gray-200/80 shadow-sm">
-                {/* Days Header */}
-                <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] border-b border-gray-200 bg-gray-50/70">
-                  <div className="border-r border-gray-200" />
-                  {weekDates.map((date, i) => {
-                    const isToday = date.toDateString() === new Date().toDateString();
-                    return (
-                      <div key={i} className={`p-3 text-center border-r border-gray-200 last:border-r-0 ${isToday ? 'bg-brand-50/80' : ''}`}>
-                        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
-                        <div className={`text-xl font-semibold mt-0.5 ${isToday ? 'text-brand-600' : 'text-gray-900'}`}>{date.getDate()}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))]">
-                  <div className="relative border-r border-gray-200 bg-gray-50/40" style={{ height: `${timelineHeight + 96}px` }}>
-                    <div className="px-2 py-2 text-[10px] uppercase tracking-wide text-gray-400">All Day</div>
-                    <div className="relative" style={{ height: `${timelineHeight}px` }}>
-                      {timeGridHours.map((hour) => {
-                        const top = (hour - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT;
-                        return (
-                          <div key={`time-label-${hour}`} className="absolute inset-x-0" style={{ top: `${top}px` }}>
-                            <div className="h-px bg-transparent" />
-                            <div className="px-2 pt-1 text-[10px] font-medium text-gray-500">{formatHourLabel(hour)}</div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {weekDates.map((date, i) => {
-                    const dateKey = asDateKey(date);
-                    const assigned = getAssignmentsForDate(dateKey);
-                    const dayEvents = eventsByDate[dateKey] || [];
-                    const allDayEvents = dayEvents.filter((event) => {
-                      const start = new Date(event.startsAt);
-                      const end = new Date(event.endsAt);
-                      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
-                      return end.getTime() - start.getTime() >= 23 * 60 * 60 * 1000;
-                    });
-                    const timedEvents = dayEvents.filter((event) => !allDayEvents.includes(event));
-                    const eventLaneMap = buildEventLanes(timedEvents);
-                    const allDayAssignments = assigned.filter((item) => !item.startsAt || !item.endsAt);
-                    const timedAssignments = assigned.filter((item) => item.startsAt && item.endsAt);
-
-                    return (
-                      <div
-                        key={i}
-                        data-testid={`schedule-day-${dateKey}`}
-                        className="border-r border-gray-200 last:border-r-0 transition-colors bg-white"
-                      >
-                        <div className="p-2 space-y-1 min-h-[96px] border-b border-gray-100">
-                          {allDayEvents.map(event => (
-                            <div
-                              key={`event-${event.id}-${dateKey}`}
-                              data-testid={`schedule-event-${event.id}`}
-                              className={`text-xs p-1.5 rounded-md border shadow-[0_1px_0_rgba(0,0,0,0.03)] cursor-pointer hover:brightness-95 ${getEventTypeClasses(event.eventType).chip}`}
-                              onClick={(clickEvent) => {
-                                clickEvent.stopPropagation();
-                                setShowModal({ type: 'calendar-event', data: event });
-                              }}
-                            >
-                              <div className="truncate font-medium">{event.title}</div>
-                              <div className="truncate text-[10px] opacity-80 mt-0.5">
-                                {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                {' - '}
-                                {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                              </div>
-                            </div>
-                          ))}
-                          {allDayAssignments.length > 0 && (
-                            <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5">
-                              <div className="text-[11px] font-semibold text-gray-700">
-                                {allDayAssignments.length} assignment{allDayAssignments.length === 1 ? '' : 's'}
-                              </div>
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {allDayAssignments.slice(0, 3).map(item => (
-                                  <span
-                                    key={item.id}
-                                    data-testid={`schedule-assignment-${item.id}`}
-                                    className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                                      item.type === 'equipment'
-                                        ? 'bg-blue-100 text-blue-700'
-                                        : 'bg-emerald-100 text-emerald-700'
-                                    }`}
-                                    title={item.name}
-                                  >
-                                    {item.type === 'equipment' ? 'Equip' : 'Crew'}
-                                  </span>
-                                ))}
-                                {allDayAssignments.length > 3 && (
-                                  <span className="inline-flex items-center rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-700">
-                                    +{allDayAssignments.length - 3}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          className="relative"
-                          style={{ height: `${timelineHeight}px` }}
-                          onClick={(clickEvent) => openEventModalAtSlot(dateKey, getHourFromClickPosition(clickEvent))}
-                        >
-                          {timeGridHours.map((hour) => {
-                            const top = (hour - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT;
-                            return (
-                              <div
-                                key={`${dateKey}-hour-line-${hour}`}
-                                data-testid={`schedule-time-cell-${dateKey}-${hour}`}
-                                className="absolute inset-x-0 border-t border-gray-100"
-                                style={{ top: `${top}px`, height: `${TIME_SLOT_HEIGHT}px` }}
-                              />
-                            );
-                          })}
-
-                          {timedAssignments.map((item) => {
-                            const top = (getTimedHour(item.startsAt) - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT + 4;
-                            return (
-                              <div
-                                key={`assignment-pill-${item.id}`}
-                                data-testid={`schedule-time-assignment-${item.id}`}
-                                className={`absolute left-2 right-2 z-10 text-[10px] truncate rounded px-2 py-0.5 border ${
-                                  item.type === 'equipment'
-                                    ? 'bg-blue-100/95 text-blue-800 border-blue-300'
-                                    : 'bg-emerald-100/95 text-emerald-800 border-emerald-300'
-                                }`}
-                                style={{ top: `${top}px` }}
-                                onClick={(clickEvent) => clickEvent.stopPropagation()}
-                                title={item.name}
-                              >
-                                {item.name}
-                              </div>
-                            );
-                          })}
-
-                          {timedEvents.map((event) => {
-                            const blockStyle = getEventBlockStyle(event);
-                            const laneData = eventLaneMap.get(event.id) || { laneIndex: 0, laneCount: 1 };
-                            const laneWidth = 100 / laneData.laneCount;
-                            const inset = 6;
-                            return (
-                              <button
-                                type="button"
-                                key={`timed-event-${event.id}-${dateKey}`}
-                                data-testid={`schedule-time-event-${event.id}`}
-                                aria-label={`Schedule event ${event.title}`}
-                                className={`absolute z-20 rounded-md border px-2 py-1 text-left shadow-sm hover:brightness-95 ${getEventTypeClasses(event.eventType).chip}`}
-                                style={{
-                                  top: `${blockStyle.topPx}px`,
-                                  height: `${blockStyle.heightPx}px`,
-                                  left: `calc(${laneData.laneIndex * laneWidth}% + ${inset}px)`,
-                                  width: `calc(${laneWidth}% - ${inset * 2}px)`,
-                                }}
-                                title={`${event.title} (${new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`}
-                                onClick={(clickEvent) => {
-                                  clickEvent.stopPropagation();
-                                  setShowModal({ type: 'calendar-event', data: event });
-                                }}
-                              >
-                                <div className="text-[11px] font-semibold truncate">{event.title}</div>
-                                <div className="text-[10px] opacity-80 truncate">
-                                  {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-          </div>
-
-          <p className="text-sm text-gray-500">
-            <Icon name="circle-info" className="mr-1" />
-            Click a time slot to open Add Event.
-          </p>
-          {scheduleWarning && (
-            <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700">{scheduleWarning}</p>
-          )}
-          {scheduleLoading && (
-            <p className="text-sm text-gray-500">Loading schedule assignments...</p>
-          )}
-          {scheduleError && (
-            <p className="text-sm text-red-600">{scheduleError}</p>
-          )}
-        </div>
-      );
-    };
-
-    // ============================================
-    // JOBS VIEW
-    // ============================================
-    const JobsView = ({ jobs, jobsLoading, setJobs, equipment, employees, setEmployees, setSelectedJob, setShowModal }) => {
-      const [filter, setFilter] = useState('all');
-      const [search, setSearch] = useState('');
-      const [selectedJobId, setSelectedJobId] = useState(null);
-      const [jobForm, setJobForm] = useState({
-        name: '',
-        status: 'active',
-        client: '',
-        site_address: '',
-        start_date: '',
-        target_end_date: '',
-        notes: '',
-      });
-      const [saveLoading, setSaveLoading] = useState(false);
-      const [deleteLoading, setDeleteLoading] = useState(false);
-      const [jobActionError, setJobActionError] = useState('');
-      const [jobEquipment, setJobEquipment] = useState([]);
-      const [jobEquipmentLoading, setJobEquipmentLoading] = useState(false);
-      const [equipmentToAssign, setEquipmentToAssign] = useState('');
-      const [jobEmployees, setJobEmployees] = useState([]);
-      const [jobEmployeesLoading, setJobEmployeesLoading] = useState(false);
-      const [employeeToAssign, setEmployeeToAssign] = useState('');
-      const [crewActionLoading, setCrewActionLoading] = useState(false);
-      const [crewActionError, setCrewActionError] = useState('');
-      const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
-      const [equipmentActionError, setEquipmentActionError] = useState('');
-
-      const handleCreateJob = async () => {
-        try {
-          const baseCount = jobs.length + 1;
-          const response = await fetch('/api/jobs', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: `New Job ${baseCount}`,
-              status: 'in_progress',
-              client: '',
-              site_address: '',
-              start_date: '',
-              target_end_date: '',
-              notes: '',
-            }),
-          });
-
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-
-          if (!response.ok || !payload?.job) {
-            console.warn('Create job failed', payload?.error || raw || response.statusText);
-            return;
-          }
-
-          setJobs((prev) => [...prev, payload.job]);
-          setSelectedJobId(payload.job.id);
-        } catch (error) {
-          console.warn('Create job failed', error);
-        }
-      };
-
-      const normalizeJobStatus = useCallback((status) => {
-        const value = String(status || '').trim().toLowerCase();
-        if (['in_progress', 'active', 'open', 'approved'].includes(value)) return 'active';
-        if (['completed', 'complete'].includes(value)) return 'completed';
-        return 'other';
-      }, []);
-
-      const filteredJobs = jobs.filter(job => {
-        const normalizedStatus = normalizeJobStatus(job.status);
-        if (normalizedStatus === 'other') return false;
-        if (filter !== 'all' && filter !== normalizedStatus) return false;
-        const haystack = `${job.name || ''} ${job.client || job.client_name || ''} ${job.site_address || job.address || ''}`.toLowerCase();
-        if (search && !haystack.includes(search.toLowerCase())) return false;
-        return true;
-      }).sort((a, b) => {
-        const aStatus = normalizeJobStatus(a.status);
-        const bStatus = normalizeJobStatus(b.status);
-        if (aStatus !== bStatus) return aStatus === 'active' ? -1 : 1;
-        return String(a.name || '').localeCompare(String(b.name || ''));
-      });
-
-      const selectedJob = jobs.find(j => j.id === selectedJobId);
-      const availableEmployees = selectedJob
-        ? employees.filter(
-            (employee) => !jobEmployees.some((assigned) => String(assigned.id) === String(employee.id))
-          )
-        : [];
-      const availableEquipment = selectedJob
-        ? equipment.filter(
-            (item) => !jobEquipment.some((assigned) => String(assigned.id) === String(item.id))
-          )
-        : [];
-
-      useEffect(() => {
-        if (!selectedJob) return;
-        setJobForm({
-          name: selectedJob.name || '',
-          status: normalizeJobStatus(selectedJob.status),
-          client: selectedJob.client || selectedJob.client_name || '',
-          site_address: selectedJob.site_address || selectedJob.address || '',
-          start_date: selectedJob.start_date || selectedJob.startDate || '',
-          target_end_date: selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '',
-          notes: selectedJob.notes || '',
-        });
-        setJobActionError('');
-      }, [normalizeJobStatus, selectedJob]);
-
-      const getJobCrewCount = useCallback((job) =>
-        employees.filter((employee) => String(employee.jobId ?? '') === String(job.id)).length
-      , [employees]);
-
-      const getJobEquipmentCount = useCallback((job) =>
-        String(selectedJobId ?? '') === String(job.id)
-          ? jobEquipment.length
-          : equipment.filter((item) => String(item.jobId ?? '') === String(job.id)).length
-      , [equipment, jobEquipment.length, selectedJobId]);
-
-      useEffect(() => {
-        let isMounted = true;
-
-        const loadJobEquipment = async () => {
-          if (!selectedJob) {
-            if (isMounted) {
-              setJobEquipment([]);
-              setEquipmentToAssign('');
-              setEquipmentActionError('');
-            }
-            return;
-          }
-
-          try {
-            setJobEquipmentLoading(true);
-            const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, { cache: 'no-store' });
-            const payload = await response.json();
-            if (!response.ok) {
-              throw new Error(payload?.error || 'Failed to load assigned equipment');
-            }
-            if (isMounted) {
-              setJobEquipment(payload.equipment || []);
-            }
-          } catch {
-            if (isMounted) {
-              setJobEquipment([]);
-            }
-          } finally {
-            if (isMounted) {
-              setJobEquipmentLoading(false);
-            }
-          }
-        };
-
-        const loadJobEmployees = async () => {
-          if (!selectedJob) {
-            if (isMounted) {
-              setJobEmployees([]);
-              setEmployeeToAssign('');
-              setCrewActionError('');
-            }
-            return;
-          }
-
-          try {
-            setJobEmployeesLoading(true);
-            const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, { cache: 'no-store' });
-            const payload = await response.json();
-            if (!response.ok) {
-              throw new Error(payload?.error || 'Failed to load assigned crew');
-            }
-            if (isMounted) {
-              setJobEmployees(payload.employees || []);
-            }
-          } catch {
-            if (isMounted) {
-              setJobEmployees([]);
-            }
-          } finally {
-            if (isMounted) {
-              setJobEmployeesLoading(false);
-            }
-          }
-        };
-
-        loadJobEquipment();
-        loadJobEmployees();
-        return () => {
-          isMounted = false;
-        };
-      }, [selectedJob]);
-
-      const handleAssignEmployee = async () => {
-        if (!selectedJob || !employeeToAssign) return;
-        setCrewActionLoading(true);
-        setCrewActionError('');
-        try {
-          const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ employee_id: employeeToAssign }),
-          });
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-
-          if (!response.ok || !payload?.employee) {
-            setCrewActionError(payload?.error || raw || 'Failed to assign employee');
-            setCrewActionLoading(false);
-            return;
-          }
-
-          setJobEmployees((prev) => [payload.employee, ...prev]);
-          setEmployees((prev) =>
-            prev.map((employee) =>
-              String(employee.id) === String(payload.employee.id) ? payload.employee : employee
-            )
-          );
-          setEmployeeToAssign('');
-        } catch {
-          setCrewActionError('Failed to assign employee');
-        } finally {
-          setCrewActionLoading(false);
-        }
-      };
-
-      const handleUnassignEmployee = async (employeeId) => {
-        if (!selectedJob) return;
-        const confirmed = confirmDestructiveAction('this crew assignment');
-        if (!confirmed) return;
-        setCrewActionLoading(true);
-        setCrewActionError('');
-        try {
-          const response = await fetch(`/api/jobs/${selectedJob.id}/employees/${employeeId}`, {
-            method: 'DELETE',
-          });
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-
-          if (!response.ok || !payload?.success) {
-            setCrewActionError(payload?.error || raw || 'Failed to remove employee');
-            setCrewActionLoading(false);
-            return;
-          }
-
-          setJobEmployees((prev) => prev.filter((employee) => String(employee.id) !== String(employeeId)));
-          setEmployees((prev) =>
-            prev.map((employee) =>
-              String(employee.id) === String(employeeId) ? { ...employee, jobId: null } : employee
-            )
-          );
-        } catch {
-          setCrewActionError('Failed to remove employee');
-        } finally {
-          setCrewActionLoading(false);
-        }
-      };
-
-      const handleAssignEquipment = async () => {
-        if (!selectedJob || !equipmentToAssign) return;
-        setEquipmentActionLoading(true);
-        setEquipmentActionError('');
-        try {
-          const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ equipment_id: equipmentToAssign }),
-          });
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-
-          if (!response.ok || !payload?.equipment) {
-            setEquipmentActionError(payload?.error || raw || 'Failed to assign equipment');
-            setEquipmentActionLoading(false);
-            return;
-          }
-
-          setJobEquipment((prev) => [payload.equipment, ...prev]);
-          setEquipment((prev) =>
-            prev.map((item) =>
-              String(item.id) === String(payload.equipment.id)
-                ? { ...item, jobId: selectedJob.id }
-                : item
-            )
-          );
-          setEquipmentToAssign('');
-        } catch {
-          setEquipmentActionError('Failed to assign equipment');
-        } finally {
-          setEquipmentActionLoading(false);
-        }
-      };
-
-      const handleUnassignEquipment = async (equipmentId) => {
-        if (!selectedJob) return;
-        const confirmed = confirmDestructiveAction('this equipment assignment');
-        if (!confirmed) return;
-        setEquipmentActionLoading(true);
-        setEquipmentActionError('');
-        try {
-          const response = await fetch(`/api/jobs/${selectedJob.id}/equipment/${equipmentId}`, {
-            method: 'DELETE',
-          });
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-
-          if (!response.ok || !payload?.success) {
-            setEquipmentActionError(payload?.error || raw || 'Failed to remove equipment');
-            setEquipmentActionLoading(false);
-            return;
-          }
-
-          setJobEquipment((prev) =>
-            prev.filter((item) => String(item.id) !== String(equipmentId))
-          );
-          setEquipment((prev) =>
-            prev.map((item) =>
-              String(item.id) === String(equipmentId) ? { ...item, jobId: null } : item
-            )
-          );
-        } catch {
-          setEquipmentActionError('Failed to remove equipment');
-        } finally {
-          setEquipmentActionLoading(false);
-        }
-      };
-
-      const handleSaveJob = async () => {
-        if (!selectedJob) return;
-        setSaveLoading(true);
-        setJobActionError('');
-
-        try {
-          const updates = {};
-          if (jobForm.name !== (selectedJob.name || '')) updates.name = jobForm.name;
-          const selectedStatus = normalizeJobStatus(selectedJob.status);
-          if (jobForm.status !== selectedStatus) {
-            updates.status = jobForm.status === 'completed' ? 'completed' : 'in_progress';
-          }
-          if (jobForm.client !== (selectedJob.client || selectedJob.client_name || '')) updates.client = jobForm.client;
-          if (jobForm.site_address !== (selectedJob.site_address || selectedJob.address || '')) updates.site_address = jobForm.site_address;
-          if (jobForm.start_date !== (selectedJob.start_date || selectedJob.startDate || '')) updates.start_date = jobForm.start_date;
-          if (jobForm.target_end_date !== (selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '')) updates.target_end_date = jobForm.target_end_date;
-          if (jobForm.notes !== (selectedJob.notes || '')) updates.notes = jobForm.notes;
-
-          if (Object.keys(updates).length === 0) {
-            setSaveLoading(false);
-            return;
-          }
-
-          const response = await fetch(`/api/jobs/${selectedJob.id}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(updates),
-          });
-
-          const payload = await response.json();
-          if (!response.ok || !payload?.job) {
-            setJobActionError(payload?.error || 'Failed to save job');
-            setSaveLoading(false);
-            return;
-          }
-
-          setJobs((prev) => prev.map((job) => (job.id === selectedJob.id ? payload.job : job)));
-        } catch {
-          setJobActionError('Failed to save job');
-        } finally {
-          setSaveLoading(false);
-        }
-      };
-
-      const handleDeleteJob = async () => {
-        if (!selectedJob) return;
-        const confirmed = confirmDestructiveAction('this job');
-        if (!confirmed) return;
-
-        setDeleteLoading(true);
-        setJobActionError('');
-
-        try {
-          const response = await fetch(`/api/jobs/${selectedJob.id}`, {
-            method: 'DELETE',
-          });
-          const payload = await response.json();
-          if (!response.ok || !payload?.success) {
-            setJobActionError(payload?.error || 'Failed to delete job');
-            setDeleteLoading(false);
-            return;
-          }
-
-          setJobs((prev) => prev.filter((job) => job.id !== selectedJob.id));
-          setSelectedJobId(null);
-        } catch {
-          setJobActionError('Failed to delete job');
-        } finally {
-          setDeleteLoading(false);
-        }
-      };
-
-      return (
-        <div className="space-y-6">
-          {/* Filters */}
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
-              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
-                {['all', 'active', 'completed'].map(status => (
-                  <button
-                    key={status}
-                    onClick={() => setFilter(status)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
-                      filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                  >
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </button>
-                ))}
-              </div>
-              <div className="w-full sm:w-72 lg:w-80">
-                <SearchInput value={search} onChange={setSearch} placeholder="Search jobs..." />
-              </div>
-            </div>
-            <Button
-              variant="brand"
-              className="w-full sm:w-auto whitespace-nowrap"
-              onClick={handleCreateJob}
-              data-testid="jobs-create"
-            >
-              <Icon name="plus" className="mr-2" /> New Job
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Jobs List */}
-            <div className="lg:col-span-2 space-y-4">
-              {jobsLoading ? (
-                <Card className="p-4">
-                  <p className="text-sm text-gray-500">Loading jobs...</p>
-                </Card>
-              ) : filteredJobs.length === 0 ? (
-                <Card className="p-4">
-                  <p className="text-sm text-gray-500">No jobs found.</p>
-                </Card>
-              ) : (
-                filteredJobs.map(job => (
-                  <Card
-                    key={job.id}
-                    data-testid={`job-row-${job.id}`}
-                    className={`p-4 cursor-pointer transition-all ${selectedJobId === job.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                    onClick={() => setSelectedJobId(job.id)}
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{job.name}</h3>
-                        <p className="text-sm text-gray-500">{job.client || job.client_name || 'No client set'}</p>
-                      </div>
-                      <Badge className={normalizeJobStatus(job.status) === 'completed' ? 'bg-gray-100 text-gray-700' : 'bg-emerald-100 text-emerald-700'}>
-                        {normalizeJobStatus(job.status) === 'completed' ? 'completed' : 'active'}
-                      </Badge>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-3">
-                      <div>
-                        <p className="text-xs text-gray-500">Client</p>
-                        <p className="font-medium text-gray-900 truncate">{job.client || job.client_name || '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Site</p>
-                        <p className="font-medium text-gray-900 truncate">{job.site_address || job.address || '—'}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Start Date</p>
-                        <p className="font-medium text-gray-900">{formatDate(job.startDate || job.start_date)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Crew</p>
-                        <p className="font-medium text-gray-900">{getJobCrewCount(job)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Equipment</p>
-                        <p className="font-medium text-gray-900">{getJobEquipmentCount(job)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">End Date</p>
-                        <p className="font-medium text-gray-900">{formatDate(job.targetEndDate || job.target_end_date || job.endDate || job.end_date)}</p>
-                      </div>
-                    </div>
-                  </Card>
-                ))
-              )}
-            </div>
-
-            {/* Job Detail Panel */}
-            {selectedJob ? (
-              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
-                <h3 className="font-semibold text-gray-900 mb-4">{selectedJob.name}</h3>
-
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Name</p>
-                    <input
-                      type="text"
-                      value={jobForm.name}
-                      onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Status</p>
-                    <select
-                      value={jobForm.status}
-                      onChange={(e) => setJobForm({ ...jobForm, status: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="active">active</option>
-                      <option value="completed">completed</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Client</p>
-                    <input
-                      type="text"
-                      value={jobForm.client}
-                      onChange={(e) => setJobForm({ ...jobForm, client: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Address</p>
-                    <input
-                      type="text"
-                      value={jobForm.site_address}
-                      onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Start Date</p>
-                      <input
-                        type="date"
-                        value={jobForm.start_date}
-                        onChange={(e) => setJobForm({ ...jobForm, start_date: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Target End Date</p>
-                      <input
-                        type="date"
-                        value={jobForm.target_end_date}
-                        onChange={(e) => setJobForm({ ...jobForm, target_end_date: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Notes</p>
-                    <textarea
-                      value={jobForm.notes}
-                      onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24"
-                    />
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-2">Job Record Snapshot</p>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between"><span className="text-gray-500">Client</span><span className="font-medium">{selectedJob.client || selectedJob.client_name || '—'}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Start Date</span><span className="font-medium">{formatDate(selectedJob.startDate || selectedJob.start_date)}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Target End</span><span className="font-medium">{formatDate(selectedJob.targetEndDate || selectedJob.target_end_date || selectedJob.endDate || selectedJob.end_date)}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Crew Assigned</span><span className="font-medium">{jobEmployees.length}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">Equipment Assigned</span><span className="font-medium">{jobEquipment.length}</span></div>
-                      <div className="flex justify-between"><span className="text-gray-500">End Date</span><span className="font-medium">{formatDate(selectedJob.targetEndDate || selectedJob.target_end_date || selectedJob.endDate || selectedJob.end_date)}</span></div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-2">Assigned Equipment ({jobEquipment.length})</p>
-                    <div className="flex items-center gap-2 mb-2">
-                      <select
-                        value={equipmentToAssign}
-                        onChange={(e) => setEquipmentToAssign(e.target.value)}
-                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      >
-                        <option value="">Select equipment</option>
-                        {availableEquipment.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name} - {item.type}
-                          </option>
-                        ))}
-                      </select>
-                      <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || !equipmentToAssign}>
-                        Add
-                      </Button>
-                    </div>
-                    <div className="space-y-1">
-                      {jobEquipmentLoading ? (
-                        <p className="text-sm text-gray-400">Loading equipment...</p>
-                      ) : jobEquipment.map(eq => (
-                        <div key={eq.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
-                          <span>{eq.name}</span>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="success" className="text-xs">Active</Badge>
-                            <button
-                              type="button"
-                              onClick={() => handleUnassignEquipment(eq.id)}
-                              className="text-xs text-red-600 hover:text-red-700"
-                              disabled={equipmentActionLoading}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      {!jobEquipmentLoading && jobEquipment.length === 0 && <p className="text-sm text-gray-400">No equipment assigned</p>}
-                    </div>
-                    {equipmentActionError && <p className="text-sm text-red-600 mt-2">{equipmentActionError}</p>}
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-gray-500 mb-2">Assigned Crew ({jobEmployees.length})</p>
-                    <div className="flex items-center gap-2 mb-2">
-                      <select
-                        value={employeeToAssign}
-                        onChange={(e) => setEmployeeToAssign(e.target.value)}
-                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      >
-                        <option value="">Select employee</option>
-                        {availableEmployees.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name} - {employee.role}
-                          </option>
-                        ))}
-                      </select>
-                      <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || !employeeToAssign}>
-                        Add
-                      </Button>
-                    </div>
-                    <div className="space-y-1">
-                      {jobEmployeesLoading ? (
-                        <p className="text-sm text-gray-400">Loading crew...</p>
-                      ) : jobEmployees.map(emp => (
-                        <div key={emp.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
-                          <span>{emp.name}</span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-gray-500">{emp.role}</span>
-                            <button
-                              type="button"
-                              onClick={() => handleUnassignEmployee(emp.id)}
-                              className="text-xs text-red-600 hover:text-red-700"
-                              disabled={crewActionLoading}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      {!jobEmployeesLoading && jobEmployees.length === 0 && <p className="text-sm text-gray-400">No crew assigned</p>}
-                    </div>
-                    {crewActionError && <p className="text-sm text-red-600 mt-2">{crewActionError}</p>}
-                  </div>
-
-                  <AttachmentPanel entityType="job" entityId={selectedJob.id} />
-
-                  {jobActionError && (
-                    <p className="text-sm text-red-600">{jobActionError}</p>
-                  )}
-
-                  <div className="flex items-center gap-2 pt-2">
-                    <Button
-                      variant="brand"
-                      size="sm"
-                      onClick={handleSaveJob}
-                      disabled={saveLoading || deleteLoading}
-                      data-testid="jobs-save"
-                    >
-                      {saveLoading ? 'Saving...' : 'Save'}
-                    </Button>
-                    <Button
-                      variant="danger"
-                      size="sm"
-                      onClick={handleDeleteJob}
-                      disabled={saveLoading || deleteLoading}
-                      data-testid="jobs-delete"
-                    >
-                      {deleteLoading ? 'Deleting...' : 'Delete'}
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ) : (
-              <Card className="p-8 text-center text-gray-500">
-                <Icon name="hand-pointer" className="text-4xl mb-2 text-gray-300" />
-                <p>Select a job to view details</p>
-              </Card>
-            )}
-          </div>
-        </div>
-      );
-    };
-
-    // ============================================
-    // FLEET VIEW
     // ============================================
     const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal }) => {
       const EQUIPMENT_TYPE_OPTIONS = useMemo(
@@ -9737,594 +8572,6 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // MESSAGES VIEW - Team Communication Hub
     // ============================================
-    const MessagesView = ({ employees = [] }) => {
-      const [activeChannel, setActiveChannel] = useState(null);
-      const [messageText, setMessageText] = useState('');
-      const [searchTerm, setSearchTerm] = useState('');
-      const [showNewChannel, setShowNewChannel] = useState(false);
-      const [newChannelName, setNewChannelName] = useState('');
-      const [channels, setChannels] = useState([]);
-      const [messages, setMessages] = useState([]);
-      const [channelsLoading, setChannelsLoading] = useState(true);
-      const [channelsError, setChannelsError] = useState('');
-      const [messagesLoading, setMessagesLoading] = useState(false);
-      const [messagesError, setMessagesError] = useState('');
-      const [invalidChannelIds, setInvalidChannelIds] = useState([]);
-      const [createChannelLoading, setCreateChannelLoading] = useState(false);
-      const [createChannelError, setCreateChannelError] = useState('');
-      const [sendLoading, setSendLoading] = useState(false);
-      const [sendError, setSendError] = useState('');
-      const [availableUsers, setAvailableUsers] = useState([]);
-      const [selectedNewChatUsers, setSelectedNewChatUsers] = useState([]);
-      const [showMembers, setShowMembers] = useState(false);
-      const [members, setMembers] = useState([]);
-      const [membersError, setMembersError] = useState('');
-      const [selectedAddMembers, setSelectedAddMembers] = useState([]);
-      const [myUserId, setMyUserId] = useState('');
-      const [newIncomingCount, setNewIncomingCount] = useState(0);
-      const [pendingDirectContact, setPendingDirectContact] = useState(null);
-      const messagesEndRef = useRef(null);
-      const previousUnreadRef = useRef(0);
-
-      const normalized = (value) => String(value || '').trim().toLowerCase();
-      const looksLikeDmName = (value) => normalized(value).startsWith('dm-') || normalized(value) === 'direct message';
-
-      const contactOptions = useMemo(() => {
-        const userById = new Map((availableUsers || []).map((user) => [String(user.userId), user]));
-        const options = [];
-
-        for (const employee of employees || []) {
-          const explicitUserId = employee?.user_id ? String(employee.user_id) : null;
-          if (explicitUserId && myUserId && explicitUserId === myUserId) continue;
-          const matchedUser = explicitUserId ? userById.get(explicitUserId) : null;
-          const preferredLabel = matchedUser?.displayName || employee?.name || employee?.full_name || "Team Member";
-          const preferredRole = matchedUser?.role || employee?.role || "";
-          options.push({
-            key: explicitUserId ? `user:${explicitUserId}` : `employee:${employee.id}`,
-            label: String(preferredLabel),
-            subtitle: String(preferredRole),
-            userId: explicitUserId || null,
-            hasAccount: Boolean(matchedUser || explicitUserId),
-          });
-        }
-
-        for (const user of availableUsers || []) {
-          if (myUserId && String(user.userId) === myUserId) continue;
-          const key = `user:${user.userId}`;
-          if (options.some((item) => item.key === key)) continue;
-          options.push({
-            key,
-            label: String(user.displayName || 'Team Member'),
-            subtitle: String(user.role || ''),
-            userId: String(user.userId),
-            hasAccount: true,
-          });
-        }
-
-        return options.sort((a, b) => a.label.localeCompare(b.label));
-      }, [availableUsers, employees, myUserId]);
-
-      const userDisplayNameById = useMemo(
-        () =>
-          new Map(
-            (availableUsers || []).map((user) => [String(user.userId), String(user.displayName || 'Team Member')])
-          ),
-        [availableUsers]
-      );
-
-      const getChannelDisplayName = useCallback(
-        (channel) => {
-          if (!channel) return 'Direct Message';
-          if (String(channel.kind || '') !== 'direct') return String(channel.name || '');
-          const otherUserId = String(channel.other_user_id || '');
-          if (otherUserId && userDisplayNameById.has(otherUserId)) {
-            return String(userDisplayNameById.get(otherUserId));
-          }
-          if (looksLikeDmName(channel.name)) return 'Direct Message';
-          return String(channel.name || 'Direct Message');
-        },
-        [userDisplayNameById]
-      );
-
-      const loadUsers = useCallback(async () => {
-        const response = await fetch('/api/messages/users', { cache: 'no-store' });
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload?.error || 'Failed to load team members');
-        setAvailableUsers(payload.items || []);
-      }, []);
-
-      const loadChannels = useCallback(async () => {
-        try {
-          setChannelsLoading(true);
-          setChannelsError('');
-          const response = await fetch('/api/messages/inbox', { cache: 'no-store' });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload?.error || 'Failed to load channels');
-          const nextChannels = payload.items || [];
-          setChannels(nextChannels);
-          setActiveChannel((prev) => {
-            if (!prev) return null;
-            if (invalidChannelIds.includes(String(prev.id))) return null;
-            const refreshed = nextChannels.find((c) => String(c.id) === String(prev.id));
-            return refreshed || null;
-          });
-          const totalUnread = nextChannels.reduce(
-            (sum, channel) => sum + Number(channel.unread_count || 0),
-            0
-          );
-          if (
-            previousUnreadRef.current > 0 &&
-            totalUnread > previousUnreadRef.current
-          ) {
-            setNewIncomingCount((count) => count + (totalUnread - previousUnreadRef.current));
-          }
-          previousUnreadRef.current = totalUnread;
-          return nextChannels;
-        } catch (error) {
-          setChannelsError(error instanceof Error ? error.message : 'Failed to load channels');
-          return channels;
-        } finally {
-          setChannelsLoading(false);
-        }
-      }, [channels, invalidChannelIds]);
-
-      const markThreadRead = useCallback(async (channelId) => {
-        if (!channelId) return;
-        await fetch(`/api/messages/threads/${channelId}/read`, { method: 'POST' }).catch(() => null);
-      }, []);
-
-      const loadMessages = useCallback(async (channelId) => {
-        try {
-          setMessagesLoading(true);
-          setMessagesError('');
-          const response = await fetch(`/api/messages/threads/${channelId}/messages`, { cache: 'no-store' });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload?.error || 'Failed to load messages');
-          setMessages(payload.items || []);
-          await markThreadRead(channelId);
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : 'Failed to load messages';
-          if (String(errorMessage).toLowerCase().includes('channel not found')) {
-            setInvalidChannelIds((prev) => (
-              prev.includes(String(channelId)) ? prev : [...prev, String(channelId)]
-            ));
-            setChannels((prev) => prev.filter((channel) => String(channel.id) !== String(channelId)));
-            setActiveChannel((prev) => (prev && String(prev.id) === String(channelId) ? null : prev));
-            setMessagesError('');
-            return;
-          }
-          setMessages([]);
-          setMessagesError(errorMessage);
-        } finally {
-          setMessagesLoading(false);
-        }
-      }, [markThreadRead]);
-
-      const loadMembers = useCallback(async (channelId) => {
-        try {
-          setMembersError('');
-          const response = await fetch(`/api/messages/channels/${channelId}/members`, { cache: 'no-store' });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(payload?.error || 'Failed to load members');
-          setMembers(payload.items || []);
-        } catch (error) {
-          setMembers([]);
-          setMembersError(error instanceof Error ? error.message : 'Failed to load members');
-        }
-      }, []);
-
-      useEffect(() => {
-        supabaseBrowser().auth.getUser().then(({ data }) => {
-          setMyUserId(String(data?.user?.id || ''));
-        }).catch(() => setMyUserId(''));
-      }, []);
-
-      useEffect(() => {
-        loadChannels();
-        loadUsers().catch(() => setAvailableUsers([]));
-      }, [loadChannels, loadUsers]);
-
-      useEffect(() => {
-        const refreshInbox = () => {
-          if (typeof document !== 'undefined' && document.hidden) return;
-          loadChannels();
-        };
-
-        const timer = setInterval(refreshInbox, 30000);
-        if (typeof window !== 'undefined') {
-          window.addEventListener('focus', refreshInbox);
-          document.addEventListener('visibilitychange', refreshInbox);
-        }
-
-        return () => {
-          clearInterval(timer);
-          if (typeof window !== 'undefined') {
-            window.removeEventListener('focus', refreshInbox);
-            document.removeEventListener('visibilitychange', refreshInbox);
-          }
-        };
-      }, [loadChannels]);
-
-      useEffect(() => {
-        if (!activeChannel?.id) {
-          setMessages([]);
-          setMembers([]);
-          return;
-        }
-        if (invalidChannelIds.includes(String(activeChannel.id))) {
-          setActiveChannel(null);
-          return;
-        }
-        setNewIncomingCount(0);
-        loadMessages(activeChannel.id);
-      }, [activeChannel, invalidChannelIds, loadMessages]);
-
-      useEffect(() => {
-        if (!showMembers || !activeChannel?.id) return;
-        loadMembers(activeChannel.id);
-      }, [showMembers, activeChannel, loadMembers]);
-
-      useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-      }, [messages]);
-
-      const filteredChannels = channels.filter((channel) =>
-        String(channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      const filteredContacts = contactOptions.filter(
-        (contact) => contact.hasAccount && normalized(contact.label).includes(normalized(searchTerm))
-      );
-
-      const startDirectChat = async (contact) => {
-        setCreateChannelError('');
-        if (!contact.userId) {
-          setCreateChannelError('This team member does not have an account yet');
-          return;
-        }
-        const existing = channels.find(
-          (channel) =>
-            String(channel.kind || '') === 'direct' &&
-            String(channel.other_user_id || '') === String(contact.userId)
-        );
-        if (existing && (existing.last_message_at || existing.last_message_preview || Number(existing.message_count || 0) > 0)) {
-          setPendingDirectContact(null);
-          setActiveChannel(existing);
-          return;
-        }
-        setActiveChannel(null);
-        setPendingDirectContact({
-          userId: String(contact.userId),
-          label: String(contact.label || 'Team Member'),
-        });
-      };
-
-      const handleCreateChannel = async () => {
-        try {
-          setCreateChannelLoading(true);
-          setCreateChannelError('');
-          const selectedParticipants = contactOptions.filter((item) => selectedNewChatUsers.includes(item.key));
-          const memberUserIds = Array.from(
-            new Set(
-              selectedParticipants
-                .map((participant) => participant.userId)
-                .filter(Boolean)
-            )
-          );
-          if (memberUserIds.length === 1) {
-            setShowNewChannel(false);
-            setNewChannelName('');
-            setSelectedNewChatUsers([]);
-            const selected = selectedParticipants[0];
-            setActiveChannel(null);
-            setPendingDirectContact({
-              userId: String(memberUserIds[0]),
-              label: String(selected?.label || 'Team Member'),
-            });
-            return;
-          }
-
-          if (!newChannelName.trim() && memberUserIds.length === 0) {
-            throw new Error('Enter a group name or select at least one member');
-          }
-
-          const generatedName =
-            newChannelName.trim() ||
-            `group-${Date.now()}`;
-
-          const response = await fetch('/api/messages/channels', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: generatedName, memberUserIds }),
-          });
-          const payload = await response.json();
-          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to create channel');
-          setShowNewChannel(false);
-          setNewChannelName('');
-          setSelectedNewChatUsers([]);
-          await loadChannels();
-          setPendingDirectContact(null);
-          setActiveChannel(payload.item);
-        } catch (error) {
-          setCreateChannelError(error instanceof Error ? error.message : 'Failed to create channel');
-        } finally {
-          setCreateChannelLoading(false);
-        }
-      };
-
-      const handleSendMessage = async () => {
-        if (!messageText.trim()) return;
-        try {
-          setSendLoading(true);
-          setSendError('');
-          let channelId = activeChannel?.id ? String(activeChannel.id) : '';
-          if (!channelId && pendingDirectContact?.userId) {
-            const createResponse = await fetch('/api/messages/direct/start', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userId: pendingDirectContact.userId }),
-            });
-            const createPayload = await createResponse.json();
-            if (!createResponse.ok || !createPayload?.item?.id) {
-              throw new Error(createPayload?.error || 'Failed to create direct chat');
-            }
-            channelId = String(createPayload.item.id);
-          }
-          if (!channelId) return;
-
-          const response = await fetch(`/api/messages/threads/${channelId}/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ body: messageText.trim() }),
-          });
-          const payload = await response.json();
-          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
-          setMessageText('');
-          await loadMessages(channelId);
-          const nextChannels = await loadChannels();
-          setPendingDirectContact(null);
-          const refreshed = (nextChannels || []).find((channel) => String(channel.id) === String(channelId));
-          if (refreshed) setActiveChannel(refreshed);
-        } catch (error) {
-          setSendError(error instanceof Error ? error.message : 'Failed to send message');
-        } finally {
-          setSendLoading(false);
-        }
-      };
-
-      const handleAddMembers = async () => {
-        if (!activeChannel?.id || selectedAddMembers.length === 0) return;
-        const response = await fetch(`/api/messages/channels/${activeChannel.id}/members`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userIds: selectedAddMembers }),
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          setMembersError(payload?.error || 'Failed to add members');
-          return;
-        }
-        setSelectedAddMembers([]);
-        await loadMembers(activeChannel.id);
-        await loadChannels();
-      };
-
-      const handleLeave = async () => {
-        if (!activeChannel?.id) return;
-        const response = await fetch(`/api/messages/channels/${activeChannel.id}/members/me`, { method: 'DELETE' });
-        if (!response.ok) return;
-        setShowMembers(false);
-        await loadChannels();
-      };
-
-      const handleRemoveMember = async (userId) => {
-        if (!activeChannel?.id) return;
-        const response = await fetch(`/api/messages/channels/${activeChannel.id}/members/${userId}`, { method: 'DELETE' });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          setMembersError(payload?.error || 'Failed to remove member');
-          return;
-        }
-        await loadMembers(activeChannel.id);
-        await loadChannels();
-      };
-
-      return (
-        <div className="h-[calc(100vh-190px)] min-h-[700px] flex rounded-xl overflow-hidden border border-gray-800 bg-[#0d1016] shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-          <div className="w-full md:w-80 bg-[#0b0f14] border-r border-gray-800/80 flex flex-col">
-            <div className="p-4 border-b border-gray-800 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-gray-100 tracking-wide">Messages</h3>
-                <Button variant="secondary" size="sm" onClick={() => setShowNewChannel(true)} data-testid="messages-create-channel-open">
-                  <Icon name="pen-to-square" />
-                </Button>
-              </div>
-              {newIncomingCount > 0 && (
-                <p className="text-xs text-emerald-300">
-                  {newIncomingCount} new message{newIncomingCount > 1 ? 's' : ''} received
-                </p>
-              )}
-              <div className="relative">
-                <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs" />
-                <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full pl-8 pr-3 py-2 bg-[#141922] border border-gray-800 rounded-lg text-sm text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500" />
-              </div>
-              {channelsError && <p className="text-sm text-red-400 mt-3">{channelsError}</p>}
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
-                <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full text-left px-4 py-3 border-b border-gray-800/70 hover:bg-[#151b26] ${activeChannel?.id === channel.id ? 'bg-brand-600/85' : ''}`} data-testid={`messages-channel-${channel.id}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}>{channel.kind === 'direct' ? getChannelDisplayName(channel) : `# ${channel.name}`}</span>
-                    {(channel.unread_count ?? channel.message_count) > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-800 text-gray-300'}`}>{channel.unread_count ?? channel.message_count}</span>}
-                  </div>
-                  <p className={`text-xs truncate ${activeChannel?.id === channel.id ? 'text-white/80' : 'text-gray-500'}`}>{channel.last_message_preview || 'No messages yet'}</p>
-                </button>
-              ))}
-              <div className="px-4 py-3 border-t border-gray-800">
-                <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Team Members</p>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {filteredContacts.map((contact) => (
-                    <button
-                      key={`contact-${contact.key}`}
-                      type="button"
-                      onClick={() => startDirectChat(contact)}
-                      className="w-full text-left px-2 py-2 rounded-lg hover:bg-[#151b26] flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="text-sm text-gray-100 truncate">{contact.label}</p>
-                        <p className="text-xs text-gray-500 truncate">{contact.subtitle || 'Team member'}</p>
-                      </div>
-                      <span className="text-[10px] text-gray-500">Chat</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {activeChannel ? (
-            <div className="flex-1 flex flex-col bg-[#11151d]">
-              <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
-                <div>
-                  <h3 className="font-semibold text-gray-100" data-testid="messages-active-channel">{activeChannel.kind === 'direct' ? getChannelDisplayName(activeChannel) : `# ${activeChannel.name}`}</h3>
-                  <p className="text-xs text-gray-400">{activeChannel.message_count || 0} messages</p>
-                </div>
-                <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-gradient-to-b from-[#131824] to-[#0f131b]">
-                {messagesLoading ? <div className="text-sm text-gray-400">Loading messages...</div> : messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500">No messages yet.</div> : messages.map((msg) => {
-                  const isMine = myUserId && String(msg.sender_user_id || '') === String(myUserId);
-                  return (
-                    <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
-                      <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                        isMine ? 'bg-blue-500 text-white rounded-br-md' : 'bg-[#2a2f38] text-gray-100 rounded-bl-md'
-                      }`}>
-                        <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
-                        <p className={`text-[10px] mt-1 ${isMine ? 'text-white/80' : 'text-gray-400'}`}>{formatDate(msg.created_at)}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </div>
-
-              <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
-                <div className="flex items-end gap-3">
-                  <div className="flex-1 relative">
-                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={activeChannel.kind === 'direct' ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
-                  </div>
-                  <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
-                    <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-                {sendError && <p className="text-xs text-red-400 mt-2">{sendError}</p>}
-                <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
-              </div>
-            </div>
-          ) : pendingDirectContact ? (
-            <div className="flex-1 flex flex-col bg-[#11151d]">
-              <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
-                <div>
-                  <h3 className="font-semibold text-gray-100">Message {pendingDirectContact.label}</h3>
-                  <p className="text-xs text-gray-400">No messages yet</p>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gradient-to-b from-[#131824] to-[#0f131b]">
-                <div className="text-sm text-gray-500">Send the first message to start this chat.</div>
-              </div>
-              <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
-                <div className="flex items-end gap-3">
-                  <div className="flex-1 relative">
-                    <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
-                  </div>
-                  <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
-                    <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-                {sendError && <p className="text-xs text-red-400 mt-2">{sendError}</p>}
-                <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
-              </div>
-            </div>
-          ) : (
-            <div className="hidden md:flex flex-1 items-center justify-center bg-[#11151d]"><div className="text-center"><h3 className="text-lg font-semibold text-gray-100 mb-2">Your Messages</h3></div></div>
-          )}
-
-          {showNewChannel && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900">Create Group Chat</h3>
-                  <button onClick={() => setShowNewChannel(false)} className="p-1 text-gray-400 hover:text-gray-600"><Icon name="xmark" /></button>
-                </div>
-                <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
-                  <label className="block text-sm font-medium text-gray-700">Group Name (optional for direct chat)</label>
-                  <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="e.g. field-updates" className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500" data-testid="messages-create-channel-input" />
-                  <label className="block text-sm font-medium text-gray-700">Add Members</label>
-                  <div className="border border-gray-200 rounded-lg p-2 max-h-48 overflow-y-auto space-y-2" data-testid="messages-create-channel-members">
-                    {contactOptions.map((contact) => (
-                      <label key={contact.key} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={selectedNewChatUsers.includes(contact.key)}
-                          onChange={(e) =>
-                            setSelectedNewChatUsers((prev) =>
-                              e.target.checked ? [...prev, contact.key] : prev.filter((id) => id !== contact.key)
-                            )
-                          }
-                        />
-                        <span>{contact.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  {createChannelError && <p className="text-sm text-red-600">{createChannelError}</p>}
-                  <div className="flex justify-end gap-2 pt-2">
-                    <Button variant="secondary" onClick={() => setShowNewChannel(false)} disabled={createChannelLoading}>Cancel</Button>
-                    <Button variant="brand" onClick={handleCreateChannel} disabled={createChannelLoading} data-testid="messages-create-channel-submit">{createChannelLoading ? 'Creating...' : 'Create'}</Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {showMembers && activeChannel && (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="messages-members-modal">
-              <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
-                <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900">Members</h3>
-                  <button onClick={() => setShowMembers(false)} className="p-1 text-gray-400 hover:text-gray-600"><Icon name="xmark" /></button>
-                </div>
-                <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
-                  {members.map((member) => (
-                    <div key={member.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2">
-                      <span>{member.displayName} {member.memberRole === 'owner' ? '(owner)' : ''}</span>
-                      {member.memberRole !== 'owner' && <Button variant="secondary" size="sm" onClick={() => handleRemoveMember(member.userId)} data-testid={`messages-member-remove-${member.userId}`}>Remove</Button>}
-                    </div>
-                  ))}
-                  <label className="block text-sm font-medium text-gray-700">Add Members</label>
-                  <div className="border border-gray-200 rounded-lg p-2 max-h-40 overflow-y-auto space-y-2">
-                    {availableUsers.map((user) => (
-                      <label key={user.userId} className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={selectedAddMembers.includes(user.userId)} onChange={(e) => setSelectedAddMembers((prev) => e.target.checked ? [...prev, user.userId] : prev.filter((id) => id !== user.userId))} />
-                        <span>{user.displayName}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex justify-between">
-                    <Button variant="secondary" onClick={handleLeave} data-testid="messages-leave-chat">Leave chat</Button>
-                    <Button variant="brand" onClick={handleAddMembers} data-testid="messages-add-members">Add selected</Button>
-                  </div>
-                  {membersError && <p className="text-sm text-red-600">{membersError}</p>}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    };
-
-    // ============================================
-    // INTEGRATIONS VIEW
-    // ============================================
     const IntegrationsView = () => {
       type IntegrationCapability = {
         canConnect: boolean;
@@ -11140,11 +9387,37 @@ const confirmDestructiveAction = (targetLabel) =>
     );
 
     const CalendarEventModal = ({ isOpen, onClose, employees, currentRole, initialData, onCreated }) => {
+      const parseLocalDateTime = (value) => {
+        const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+        if (!match) return null;
+        const [, year, month, day, hour, minute] = match;
+        const date = new Date(
+          Number(year),
+          Number(month) - 1,
+          Number(day),
+          Number(hour),
+          Number(minute),
+          0,
+          0
+        );
+        return Number.isNaN(date.getTime()) ? null : date;
+      };
+
+      const toLocalInputValue = (date) => {
+        const dt = new Date(date);
+        const year = dt.getFullYear();
+        const month = String(dt.getMonth() + 1).padStart(2, '0');
+        const day = String(dt.getDate()).padStart(2, '0');
+        const hour = String(dt.getHours()).padStart(2, '0');
+        const minute = String(dt.getMinutes()).padStart(2, '0');
+        return `${year}-${month}-${day}T${hour}:${minute}`;
+      };
+
       const [title, setTitle] = useState('');
       const [eventType, setEventType] = useState('meeting');
       const [visibility, setVisibility] = useState('attendees');
-      const [startsAt, setStartsAt] = useState(new Date().toISOString().slice(0, 16));
-      const [endsAt, setEndsAt] = useState(new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
+      const [startsAt, setStartsAt] = useState(toLocalInputValue(new Date()));
+      const [endsAt, setEndsAt] = useState(toLocalInputValue(new Date(Date.now() + 60 * 60 * 1000)));
       const [locationText, setLocationText] = useState('');
       const [description, setDescription] = useState('');
       const [attendeeEmployeeIds, setAttendeeEmployeeIds] = useState([]);
@@ -11193,8 +9466,8 @@ const confirmDestructiveAction = (targetLabel) =>
         setTitle('');
         setEventType('meeting');
         setVisibility('attendees');
-        setStartsAt(new Date().toISOString().slice(0, 16));
-        setEndsAt(new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
+        setStartsAt(toLocalInputValue(new Date()));
+        setEndsAt(toLocalInputValue(new Date(Date.now() + 60 * 60 * 1000)));
         setLocationText('');
         setDescription('');
         setAttendeeEmployeeIds([]);
@@ -11236,16 +9509,6 @@ const confirmDestructiveAction = (targetLabel) =>
         setExternalContact('');
       };
 
-      const toLocalInputValue = (date) => {
-        const dt = new Date(date);
-        const year = dt.getFullYear();
-        const month = String(dt.getMonth() + 1).padStart(2, '0');
-        const day = String(dt.getDate()).padStart(2, '0');
-        const hour = String(dt.getHours()).padStart(2, '0');
-        const minute = String(dt.getMinutes()).padStart(2, '0');
-        return `${year}-${month}-${day}T${hour}:${minute}`;
-      };
-
       const removeExternalAttendee = (index) => {
         setExternalAttendees((prev) => prev.filter((_, idx) => idx !== index));
       };
@@ -11268,6 +9531,16 @@ const confirmDestructiveAction = (targetLabel) =>
         try {
           setSaving(true);
           setError('');
+          const parsedStart = parseLocalDateTime(startsAt);
+          const parsedEnd = parseLocalDateTime(endsAt);
+          if (!parsedStart || !parsedEnd) {
+            setError('Invalid start or end time');
+            return;
+          }
+          if (parsedEnd.getTime() <= parsedStart.getTime()) {
+            setError('End time must be after start time');
+            return;
+          }
           const attendees = [
             ...attendeeEmployeeIds.map((employeeId) => ({
               attendeeType: 'employee',
@@ -11287,8 +9560,8 @@ const confirmDestructiveAction = (targetLabel) =>
               title: title.trim(),
               eventType,
               visibility,
-              startsAt: new Date(startsAt).toISOString(),
-              endsAt: new Date(endsAt).toISOString(),
+              startsAt: parsedStart.toISOString(),
+              endsAt: parsedEnd.toISOString(),
               locationText,
               description,
               ...(isEditMode ? {} : { attendees }),

@@ -211,13 +211,20 @@ export async function GET(request: Request) {
       const key = String(channel.id);
       const latest = latestByChannel.get(key);
       const rawName = String(channel.name ?? "");
-      const isLegacyDmName = rawName.toLowerCase().startsWith("dm-");
+      const normalizedName = rawName.toLowerCase();
+      const isLegacyDmName = normalizedName.startsWith("dm-") || normalizedName === "direct message" || normalizedName === "direct-message";
       const effectiveKind = channel.kind === "direct" || isLegacyDmName ? "direct" : channel.kind || "channel";
       let otherUserId: string | null = null;
       if (effectiveKind === "direct") {
         const members = memberUserIdsByChannel.get(key) ?? [];
         const other = members.find((id) => id !== String(userId));
         otherUserId = other ?? null;
+        if (!otherUserId) {
+          const userA = channel.dm_user_a ? String(channel.dm_user_a) : "";
+          const userB = channel.dm_user_b ? String(channel.dm_user_b) : "";
+          if (userA && userA !== String(userId)) otherUserId = userA;
+          else if (userB && userB !== String(userId)) otherUserId = userB;
+        }
       }
       const resolvedDirectName =
         effectiveKind === "direct"
@@ -245,7 +252,7 @@ export async function GET(request: Request) {
         passThroughItems.push(item);
         continue;
       }
-      const key = String(item.other_user_id || item.name || item.id);
+      const key = String(item.other_user_id || item.id);
       const prev = dedupedByDirectTarget.get(key);
       if (!prev) {
         dedupedByDirectTarget.set(key, item);

@@ -132,9 +132,17 @@ const mapEvent = (event: EventRow, attendees: EventAttendeeRow[]) => ({
 function assignmentVisibleForRole(
   role: AppRole,
   assignment: AssignmentRow,
-  employeeRoleById: Map<string, AppRole | null>
+  employeeRoleById: Map<string, AppRole | null>,
+  userEmployeeIds: Set<string>,
+  hasLinkedEmployeeForRole: boolean
 ) {
   if (role === "admin" || role === "pm") return true;
+  if (assignment.employee_id && userEmployeeIds.has(String(assignment.employee_id))) {
+    return true;
+  }
+  if (hasLinkedEmployeeForRole) {
+    return false;
+  }
   if (role === "mechanic") {
     if (assignment.equipment_id) return true;
     if (!assignment.employee_id) return false;
@@ -394,7 +402,15 @@ export async function GET(request: Request) {
     }
 
     const assignments = mergedAssignments
-      .filter((assignment) => assignmentVisibleForRole(role, assignment, employeeRoleById))
+      .filter((assignment) =>
+        assignmentVisibleForRole(
+          role,
+          assignment,
+          employeeRoleById,
+          userEmployeeIds,
+          hasLinkedEmployeeForRole
+        )
+      )
       .map(mapAssignment);
 
     const employeeJobResult =

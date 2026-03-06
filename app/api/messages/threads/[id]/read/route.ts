@@ -7,7 +7,7 @@ import { getMyMembership } from "@/lib/messages/members";
 export const dynamic = "force-dynamic";
 
 const paramsSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
 });
 
 type ValidationIssue = {

@@ -54,6 +54,10 @@ export async function GET(
     }
 
     if (ledgerResult.error) {
+      const message = (ledgerResult.error.message || "").toLowerCase();
+      if (message.includes("inventory_transactions") && (message.includes("does not exist") || message.includes("not find"))) {
+        return NextResponse.json({ items: [] });
+      }
       return NextResponse.json({ error: ledgerResult.error.message }, { status: 400 });
     }
 

@@ -446,6 +446,9 @@ const confirmDestructiveAction = (targetLabel) =>
       const [uploading, setUploading] = useState(false);
       const [error, setError] = useState('');
       const fileInputRef = useRef(null);
+      const isDocumentContext = ['job', 'vendor', 'document'].includes(String(entityType || '').toLowerCase());
+      const panelLabel = isDocumentContext ? 'Documents' : 'Attachments';
+      const emptyLabel = isDocumentContext ? 'No documents yet.' : 'No attachments yet.';
 
       const loadAttachments = useCallback(async () => {
         if (entityId === null || entityId === undefined || entityId === '') {
@@ -521,7 +524,7 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleDelete = async (attachmentId) => {
-        const confirmed = confirmDestructiveAction('this attachment');
+        const confirmed = confirmDestructiveAction(isDocumentContext ? 'this document' : 'this attachment');
         if (!confirmed) return;
         setError('');
         try {
@@ -546,7 +549,7 @@ const confirmDestructiveAction = (targetLabel) =>
       return (
         <div className="pt-4 border-t border-gray-200">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-gray-500">Attachments</p>
+            <p className="text-xs text-gray-500">{panelLabel}</p>
             <div className="flex items-center gap-2">
               <input
                 ref={fileInputRef}
@@ -564,7 +567,7 @@ const confirmDestructiveAction = (targetLabel) =>
           {loading ? (
             <p className="text-sm text-gray-500">Loading attachments...</p>
           ) : attachments.length === 0 ? (
-            <p className="text-sm text-gray-400">No attachments yet.</p>
+            <p className="text-sm text-gray-400">{emptyLabel}</p>
           ) : (
             <div className="space-y-2">
               {attachments.map((attachment) => (
@@ -700,20 +703,57 @@ const confirmDestructiveAction = (targetLabel) =>
         return 'admin';
       }, []);
 
+      const fallbackNavByRole = useCallback((role) => {
+        const navLibrary = {
+          dashboard: { key: 'dashboard', label: 'Dashboard', iconKey: 'table-cells-large' },
+          schedule: { key: 'schedule', label: 'Schedule', iconKey: 'calendar-week' },
+          jobs: { key: 'jobs', label: 'Jobs', iconKey: 'briefcase' },
+          team: { key: 'team', label: 'Team', iconKey: 'people-group' },
+          fleet: { key: 'fleet', label: 'Fleet', iconKey: 'truck-field' },
+          messages: { key: 'messages', label: 'Messages', iconKey: 'comments' },
+          maintenance: { key: 'maintenance', label: 'Maintenance', iconKey: 'toolbox' },
+          inventory: { key: 'inventory', label: 'Inventory', iconKey: 'warehouse' },
+          safety: { key: 'safety', label: 'Safety', iconKey: 'shield-heart' },
+          reports: { key: 'reports', label: 'Reports', iconKey: 'chart-line' },
+          bids: { key: 'bids', label: 'Bids', iconKey: 'file-contract' },
+          vendors: { key: 'vendors', label: 'Vendors', iconKey: 'handshake' },
+          documents: { key: 'documents', label: 'Documents', iconKey: 'folder-open' },
+          training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
+          finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
+          integrations: { key: 'integrations', label: 'Integrations', iconKey: 'plug' },
+          settings: { key: 'settings', label: 'Settings', iconKey: 'gear' },
+          subscribe: { key: 'subscribe', label: 'Subscribe', iconKey: 'credit-card' },
+          audit: { key: 'audit', label: 'Audit', iconKey: 'clipboard-list' },
+        };
+        const byRole = {
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'integrations', 'settings', 'subscribe', 'audit', 'documents', 'team', 'training', 'schedule'],
+          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'settings', 'documents', 'team', 'training', 'schedule'],
+          foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
+          mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
+          operator: ['dashboard', 'messages', 'schedule', 'safety'],
+        };
+        return (byRole[String(role || 'executive')] || byRole.executive).map((key) => navLibrary[key]).filter(Boolean);
+      }, []);
+
       const loadNav = useCallback(async () => {
         try {
           const response = await fetch('/api/nav', { cache: 'no-store' });
           const payload = await response.json().catch(() => ({}));
-          if (!response.ok) return;
-          setServerNavItems(Array.isArray(payload?.items) ? payload.items : []);
-          setCurrentRole(mapServerRoleToUiRole(payload?.role));
+          if (!response.ok) {
+            setServerNavItems(fallbackNavByRole(currentRole));
+            return;
+          }
+          const uiRole = mapServerRoleToUiRole(payload?.role);
+          setCurrentRole(uiRole);
           setCanSwitchRoleView(Boolean(payload?.canSwitchRoleView));
+          const resolvedItems = Array.isArray(payload?.items) && payload.items.length > 0 ? payload.items : fallbackNavByRole(uiRole);
+          setServerNavItems(resolvedItems);
         } catch {
-          setServerNavItems([]);
+          setServerNavItems(fallbackNavByRole(currentRole));
         } finally {
           setNavLoaded(true);
         }
-      }, [mapServerRoleToUiRole]);
+      }, [currentRole, fallbackNavByRole, mapServerRoleToUiRole]);
 
       const notificationVisuals = {
         assignment_created: {
@@ -1503,7 +1543,7 @@ const confirmDestructiveAction = (targetLabel) =>
           case 'messages': return <MessagesView employees={employees} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} />;
-          case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} />;
+          case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} />;
@@ -1513,7 +1553,7 @@ const confirmDestructiveAction = (targetLabel) =>
           case 'vendors': return <VendorsView vendors={vendors} vendorsLoading={vendorsLoading} setVendors={setVendors} jobs={jobs} inventory={inventory} />;
           case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} />;
           case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} />;
-          case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} />;
+          case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} currentRole={currentRole} />;
           case 'subscribe': return <SubscribeView employees={employees} currentRole={currentRole} />;
           case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
           case 'audit': return <AuditView currentRole={currentRole} />;
@@ -1947,7 +1987,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // SCHEDULE VIEW (Click-to-Add Calendar)
     // ============================================
     // ============================================
-    const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal }) => {
+    const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal, currentRole }) => {
       const EQUIPMENT_TYPE_OPTIONS = useMemo(
         () => [
           'Excavator',
@@ -1983,6 +2023,8 @@ const confirmDestructiveAction = (targetLabel) =>
       const [equipmentActionError, setEquipmentActionError] = useState('');
       const [selectedTypeOption, setSelectedTypeOption] = useState('Excavator');
       const [customTypeInput, setCustomTypeInput] = useState('');
+      const normalizedRole = String(currentRole || '').trim().toLowerCase();
+      const canManageFleet = ['executive', 'operations', 'admin', 'pm', 'mechanic'].includes(normalizedRole);
 
       const EquipmentTypeGlyph = useCallback(({ type, className = '' }) => {
         const normalized = String(type || '').trim().toLowerCase();
@@ -2143,6 +2185,10 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [filter, loadFleetItems]);
 
       const handleCreateEquipment = async () => {
+        if (!canManageFleet) {
+          setEquipmentActionError('Forbidden');
+          return;
+        }
         try {
           const baseCount = equipment.length + 1;
           const response = await fetch('/api/equipment', {
@@ -2185,6 +2231,10 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleSaveEquipment = async () => {
+        if (!canManageFleet) {
+          setEquipmentActionError('Forbidden');
+          return;
+        }
         if (!selectedEquipment) return;
         setSaveLoading(true);
         setEquipmentActionError('');
@@ -2236,6 +2286,10 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleDeleteEquipment = async () => {
+        if (!canManageFleet) {
+          setEquipmentActionError('Forbidden');
+          return;
+        }
         if (!selectedEquipment) return;
         const confirmed = confirmDestructiveAction('this equipment');
         if (!confirmed) return;
@@ -2315,7 +2369,7 @@ const confirmDestructiveAction = (targetLabel) =>
               <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'equipment-checkin' })}>
                 <Icon name="clipboard-check" className="mr-2" /> Check In/Out
               </Button>
-              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEquipment}>
+              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEquipment} disabled={!canManageFleet}>
                 <Icon name="plus" className="mr-2" /> Add Equipment
               </Button>
             </div>
@@ -2609,13 +2663,13 @@ const confirmDestructiveAction = (targetLabel) =>
                   )}
 
                   <div className="flex gap-2 pt-4">
-                    <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveEquipment} disabled={saveLoading || deleteLoading}>
+                    <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveEquipment} disabled={!canManageFleet || saveLoading || deleteLoading}>
                       {saveLoading ? 'Saving...' : 'Save'}
                     </Button>
                     <Button variant="secondary" size="sm" className="flex-1" onClick={() => setShowModal({ type: 'work-order', data: { equipmentId: selectedEquipment.id } })}>
                       <Icon name="wrench" className="mr-1" /> Create WO
                     </Button>
-                    <Button variant="danger" size="sm" className="flex-1" onClick={handleDeleteEquipment} disabled={saveLoading || deleteLoading}>
+                    <Button variant="danger" size="sm" className="flex-1" onClick={handleDeleteEquipment} disabled={!canManageFleet || saveLoading || deleteLoading}>
                       {deleteLoading ? 'Deleting...' : 'Delete'}
                     </Button>
                   </div>
@@ -7433,7 +7487,9 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // FINANCE VIEW (QBO Integration Placeholder)
     // ============================================
-    const FinanceView = ({ jobs = [], bids = [], vendors = [], inventory = [], workOrders = [] }) => {
+    const FinanceView = ({ jobs = [], bids = [], vendors = [], inventory = [], workOrders = [], currentRole }) => {
+      const normalizedRole = String(currentRole || '').trim().toLowerCase();
+      const canViewPricingSettings = normalizedRole === 'executive' || normalizedRole === 'admin' || normalizedRole === 'pm' || normalizedRole.includes('operations');
       const [pricingLoading, setPricingLoading] = useState(true);
       const [pricingSaving, setPricingSaving] = useState(false);
       const [pricingError, setPricingError] = useState('');
@@ -7449,6 +7505,12 @@ const confirmDestructiveAction = (targetLabel) =>
       });
 
       useEffect(() => {
+        if (!canViewPricingSettings) {
+          setPricingLoading(false);
+          setPricingError('');
+          return () => {};
+        }
+
         let isMounted = true;
 
         const loadPricingSettings = async () => {
@@ -7486,7 +7548,7 @@ const confirmDestructiveAction = (targetLabel) =>
         return () => {
           isMounted = false;
         };
-      }, []);
+      }, [canViewPricingSettings]);
 
       const handleSavePricingSettings = async () => {
         try {
@@ -7744,6 +7806,7 @@ const confirmDestructiveAction = (targetLabel) =>
             )}
           </Card>
 
+          {canViewPricingSettings && (
           <Card className="p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-900">
@@ -7841,6 +7904,7 @@ const confirmDestructiveAction = (targetLabel) =>
             {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
             {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
           </Card>
+          )}
         </div>
       );
     };

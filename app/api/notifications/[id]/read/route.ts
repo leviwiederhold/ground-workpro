@@ -1,13 +1,8 @@
-import { NextResponse } from 'next/server';
-import { z } from 'next/dist/compiled/zod';
-import { getCompanyId, TenantResolverError } from '@/lib/tenant/getCompanyId';
-import { formatNotification, type NotificationType } from '@/lib/notifications/format';
-import { getEffectiveRole } from '@/lib/auth/effectiveRole';
-import { markFallbackNotificationRead } from '@/lib/notifications/fallbackStore';
-
-const paramsSchema = z.object({
-  id: z.string().uuid(),
-});
+import { NextResponse } from "next/server";
+import { z } from "next/dist/compiled/zod";
+import { supabaseServer } from "@/lib/supabase/server";
+import { formatNotification, type NotificationType } from "@/lib/notifications/format";
+import { markFallbackNotificationRead } from "@/lib/notifications/fallbackStore";
 
 type NotificationRow = {
   id: string;
@@ -17,15 +12,49 @@ type NotificationRow = {
   created_at: string;
 };
 
+const paramsSchema = z.object({
+  id: z.string().uuid(),
+});
+
 function isMissingNotificationsTable(message: string) {
   const normalized = message.toLowerCase();
   return (
-    normalized.includes('notifications') &&
-    (normalized.includes('does not exist') || normalized.includes('not find'))
+    normalized.includes("notifications") &&
+    (normalized.includes("does not exist") || normalized.includes("not find"))
   );
 }
 
-export const dynamic = 'force-dynamic';
+async function resolveContext() {
+  const supabase = await supabaseServer();
+  const userResult = await supabase.auth.getUser();
+  if (userResult.error || !userResult.data?.user) {
+    return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
+  }
+
+  const userId = userResult.data.user.id;
+  const membershipResult = await supabase
+    .from("memberships")
+    .select("company_id")
+    .eq("user_id", userId)
+    .order("company_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (membershipResult.error) {
+    return { error: NextResponse.json({ error: membershipResult.error.message }, { status: 400 }) };
+  }
+  if (!membershipResult.data?.company_id) {
+    return { error: NextResponse.json({ error: "No company membership found (run bootstrap)" }, { status: 403 }) };
+  }
+
+  return {
+    supabase,
+    companyId: String(membershipResult.data.company_id),
+    userId,
+  };
+}
+
+export const dynamic = "force-dynamic";
 
 export async function POST(
   _request: Request,
@@ -36,9 +65,9 @@ export async function POST(
     if (!parsedParams.success) {
       return NextResponse.json(
         {
-          error: 'Validation error',
+          error: "Validation error",
           details: parsedParams.error.issues.map((issue: { path: (string | number)[]; message: string }) => ({
-            path: issue.path.join('.'),
+            path: issue.path.join("."),
             message: issue.message,
           })),
         },
@@ -46,30 +75,28 @@ export async function POST(
       );
     }
 
-    const { supabase, companyId, userId } = await getCompanyId();
-    const role = await getEffectiveRole();
-    const canCompanyWide = role === 'admin' || role === 'pm';
+    const context = await resolveContext();
+    if ("error" in context) return context.error;
 
-    let query = supabase
-      .from('notifications')
+    const result = await context.supabase
+      .from("notifications")
       .update({ read_at: new Date().toISOString() })
-      .eq('company_id', companyId)
-      .eq('id', parsedParams.data.id);
-    if (!canCompanyWide) {
-      query = query.eq('user_id', userId);
-    }
-    const result = await query.select('id, type, payload, read_at, created_at').maybeSingle();
+      .eq("company_id", context.companyId)
+      .eq("user_id", context.userId)
+      .eq("id", parsedParams.data.id)
+      .select("id, type, payload, read_at, created_at")
+      .maybeSingle();
 
     if (result.error) {
       if (isMissingNotificationsTable(result.error.message)) {
         const fallbackRow = markFallbackNotificationRead({
-          companyId,
+          companyId: context.companyId,
           notificationId: parsedParams.data.id,
-          userId,
-          companyWide: canCompanyWide,
+          userId: context.userId,
+          companyWide: false,
         });
         if (!fallbackRow) {
-          return NextResponse.json({ error: 'Not found' }, { status: 404 });
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
         const fallbackPayload = (fallbackRow.payload ?? {}) as Record<string, unknown>;
         const fallbackDisplay = formatNotification(fallbackRow.type, fallbackPayload);
@@ -92,13 +119,13 @@ export async function POST(
 
     if (!result.data) {
       const fallbackRow = markFallbackNotificationRead({
-        companyId,
+        companyId: context.companyId,
         notificationId: parsedParams.data.id,
-        userId,
-        companyWide: canCompanyWide,
+        userId: context.userId,
+        companyWide: false,
       });
       if (!fallbackRow) {
-        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
       const fallbackPayload = (fallbackRow.payload ?? {}) as Record<string, unknown>;
       const fallbackDisplay = formatNotification(fallbackRow.type, fallbackPayload);
@@ -135,10 +162,7 @@ export async function POST(
       },
     });
   } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-    const message = error instanceof Error ? error.message : 'Internal server error';
+    const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

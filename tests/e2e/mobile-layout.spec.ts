@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { loginViaUI } from './helpers';
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -32,6 +33,7 @@ async function expectTwoColumnStats(page: Page) {
 }
 
 test('mobile layout has 2-column stat cards and no horizontal page overflow', async ({ page }) => {
+  await loginViaUI(page);
   await page.goto('/');
 
   await goToNav(page, 'fleet');

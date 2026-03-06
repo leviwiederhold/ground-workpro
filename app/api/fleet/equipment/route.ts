@@ -128,7 +128,7 @@ export async function GET(request: Request) {
     const equipmentIds = equipment.map((row: Record<string, unknown>) => normalizeId(row.id)).filter(Boolean);
     const today = new Date().toISOString().slice(0, 10);
 
-    const [workOrdersResult, assignmentsResult] = await Promise.all([
+    const [workOrdersResult, assignmentsResult, jobEquipmentResult] = await Promise.all([
       supabase
         .from("work_orders")
         .select("equipment_id, status, priority")
@@ -140,6 +140,11 @@ export async function GET(request: Request) {
         .eq("company_id", companyId)
         .eq("date", today)
         .in("equipment_id", equipmentIds),
+      supabase
+        .from("job_equipment")
+        .select("equipment_id, job_id")
+        .eq("company_id", companyId)
+        .in("equipment_id", equipmentIds),
     ]);
 
     if (workOrdersResult.error && !isMissingSchemaError(workOrdersResult.error.message)) {
@@ -148,8 +153,17 @@ export async function GET(request: Request) {
     if (assignmentsResult.error && !isMissingSchemaError(assignmentsResult.error.message)) {
       return NextResponse.json({ error: assignmentsResult.error.message }, { status: 400 });
     }
+    if (jobEquipmentResult.error && !isMissingSchemaError(jobEquipmentResult.error.message)) {
+      return NextResponse.json({ error: jobEquipmentResult.error.message }, { status: 400 });
+    }
 
-    const assignmentRows = assignmentsResult.error ? [] : assignmentsResult.data ?? [];
+    const scheduleAssignmentRows = assignmentsResult.error ? [] : assignmentsResult.data ?? [];
+    const jobEquipmentRows = jobEquipmentResult.error ? [] : jobEquipmentResult.data ?? [];
+    const assignmentRows =
+      scheduleAssignmentRows.length > 0
+        ? scheduleAssignmentRows
+        : // Fallback when time-grid assignment table is unavailable.
+          jobEquipmentRows;
     const assignedJobIds = Array.from(
       new Set(
         assignmentRows

@@ -32,7 +32,8 @@ test("RBAC forbids restricted actions by role and enforces cross-company isolati
 
   await setRole(page, "operator");
   const operatorGetJobs = await page.request.get("/api/jobs");
-  expect(operatorGetJobs.status()).toBe(200);
+  expect(operatorGetJobs.status()).toBe(403);
+  expect(await operatorGetJobs.json()).toEqual({ error: "Forbidden" });
 
   const operatorCreateJob = await page.request.post("/api/jobs", {
     data: { name: `Operator Forbidden Job ${Date.now()}`, status: "draft" },

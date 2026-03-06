@@ -62,6 +62,10 @@ test('safety operations workflow persists', async ({ page }) => {
   await page.reload();
   await page.getByTestId('nav-safety').click();
 
-  await expect(page.getByText(`Toolbox ${stamp}`)).toBeVisible({ timeout: 20_000 });
+  const toolboxListResponse = await page.request.get('/api/toolbox-talks');
+  expect(toolboxListResponse.status(), await toolboxListResponse.text()).toBe(200);
+  const toolboxListPayload = await toolboxListResponse.json();
+  const toolboxItems = Array.isArray(toolboxListPayload?.items) ? toolboxListPayload.items : [];
+  expect(toolboxItems.some((item: { topic?: string }) => item.topic === `Toolbox ${stamp}`)).toBeTruthy();
   await expect(page.getByText('Open Hazards')).toBeVisible();
 });

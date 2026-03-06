@@ -372,6 +372,17 @@ export async function GET(request: Request) {
 
       primary.push(
         {
+          type: "getting_started",
+          title: "Getting Started",
+          meta: {
+            enabled: !onboardingDismissed,
+            items: checklistItems,
+            completedCount: checklistItems.filter((item) => item.completed).length,
+            totalCount: checklistItems.length,
+            dismissed: onboardingDismissed,
+          },
+        },
+        {
           type: "my_assignment_today",
           title: "My assignment today",
           subtitle: todayFirst

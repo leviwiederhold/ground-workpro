@@ -7,6 +7,7 @@ import {
   type OnboardingChecklistRole,
 } from "@/lib/onboarding/checklist";
 import { normalizeAppRole } from "@/lib/nav/config";
+import { upsertFallbackChecklistRow } from "@/lib/onboarding/fallbackStore";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,10 @@ function toTenantErrorResponse(error: TenantResolverError) {
   if (error.status === 404) return notFound(error.message);
   if (error.status === 403) return forbidden(error.message);
   return serverError(error.message);
+}
+
+function isMissingOnboardingTable(message: string | undefined) {
+  return /onboarding_checklist/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
 }
 
 async function resolveChecklistRole(
@@ -89,8 +94,27 @@ export async function POST(request: Request) {
       ? await existingQuery.eq("user_id", rowUserId).maybeSingle()
       : await existingQuery.is("user_id", null).maybeSingle();
 
-    if (existingResult.error) {
+    if (existingResult.error && !isMissingOnboardingTable(existingResult.error.message)) {
       return serverError(existingResult.error.message);
+    }
+
+    if (existingResult.error && isMissingOnboardingTable(existingResult.error.message)) {
+      const fallback = upsertFallbackChecklistRow({
+        companyId,
+        userId: rowUserId,
+        key: parsedBody.data.key,
+        completedAt,
+        completedBy: parsedBody.data.completed ? userId : null,
+      });
+      return okItem({
+        key: fallback.key,
+        label: itemDef?.label ?? fallback.key,
+        description: itemDef?.description ?? "",
+        view: itemDef?.view ?? "dashboard",
+        completed: Boolean(fallback.completed_at),
+        completed_at: fallback.completed_at,
+        completed_by: fallback.completed_by,
+      });
     }
 
     const mutationPayload = {

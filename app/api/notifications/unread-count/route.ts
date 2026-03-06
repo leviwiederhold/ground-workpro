@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getCompanyId, TenantResolverError } from '@/lib/tenant/getCompanyId';
-import { getEffectiveRole } from '@/lib/auth/effectiveRole';
 import { countFallbackUnread } from '@/lib/notifications/fallbackStore';
 
 export const dynamic = 'force-dynamic';
@@ -16,22 +15,18 @@ function isMissingNotificationsTable(message: string) {
 export async function GET() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
-    const role = await getEffectiveRole();
-    const isCompanyWide = role === 'admin' || role === 'pm';
 
-    let query = supabase
+    const query = supabase
       .from('notifications')
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
+      .eq('user_id', userId)
       .is('read_at', null);
-    if (!isCompanyWide) {
-      query = query.eq('user_id', userId);
-    }
     const result = await query;
     const fallbackCount = countFallbackUnread({
       companyId,
       userId,
-      companyWide: isCompanyWide,
+      companyWide: false,
     });
 
     if (result.error) {

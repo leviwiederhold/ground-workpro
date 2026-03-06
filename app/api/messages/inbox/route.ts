@@ -42,6 +42,11 @@ function isMissingMessagesColumns(message: string) {
   return normalized.includes("column") && (normalized.includes("kind") || normalized.includes("dm_user_a") || normalized.includes("dm_user_b") || normalized.includes("last_read_at"));
 }
 
+function isLegacyDirectLikeName(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.startsWith("dm-") || normalized === "direct message" || normalized === "direct-message";
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -213,10 +218,16 @@ export async function GET(request: Request) {
       const rawName = String(channel.name ?? "");
       const normalizedName = rawName.toLowerCase();
       const isLegacyDmName = normalizedName.startsWith("dm-") || normalizedName === "direct message" || normalizedName === "direct-message";
-      const effectiveKind = channel.kind === "direct" || isLegacyDmName ? "direct" : channel.kind || "channel";
+      const members = Array.from(new Set(memberUserIdsByChannel.get(key) ?? []));
+      const hasCurrentUser = members.includes(String(userId));
+      const hasOtherUser = members.some((id) => id !== String(userId));
+      // Legacy rows can have name-based DM markers; treat them as direct when they clearly map to current user + at least one teammate.
+      const effectiveKind =
+        channel.kind === "direct" || (isLegacyDmName && hasCurrentUser && hasOtherUser)
+          ? "direct"
+          : channel.kind || "channel";
       let otherUserId: string | null = null;
       if (effectiveKind === "direct") {
-        const members = memberUserIdsByChannel.get(key) ?? [];
         const other = members.find((id) => id !== String(userId));
         otherUserId = other ?? null;
         if (!otherUserId) {
@@ -228,7 +239,7 @@ export async function GET(request: Request) {
       }
       const resolvedDirectName =
         effectiveKind === "direct"
-          ? displayNameByUserId.get(String(otherUserId ?? "")) || "Direct Message"
+          ? displayNameByUserId.get(String(otherUserId ?? "")) || (isLegacyDirectLikeName(rawName) ? "Team Member" : rawName || "Team Member")
           : rawName;
       return {
         id: channel.id,
@@ -263,7 +274,11 @@ export async function GET(request: Request) {
       if (itemTs >= prevTs) dedupedByDirectTarget.set(key, item);
     }
 
-    const items = [...passThroughItems, ...Array.from(dedupedByDirectTarget.values())];
+    const items = [...passThroughItems, ...Array.from(dedupedByDirectTarget.values())]
+      // Hide ambiguous/legacy direct rows that cannot be mapped to a real teammate.
+      .filter((item) => !(item.kind === "direct" && !item.other_user_id))
+      // Also hide legacy direct-like channel names unless they resolve to a real direct thread.
+      .filter((item) => !(item.kind !== "direct" && isLegacyDirectLikeName(String(item.name || ""))));
     items.sort((a, b) => String(b.last_message_at || b.created_at).localeCompare(String(a.last_message_at || a.created_at)));
     const totalUnread = items.reduce((sum, item) => sum + Number(item.unread_count ?? 0), 0);
     return Response.json({

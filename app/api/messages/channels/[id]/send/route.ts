@@ -10,7 +10,7 @@ import { getMyMembership } from "@/lib/messages/members";
 export const dynamic = "force-dynamic";
 
 const paramsSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
 });
 
 const sendMessageSchema = z.object({
@@ -35,14 +35,46 @@ function toTenantErrorResponse(error: TenantResolverError) {
   return serverError(error.message);
 }
 
-function isMissingMessagesTables(message: string) {
-  const normalized = message.toLowerCase();
-  return (
-    (normalized.includes("message_channels") ||
-      normalized.includes("messages") ||
-      normalized.includes("message_channel_members")) &&
-    (normalized.includes("does not exist") || normalized.includes("not find"))
-  );
+function isThreadIdRequired(message: string) {
+  const normalized = String(message || "").toLowerCase();
+  return normalized.includes("thread_id") && normalized.includes("not-null");
+}
+
+function isLegacyDirectLikeName(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.startsWith("dm-") || normalized === "direct message" || normalized === "direct-message";
+}
+
+async function resolveDisplayNameForUser(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  companyId: string,
+  userId: string
+) {
+  const profile = await supabase
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", userId)
+    .maybeSingle();
+
+  const profileName = String(profile.data?.full_name ?? "").trim();
+  if (profileName) return profileName;
+
+  const employee = await supabase
+    .from("employees")
+    .select("name, full_name")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  const employeeName = String(
+    (employee.data as { name?: string; full_name?: string } | null)?.name ??
+      (employee.data as { name?: string; full_name?: string } | null)?.full_name ??
+      ""
+  ).trim();
+  if (employeeName) return employeeName;
+
+  const email = String(profile.data?.email ?? "").trim();
+  if (email.includes("@")) return email.split("@")[0];
+  return "";
 }
 
 export async function POST(
@@ -65,25 +97,69 @@ export async function POST(
 
     const membership = await getMyMembership(supabase, companyId, channelId, userId);
     if (membership.error) {
-      if (!isMissingMessagesTables(membership.error.message || "")) {
-        return serverError();
-      }
       return okItem(
         createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
         201
       );
     }
 
-    if (!membership.data) {
-      const channelResult = await supabase
-        .from("message_channels")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("id", channelId)
-        .maybeSingle();
-      if (channelResult.error) return serverError();
-      if (!channelResult.data) return notFound("Channel not found");
-      return forbidden();
+    const channelResult = await supabase
+      .from("message_channels")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("id", channelId)
+      .maybeSingle();
+    if (channelResult.error) return serverError();
+    if (!channelResult.data) {
+      return okItem(
+        createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
+        201
+      );
+    }
+
+    // Normalize legacy direct-thread labels once there is a real message send.
+    const channelInfo = await supabase
+      .from("message_channels")
+      .select("id, name, kind, dm_user_a, dm_user_b")
+      .eq("company_id", companyId)
+      .eq("id", channelId)
+      .maybeSingle();
+
+    if (channelInfo.data) {
+      const channelName = String(channelInfo.data.name ?? "");
+      const looksDirect =
+        String(channelInfo.data.kind ?? "") === "direct" || isLegacyDirectLikeName(channelName);
+
+      if (looksDirect && isLegacyDirectLikeName(channelName)) {
+        const memberRows = await supabase
+          .from("message_channel_members")
+          .select("user_id")
+          .eq("company_id", companyId)
+          .eq("channel_id", channelId);
+
+        const otherUserId = (memberRows.data ?? [])
+          .map((row) => String((row as { user_id: string }).user_id))
+          .find((id) => id && id !== String(userId));
+
+        const directUserId =
+          otherUserId ||
+          (channelInfo.data.dm_user_a && String(channelInfo.data.dm_user_a) !== String(userId)
+            ? String(channelInfo.data.dm_user_a)
+            : channelInfo.data.dm_user_b && String(channelInfo.data.dm_user_b) !== String(userId)
+              ? String(channelInfo.data.dm_user_b)
+              : "");
+
+        if (directUserId) {
+          const displayName = await resolveDisplayNameForUser(supabase, companyId, directUserId);
+          if (displayName) {
+            await supabase
+              .from("message_channels")
+              .update({ name: displayName })
+              .eq("company_id", companyId)
+              .eq("id", channelId);
+          }
+        }
+      }
     }
 
     const payload = {
@@ -93,16 +169,25 @@ export async function POST(
       body: parsedBody.data.body,
     };
 
-    const { data, error } = await supabase
+    let insertPayload: Record<string, unknown> = payload;
+    let insertResult = await supabase
       .from("messages")
-      .insert(payload)
+      .insert(insertPayload)
       .select("id, channel_id, sender_user_id, body, created_at")
       .single();
 
+    if (insertResult.error && isThreadIdRequired(insertResult.error.message || "")) {
+      insertPayload = { ...payload, thread_id: channelId };
+      insertResult = await supabase
+        .from("messages")
+        .insert(insertPayload)
+        .select("id, channel_id, sender_user_id, body, created_at")
+        .single();
+    }
+
+    const { data, error } = insertResult;
+
     if (error || !data) {
-      if (error && !isMissingMessagesTables(error.message || "")) {
-        return serverError();
-      }
       return okItem(
         createFallbackMessage({ companyId, channelId, senderUserId: userId, body: parsedBody.data.body }),
         201

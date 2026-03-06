@@ -1,6 +1,5 @@
 import { supabaseServer } from "@/lib/supabase/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import * as Sentry from "@sentry/nextjs";
 
 export class TenantResolverError extends Error {
   status: number;
@@ -130,10 +129,6 @@ export async function getCompanyId() {
   if (!companyId) {
     throw new TenantResolverError("No company membership found (run bootstrap)", 403);
   }
-
-  Sentry.setUser({ id: userData.user.id });
-  Sentry.setTag("companyId", String(companyId));
-  Sentry.setTag("userId", String(userData.user.id));
 
   return { supabase, companyId, userId: userData.user.id, userEmail: String(userData.user.email ?? "").trim().toLowerCase() };
 }

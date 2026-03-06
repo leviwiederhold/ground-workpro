@@ -5,7 +5,7 @@ import { okSuccess } from "@/lib/http/json";
 import { getMyMembership } from "@/lib/messages/members";
 
 const paramsSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
   userId: z.string().uuid(),
 });
 

@@ -62,3 +62,6 @@ export function listFallbackAssignmentsForWeek(companyId: string, weekStart: str
     .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)));
 }
 
+export function listFallbackAssignmentsForDate(companyId: string, date: string) {
+  return readStore().assignments.filter((assignment) => assignment.company_id === companyId && assignment.date === date);
+}

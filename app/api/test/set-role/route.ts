@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
+import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 
 const bodySchema = z.object({
   role: z.enum(["admin", "pm", "foreman", "mechanic", "operator"]),
@@ -25,10 +26,25 @@ export async function POST(request: Request) {
       return NextResponse.json(toValidationError(parsed.error.issues), { status: 422 });
     }
 
+    const { supabase, userId } = await getCompanyId();
+
+    const membershipUpdate = await supabase
+      .from("memberships")
+      .update({ role: parsed.data.role })
+      .eq("user_id", userId)
+      .select("user_id");
+
+    if (membershipUpdate.error) {
+      return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
+    }
     const response = NextResponse.json({ item: { role: parsed.data.role }, success: true });
     response.cookies.set("e2e_role", parsed.data.role, { path: "/", sameSite: "lax" });
+    response.cookies.set("gw_acting_role", parsed.data.role, { path: "/", sameSite: "lax" });
     return response;
   } catch (error) {
+    if (error instanceof TenantResolverError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = error instanceof Error ? error.message : "Unexpected server error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

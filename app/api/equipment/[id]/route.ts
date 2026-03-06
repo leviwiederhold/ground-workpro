@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
-import { getRoleScopedEquipmentIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { getRoleScopedEquipmentIds } from "@/lib/jobs/roleScope";
 
 const equipmentStatusSchema = z.enum(["active", "idle", "maintenance"]);
 
@@ -146,7 +147,7 @@ export async function GET(
   try {
     const { id } = await params;
     const { supabase, companyId, userId } = await getCompanyId();
-    const role = await resolveMembershipRole(supabase, companyId, userId);
+    const role = await getEffectiveRole();
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -3,8 +3,9 @@ import { NextResponse } from "next/server";
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
-import { getRoleScopedEquipmentIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import { getRoleScopedEquipmentIds } from "@/lib/jobs/roleScope";
 
 const equipmentStatusSchema = z.enum(["active", "idle", "maintenance"]);
 
@@ -129,7 +130,7 @@ export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId, userId } = await getCompanyId();
-    const role = await resolveMembershipRole(supabase, companyId, userId);
+    const role = await getEffectiveRole();
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -170,7 +171,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "mechanic"]);
+      await requireRole(["admin", "mechanic"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

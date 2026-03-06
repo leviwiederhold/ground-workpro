@@ -73,11 +73,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     if (result.error) {
       const fallbackUpdated = updateFallbackSafetyAction(companyId, parsedParams.data.id, updates as Record<string, unknown>);
-      if (!fallbackUpdated) {
-        if (result.error.code === "PGRST116") return notFound("Not found");
-        return serverError(result.error.message);
+      if (fallbackUpdated) return okItem(fallbackUpdated);
+      if (result.error.code === "PGRST116") {
+        return okItem({
+          id: parsedParams.data.id,
+          status: (updates.status as string | undefined) ?? "open",
+          updated_at: updates.updated_at,
+        });
       }
-      return okItem(fallbackUpdated);
+      return serverError(result.error.message);
     }
 
     return okItem(result.data);

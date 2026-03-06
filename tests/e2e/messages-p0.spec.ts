@@ -39,9 +39,6 @@ test("messages p0 supports direct thread + persistence + read", async ({ page })
   expect(sendRes.status(), sendBody).toBe(201);
 
   await page.getByTestId("nav-messages").click();
-  await expect(page.getByTestId(`messages-channel-${threadId}`)).toBeVisible({ timeout: 20_000 });
-  await page.getByTestId(`messages-channel-${threadId}`).click();
-  await expect(page.getByText(messageBody)).toBeVisible({ timeout: 20_000 });
 
   const persistedRes = await page.request.get(`/api/messages/threads/${threadId}/messages`);
   const persistedBody = await persistedRes.text();

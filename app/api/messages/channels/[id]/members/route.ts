@@ -4,7 +4,7 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { okItem } from "@/lib/http/json";
 import { getMyMembership } from "@/lib/messages/members";
 
-const paramsSchema = z.object({ id: z.string().uuid() });
+const paramsSchema = z.object({ id: z.string().min(1) });
 const bodySchema = z.object({ userIds: z.array(z.string().uuid()).min(1) });
 
 function issueDetails(error: { issues: { path: Array<string | number>; message: string }[] }) {

@@ -7,6 +7,12 @@ import { useCallback, useEffect, useState } from 'react';
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, setEmployees, ui }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
+  const currency = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selectedJobId, setSelectedJobId] = useState(null);
@@ -32,6 +38,8 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
   const [crewActionError, setCrewActionError] = useState('');
   const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
   const [equipmentActionError, setEquipmentActionError] = useState('');
+  const [financialSummary, setFinancialSummary] = useState(null);
+  const [financialLoading, setFinancialLoading] = useState(false);
 
   const handleCreateJob = async () => {
     try {
@@ -196,6 +204,37 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
     loadJobEmployees();
     return () => {
       isMounted = false;
+    };
+  }, [selectedJob]);
+
+  useEffect(() => {
+    let active = true;
+    const loadFinancialSummary = async () => {
+      if (!selectedJob) {
+        if (active) setFinancialSummary(null);
+        return;
+      }
+      try {
+        setFinancialLoading(true);
+        const response = await fetch(`/api/jobs/${selectedJob.id}/financial-summary`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (active) setFinancialSummary(null);
+          return;
+        }
+        if (active) {
+          setFinancialSummary(payload?.item || null);
+        }
+      } catch {
+        if (active) setFinancialSummary(null);
+      } finally {
+        if (active) setFinancialLoading(false);
+      }
+    };
+
+    loadFinancialSummary();
+    return () => {
+      active = false;
     };
   }, [selectedJob]);
 
@@ -614,25 +653,56 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
               </div>
 
               <div>
+                <p className="text-xs text-gray-500 mb-2">Profitability</p>
+                {financialLoading ? (
+                  <p className="text-sm text-gray-400">Loading financial summary...</p>
+                ) : financialSummary?.visible === false ? (
+                  <div data-testid="job-financial-hidden" className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+                    Financial data is hidden for your role.
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between"><span className="text-gray-500">Contract</span><span className="font-medium">{currency.format(Number(financialSummary?.contractValue || 0))}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Revenue</span><span className="font-medium">{currency.format(Number(financialSummary?.revenueTotal || 0))}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Cost</span><span className="font-medium">{currency.format(Number(financialSummary?.spentCost || 0))}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Profit</span><span className="font-medium">{currency.format(Number(financialSummary?.profit || 0))}</span></div>
+                    <div className="flex justify-between"><span className="text-gray-500">Margin</span><span className="font-medium">{Number(financialSummary?.marginPct || 0).toFixed(2)}%</span></div>
+                  </div>
+                )}
+              </div>
+
+              <div>
                 <p className="text-xs text-gray-500 mb-2">Assigned Equipment ({jobEquipment.length})</p>
+                <div className="mb-2 border border-gray-300 rounded-lg p-2 max-h-32 overflow-y-auto">
+                  {availableEquipment.length > 0 ? (
+                    <div className="space-y-1">
+                      {availableEquipment.map((item) => {
+                        const checked = equipmentToAssign.includes(String(item.id));
+                        return (
+                          <label key={item.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const id = String(item.id);
+                                setEquipmentToAssign((prev) => {
+                                  if (e.target.checked) return [...prev, id];
+                                  return prev.filter((value) => String(value) !== id);
+                                });
+                              }}
+                            />
+                            <span>{item.name} - {item.type}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No available equipment</p>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 mb-2">
-                  <select
-                    value={equipmentToAssign}
-                    multiple
-                    onChange={(e) => {
-                      const selectedIds = Array.from(e.target.selectedOptions).map((option) => option.value);
-                      setEquipmentToAssign(selectedIds);
-                    }}
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  >
-                    {availableEquipment.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name} - {item.type}
-                      </option>
-                    ))}
-                  </select>
                   <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || equipmentToAssign.length === 0}>
-                    Add
+                    Add Selected ({equipmentToAssign.length})
                   </Button>
                 </div>
                 <div className="space-y-1">
@@ -661,24 +731,36 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
 
               <div>
                 <p className="text-xs text-gray-500 mb-2">Assigned Crew ({jobEmployees.length})</p>
+                <div className="mb-2 border border-gray-300 rounded-lg p-2 max-h-32 overflow-y-auto">
+                  {availableEmployees.length > 0 ? (
+                    <div className="space-y-1">
+                      {availableEmployees.map((employee) => {
+                        const checked = employeeToAssign.includes(String(employee.id));
+                        return (
+                          <label key={employee.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const id = String(employee.id);
+                                setEmployeeToAssign((prev) => {
+                                  if (e.target.checked) return [...prev, id];
+                                  return prev.filter((value) => String(value) !== id);
+                                });
+                              }}
+                            />
+                            <span>{employee.name} - {employee.role}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400">No available crew</p>
+                  )}
+                </div>
                 <div className="flex items-center gap-2 mb-2">
-                  <select
-                    value={employeeToAssign}
-                    multiple
-                    onChange={(e) => {
-                      const selectedIds = Array.from(e.target.selectedOptions).map((option) => option.value);
-                      setEmployeeToAssign(selectedIds);
-                    }}
-                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  >
-                    {availableEmployees.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name} - {employee.role}
-                      </option>
-                    ))}
-                  </select>
                   <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || employeeToAssign.length === 0}>
-                    Add
+                    Add Selected ({employeeToAssign.length})
                   </Button>
                 </div>
                 <div className="space-y-1">

@@ -1,14 +1,14 @@
 import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
-import { getFallbackChannel, listFallbackMessages } from "@/lib/messages/fallbackStore";
+import { listFallbackMessages } from "@/lib/messages/fallbackStore";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { getMyMembership } from "@/lib/messages/members";
 
 export const dynamic = "force-dynamic";
 
 const paramsSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
 });
 
 type ValidationIssue = {
@@ -52,25 +52,28 @@ export async function GET(
     const { supabase, companyId, userId } = await getCompanyId();
 
     const membership = await getMyMembership(supabase, companyId, channelId, userId);
-    if (membership.error) {
-      if (isMissingMessagesTables(membership.error.message || "")) {
-        const fallbackChannel = getFallbackChannel(companyId, channelId);
-        if (!fallbackChannel) return notFound("Channel not found");
-        const fallbackItems = listFallbackMessages(companyId, channelId);
-        return Response.json({ items: fallbackItems.slice(from, to + 1), ...getPaginationMeta(fallbackItems.length, page, pageSize) });
-      }
-      return serverError();
+    if (membership.error && isMissingMessagesTables(membership.error.message || "")) {
+      const fallbackItems = listFallbackMessages(companyId, channelId);
+      return Response.json({
+        items: fallbackItems.slice(from, to + 1),
+        ...getPaginationMeta(fallbackItems.length, page, pageSize),
+      });
     }
-    if (!membership.data) {
-      const channelResult = await supabase
-        .from("message_channels")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("id", channelId)
-        .maybeSingle();
-      if (channelResult.error) return serverError();
-      if (!channelResult.data) return notFound("Channel not found");
-      return forbidden();
+    if (membership.error) return serverError();
+
+    const channelResult = await supabase
+      .from("message_channels")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("id", channelId)
+      .maybeSingle();
+    if (channelResult.error) return serverError();
+    if (!channelResult.data) {
+      const fallbackItems = listFallbackMessages(companyId, channelId);
+      return Response.json({
+        items: fallbackItems.slice(from, to + 1),
+        ...getPaginationMeta(fallbackItems.length, page, pageSize),
+      });
     }
 
     const { data, error, count } = await supabase

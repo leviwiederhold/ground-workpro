@@ -1,19 +1,24 @@
 import { test as setup } from '@playwright/test';
-import { getE2ECreds } from './helpers';
+import { E2E_BASE_URL, getE2ECreds } from './helpers';
 
 const authFile = 'playwright/.auth/user.json';
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+const BASE_URL = process.env.E2E_BASE_URL || E2E_BASE_URL;
 
 setup('authenticate', async ({ page }) => {
   const { email, password } = getE2ECreds();
-  await page.goto('/login');
-
-  const loginResponse = await page.request.post('/api/test/login', {
+  const apiLogin = await page.request.post('/api/test/login', {
     data: { email, password },
+    timeout: 30000,
   });
-  const loginBody = await loginResponse.text();
-  if (!loginResponse.ok()) {
-    throw new Error(`E2E setup login failed: ${loginBody}`);
+
+  if (!apiLogin.ok()) {
+    await page.goto('/login');
+    await page.getByTestId('login-email').fill(email);
+    await page.getByTestId('login-password').fill(password);
+    await page.getByTestId('login-submit').click();
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 30_000 });
+  } else {
+    await page.goto('/');
   }
 
   const bootstrapResponse = await page.request.post('/api/bootstrap');

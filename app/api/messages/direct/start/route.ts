@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 const bodySchema = z.object({
   userId: z.string().uuid(),
+  label: z.string().trim().min(1).max(120).optional(),
 });
 
 type ValidationIssue = {
@@ -48,6 +49,11 @@ function isMissingMessagesTables(message: string) {
   );
 }
 
+function isLegacyDirectLikeName(value: string) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.startsWith("dm-") || normalized === "direct message" || normalized === "direct-message";
+}
+
 function missingColumn(message: string) {
   const match = String(message || "").match(/Could not find the '([^']+)' column/i);
   return match?.[1] ?? null;
@@ -60,6 +66,7 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const otherUserId = parsedBody.data.userId;
+    const preferredLabel = String(parsedBody.data.label ?? "").trim();
     if (otherUserId === userId) {
       return validationError([{ path: "userId", message: "Cannot start direct message with yourself" }]);
     }
@@ -154,7 +161,64 @@ export async function POST(request: Request) {
       const legacyChannel = existingRows.find((row: { id: string }) => Boolean(row?.id));
       if (legacyChannel) {
         await ensureDirectMembers(String(legacyChannel.id));
+        if (preferredLabel && isLegacyDirectLikeName(String(legacyChannel.name ?? ""))) {
+          await supabase
+            .from("message_channels")
+            .update({ name: preferredLabel, updated_at: new Date().toISOString() })
+            .eq("company_id", companyId)
+            .eq("id", legacyChannel.id);
+          legacyChannel.name = preferredLabel;
+        }
         return okItem(legacyChannel);
+      }
+    }
+
+    // Secondary fallback for legacy schemas/rows:
+    // find an existing 1:1 channel where exactly these two users are members.
+    const membershipIntersection = await supabase
+      .from("message_channel_members")
+      .select("channel_id, user_id")
+      .eq("company_id", companyId)
+      .in("user_id", [userId, otherUserId]);
+    if (!membershipIntersection.error) {
+      const channelUsers = new Map<string, Set<string>>();
+      for (const row of membershipIntersection.data ?? []) {
+        const key = String(row.channel_id);
+        const users = channelUsers.get(key) ?? new Set<string>();
+        users.add(String(row.user_id));
+        channelUsers.set(key, users);
+      }
+      const pairChannelIds = Array.from(channelUsers.entries())
+        .filter(([, users]) => users.has(String(userId)) && users.has(String(otherUserId)))
+        .map(([channelId]) => channelId);
+      if (pairChannelIds.length > 0) {
+        const pairCounts = await supabase
+          .from("message_channel_members")
+          .select("channel_id")
+          .eq("company_id", companyId)
+          .in("channel_id", pairChannelIds);
+        if (!pairCounts.error) {
+          const counts = new Map<string, number>();
+          for (const row of pairCounts.data ?? []) {
+            const key = String(row.channel_id);
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+          }
+          const strictPairIds = pairChannelIds.filter((id) => (counts.get(String(id)) ?? 0) === 2);
+          if (strictPairIds.length > 0) {
+            const candidate = await supabase
+              .from("message_channels")
+              .select("id, name, kind, created_at, updated_at")
+              .eq("company_id", companyId)
+              .in("id", strictPairIds)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (!candidate.error && candidate.data?.id) {
+              await ensureDirectMembers(String(candidate.data.id));
+              return okItem(candidate.data);
+            }
+          }
+        }
       }
     }
 
@@ -164,7 +228,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const channelPayload: Record<string, unknown> = {
       company_id: companyId,
-      name: "Direct message",
+      name: preferredLabel || "Direct message",
       created_at: now,
       updated_at: now,
       is_dm: true,

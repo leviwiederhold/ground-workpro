@@ -4,7 +4,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
-import { createFallbackAssignment } from "@/lib/schedule/fallbackStore";
+import { createFallbackAssignment, listFallbackAssignmentsForDate } from "@/lib/schedule/fallbackStore";
 
 const createAssignmentSchema = z
   .object({
@@ -175,6 +175,22 @@ export async function POST(request: Request) {
     if (!conflictChecks[1].error && (conflictChecks[1].data ?? []).length > 0) {
       warnings.push("Equipment is already assigned to another job on this date.");
     }
+    if (conflictChecks[0].error && isMissingScheduleAssignmentsTable(conflictChecks[0].error.message)) {
+      const fallbackConflicts = listFallbackAssignmentsForDate(companyId, payload.date).filter(
+        (row) => row.employee_id === (payload.employeeId ?? null) && row.job_id !== payload.jobId
+      );
+      if (fallbackConflicts.length > 0) {
+        warnings.push("Employee is already assigned to another job on this date.");
+      }
+    }
+    if (conflictChecks[1].error && isMissingScheduleAssignmentsTable(conflictChecks[1].error.message)) {
+      const fallbackConflicts = listFallbackAssignmentsForDate(companyId, payload.date).filter(
+        (row) => row.equipment_id === (payload.equipmentId ?? null) && row.job_id !== payload.jobId
+      );
+      if (fallbackConflicts.length > 0) {
+        warnings.push("Equipment is already assigned to another job on this date.");
+      }
+    }
 
     const insertResult = await supabase
       .from("schedule_assignments")
@@ -192,18 +208,34 @@ export async function POST(request: Request) {
       .select("id, job_id, date, employee_id, equipment_id, starts_at, ends_at, notes, created_by, created_at")
       .single();
 
-    if (insertResult.error && isMissingScheduleAssignmentsTable(insertResult.error.message) && payload.employeeId) {
-      const jobEmployeeInsert = await supabase
-        .from("job_employees")
-        .insert({
-          company_id: companyId,
-          job_id: payload.jobId,
-          employee_id: payload.employeeId,
-        })
-        .select("employee_id")
-        .maybeSingle();
-      if (jobEmployeeInsert.error && !/duplicate key|unique/i.test(jobEmployeeInsert.error.message || "")) {
-        return NextResponse.json({ error: jobEmployeeInsert.error?.message ?? "Failed to create assignment" }, { status: 400 });
+    if (insertResult.error && isMissingScheduleAssignmentsTable(insertResult.error.message)) {
+      if (payload.employeeId) {
+        const jobEmployeeInsert = await supabase
+          .from("job_employees")
+          .insert({
+            company_id: companyId,
+            job_id: payload.jobId,
+            employee_id: payload.employeeId,
+          })
+          .select("employee_id")
+          .maybeSingle();
+        if (jobEmployeeInsert.error && !/duplicate key|unique/i.test(jobEmployeeInsert.error.message || "")) {
+          return NextResponse.json({ error: jobEmployeeInsert.error?.message ?? "Failed to create assignment" }, { status: 400 });
+        }
+      }
+      if (payload.equipmentId) {
+        const jobEquipmentInsert = await supabase
+          .from("job_equipment")
+          .insert({
+            company_id: companyId,
+            job_id: payload.jobId,
+            equipment_id: payload.equipmentId,
+          })
+          .select("equipment_id")
+          .maybeSingle();
+        if (jobEquipmentInsert.error && !/duplicate key|unique/i.test(jobEquipmentInsert.error.message || "")) {
+          return NextResponse.json({ error: jobEquipmentInsert.error?.message ?? "Failed to create assignment" }, { status: 400 });
+        }
       }
       const fallbackAssignment = createFallbackAssignment({
         company_id: companyId,

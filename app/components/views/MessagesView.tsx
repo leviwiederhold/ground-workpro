@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 export function MessagesView({ employees = [], ui }) {
-  const { Button, Icon, formatDate } = ui;
+  const { Button, Icon } = ui;
   const [activeChannel, setActiveChannel] = useState(null);
   const [messageText, setMessageText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,8 +41,32 @@ export function MessagesView({ employees = [], ui }) {
   }, [channels]);
 
   const normalized = (value) => String(value || '').trim().toLowerCase();
+  const formatMessageTime = useCallback((value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, []);
+  const formatThreadSubtextTime = useCallback((value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, []);
+  const formatMessageDayLabel = useCallback((value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+  }, []);
+  const getMessageDayKey = useCallback((value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+  }, []);
   const looksLikeDmName = useCallback(
     (value) => normalized(value).startsWith('dm-') || normalized(value) === 'direct message',
+    []
+  );
+  const isDirectChannel = useCallback(
+    (channel) => String(channel?.kind || '') === 'direct' || Boolean(channel?.other_user_id),
     []
   );
 
@@ -94,19 +118,16 @@ export function MessagesView({ employees = [], ui }) {
       if (!channel) return 'Direct Message';
       const forcedLabel = forcedDirectLabels[String(channel.id || '')];
       if (forcedLabel) return String(forcedLabel);
-      const isDirectChannel =
-        String(channel.kind || '') === 'direct' ||
-        Boolean(channel.other_user_id) ||
-        looksLikeDmName(channel.name);
-      if (!isDirectChannel) return String(channel.name || '');
+      if (!isDirectChannel(channel)) return String(channel.name || '');
       const otherUserId = String(channel.other_user_id || '');
       if (otherUserId && userDisplayNameById.has(otherUserId)) {
         return String(userDisplayNameById.get(otherUserId));
       }
-      if (looksLikeDmName(channel.name)) return 'Direct Message';
-      return String(channel.name || 'Direct Message');
+      const fallbackName = String(channel.name || '').trim();
+      if (fallbackName && !looksLikeDmName(fallbackName)) return fallbackName;
+      return 'Team Member';
     },
-    [forcedDirectLabels, userDisplayNameById, looksLikeDmName]
+    [forcedDirectLabels, isDirectChannel, userDisplayNameById, looksLikeDmName]
   );
 
   const loadUsers = useCallback(async () => {
@@ -253,22 +274,29 @@ export function MessagesView({ employees = [], ui }) {
 
   const filteredChannels = channels
     .filter((channel) => {
-      const isDirectChannel =
-        String(channel.kind || '') === 'direct' ||
-        Boolean(channel.other_user_id) ||
-        looksLikeDmName(channel.name);
-      if (!isDirectChannel) return true;
+      const direct = isDirectChannel(channel);
+      const displayName = String(getChannelDisplayName(channel) || '');
+      const hasMessages = Number(channel.message_count || 0) > 0;
+      if (!direct) {
+        // Hide legacy junk rows named like DM but not actually direct channels.
+        if (looksLikeDmName(channel.name)) return false;
+        return true;
+      }
       if (String(activeChannel?.id || '') === String(channel.id)) return true;
       const hasPersonBinding =
         Boolean(channel.other_user_id) ||
         Boolean(forcedDirectLabels[String(channel.id || '')]);
+      const genericDirectLabel =
+        !displayName ||
+        normalized(displayName) === 'direct message' ||
+        normalized(displayName) === 'team member';
       // Hide anonymous legacy direct threads (e.g., "Direct Message" / dm-*) that are not
       // bound to a specific teammate in this session.
-      return hasPersonBinding && !looksLikeDmName(channel.name);
+      if (genericDirectLabel && !hasMessages) return false;
+      return hasPersonBinding || hasMessages || !looksLikeDmName(channel.name);
     })
-    .filter((channel) => Number(channel.message_count || 0) > 0 || String(activeChannel?.id || '') === String(channel.id))
     .filter((channel) =>
-      String(channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+      String(getChannelDisplayName(channel) || channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
   const filteredContacts = contactOptions.filter(
     (contact) => contact.hasAccount && normalized(contact.label).includes(normalized(searchTerm))
@@ -282,16 +310,12 @@ export function MessagesView({ employees = [], ui }) {
     }
     const existing = channels.find(
       (channel) =>
-        (String(channel.kind || '') === 'direct' || looksLikeDmName(channel.name)) &&
+        isDirectChannel(channel) &&
         String(channel.other_user_id || '') === String(contact.userId)
     );
     if (existing) {
-      setForcedDirectLabels((prev) => ({
-        ...prev,
-        [String(existing.id)]: String(contact.label || 'Team Member'),
-      }));
-      setPendingDirectContact(null);
       setActiveChannel(existing);
+      setPendingDirectContact(null);
       return;
     }
     setActiveChannel(null);
@@ -364,7 +388,10 @@ export function MessagesView({ employees = [], ui }) {
         const createResponse = await fetch('/api/messages/direct/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: pendingDirectContact.userId }),
+          body: JSON.stringify({
+            userId: pendingDirectContact.userId,
+            label: String(pendingDirectContact.label || 'Direct Message'),
+          }),
         });
         const createPayload = await createResponse.json();
         if (!createResponse.ok || !createPayload?.item?.id) {
@@ -395,10 +422,7 @@ export function MessagesView({ employees = [], ui }) {
       setPendingDirectContact(null);
       const refreshed = (nextChannels || []).find((channel) => String(channel.id) === String(channelId));
       if (refreshed) {
-        const isDirect =
-          String(refreshed.kind || '') === 'direct' ||
-          Boolean(refreshed.other_user_id) ||
-          looksLikeDmName(refreshed.name);
+        const isDirect = isDirectChannel(refreshed);
         const patched = isDirect
           ? {
               ...refreshed,
@@ -452,45 +476,47 @@ export function MessagesView({ employees = [], ui }) {
   };
 
   return (
-    <div className="h-[calc(100vh-190px)] min-h-[700px] flex rounded-xl overflow-hidden border border-gray-800 bg-[#0d1016] shadow-[0_12px_40px_rgba(0,0,0,0.35)]">
-      <div className="w-full md:w-80 bg-[#0b0f14] border-r border-gray-800/80 flex flex-col">
+    <div className="h-[calc(100vh-190px)] min-h-[700px] flex rounded-xl overflow-hidden border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)]">
+      <div className="w-full md:w-80 bg-white border-r border-gray-200 flex flex-col">
         <div className="p-4 border-b border-gray-800 space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-gray-100 tracking-wide">Messages</h3>
+            <h3 className="font-semibold text-gray-900 tracking-wide">Messages</h3>
             <Button variant="secondary" size="sm" onClick={() => setShowNewChannel(true)} data-testid="messages-create-channel-open">
               <Icon name="pen-to-square" />
             </Button>
           </div>
           {newIncomingCount > 0 && (
-            <p className="text-xs text-emerald-300">
+            <p className="text-xs text-emerald-700">
               {newIncomingCount} new message{newIncomingCount > 1 ? 's' : ''} received
             </p>
           )}
           <div className="relative">
-            <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs" />
-            <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full pl-8 pr-3 py-2 bg-[#141922] border border-gray-800 rounded-lg text-sm text-gray-100 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500" />
+            <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs" />
+            <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500" />
           </div>
           {channelsError && <p className="text-sm text-red-400 mt-3">{channelsError}</p>}
         </div>
         <div className="flex-1 overflow-y-auto">
-          {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
-            <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full text-left px-4 py-3 border-b border-gray-800/70 hover:bg-[#151b26] ${activeChannel?.id === channel.id ? 'bg-brand-600/85' : ''}`} data-testid={`messages-channel-${channel.id}`}>
+          {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-500">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
+            <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white' : ''}`} data-testid={`messages-channel-${channel.id}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}>
-                  {(String(channel.kind || '') === 'direct' || Boolean(channel.other_user_id) || looksLikeDmName(channel.name))
+                  {isDirectChannel(channel)
                     ? getChannelDisplayName(channel)
                     : `# ${channel.name}`}
                 </span>
-                {(channel.unread_count ?? channel.message_count) > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-800 text-gray-300'}`}>{channel.unread_count ?? channel.message_count}</span>}
+                {(channel.unread_count ?? channel.message_count) > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`}>{channel.unread_count ?? channel.message_count}</span>}
               </div>
-              <p className={`text-xs truncate ${activeChannel?.id === channel.id ? 'text-white/80' : 'text-gray-500'}`}>{channel.last_message_preview || 'No messages yet'}</p>
+              <p className={`text-xs truncate ${activeChannel?.id === channel.id ? 'text-white/85' : 'text-gray-500'}`}>
+                {channel.last_message_at ? formatThreadSubtextTime(channel.last_message_at) : (channel.last_message_preview || 'No messages yet')}
+              </p>
             </button>
           ))}
           {pendingDirectContact && (
             <button
               type="button"
               onClick={() => setActiveChannel(null)}
-              className="w-full text-left px-4 py-3 border-b border-gray-800/70 bg-brand-600/85"
+              className="w-full text-left px-4 py-3 border-b border-gray-100 bg-brand-500"
               data-testid="messages-channel-pending-direct"
             >
               <div className="flex items-center justify-between gap-2">
@@ -499,7 +525,7 @@ export function MessagesView({ employees = [], ui }) {
               <p className="text-xs truncate text-white/80">No messages yet</p>
             </button>
           )}
-          <div className="px-4 py-3 border-t border-gray-800">
+          <div className="px-4 py-3 border-t border-gray-100">
             <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Team Members</p>
             <div className="space-y-1 max-h-48 overflow-y-auto">
               {filteredContacts.map((contact) => (
@@ -507,10 +533,10 @@ export function MessagesView({ employees = [], ui }) {
                   key={`contact-${contact.key}`}
                   type="button"
                   onClick={() => startDirectChat(contact)}
-                  className="w-full text-left px-2 py-2 rounded-lg hover:bg-[#151b26] flex items-center justify-between"
+                  className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 flex items-center justify-between"
                 >
                   <div>
-                    <p className="text-sm text-gray-100 truncate">{contact.label}</p>
+                    <p className="text-sm text-gray-900 truncate">{contact.label}</p>
                     <p className="text-xs text-gray-500 truncate">{contact.subtitle || 'Team member'}</p>
                   </div>
                   <span className="text-[10px] text-gray-500">Chat</span>
@@ -522,29 +548,41 @@ export function MessagesView({ employees = [], ui }) {
       </div>
 
       {activeChannel ? (
-        <div className="flex-1 flex flex-col bg-[#11151d]">
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
+        <div className="flex-1 flex flex-col bg-white">
+          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
             <div>
-              <h3 className="font-semibold text-gray-100" data-testid="messages-active-channel">
-                {(String(activeChannel.kind || '') === 'direct' || Boolean(activeChannel.other_user_id) || looksLikeDmName(activeChannel.name))
+              <h3 className="font-semibold text-gray-900" data-testid="messages-active-channel">
+                {isDirectChannel(activeChannel)
                   ? getChannelDisplayName(activeChannel)
                   : `# ${activeChannel.name}`}
               </h3>
-              <p className="text-xs text-gray-400">{activeChannel.message_count || 0} messages</p>
+              <p className="text-xs text-gray-500">{activeChannel.message_count || 0} messages</p>
             </div>
             <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-gradient-to-b from-[#131824] to-[#0f131b]">
-            {messagesLoading ? <div className="text-sm text-gray-400">Loading messages...</div> : messagesError ? <div className="text-sm text-red-400">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500">No messages yet.</div> : messages.map((msg) => {
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-gray-50/40">
+            {messagesLoading ? <div className="text-sm text-gray-500">Loading messages...</div> : messagesError ? <div className="text-sm text-red-500">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500">No messages yet.</div> : messages.map((msg, index) => {
               const isMine = myUserId && String(msg.sender_user_id || '') === String(myUserId);
+              const dayKey = getMessageDayKey(msg.created_at);
+              const prevDayKey = index > 0 ? getMessageDayKey(messages[index - 1].created_at) : '';
+              const showDayDivider = dayKey && dayKey !== prevDayKey;
               return (
-                <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                    isMine ? 'bg-blue-500 text-white rounded-br-md' : 'bg-[#2a2f38] text-gray-100 rounded-bl-md'
-                  }`}>
-                    <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
-                    <p className={`text-[10px] mt-1 ${isMine ? 'text-white/80' : 'text-gray-400'}`}>{formatDate(msg.created_at)}</p>
+                <div key={msg.id}>
+                  {showDayDivider && (
+                    <div className="flex items-center gap-3 my-3">
+                      <div className="h-px flex-1 bg-gray-200" />
+                      <div className="text-[11px] uppercase tracking-wide text-gray-500">{formatMessageDayLabel(msg.created_at)}</div>
+                      <div className="h-px flex-1 bg-gray-200" />
+                    </div>
+                  )}
+                  <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                      isMine ? 'bg-blue-500 text-white rounded-br-md' : 'bg-gray-200 text-gray-900 rounded-bl-md'
+                    }`}>
+                      <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                      <p className={`text-[10px] mt-1 ${isMine ? 'text-white/80' : 'text-gray-500'}`}>{formatMessageTime(msg.created_at)}</p>
+                    </div>
                   </div>
                 </div>
               );
@@ -552,45 +590,45 @@ export function MessagesView({ employees = [], ui }) {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
+          <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200 bg-white">
             <div className="flex items-end gap-3">
               <div className="flex-1 relative">
-                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={(String(activeChannel.kind || '') === 'direct' || Boolean(activeChannel.other_user_id) || looksLikeDmName(activeChannel.name)) ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
               </div>
               <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
-            {sendError && <p className="text-xs text-red-400 mt-2">{sendError}</p>}
+            {sendError && <p className="text-xs text-red-500 mt-2">{sendError}</p>}
             <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
           </div>
         </div>
       ) : pendingDirectContact ? (
-        <div className="flex-1 flex flex-col bg-[#11151d]">
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-[#0f131b]">
+        <div className="flex-1 flex flex-col bg-white">
+          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
             <div>
-              <h3 className="font-semibold text-gray-100">Message {pendingDirectContact.label}</h3>
-              <p className="text-xs text-gray-400">No messages yet</p>
+              <h3 className="font-semibold text-gray-900">Message {pendingDirectContact.label}</h3>
+              <p className="text-xs text-gray-500">No messages yet</p>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gradient-to-b from-[#131824] to-[#0f131b]">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50/40">
             <div className="text-sm text-gray-500">Send the first message to start this chat.</div>
           </div>
-          <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-800 bg-[#0f131b]">
+          <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200 bg-white">
             <div className="flex items-end gap-3">
               <div className="flex-1 relative">
-                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full px-4 py-3 bg-[#161c27] border border-gray-800 rounded-xl text-sm text-gray-100 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
               </div>
               <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
-            {sendError && <p className="text-xs text-red-400 mt-2">{sendError}</p>}
+            {sendError && <p className="text-xs text-red-500 mt-2">{sendError}</p>}
             <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
           </div>
         </div>
       ) : (
-        <div className="hidden md:flex flex-1 items-center justify-center bg-[#11151d]"><div className="text-center"><h3 className="text-lg font-semibold text-gray-100 mb-2">Your Messages</h3></div></div>
+        <div className="hidden md:flex flex-1 items-center justify-center bg-white"><div className="text-center"><h3 className="text-lg font-semibold text-gray-900 mb-2">Your Messages</h3></div></div>
       )}
 
       {showNewChannel && (

@@ -7,6 +7,7 @@ import {
   type OnboardingChecklistRole,
 } from "@/lib/onboarding/checklist";
 import { normalizeAppRole } from "@/lib/nav/config";
+import { listFallbackChecklistRows } from "@/lib/onboarding/fallbackStore";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,10 @@ function toTenantErrorResponse(error: TenantResolverError) {
   if (error.status === 404) return notFound(error.message);
   if (error.status === 403) return forbidden(error.message);
   return serverError(error.message);
+}
+
+function isMissingOnboardingTable(message: string | undefined) {
+  return /onboarding_checklist/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
 }
 
 async function resolveChecklistRole(
@@ -57,11 +62,13 @@ export async function GET() {
       .select("key, user_id, completed_at, completed_by")
       .eq("company_id", companyId);
 
-    if (error) {
+    if (error && !isMissingOnboardingTable(error.message)) {
       return serverError(error.message);
     }
 
-    const rows = (data ?? []) as ChecklistRow[];
+    const rows = (error && isMissingOnboardingTable(error.message)
+      ? listFallbackChecklistRows(companyId)
+      : (data ?? [])) as ChecklistRow[];
     const completedMap = new Map(
       rows.map((row) => [`${row.key}::${row.user_id ?? "__company__"}`, row])
     );

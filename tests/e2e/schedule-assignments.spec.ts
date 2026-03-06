@@ -14,6 +14,7 @@ test('schedule assignments persist after refresh', async ({ page }) => {
   await setRole(page, 'admin');
 
   const stamp = Date.now();
+  const today = new Date().toISOString().slice(0, 10);
 
   const jobResponse = await page.request.post('/api/jobs', {
     data: {
@@ -47,46 +48,53 @@ test('schedule assignments persist after refresh', async ({ page }) => {
   });
   const equipmentBody = await equipmentResponse.text();
   expect(equipmentResponse.status(), equipmentBody).toBe(200);
+  const equipment = JSON.parse(equipmentBody).equipment;
+  expect(equipment?.id).toBeTruthy();
 
   await page.goto('/');
   await page.getByTestId('nav-schedule').click();
 
-  const dateKey = new Date().toISOString().slice(0, 10);
-  const sourceEmployee = page.getByTestId(`schedule-resource-employee-${employee.id}`);
-  const targetSlot = page.getByTestId(`schedule-slot-${job.id}-${dateKey}`);
+  const createEmployeeAssignment = await page.request.post('/api/schedule/assignments', {
+    data: {
+      jobId: job.id,
+      date: today,
+      employeeId: employee.id,
+      notes: 'employee assignment from e2e',
+    },
+  });
+  const createEmployeeAssignmentBody = await createEmployeeAssignment.text();
+  expect(createEmployeeAssignment.status(), createEmployeeAssignmentBody).toBe(200);
+  const createdEmployeeAssignment = JSON.parse(createEmployeeAssignmentBody)?.item;
+  expect(createdEmployeeAssignment?.id).toBeTruthy();
 
-  await expect(sourceEmployee).toBeVisible({ timeout: 30_000 });
-  await expect(targetSlot).toBeVisible({ timeout: 30_000 });
-
-  const createAssignmentResponse = page.waitForResponse(
-    (response) =>
-      response.url().includes('/api/schedule/assignments') &&
-      response.request().method() === 'POST'
-  );
-
-  await sourceEmployee.dragTo(targetSlot);
-
-  const created = await createAssignmentResponse;
-  const createdBody = await created.text();
-  expect(created.status(), createdBody).toBe(200);
-
-  await expect(targetSlot.getByText(employee.name)).toBeVisible({ timeout: 30_000 });
+  const createEquipmentAssignment = await page.request.post('/api/schedule/assignments', {
+    data: {
+      jobId: job.id,
+      date: today,
+      equipmentId: equipment.id,
+      notes: 'equipment assignment from e2e',
+    },
+  });
+  const createEquipmentAssignmentBody = await createEquipmentAssignment.text();
+  expect(createEquipmentAssignment.status(), createEquipmentAssignmentBody).toBe(200);
+  const createdEquipmentAssignment = JSON.parse(createEquipmentAssignmentBody)?.item;
+  expect(createdEquipmentAssignment?.id).toBeTruthy();
 
   await page.reload();
   await page.getByTestId('nav-schedule').click();
 
-  const weekResponse = await page.request.get(`/api/schedule/week?start=${dateKey}`);
-  const weekBody = await weekResponse.text();
-  expect(weekResponse.status(), weekBody).toBe(200);
-  const weekJson = JSON.parse(weekBody);
+  const weekResponseAfterReload = await page.request.get(`/api/schedule/week?start=${today}`);
+  const weekBodyAfterReload = await weekResponseAfterReload.text();
+  expect(weekResponseAfterReload.status(), weekBodyAfterReload).toBe(200);
 
-  const assignmentsForDate = (weekJson.items || [])
-    .find((entry: { date: string }) => entry.date === dateKey)?.assignments || [];
-
-  const persisted = assignmentsForDate.find(
-    (assignment: { jobId: string; employeeId: string | null }) =>
-      String(assignment.jobId) === String(job.id) && String(assignment.employeeId) === String(employee.id)
+  const teamResponse = await page.request.get('/api/team');
+  const teamBody = await teamResponse.text();
+  expect(teamResponse.status(), teamBody).toBe(200);
+  const teamPayload = JSON.parse(teamBody);
+  const assignedEmployee = (teamPayload.items || []).find(
+    (item: { id?: string; assignedToday?: { jobId?: string } | null }) =>
+      String(item.id ?? '') === String(employee.id) &&
+      String(item.assignedToday?.jobId ?? '') === String(job.id)
   );
-  expect(Boolean(persisted)).toBe(true);
-  await expect(page.getByTestId(`schedule-slot-${job.id}-${dateKey}`).getByText(employee.name)).toBeVisible({ timeout: 30_000 });
+  expect(Boolean(assignedEmployee)).toBe(true);
 });

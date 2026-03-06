@@ -16,9 +16,17 @@ if (missingEnv.length > 0) {
 
 const nextConfig: NextConfig = {};
 
-export default withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG,
-  project: process.env.SENTRY_PROJECT,
-  silent: true,
-  disableLogger: true,
-});
+const sentryEnabled =
+  process.env.SENTRY_ENABLED === "true" &&
+  Boolean(process.env.SENTRY_DSN) &&
+  Boolean(process.env.SENTRY_ORG) &&
+  Boolean(process.env.SENTRY_PROJECT);
+
+export default sentryEnabled
+  ? withSentryConfig(nextConfig, {
+      org: process.env.SENTRY_ORG,
+      project: process.env.SENTRY_PROJECT,
+      silent: true,
+      disableLogger: true,
+    })
+  : nextConfig;

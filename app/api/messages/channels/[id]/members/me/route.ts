@@ -4,7 +4,7 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { okSuccess } from "@/lib/http/json";
 import { getMyMembership } from "@/lib/messages/members";
 
-const paramsSchema = z.object({ id: z.string().uuid() });
+const paramsSchema = z.object({ id: z.string().min(1) });
 
 function tenantError(error: TenantResolverError) {
   if (error.status === 404) return notFound(error.message);

@@ -54,14 +54,15 @@ export async function GET(request: Request) {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId, userId } = await getCompanyId();
 
-    const memberRows = await supabase
-      .from("message_channel_members")
-      .select("channel_id")
+    const channelsResult = await supabase
+      .from("message_channels")
+      .select("id, name, created_at, updated_at", { count: "exact" })
       .eq("company_id", companyId)
-      .eq("user_id", userId);
+      .order("created_at", { ascending: false })
+      .range(from, to);
 
-    if (memberRows.error) {
-      const message = memberRows.error?.message || "";
+    if (channelsResult.error) {
+      const message = channelsResult.error?.message || "";
       if (isMissingMessagesTables(message)) {
         const fallback = listFallbackChannels(companyId, userId).map((channel) => ({
           ...channel,
@@ -76,22 +77,6 @@ export async function GET(request: Request) {
       return serverError();
     }
 
-    const memberChannelIds = Array.from(new Set((memberRows.data ?? []).map((row) => String(row.channel_id))));
-
-    if (memberChannelIds.length === 0) {
-      return Response.json({ items: [], unread_count: 0, ...getPaginationMeta(0, page, pageSize) });
-    }
-
-    const channelsResult = await supabase
-      .from("message_channels")
-      .select("id, name, created_at, updated_at", { count: "exact" })
-      .eq("company_id", companyId)
-      .in("id", memberChannelIds)
-      .order("created_at", { ascending: true })
-      .range(from, to);
-
-    if (channelsResult.error) return serverError();
-
     const channelIds = (channelsResult.data ?? []).map((c) => c.id);
     const messagesQuery =
       channelIds.length > 0
@@ -103,15 +88,24 @@ export async function GET(request: Request) {
             .order("created_at", { ascending: false })
         : { data: [], error: null };
 
-    if (messagesQuery.error) return serverError();
+    if (messagesQuery.error) {
+      const message = messagesQuery.error?.message || "";
+      if (!isMissingMessagesTables(message)) return serverError();
+    }
 
-    const memberCountsQuery = await supabase
-      .from("message_channel_members")
-      .select("channel_id")
-      .eq("company_id", companyId)
-      .in("channel_id", channelIds);
+    const memberCountsQuery =
+      channelIds.length > 0
+        ? await supabase
+            .from("message_channel_members")
+            .select("channel_id")
+            .eq("company_id", companyId)
+            .in("channel_id", channelIds)
+        : { data: [], error: null };
 
-    if (memberCountsQuery.error) return serverError();
+    if (memberCountsQuery.error) {
+      const message = memberCountsQuery.error?.message || "";
+      if (!isMissingMessagesTables(message)) return serverError();
+    }
 
     const latestByChannel = new Map<string, { body: string; created_at: string }>();
     const countsByChannel = new Map<string, number>();
@@ -163,7 +157,19 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const now = new Date().toISOString();
-    const memberUserIds = dedupeUserIds(parsedBody.data.memberUserIds, userId);
+    let memberUserIds = dedupeUserIds(parsedBody.data.memberUserIds, userId);
+
+    if (memberUserIds.length <= 1) {
+      const companyMembers = await supabase
+        .from("memberships")
+        .select("user_id")
+        .eq("company_id", companyId);
+      if (companyMembers.error) return serverError();
+      memberUserIds = dedupeUserIds(
+        (companyMembers.data ?? []).map((row) => String(row.user_id)),
+        userId
+      );
+    }
 
     const membersResult = await supabase
       .from("memberships")
@@ -232,7 +238,7 @@ export async function POST(request: Request) {
     }
     if (membersInsert.error) {
       if (isMissingMessagesTables(membersInsert.error.message || "")) {
-        return okItem(createFallbackChannel(companyId, parsedBody.data.name, memberUserIds), 201);
+        return okItem(data, 201);
       }
       return Response.json({ error: membersInsert.error.message || "Failed to add members" }, { status: 400 });
     }

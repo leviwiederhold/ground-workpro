@@ -25,8 +25,18 @@ function isMissingMessagesTable(message: string) {
   );
 }
 
+function isMessagesSeedConstraint(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("thread_id") ||
+    normalized.includes("not-null constraint") ||
+    normalized.includes("violates") ||
+    normalized.includes("foreign key")
+  );
+}
+
 export async function POST(request: Request) {
-  if (process.env.E2E !== "true") {
+  if (process.env.E2E !== "true" && process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -107,6 +117,7 @@ export async function POST(request: Request) {
           Array.from({ length: messagesPerChannel }, (_, idx) => ({
             company_id: companyId,
             channel_id: channel.id,
+            thread_id: channel.id,
             sender_user_id: userId,
             body: `Seeded message ${now}-${idx}`,
             created_at: new Date().toISOString(),
@@ -114,9 +125,18 @@ export async function POST(request: Request) {
         );
 
         for (const part of chunk(messageRows, 500)) {
-          const { error } = await supabase.from("messages").insert(part);
+          let { error } = await supabase.from("messages").insert(part);
+          if (error && /column .*thread_id.* does not exist|Could not find the 'thread_id' column/i.test(error.message || "")) {
+            const withoutThreadId = part.map((row) => {
+              const mutableRow = { ...row } as Record<string, unknown>;
+              delete mutableRow.thread_id;
+              return mutableRow;
+            });
+            const retry = await supabase.from("messages").insert(withoutThreadId);
+            error = retry.error;
+          }
           if (error) {
-            if (isMissingMessagesTable(error.message || "")) {
+            if (isMissingMessagesTable(error.message || "") || isMessagesSeedConstraint(error.message || "")) {
               messagesTablesAvailable = false;
               insertedMessages = 0;
               break;

@@ -250,7 +250,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const weatherLowF = weatherSection?.lowF ?? null;
   const equipmentLocationsSection = dashboardSummary?.sections?.equipmentLocations ?? primaryItems.find((item) => item.type === 'equipment_locations')?.meta;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
-  const showGettingStarted = Boolean(gettingStartedSection?.enabled ?? gettingStartedSection);
+  const showGettingStarted = Boolean(gettingStartedSection);
   const isAdminDashboard = effectiveRole === 'admin';
 
   const rolePrimaryItems = !isAdminDashboard
@@ -547,6 +547,46 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
             ))}
           </div>
           <div className="space-y-6">
+            {showGettingStarted && (
+              <Card className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-900">
+                    <Icon name="circle-check" className="mr-2 text-brand-500" />
+                    Getting Started
+                  </h3>
+                </div>
+                <div className="space-y-2">
+                  {activeOnboardingItems.length === 0 ? (
+                    <EmptyState>All checklist items complete.</EmptyState>
+                  ) : (
+                    activeOnboardingItems.map((item) => (
+                      <div
+                        key={item.key}
+                        className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50"
+                        data-testid={`onboarding-item-${item.key}`}
+                        onClick={() => goToChecklistItem(item)}
+                      >
+                        <button
+                          type="button"
+                          disabled={onboardingSavingKey === item.key}
+                          data-testid={`onboarding-toggle-${item.key}`}
+                          className={`mt-0.5 w-5 h-5 rounded-full border flex items-center justify-center ${item.completed ? 'bg-green-500 border-green-500 text-white' : 'border-gray-300 text-transparent'} disabled:opacity-50`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            completeChecklistItem(item.key, !item.completed);
+                          }}
+                        >
+                          <Icon name="check" className="text-[10px]" />
+                        </button>
+                        <p className={`text-sm font-medium ${item.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                          {item.label}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Card>
+            )}
             {alertsSection && (
               <Card className="p-4">
                 <h3 className="font-semibold text-gray-900 mb-4">Alerts</h3>

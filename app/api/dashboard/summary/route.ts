@@ -8,6 +8,7 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import type { AppRole } from "@/lib/nav/config";
 import { getStatsForRole } from "@/lib/stats/getStats";
 import { getDashboardWeather } from "@/lib/weather/dashboardWeather";
+import { listFallbackChecklistRows } from "@/lib/onboarding/fallbackStore";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,8 @@ const asNumber = (value: unknown) => {
 
 const ACTIVE_JOB_STATUSES = ["active", "open", "in_progress"];
 const OPEN_WORK_ORDER_STATUSES = ["open", "scheduled", "in-progress", "in_progress"];
+const isMissingOnboardingTable = (message: string | undefined) =>
+  /onboarding_checklist/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
 
 function toError(error: unknown) {
   if (error instanceof TenantResolverError) {
@@ -230,7 +233,9 @@ export async function GET() {
       return qty <= reorder;
     }).length;
 
-    const onboardingRows = onboardingResult.error ? [] : onboardingResult.data ?? [];
+    const onboardingRows = onboardingResult.error
+      ? (isMissingOnboardingTable(onboardingResult.error.message) ? listFallbackChecklistRows(companyId) : [])
+      : onboardingResult.data ?? [];
     const completedMap = new Map<string, { completed_at: string | null }>();
     for (const row of onboardingRows) {
       const key = `${String(row.key)}::${row.user_id ? String(row.user_id) : "__company__"}`;

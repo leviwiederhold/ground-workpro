@@ -218,7 +218,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, effectiveRole);
     if (scopedJobIds && scopedJobIds.length === 0) {
       return NextResponse.json({ items: [], jobs: [], nextCursor: null });
     }
@@ -230,21 +230,38 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false })
       .order("id", { ascending: false });
 
+    let countQuery = supabase
+      .from("jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
+
     if (scopedJobIds) {
       query = query.in("id", scopedJobIds);
+      countQuery = countQuery.in("id", scopedJobIds);
     }
 
     const statusFilters = resolveStatusFilters(queryInput.status);
     if (statusFilters) {
       query = query.in("status", statusFilters);
+      countQuery = countQuery.in("status", statusFilters);
     }
 
     if (queryInput.q) {
       const escaped = queryInput.q.replace(/[%_]/g, "");
       query = query.or(`name.ilike.%${escaped}%,site_address.ilike.%${escaped}%,client.ilike.%${escaped}%`);
+      countQuery = countQuery.or(`name.ilike.%${escaped}%,site_address.ilike.%${escaped}%,client.ilike.%${escaped}%`);
     }
 
-    let { data, error } = await query.range(offset, offset + limit);
+    const [{ error: countError, count: totalCount }, listResult] = await Promise.all([
+      countQuery,
+      query.range(offset, offset + limit),
+    ]);
+
+    if (countError && !isMissingSchemaError(countError.message)) {
+      return NextResponse.json({ error: countError.message }, { status: 400 });
+    }
+
+    let { data, error } = listResult;
     if (error && isMissingSchemaError(error.message)) {
       let fallbackQuery = supabase
         .from("jobs")
@@ -278,7 +295,9 @@ export async function GET(request: Request) {
     const jobs = trimmedRows.map(mapJob);
     const nextCursor = hasMore ? String(offset + limit) : null;
 
-    return NextResponse.json({ items: jobs, jobs, nextCursor });
+    const total = typeof totalCount === "number" ? totalCount : jobs.length + offset;
+    const page = Math.floor(offset / limit) + 1;
+    return NextResponse.json({ items: jobs, jobs, nextCursor, page, pageSize: limit, total });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

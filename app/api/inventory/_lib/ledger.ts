@@ -74,7 +74,9 @@ export const mapInventory = (row: any, lastUnitCost = 0) => {
   };
 };
 
-export const mapLedgerItem = (row: any) => ({
+export const mapLedgerItem = (row: any) => {
+  if (!row) return null;
+  return {
   id: row.id,
   itemId: normalizeId(row.item_id),
   type: row.type ?? "adjust",
@@ -83,9 +85,10 @@ export const mapLedgerItem = (row: any) => ({
   fromLocation: row.from_location ?? "",
   toLocation: row.to_location ?? "",
   jobId: normalizeId(row.job_id),
-    notes: stripInventoryMetaTag(row.notes ?? ""),
+  notes: stripInventoryMetaTag(row.notes ?? ""),
   createdAt: row.created_at ?? "",
-});
+  };
+};
 
 export async function findInventoryItem(supabase: any, companyId: string, id: string | number) {
   const { data, error } = await supabase
@@ -132,7 +135,13 @@ export async function insertInventoryTransaction(
     lastResult = result;
     const message = result.error?.message || "";
     const match = message.match(/Could not find the '([^']+)' column/);
-    if (!match) return result;
+    if (!match) {
+      const message = (result.error?.message || "").toLowerCase();
+      if (message.includes("inventory_transactions") && (message.includes("does not exist") || message.includes("not find"))) {
+        return { data: null, error: null };
+      }
+      return result;
+    }
     const missingColumn = match[1];
     if (!(missingColumn in currentPayload)) return result;
     delete currentPayload[missingColumn];

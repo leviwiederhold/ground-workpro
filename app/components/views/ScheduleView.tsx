@@ -10,6 +10,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const [scheduleError, setScheduleError] = useState('');
   const [scheduleWarning, setScheduleWarning] = useState('');
   const [eventsByDate, setEventsByDate] = useState({});
+  const [movingEventId, setMovingEventId] = useState(null);
 
   const TIME_GRID_START_HOUR = 6;
   const TIME_GRID_END_HOUR = 18;
@@ -289,6 +290,56 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const getAssignmentsForDate = (dateKey) =>
     Object.entries(scheduleData).flatMap(([key, items]) => (key.endsWith(`-${dateKey}`) ? items : []));
 
+  const findEventById = useCallback(
+    (eventId) => {
+      for (const dateKey of Object.keys(eventsByDate || {})) {
+        const found = (eventsByDate[dateKey] || []).find((event) => String(event.id) === String(eventId));
+        if (found) return found;
+      }
+      return null;
+    },
+    [eventsByDate]
+  );
+
+  const moveEventToSlot = useCallback(
+    async (eventId, dateKey, hour) => {
+      const event = findEventById(eventId);
+      if (!event) return;
+      const start = new Date(event.startsAt);
+      const end = new Date(event.endsAt);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
+
+      const durationMs = Math.max(30 * 60 * 1000, end.getTime() - start.getTime());
+      const nextStart = new Date(`${dateKey}T00:00:00`);
+      nextStart.setHours(hour, start.getMinutes(), 0, 0);
+      const nextEnd = new Date(nextStart.getTime() + durationMs);
+
+      try {
+        setMovingEventId(String(eventId));
+        setScheduleError('');
+        const response = await fetch(`/api/calendar/events/${eventId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            startsAt: nextStart.toISOString(),
+            endsAt: nextEnd.toISOString(),
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setScheduleError(payload?.error || 'Failed to move event');
+          return;
+        }
+        await loadWeekAssignments();
+      } catch {
+        setScheduleError('Failed to move event');
+      } finally {
+        setMovingEventId(null);
+      }
+    },
+    [findEventById, loadWeekAssignments]
+  );
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -372,6 +423,15 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                             data-testid={`schedule-time-cell-${dateKey}-${hour}`}
                             className="absolute inset-x-0 border-t border-gray-100 cursor-pointer hover:bg-brand-50/40"
                             style={{ top: `${top}px`, height: `${TIME_SLOT_HEIGHT}px` }}
+                            onDragOver={(dragEvent) => {
+                              dragEvent.preventDefault();
+                            }}
+                            onDrop={(dropEvent) => {
+                              dropEvent.preventDefault();
+                              const draggedEventId = dropEvent.dataTransfer.getData('text/calendar-event-id');
+                              if (!draggedEventId) return;
+                              moveEventToSlot(draggedEventId, dateKey, hour);
+                            }}
                             onClick={(clickEvent) => {
                               clickEvent.stopPropagation();
                               openEventModalAtSlot(dateKey, hour);
@@ -411,6 +471,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                             key={`timed-event-${event.id}-${dateKey}`}
                             data-testid={`schedule-time-event-${event.id}`}
                             aria-label={`Schedule event ${event.title}`}
+                            draggable
                             className={`absolute z-20 rounded-md border px-2 py-1 text-left shadow-sm hover:brightness-95 ${getEventTypeClasses(event.eventType).chip}`}
                             style={{
                               top: `${blockStyle.topPx}px`,
@@ -419,6 +480,10 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                               width: `calc(${laneWidth}% - ${inset * 2}px)`,
                             }}
                             title={`${event.title} (${new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - ${new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`}
+                            onDragStart={(dragEvent) => {
+                              dragEvent.dataTransfer.setData('text/calendar-event-id', String(event.id));
+                              dragEvent.dataTransfer.effectAllowed = 'move';
+                            }}
                             onClick={(clickEvent) => {
                               clickEvent.stopPropagation();
                               setShowModal({ type: 'calendar-event', data: event });
@@ -446,7 +511,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
       {scheduleWarning && (
         <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700">{scheduleWarning}</p>
       )}
-      {scheduleLoading && (
+      {(scheduleLoading || movingEventId) && (
         <p className="text-sm text-gray-500">Loading schedule assignments...</p>
       )}
       {scheduleError && (

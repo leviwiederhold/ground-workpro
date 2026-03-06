@@ -1,29 +1,75 @@
 import { NextResponse } from "next/server";
-import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { getEffectiveRole, resolveRealRole } from "@/lib/auth/effectiveRole";
-import { toNavItems } from "@/lib/nav/config";
+import { cookies } from "next/headers";
+import { supabaseServer } from "@/lib/supabase/server";
+import { normalizeAppRole, toNavItems, type AppRole } from "@/lib/nav/config";
 
 export const dynamic = "force-dynamic";
 
+const ACTING_ROLE_COOKIE = "gw_acting_role";
+const ROLE_RANK: Record<AppRole, number> = {
+  admin: 5,
+  pm: 4,
+  foreman: 3,
+  mechanic: 2,
+  operator: 1,
+};
+
+async function resolveContext() {
+  const supabase = await supabaseServer();
+  const userResult = await supabase.auth.getUser();
+  if (userResult.error || !userResult.data?.user) {
+    return { error: NextResponse.json({ error: "Not authenticated" }, { status: 401 }) };
+  }
+
+  const userId = userResult.data.user.id;
+  const membershipResult = await supabase
+    .from("memberships")
+    .select("company_id, role")
+    .eq("user_id", userId)
+    .order("company_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (membershipResult.error) {
+    return { error: NextResponse.json({ error: membershipResult.error.message }, { status: 400 }) };
+  }
+  if (!membershipResult.data?.company_id) {
+    return { error: NextResponse.json({ error: "No company membership found (run bootstrap)" }, { status: 403 }) };
+  }
+
+  return {
+    supabase,
+    userId,
+    companyId: String(membershipResult.data.company_id),
+    realRole: normalizeAppRole(membershipResult.data.role) ?? "operator",
+  };
+}
+
+function clampRole(realRole: AppRole, requestedRole: AppRole): AppRole {
+  return ROLE_RANK[requestedRole] <= ROLE_RANK[realRole] ? requestedRole : realRole;
+}
+
 export async function GET() {
+  const context = await resolveContext();
+  if ("error" in context) return context.error;
+
   try {
-    const { supabase, companyId, userId } = await getCompanyId();
-    const realRole = await resolveRealRole(supabase, companyId, userId);
-    const role = await getEffectiveRole();
-    if (!role || !realRole) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    const cookieStore = await cookies();
+    const e2eRole =
+      process.env.NODE_ENV !== "production"
+        ? normalizeAppRole(cookieStore.get("e2e_role")?.value)
+        : null;
+    const actingRole = normalizeAppRole(cookieStore.get(ACTING_ROLE_COOKIE)?.value);
+
+    const role = e2eRole ?? (actingRole ? clampRole(context.realRole, actingRole) : context.realRole);
 
     return NextResponse.json({
       items: toNavItems(role),
       role,
-      realRole,
+      realRole: context.realRole,
       canSwitchRoleView: role === "admin",
     });
   } catch (error) {
-    if (error instanceof TenantResolverError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
     const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -67,8 +67,15 @@ async function upsertWithColumnFallback(supabase: any, payload: Record<string, u
 export async function GET() {
   let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
+    try {
+      const access = await requireRole(["admin", "pm"]);
+      context = { companyId: access.companyId, userId: access.userId, role: access.role };
+    } catch {
+      return errorResponse("Forbidden", 403);
+    }
+
     const { supabase, companyId, userId } = await getCompanyId();
-    context = { companyId, userId, role: "member" };
+    context = { ...context, companyId, userId };
 
     const { data, error } = await supabase
       .from("pricing_settings")

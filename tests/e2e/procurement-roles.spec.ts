@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
@@ -31,6 +32,7 @@ async function setRole(page: Page, role: Role) {
 
 test('procurement APIs are role scoped', async ({ page }) => {
   const stamp = Date.now();
+  await loginViaUI(page);
 
   await setRole(page, 'admin');
 

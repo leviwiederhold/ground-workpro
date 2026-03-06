@@ -40,6 +40,16 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
   const [equipmentActionError, setEquipmentActionError] = useState('');
   const [financialSummary, setFinancialSummary] = useState(null);
   const [financialLoading, setFinancialLoading] = useState(false);
+  const syncSelectedJobCounts = useCallback((crewCount, equipmentCount) => {
+    if (!selectedJobId) return;
+    setJobs((prev) =>
+      prev.map((job) =>
+        String(job.id) === String(selectedJobId)
+          ? { ...job, crew_assigned_count: crewCount, equipment_assigned_count: equipmentCount }
+          : job
+      )
+    );
+  }, [selectedJobId, setJobs]);
 
   const handleCreateJob = async () => {
     try {
@@ -125,15 +135,23 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
     setJobActionError('');
   }, [normalizeJobStatus, selectedJob]);
 
-  const getJobCrewCount = useCallback((job) =>
-    employees.filter((employee) => String(employee.jobId ?? '') === String(job.id)).length
-  , [employees]);
+  const getJobCrewCount = useCallback((job) => {
+    if (String(selectedJobId ?? '') === String(job.id)) {
+      return jobEmployees.length;
+    }
+    const explicit = Number(job.crew_assigned_count ?? job.crewAssigned ?? job.crewCount);
+    if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+    return employees.filter((employee) => String(employee.jobId ?? '') === String(job.id)).length;
+  }, [employees, jobEmployees.length, selectedJobId]);
 
-  const getJobEquipmentCount = useCallback((job) =>
-    String(selectedJobId ?? '') === String(job.id)
-      ? jobEquipment.length
-      : equipment.filter((item) => String(item.jobId ?? '') === String(job.id)).length
-  , [equipment, jobEquipment.length, selectedJobId]);
+  const getJobEquipmentCount = useCallback((job) => {
+    if (String(selectedJobId ?? '') === String(job.id)) {
+      return jobEquipment.length;
+    }
+    const explicit = Number(job.equipment_assigned_count ?? job.equipmentAssigned ?? job.equipmentCount);
+    if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+    return equipment.filter((item) => String(item.jobId ?? '') === String(job.id)).length;
+  }, [equipment, jobEquipment.length, selectedJobId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -156,7 +174,9 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
           throw new Error(payload?.error || 'Failed to load assigned equipment');
         }
         if (isMounted) {
-          setJobEquipment(payload.equipment || []);
+          const nextEquipment = payload.equipment || [];
+          setJobEquipment(nextEquipment);
+          syncSelectedJobCounts(jobEmployees.length, nextEquipment.length);
         }
       } catch {
         if (isMounted) {
@@ -187,7 +207,9 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
           throw new Error(payload?.error || 'Failed to load assigned crew');
         }
         if (isMounted) {
-          setJobEmployees(payload.employees || []);
+          const nextEmployees = payload.employees || [];
+          setJobEmployees(nextEmployees);
+          syncSelectedJobCounts(nextEmployees.length, jobEquipment.length);
         }
       } catch {
         if (isMounted) {
@@ -205,7 +227,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
     return () => {
       isMounted = false;
     };
-  }, [selectedJob]);
+  }, [jobEmployees.length, jobEquipment.length, selectedJob, syncSelectedJobCounts]);
 
   useEffect(() => {
     let active = true;
@@ -267,6 +289,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
       }
 
       setJobEmployees((prev) => [...assignedEmployees, ...prev]);
+      syncSelectedJobCounts(jobEmployees.length + assignedEmployees.length, jobEquipment.length);
       setEmployees((prev) => {
         const updatesById = new Map(assignedEmployees.map((employee) => [String(employee.id), employee]));
         return prev.map((employee) => updatesById.get(String(employee.id)) || employee);
@@ -304,6 +327,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
       }
 
       setJobEmployees((prev) => prev.filter((employee) => String(employee.id) !== String(employeeId)));
+      syncSelectedJobCounts(Math.max(0, jobEmployees.length - 1), jobEquipment.length);
       setEmployees((prev) =>
         prev.map((employee) =>
           String(employee.id) === String(employeeId) ? { ...employee, jobId: null } : employee
@@ -345,6 +369,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
       }
 
       setJobEquipment((prev) => [...assignedEquipment, ...prev]);
+      syncSelectedJobCounts(jobEmployees.length, jobEquipment.length + assignedEquipment.length);
       setEquipment((prev) => {
         const updatesById = new Set(assignedEquipment.map((item) => String(item.id)));
         return prev.map((item) =>
@@ -386,6 +411,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
       setJobEquipment((prev) =>
         prev.filter((item) => String(item.id) !== String(equipmentId))
       );
+      syncSelectedJobCounts(jobEmployees.length, Math.max(0, jobEquipment.length - 1));
       setEquipment((prev) =>
         prev.map((item) =>
           String(item.id) === String(equipmentId) ? { ...item, jobId: null } : item

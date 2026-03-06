@@ -92,7 +92,7 @@ async function updateWithColumnFallback(
       .eq("company_id", companyId)
       .eq("id", id)
       .select("*")
-      .single();
+      .maybeSingle();
     lastResult = result;
     const message = result.error?.message || "";
     const postgrestMissing = message.match(/Could not find the '([^']+)' column/i);

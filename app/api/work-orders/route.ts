@@ -10,7 +10,15 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
-const workOrderStatusSchema = z.enum(["scheduled", "in-progress", "completed"]);
+const workOrderStatusSchema = z.enum([
+  "open",
+  "scheduled",
+  "in-progress",
+  "in_progress",
+  "waiting_parts",
+  "completed",
+  "closed",
+]);
 
 const createWorkOrderSchema = z.object({
   equipmentId: z.union([z.number(), z.string()]),
@@ -42,13 +50,25 @@ const normalizeUuid = (value: unknown) => {
 const toDbStatus = (status: string | undefined) => {
   if (!status) return status;
   if (status === "in-progress") return "in_progress";
-  return status;
+  if (status === "closed") return "completed";
+  return String(status).toLowerCase();
 };
 
 const toUiStatus = (status: string | undefined) => {
   if (!status) return "scheduled";
   if (status === "in_progress") return "in-progress";
+  if (status === "open") return "scheduled";
   return status;
+};
+
+const statusCandidates = (status: string | undefined) => {
+  if (!status) return [];
+  const normalized = toDbStatus(status);
+  if (normalized === "in_progress") return ["in_progress", "in-progress", "scheduled", "open", "completed"];
+  if (normalized === "completed") return ["completed", "closed", "scheduled", "open"];
+  if (normalized === "waiting_parts") return ["waiting_parts", "scheduled", "open", "in_progress"];
+  if (normalized === "open") return ["open", "scheduled", "in_progress"];
+  return [normalized];
 };
 
 const mapWorkOrder = (row: any) => ({
@@ -181,7 +201,14 @@ export async function POST(request: Request) {
     });
 
     if (result.error?.message?.includes("work_orders_status_check") && payload.status) {
-      result = await insertWithColumnFallback(supabase, basePayload);
+      const variants = statusCandidates(payload.status);
+      for (const variant of variants) {
+        result = await insertWithColumnFallback(supabase, { ...basePayload, status: variant });
+        if (!result.error) break;
+      }
+      if (result.error) {
+        result = await insertWithColumnFallback(supabase, basePayload);
+      }
     }
 
     if (result.error?.message?.includes("work_orders_priority_check") && payload.priority) {

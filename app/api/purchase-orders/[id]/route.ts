@@ -4,7 +4,27 @@ import { z } from "next/dist/compiled/zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 
-const poStatusSchema = z.enum(["draft", "submitted", "approved", "ordered", "received", "canceled"]);
+const poStatusSchema = z.enum([
+  "draft",
+  "submitted",
+  "approved",
+  "ordered",
+  "received",
+  "canceled",
+  "cancelled",
+  "open",
+  "closed",
+]);
+
+const poStatusCandidates = (status: string | undefined) => {
+  if (!status) return [];
+  const normalized = String(status).toLowerCase();
+  if (normalized === "cancelled") return ["cancelled", "canceled", "draft"];
+  if (normalized === "canceled") return ["canceled", "cancelled", "draft"];
+  if (normalized === "open") return ["open", "submitted", "approved", "ordered", "draft"];
+  if (normalized === "closed") return ["closed", "received", "approved"];
+  return [normalized];
+};
 
 const updatePurchaseOrderSchema = z
   .object({
@@ -101,15 +121,28 @@ export async function PATCH(
     const updatePayload: Record<string, unknown> = {};
     if (payload.vendor_id !== undefined) updatePayload.vendor_id = normalizeId(payload.vendor_id);
     if (payload.job_id !== undefined) updatePayload.job_id = normalizeId(payload.job_id);
-    if (payload.status !== undefined) updatePayload.status = payload.status;
+    if (payload.status !== undefined) updatePayload.status = String(payload.status).toLowerCase();
     if (payload.notes !== undefined) updatePayload.notes = payload.notes;
 
-    const { error } = await updateWithColumnFallback(
+    let { error } = await updateWithColumnFallback(
       supabase,
       companyId,
       normalizeRouteId(id),
       updatePayload
     );
+
+    if (error?.message?.includes("purchase_orders_status_check") && payload.status !== undefined) {
+      for (const variant of poStatusCandidates(payload.status)) {
+        const retry = await updateWithColumnFallback(
+          supabase,
+          companyId,
+          normalizeRouteId(id),
+          { ...updatePayload, status: variant }
+        );
+        error = retry.error;
+        if (!error) break;
+      }
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });

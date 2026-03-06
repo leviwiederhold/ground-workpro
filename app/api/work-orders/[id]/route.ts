@@ -6,7 +6,15 @@ import { requireRole } from "@/lib/auth/requireRole";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
-const workOrderStatusSchema = z.enum(["scheduled", "in-progress", "completed"]);
+const workOrderStatusSchema = z.enum([
+  "open",
+  "scheduled",
+  "in-progress",
+  "in_progress",
+  "waiting_parts",
+  "completed",
+  "closed",
+]);
 
 const updateWorkOrderSchema = z
   .object({
@@ -42,13 +50,25 @@ const normalizeUuid = (value: unknown) => {
 const toDbStatus = (status: string | undefined) => {
   if (!status) return status;
   if (status === "in-progress") return "in_progress";
-  return status;
+  if (status === "closed") return "completed";
+  return String(status).toLowerCase();
 };
 
 const toUiStatus = (status: string | undefined) => {
   if (!status) return "scheduled";
   if (status === "in_progress") return "in-progress";
+  if (status === "open") return "scheduled";
   return status;
+};
+
+const statusCandidates = (status: string | undefined) => {
+  if (!status) return [];
+  const normalized = toDbStatus(status);
+  if (normalized === "in_progress") return ["in_progress", "in-progress", "scheduled", "open", "completed"];
+  if (normalized === "completed") return ["completed", "closed", "scheduled", "open"];
+  if (normalized === "waiting_parts") return ["waiting_parts", "scheduled", "open", "in_progress"];
+  if (normalized === "open") return ["open", "scheduled", "in_progress"];
+  return [normalized];
 };
 
 const mapWorkOrder = (row: any) => ({
@@ -132,12 +152,27 @@ export async function PATCH(
     if (payload.dueDate !== undefined) updatePayload.due_date = payload.dueDate ? payload.dueDate : null;
     if (payload.laborHours !== undefined) updatePayload.labor_hours = payload.laborHours;
 
-    const { data, error } = await updateWithColumnFallback(
+    let { data, error } = await updateWithColumnFallback(
       supabase,
       companyId,
       normalizeRouteId(id),
       updatePayload
     );
+
+    if (error?.message?.includes("work_orders_status_check") && payload.status !== undefined) {
+      const variants = statusCandidates(payload.status);
+      for (const variant of variants) {
+        const retry = await updateWithColumnFallback(
+          supabase,
+          companyId,
+          normalizeRouteId(id),
+          { ...updatePayload, status: variant }
+        );
+        data = retry.data;
+        error = retry.error;
+        if (!error) break;
+      }
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });

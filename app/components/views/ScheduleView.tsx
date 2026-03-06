@@ -366,7 +366,10 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
       </Card>
 
       <div className="overflow-x-auto">
-          <Card className="p-0 min-w-[880px] border border-gray-200/80 shadow-sm">
+          <Card
+            className="p-0 min-w-[880px] border border-gray-200/80 shadow-sm"
+            aria-busy={scheduleLoading || Boolean(movingEventId)}
+          >
             {/* Days Header */}
             <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] border-b border-gray-200 bg-gray-50/70">
               <div className="border-r border-gray-200" />
@@ -510,9 +513,6 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
       </p>
       {scheduleWarning && (
         <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700">{scheduleWarning}</p>
-      )}
-      {(scheduleLoading || movingEventId) && (
-        <p className="text-sm text-gray-500">Loading schedule assignments...</p>
       )}
       {scheduleError && (
         <p className="text-sm text-red-600">{scheduleError}</p>

@@ -24,12 +24,12 @@ const updateBidSchema = z
     status: bidStatusSchema.optional(),
     job_id: z.union([z.string(), z.number()]).nullable().optional(),
     client: z.string().optional(),
-    bid_date: z.string().optional(),
-    probability: z.number().min(0).max(100).optional(),
+    bid_date: z.union([z.string(), z.date()]).optional(),
+    probability: z.coerce.number().min(0).max(100).optional(),
     notes: z.string().optional(),
     stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).optional(),
-    owner_user_id: z.string().uuid().nullable().optional(),
-    due_date: z.string().nullable().optional(),
+    owner_user_id: z.string().nullable().optional(),
+    due_date: z.union([z.string(), z.date()]).nullable().optional(),
     review_ready: z.boolean().optional(),
     review_approved: z.boolean().optional(),
   })
@@ -165,8 +165,13 @@ export async function PATCH(
     if (payload.probability !== undefined) updatePayload.probability = normalizeNumber(payload.probability);
     if (payload.notes !== undefined) updatePayload.notes = payload.notes;
     if (payload.stage !== undefined) updatePayload.stage = payload.stage;
-    if (payload.owner_user_id !== undefined) updatePayload.owner_user_id = payload.owner_user_id;
-    if (payload.due_date !== undefined) updatePayload.due_date = payload.due_date || null;
+    if (payload.owner_user_id !== undefined) {
+      const trimmed = String(payload.owner_user_id ?? "").trim();
+      updatePayload.owner_user_id = trimmed || null;
+    }
+    if (payload.due_date !== undefined) {
+      updatePayload.due_date = payload.due_date ? normalizeDate(String(payload.due_date)) : null;
+    }
     if (payload.review_ready !== undefined) {
       updatePayload.review_ready_at = payload.review_ready ? new Date().toISOString() : null;
     }

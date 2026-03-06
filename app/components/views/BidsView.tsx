@@ -313,7 +313,6 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
 
           const payload = {
             title: bidForm.title.trim(),
-            status: bidForm.status,
             stage: bidForm.stage,
             job_id: bidForm.job_id || null,
             client: bidForm.client.trim(),

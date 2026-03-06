@@ -174,9 +174,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
           throw new Error(payload?.error || 'Failed to load assigned equipment');
         }
         if (isMounted) {
-          const nextEquipment = payload.equipment || [];
-          setJobEquipment(nextEquipment);
-          syncSelectedJobCounts(jobEmployees.length, nextEquipment.length);
+          setJobEquipment(payload.equipment || []);
         }
       } catch {
         if (isMounted) {
@@ -207,9 +205,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
           throw new Error(payload?.error || 'Failed to load assigned crew');
         }
         if (isMounted) {
-          const nextEmployees = payload.employees || [];
-          setJobEmployees(nextEmployees);
-          syncSelectedJobCounts(nextEmployees.length, jobEquipment.length);
+          setJobEmployees(payload.employees || []);
         }
       } catch {
         if (isMounted) {
@@ -227,7 +223,12 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
     return () => {
       isMounted = false;
     };
-  }, [jobEmployees.length, jobEquipment.length, selectedJob, syncSelectedJobCounts]);
+  }, [selectedJob]);
+
+  useEffect(() => {
+    if (!selectedJobId) return;
+    syncSelectedJobCounts(jobEmployees.length, jobEquipment.length);
+  }, [jobEmployees.length, jobEquipment.length, selectedJobId, syncSelectedJobCounts]);
 
   useEffect(() => {
     let active = true;

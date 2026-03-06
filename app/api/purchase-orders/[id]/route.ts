@@ -144,6 +144,18 @@ export async function PATCH(
       }
     }
 
+    if (error?.message?.includes("purchase_orders_status_check")) {
+      const retryWithoutStatusPayload = { ...updatePayload };
+      delete retryWithoutStatusPayload.status;
+      const retryWithoutStatus = await updateWithColumnFallback(
+        supabase,
+        companyId,
+        normalizeRouteId(id),
+        retryWithoutStatusPayload
+      );
+      error = retryWithoutStatus.error;
+    }
+
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

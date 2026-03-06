@@ -3420,7 +3420,17 @@ const confirmDestructiveAction = (targetLabel) =>
       const [woActionLoading, setWoActionLoading] = useState(false);
       const [woActionError, setWoActionError] = useState('');
 
-      const filteredWOs = workOrders.filter(wo => filter === 'all' || wo.status === filter || wo.type === filter);
+      const normalizeWoStatus = (status) => {
+        const value = String(status || '').toLowerCase();
+        if (value === 'open') return 'scheduled';
+        if (value === 'in_progress') return 'in-progress';
+        if (value === 'closed') return 'completed';
+        return value || 'scheduled';
+      };
+      const filteredWOs = workOrders.filter((wo) => {
+        const normalizedStatus = normalizeWoStatus(wo.status);
+        return filter === 'all' || normalizedStatus === filter || wo.type === filter;
+      });
       const selectedWO = workOrders.find(w => w.id === selectedWOId);
       const selectedEquipment = selectedWO ? equipment.find(e => e.id === selectedWO.equipmentId) : null;
       const assignee = selectedWO ? employees.find(e => e.id === selectedWO.assignedTo) : null;
@@ -3429,7 +3439,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
       useEffect(() => {
         if (!selectedWO) return;
-        setWoStatus(selectedWO.status || 'scheduled');
+        setWoStatus(normalizeWoStatus(selectedWO.status || 'scheduled'));
         setWoPriority(selectedWO.priority || 'medium');
         setWoActionError('');
       }, [selectedWO]);
@@ -3440,7 +3450,8 @@ const confirmDestructiveAction = (targetLabel) =>
         setWoActionError('');
         try {
           const updates = {};
-          if (woStatus !== (selectedWO.status || 'scheduled')) updates.status = woStatus;
+          const selectedStatus = normalizeWoStatus(selectedWO.status || 'scheduled');
+          if (woStatus !== selectedStatus) updates.status = woStatus;
           if (woPriority !== (selectedWO.priority || 'medium')) updates.priority = woPriority;
 
           if (Object.keys(updates).length === 0) {
@@ -6860,15 +6871,20 @@ const confirmDestructiveAction = (targetLabel) =>
         setPoLoading(true);
         setPoError('');
         try {
+          const requestBody = {
+            vendor_id: poForm.vendor_id,
+            job_id: poForm.job_id || null,
+            notes: poForm.notes,
+            ...(editingPoId
+              ? selectedPO && String(poForm.status || '') !== String(selectedPO.status || '')
+                ? { status: poForm.status }
+                : {}
+              : { status: poForm.status }),
+          };
           const response = await fetch(editingPoId ? `/api/purchase-orders/${editingPoId}` : '/api/purchase-orders', {
             method: editingPoId ? 'PATCH' : 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              vendor_id: poForm.vendor_id,
-              job_id: poForm.job_id || null,
-              status: poForm.status,
-              notes: poForm.notes,
-            }),
+            body: JSON.stringify(requestBody),
           });
           const raw = await response.text();
           let payload = null;
@@ -7169,8 +7185,30 @@ const confirmDestructiveAction = (targetLabel) =>
                     </Button>
                   </div>
                   <div className="flex gap-2 pt-4">
-                    <Button variant="secondary" size="sm" className="flex-1"><Icon name="phone" className="mr-1" />Call</Button>
-                    <Button variant="secondary" size="sm" className="flex-1"><Icon name="envelope" className="mr-1" />Email</Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => {
+                        const phone = String(vendorProfile?.phone || '').trim();
+                        if (!phone) return;
+                        window.open(`tel:${phone.replace(/[^\d+]/g, '')}`, '_self');
+                      }}
+                    >
+                      <Icon name="phone" className="mr-1" />Call
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => {
+                        const email = String(vendorProfile?.email || '').trim();
+                        if (!email) return;
+                        window.open(`mailto:${email}`, '_self');
+                      }}
+                    >
+                      <Icon name="envelope" className="mr-1" />Email
+                    </Button>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="secondary" className="flex-1" onClick={() => handleSetVendorStatus('preferred')}>

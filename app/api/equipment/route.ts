@@ -235,7 +235,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ equipment: mapEquipment(data) });
+    const mapped = mapEquipment(data);
+    return NextResponse.json({ equipment: mapped, item: mapped });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

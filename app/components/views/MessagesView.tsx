@@ -262,7 +262,9 @@ export function MessagesView({ employees = [], ui }) {
       const hasPersonBinding =
         Boolean(channel.other_user_id) ||
         Boolean(forcedDirectLabels[String(channel.id || '')]);
-      return hasPersonBinding || !looksLikeDmName(channel.name);
+      // Hide anonymous legacy direct threads (e.g., "Direct Message" / dm-*) that are not
+      // bound to a specific teammate in this session.
+      return hasPersonBinding && !looksLikeDmName(channel.name);
     })
     .filter((channel) => Number(channel.message_count || 0) > 0 || String(activeChannel?.id || '') === String(channel.id))
     .filter((channel) =>
@@ -281,8 +283,7 @@ export function MessagesView({ employees = [], ui }) {
     const existing = channels.find(
       (channel) =>
         (String(channel.kind || '') === 'direct' || looksLikeDmName(channel.name)) &&
-        String(channel.other_user_id || '') === String(contact.userId) &&
-        Number(channel.message_count || 0) > 0
+        String(channel.other_user_id || '') === String(contact.userId)
     );
     if (existing) {
       setForcedDirectLabels((prev) => ({

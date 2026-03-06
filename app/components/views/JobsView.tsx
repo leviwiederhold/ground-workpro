@@ -24,10 +24,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
   const [jobActionError, setJobActionError] = useState('');
   const [jobEquipment, setJobEquipment] = useState([]);
   const [jobEquipmentLoading, setJobEquipmentLoading] = useState(false);
-  const [equipmentToAssign, setEquipmentToAssign] = useState('');
+  const [equipmentToAssign, setEquipmentToAssign] = useState([]);
   const [jobEmployees, setJobEmployees] = useState([]);
   const [jobEmployeesLoading, setJobEmployeesLoading] = useState(false);
-  const [employeeToAssign, setEmployeeToAssign] = useState('');
+  const [employeeToAssign, setEmployeeToAssign] = useState([]);
   const [crewActionLoading, setCrewActionLoading] = useState(false);
   const [crewActionError, setCrewActionError] = useState('');
   const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
@@ -134,7 +134,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
       if (!selectedJob) {
         if (isMounted) {
           setJobEquipment([]);
-          setEquipmentToAssign('');
+          setEquipmentToAssign([]);
           setEquipmentActionError('');
         }
         return;
@@ -165,7 +165,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
       if (!selectedJob) {
         if (isMounted) {
           setJobEmployees([]);
-          setEmployeeToAssign('');
+          setEmployeeToAssign([]);
           setCrewActionError('');
         }
         return;
@@ -200,36 +200,39 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
   }, [selectedJob]);
 
   const handleAssignEmployee = async () => {
-    if (!selectedJob || !employeeToAssign) return;
+    if (!selectedJob || employeeToAssign.length === 0) return;
     setCrewActionLoading(true);
     setCrewActionError('');
     try {
-      const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employee_id: employeeToAssign }),
+      const assignedEmployees = [];
+      for (const employeeId of employeeToAssign) {
+        const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employee_id: employeeId }),
+        });
+        const raw = await response.text();
+        let payload = null;
+        try {
+          payload = raw ? JSON.parse(raw) : null;
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok || !payload?.employee) {
+          setCrewActionError(payload?.error || raw || 'Failed to assign employee');
+          setCrewActionLoading(false);
+          return;
+        }
+        assignedEmployees.push(payload.employee);
+      }
+
+      setJobEmployees((prev) => [...assignedEmployees, ...prev]);
+      setEmployees((prev) => {
+        const updatesById = new Map(assignedEmployees.map((employee) => [String(employee.id), employee]));
+        return prev.map((employee) => updatesById.get(String(employee.id)) || employee);
       });
-      const raw = await response.text();
-      let payload = null;
-      try {
-        payload = raw ? JSON.parse(raw) : null;
-      } catch {
-        payload = null;
-      }
-
-      if (!response.ok || !payload?.employee) {
-        setCrewActionError(payload?.error || raw || 'Failed to assign employee');
-        setCrewActionLoading(false);
-        return;
-      }
-
-      setJobEmployees((prev) => [payload.employee, ...prev]);
-      setEmployees((prev) =>
-        prev.map((employee) =>
-          String(employee.id) === String(payload.employee.id) ? payload.employee : employee
-        )
-      );
-      setEmployeeToAssign('');
+      setEmployeeToAssign([]);
     } catch {
       setCrewActionError('Failed to assign employee');
     } finally {
@@ -275,38 +278,41 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
   };
 
   const handleAssignEquipment = async () => {
-    if (!selectedJob || !equipmentToAssign) return;
+    if (!selectedJob || equipmentToAssign.length === 0) return;
     setEquipmentActionLoading(true);
     setEquipmentActionError('');
     try {
-      const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ equipment_id: equipmentToAssign }),
+      const assignedEquipment = [];
+      for (const equipmentId of equipmentToAssign) {
+        const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ equipment_id: equipmentId }),
+        });
+        const raw = await response.text();
+        let payload = null;
+        try {
+          payload = raw ? JSON.parse(raw) : null;
+        } catch {
+          payload = null;
+        }
+
+        if (!response.ok || !payload?.equipment) {
+          setEquipmentActionError(payload?.error || raw || 'Failed to assign equipment');
+          setEquipmentActionLoading(false);
+          return;
+        }
+        assignedEquipment.push(payload.equipment);
+      }
+
+      setJobEquipment((prev) => [...assignedEquipment, ...prev]);
+      setEquipment((prev) => {
+        const updatesById = new Set(assignedEquipment.map((item) => String(item.id)));
+        return prev.map((item) =>
+          updatesById.has(String(item.id)) ? { ...item, jobId: selectedJob.id } : item
+        );
       });
-      const raw = await response.text();
-      let payload = null;
-      try {
-        payload = raw ? JSON.parse(raw) : null;
-      } catch {
-        payload = null;
-      }
-
-      if (!response.ok || !payload?.equipment) {
-        setEquipmentActionError(payload?.error || raw || 'Failed to assign equipment');
-        setEquipmentActionLoading(false);
-        return;
-      }
-
-      setJobEquipment((prev) => [payload.equipment, ...prev]);
-      setEquipment((prev) =>
-        prev.map((item) =>
-          String(item.id) === String(payload.equipment.id)
-            ? { ...item, jobId: selectedJob.id }
-            : item
-        )
-      );
-      setEquipmentToAssign('');
+      setEquipmentToAssign([]);
     } catch {
       setEquipmentActionError('Failed to assign equipment');
     } finally {
@@ -612,17 +618,20 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
                 <div className="flex items-center gap-2 mb-2">
                   <select
                     value={equipmentToAssign}
-                    onChange={(e) => setEquipmentToAssign(e.target.value)}
+                    multiple
+                    onChange={(e) => {
+                      const selectedIds = Array.from(e.target.selectedOptions).map((option) => option.value);
+                      setEquipmentToAssign(selectedIds);
+                    }}
                     className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   >
-                    <option value="">Select equipment</option>
                     {availableEquipment.map((item) => (
                       <option key={item.id} value={item.id}>
                         {item.name} - {item.type}
                       </option>
                     ))}
                   </select>
-                  <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || !equipmentToAssign}>
+                  <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || equipmentToAssign.length === 0}>
                     Add
                   </Button>
                 </div>
@@ -655,17 +664,20 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
                 <div className="flex items-center gap-2 mb-2">
                   <select
                     value={employeeToAssign}
-                    onChange={(e) => setEmployeeToAssign(e.target.value)}
+                    multiple
+                    onChange={(e) => {
+                      const selectedIds = Array.from(e.target.selectedOptions).map((option) => option.value);
+                      setEmployeeToAssign(selectedIds);
+                    }}
                     className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm"
                   >
-                    <option value="">Select employee</option>
                     {availableEmployees.map((employee) => (
                       <option key={employee.id} value={employee.id}>
                         {employee.name} - {employee.role}
                       </option>
                     ))}
                   </select>
-                  <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || !employeeToAssign}>
+                  <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || employeeToAssign.length === 0}>
                     Add
                   </Button>
                 </div>

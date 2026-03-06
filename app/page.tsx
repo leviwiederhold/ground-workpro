@@ -2168,14 +2168,15 @@ const confirmDestructiveAction = (targetLabel) =>
           } catch {
             payload = null;
           }
-          if (!response.ok || !payload?.equipment) {
+          const createdEquipment = payload?.equipment || payload?.item;
+          if (!response.ok || !createdEquipment) {
             const message = payload?.error || raw || response.statusText || 'Failed to create equipment';
             setEquipmentActionError(message);
             console.warn('Create equipment failed', message);
             return;
           }
-          setEquipment((prev) => [payload.equipment, ...prev]);
-          setSelectedEquipmentId(payload.equipment.id);
+          setEquipment((prev) => [createdEquipment, ...prev]);
+          setSelectedEquipmentId(createdEquipment.id);
           await loadFleetItems(filter);
         } catch (error) {
           setEquipmentActionError('Failed to create equipment');
@@ -2217,13 +2218,14 @@ const confirmDestructiveAction = (targetLabel) =>
           } catch {
             payload = null;
           }
-          if (!response.ok || !payload?.equipment) {
+          const updatedEquipment = payload?.equipment || payload?.item;
+          if (!response.ok || !updatedEquipment) {
             setEquipmentActionError(payload?.error || raw || 'Failed to save equipment');
             setSaveLoading(false);
             return;
           }
           setEquipment((prev) =>
-            prev.map((item) => (item.id === selectedEquipment.id ? payload.equipment : item))
+            prev.map((item) => (item.id === selectedEquipment.id ? updatedEquipment : item))
           );
           await loadFleetItems(filter);
         } catch {

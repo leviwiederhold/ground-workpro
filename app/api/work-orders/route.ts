@@ -49,8 +49,9 @@ const normalizeUuid = (value: unknown) => {
 
 const toDbStatus = (status: string | undefined) => {
   if (!status) return status;
+  if (status === "scheduled") return "open";
   if (status === "in-progress") return "in_progress";
-  if (status === "closed") return "completed";
+  if (status === "completed") return "closed";
   return String(status).toLowerCase();
 };
 
@@ -58,15 +59,16 @@ const toUiStatus = (status: string | undefined) => {
   if (!status) return "scheduled";
   if (status === "in_progress") return "in-progress";
   if (status === "open") return "scheduled";
+  if (status === "closed") return "completed";
   return status;
 };
 
 const statusCandidates = (status: string | undefined) => {
   if (!status) return [];
   const normalized = toDbStatus(status);
-  if (normalized === "in_progress") return ["in_progress", "in-progress", "scheduled", "open", "completed"];
-  if (normalized === "completed") return ["completed", "closed", "scheduled", "open"];
-  if (normalized === "waiting_parts") return ["waiting_parts", "scheduled", "open", "in_progress"];
+  if (normalized === "in_progress") return ["in_progress", "in-progress", "open", "scheduled", "closed"];
+  if (normalized === "closed") return ["closed", "completed", "open", "scheduled"];
+  if (normalized === "waiting_parts") return ["waiting_parts", "open", "scheduled", "in_progress"];
   if (normalized === "open") return ["open", "scheduled", "in_progress"];
   return [normalized];
 };
@@ -197,7 +199,7 @@ export async function POST(request: Request) {
 
     let result = await insertWithColumnFallback(supabase, {
       ...basePayload,
-      ...(isFieldRequester ? { status: "scheduled" } : payload.status ? { status: toDbStatus(payload.status) } : {}),
+      ...(isFieldRequester ? { status: toDbStatus("scheduled") } : payload.status ? { status: toDbStatus(payload.status) } : {}),
     });
 
     if (result.error?.message?.includes("work_orders_status_check") && payload.status) {

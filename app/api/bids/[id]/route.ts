@@ -63,9 +63,9 @@ const mapBid = (row: any) => ({
   id: row.id,
   title: row.title ?? row.project_name ?? "",
   projectName: row.title ?? row.project_name ?? "",
-  client: row.client ?? "",
+  client: row.client ?? row.client_name ?? "",
   bid_date: row.bid_date ?? null,
-  bidDate: row.bid_date ?? null,
+  bidDate: row.bid_date ?? row.bidDate ?? null,
   subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
   total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
@@ -114,6 +114,37 @@ async function updateWithColumnFallback(
   }
 
   return lastResult;
+}
+
+async function updateWithVariants(
+  supabase: any,
+  companyId: string,
+  id: string | number,
+  payload: Record<string, unknown>
+) {
+  const variants: Array<Record<string, unknown>> = [payload];
+
+  if ("client" in payload) {
+    const withClientName = { ...payload, client_name: payload.client };
+    variants.push(withClientName);
+  }
+
+  if ("bid_date" in payload) {
+    const withBidDateAlias = { ...payload, bidDate: payload.bid_date };
+    variants.push(withBidDateAlias);
+    if ("client" in payload) {
+      variants.push({ ...withBidDateAlias, client_name: payload.client });
+    }
+  }
+
+  for (const variant of variants) {
+    const result = await updateWithColumnFallback(supabase, companyId, id, variant);
+    if (!result.error) return result;
+    const message = String(result.error.message || "");
+    if (!message.includes("Could not find the")) return result;
+  }
+
+  return updateWithColumnFallback(supabase, companyId, id, payload);
 }
 
 export async function PATCH(
@@ -194,7 +225,7 @@ export async function PATCH(
       .eq("id", bidId)
       .maybeSingle();
 
-    const { error } = await updateWithColumnFallback(supabase, companyId, bidId, updatePayload);
+    const { error } = await updateWithVariants(supabase, companyId, bidId, updatePayload);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });

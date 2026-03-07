@@ -1,4 +1,4 @@
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { okItem, okSuccess } from "@/lib/http/json";

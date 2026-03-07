@@ -1,4 +1,4 @@
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
@@ -162,12 +162,25 @@ export async function POST(request: Request) {
       if (legacyChannel) {
         await ensureDirectMembers(String(legacyChannel.id));
         if (preferredLabel && isLegacyDirectLikeName(String(legacyChannel.name ?? ""))) {
-          await supabase
+          const renamePayload: Record<string, unknown> = {
+            name: preferredLabel,
+            updated_at: new Date().toISOString(),
+          };
+          let renameResult = await supabase
             .from("message_channels")
-            .update({ name: preferredLabel, updated_at: new Date().toISOString() })
+            .update(renamePayload)
             .eq("company_id", companyId)
             .eq("id", legacyChannel.id);
-          legacyChannel.name = preferredLabel;
+          if (renameResult.error && missingColumn(renameResult.error.message || "") === "updated_at") {
+            renameResult = await supabase
+              .from("message_channels")
+              .update({ name: preferredLabel })
+              .eq("company_id", companyId)
+              .eq("id", legacyChannel.id);
+          }
+          if (!renameResult.error) {
+            legacyChannel.name = preferredLabel;
+          }
         }
         return okItem(legacyChannel);
       }
@@ -228,7 +241,7 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const channelPayload: Record<string, unknown> = {
       company_id: companyId,
-      name: preferredLabel || "Direct message",
+      name: legacyDirectName,
       created_at: now,
       updated_at: now,
       is_dm: true,

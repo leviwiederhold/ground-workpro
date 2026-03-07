@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3001';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -35,9 +35,9 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: 'pnpm dev --port 3000',
-        port: 3000,
-        reuseExistingServer: true,
+        command: 'pnpm dev --port 3001',
+        port: 3001,
+        reuseExistingServer: false,
         timeout: 120_000,
         env: {
           ...process.env,

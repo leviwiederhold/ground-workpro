@@ -1,12 +1,34 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { enqueueOutboxEvent } from "@/lib/outbox/queue";
 import { requireRole } from "@/lib/auth/requireRole";
 
-const poStatusSchema = z.enum(["draft", "submitted", "approved", "ordered", "received", "canceled"]);
+const poStatusSchema = z.enum([
+  "draft",
+  "submitted",
+  "approved",
+  "ordered",
+  "received",
+  "canceled",
+  "cancelled",
+  "open",
+  "closed",
+  "completed",
+]);
+
+const toDbStatus = (status: string | undefined) => {
+  if (!status) return status;
+  const normalized = String(status).toLowerCase();
+  if (normalized === "cancelled") return "canceled";
+  if (normalized === "open") return "submitted";
+  if (normalized === "closed") return "received";
+  if (normalized === "completed") return "received";
+  if (normalized === "ordered") return "approved";
+  return normalized;
+};
 
 const createPurchaseOrderSchema = z.object({
   vendor_id: z.union([z.string(), z.number()]),
@@ -131,10 +153,14 @@ export async function POST(request: Request) {
 
     let result = await insertWithColumnFallback(supabase, {
       ...basePayload,
-      ...(payload.status ? { status: payload.status } : {}),
+      ...(payload.status ? { status: toDbStatus(payload.status) } : {}),
     });
 
     if (result.error?.message?.toLowerCase().includes("status") && payload.status) {
+      result = await insertWithColumnFallback(supabase, basePayload);
+    }
+
+    if (result.error?.message?.includes("purchase_orders_status_check")) {
       result = await insertWithColumnFallback(supabase, basePayload);
     }
 

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
@@ -23,7 +23,7 @@ const createBidSchema = z.object({
   status: bidStatusSchema.default("draft").optional(),
   job_id: z.union([z.string(), z.number()]).nullable().optional(),
   client: z.string().default("").optional(),
-  bid_date: z.string().optional(),
+  bid_date: z.string().optional().nullable(),
   probability: z.number().min(0).max(100).default(0).optional(),
   notes: z.string().default("").optional(),
   stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).default("estimating").optional(),
@@ -35,6 +35,7 @@ type BidNotesMeta = {
   client?: string;
   bid_date?: string;
   probability?: number;
+  stage?: string;
 };
 
 const BID_META_PREFIX = "\n<!--GW_BID_META:";
@@ -62,6 +63,7 @@ function buildBidNotes(plainNotes: string, meta: BidNotesMeta): string {
   if (meta.client) compactMeta.client = meta.client;
   if (meta.bid_date) compactMeta.bid_date = meta.bid_date;
   if (typeof meta.probability === "number" && !Number.isNaN(meta.probability)) compactMeta.probability = meta.probability;
+  if (meta.stage) compactMeta.stage = meta.stage;
   const base = plainNotes?.trimEnd() ?? "";
   if (Object.keys(compactMeta).length === 0) return base;
   return `${base}${BID_META_PREFIX}${JSON.stringify(compactMeta)}${BID_META_SUFFIX}`;
@@ -81,10 +83,19 @@ const normalizeNumber = (value: unknown, fallback = 0) => {
 };
 
 const normalizeDate = (value: unknown, fallback: string | null = null) => {
-  if (!value || typeof value !== "string") return fallback;
-  const parsed = new Date(value);
+  if (!value) return fallback;
+  const parsed = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(parsed.getTime())) return fallback;
   return parsed.toISOString().slice(0, 10);
+};
+
+const pickNonEmptyString = (...values: Array<unknown>) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text.length > 0) return text;
+  }
+  return "";
 };
 
 const statusFromStage = (stage: string | undefined) => {
@@ -98,22 +109,41 @@ const statusFromStage = (stage: string | undefined) => {
 const mapBid = (row: any) => ({
   ...(() => {
     const parsedNotes = parseBidNotes(row.notes);
+    const client = pickNonEmptyString(
+      row.client,
+      row.client_name,
+      row.customer,
+      row.customer_name,
+      parsedNotes.meta.client
+    );
+    const bidDate = pickNonEmptyString(
+      row.bid_date,
+      row.bidDate,
+      row.biddate,
+      parsedNotes.meta.bid_date
+    );
+    const dbProbability = normalizeNumber(row.probability ?? row.win_probability ?? 0);
+    const notesProbability =
+      typeof parsedNotes.meta.probability === "number" && !Number.isNaN(parsedNotes.meta.probability)
+        ? parsedNotes.meta.probability
+        : null;
+    const probability = dbProbability === 0 && notesProbability !== null ? notesProbability : dbProbability;
     return {
   id: row.id,
   title: row.title ?? row.project_name ?? "",
   projectName: row.title ?? row.project_name ?? "",
-  client: row.client ?? row.client_name ?? row.customer ?? row.customer_name ?? parsedNotes.meta.client ?? "",
-  bid_date: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
-  bidDate: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
+  client,
+  bid_date: bidDate || null,
+  bidDate: bidDate || null,
   subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
   total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   status: row.status ?? "draft",
-  probability: normalizeNumber(row.probability ?? row.win_probability ?? parsedNotes.meta.probability ?? 0),
+  probability,
   notes: parsedNotes.plainNotes,
   job_id: normalizeId(row.job_id),
   jobId: normalizeId(row.job_id),
-  stage: row.stage ?? "estimating",
+  stage: row.stage ?? parsedNotes.meta.stage ?? "estimating",
   owner_user_id: row.owner_user_id ?? null,
   ownerUserId: row.owner_user_id ?? null,
   due_date: row.due_date ?? null,
@@ -235,6 +265,7 @@ export async function POST(request: Request) {
       client: payload.client ?? "",
       bid_date: normalizedBidDate ?? undefined,
       probability: normalizedProbability,
+      stage: payload.stage ?? "estimating",
     });
 
     const basePayload = {

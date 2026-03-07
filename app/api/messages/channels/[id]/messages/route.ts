@@ -1,4 +1,4 @@
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { listFallbackMessages } from "@/lib/messages/fallbackStore";

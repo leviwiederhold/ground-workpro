@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";

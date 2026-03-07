@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
-export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, setEmployees, ui }) {
+export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
   const currency = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -153,6 +153,21 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
     return equipment.filter((item) => String(item.jobId ?? '') === String(job.id)).length;
   }, [equipment, jobEquipment.length, selectedJobId]);
 
+  const refreshSelectedAssignments = useCallback(async () => {
+    if (!selectedJobId) return;
+    const [employeesResponse, equipmentResponse] = await Promise.all([
+      fetch(`/api/jobs/${selectedJobId}/employees`, { cache: 'no-store' }),
+      fetch(`/api/jobs/${selectedJobId}/equipment`, { cache: 'no-store' }),
+    ]);
+    const employeesPayload = await employeesResponse.json().catch(() => ({}));
+    const equipmentPayload = await equipmentResponse.json().catch(() => ({}));
+    const nextEmployees = employeesResponse.ok ? (employeesPayload?.employees || []) : [];
+    const nextEquipment = equipmentResponse.ok ? (equipmentPayload?.equipment || []) : [];
+    setJobEmployees(nextEmployees);
+    setJobEquipment(nextEquipment);
+    syncSelectedJobCounts(nextEmployees.length, nextEquipment.length);
+  }, [selectedJobId, syncSelectedJobCounts]);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -296,6 +311,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
         return prev.map((employee) => updatesById.get(String(employee.id)) || employee);
       });
       setEmployeeToAssign([]);
+      await refreshSelectedAssignments();
     } catch {
       setCrewActionError('Failed to assign employee');
     } finally {
@@ -334,6 +350,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
           String(employee.id) === String(employeeId) ? { ...employee, jobId: null } : employee
         )
       );
+      await refreshSelectedAssignments();
     } catch {
       setCrewActionError('Failed to remove employee');
     } finally {
@@ -378,6 +395,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
         );
       });
       setEquipmentToAssign([]);
+      await refreshSelectedAssignments();
     } catch {
       setEquipmentActionError('Failed to assign equipment');
     } finally {
@@ -418,6 +436,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
           String(item.id) === String(equipmentId) ? { ...item, jobId: null } : item
         )
       );
+      await refreshSelectedAssignments();
     } catch {
       setEquipmentActionError('Failed to remove equipment');
     } finally {
@@ -461,7 +480,9 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
         return;
       }
 
-      setJobs((prev) => prev.map((job) => (job.id === selectedJob.id ? payload.job : job)));
+      setJobs((prev) =>
+        prev.map((job) => (String(job.id) === String(selectedJob.id) ? payload.job : job))
+      );
     } catch {
       setJobActionError('Failed to save job');
     } finally {
@@ -488,7 +509,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, employees, set
         return;
       }
 
-      setJobs((prev) => prev.filter((job) => job.id !== selectedJob.id));
+      setJobs((prev) => prev.filter((job) => String(job.id) !== String(selectedJob.id)));
       setSelectedJobId(null);
     } catch {
       setJobActionError('Failed to delete job');

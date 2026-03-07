@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { cookies } from "next/headers";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {

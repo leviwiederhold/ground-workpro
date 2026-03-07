@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getJobCostSummary } from "@/lib/job-costing/getJobCostSummary";
 import { getBidSummaryData } from "@/lib/bids/getBidSummaryData";

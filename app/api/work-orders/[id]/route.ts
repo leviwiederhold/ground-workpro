@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -52,6 +53,9 @@ const toDbStatus = (status: string | undefined) => {
   if (status === "scheduled") return "open";
   if (status === "in-progress") return "in_progress";
   if (status === "completed") return "closed";
+  if (status === "complete") return "closed";
+  if (status === "done") return "closed";
+  if (status === "closed") return "closed";
   return String(status).toLowerCase();
 };
 
@@ -59,17 +63,25 @@ const toUiStatus = (status: string | undefined) => {
   if (!status) return "scheduled";
   if (status === "in_progress") return "in-progress";
   if (status === "open") return "scheduled";
+  if (status === "scheduled") return "scheduled";
+  if (status === "in-progress") return "in-progress";
+  if (status === "waiting_parts") return "scheduled";
   if (status === "closed") return "completed";
+  if (status === "completed") return "completed";
+  if (status === "complete") return "completed";
+  if (status === "done") return "completed";
+  if (status === "resolved") return "completed";
   return status;
 };
 
 const statusCandidates = (status: string | undefined) => {
   if (!status) return [];
   const normalized = toDbStatus(status);
-  if (normalized === "in_progress") return ["in_progress", "in-progress"];
-  if (normalized === "closed") return ["closed", "completed"];
+  if (normalized === "in_progress") return ["in_progress", "in-progress", "inprogress"];
+  if (normalized === "completed") return ["closed", "completed", "complete", "done", "resolved"];
+  if (normalized === "closed") return ["closed", "completed", "complete", "done", "resolved"];
   if (normalized === "waiting_parts") return ["waiting_parts"];
-  if (normalized === "open") return ["open", "scheduled"];
+  if (normalized === "open") return ["open", "scheduled", "pending"];
   return [normalized];
 };
 
@@ -124,6 +136,11 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const effectiveRole = await getEffectiveRole();
+    if (effectiveRole !== "admin" && effectiveRole !== "mechanic") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     try {
       await requireRole(["admin", "mechanic"]);
     } catch {
@@ -208,6 +225,11 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const effectiveRole = await getEffectiveRole();
+    if (effectiveRole !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     try {
       await requireRole(["admin"]);
     } catch {

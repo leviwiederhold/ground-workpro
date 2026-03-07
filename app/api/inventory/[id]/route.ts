@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import {
@@ -28,6 +28,7 @@ const updateInventorySchema = z
     reorder_point: z.number().optional(),
     unitCost: z.number().optional(),
     unit_cost: z.number().optional(),
+    notes: z.string().optional(),
     jobId: z.union([z.number(), z.string()]).nullable().optional(),
     job_id: z.union([z.number(), z.string()]).nullable().optional(),
     location: z.string().optional(),

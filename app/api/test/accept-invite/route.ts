@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const bodySchema = z.object({

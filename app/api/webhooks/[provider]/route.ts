@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { okItem } from "@/lib/http/json";
 import { serverError, validationError } from "@/lib/http/errors";

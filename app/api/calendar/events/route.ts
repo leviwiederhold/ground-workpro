@@ -1,19 +1,10 @@
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { createFallbackEvent } from "@/lib/calendar/fallbackStore";
-
-type AttendeeInput = {
-  attendeeType: "user" | "employee" | "external";
-  userId?: string;
-  employeeId?: string;
-  externalName?: string;
-  externalContact?: string;
-  responseStatus?: string;
-};
 
 const attendeeSchema = z
   .object({
@@ -25,37 +16,31 @@ const attendeeSchema = z
     externalContact: z.string().optional(),
     responseStatus: z.string().optional(),
   })
-  .transform((value: {
-    attendeeType?: "user" | "employee" | "external";
-    type?: "user" | "employee" | "external";
-    userId?: string;
-    employeeId?: string;
-    externalName?: string;
-    externalContact?: string;
-    responseStatus?: string;
-  }) => ({
-    attendeeType: value.attendeeType ?? value.type,
+  .superRefine((value, ctx) => {
+    const attendeeType = value.attendeeType ?? value.type;
+    if (!attendeeType) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["type"], message: "type is required" });
+      return;
+    }
+    if (attendeeType === "user" && !value.userId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["userId"], message: "userId is required for user attendee" });
+    }
+    if (attendeeType === "employee" && !value.employeeId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["employeeId"], message: "employeeId is required for employee attendee" });
+    }
+    if (attendeeType === "external" && !value.externalName) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["externalName"], message: "externalName is required for external attendee" });
+    }
+  })
+  .transform((value) => ({
+    attendeeType: (value.attendeeType ?? value.type)!,
     userId: value.userId,
     employeeId: value.employeeId,
     externalName: value.externalName,
     externalContact: value.externalContact,
     responseStatus: value.responseStatus,
-  }))
-  .superRefine((value: AttendeeInput, ctx: { addIssue: (issue: { code: string; path?: (string | number)[]; message: string }) => void }) => {
-    if (!value.attendeeType) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["type"], message: "type is required" });
-      return;
-    }
-    if (value.attendeeType === "user" && !value.userId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["userId"], message: "userId is required for user attendee" });
-    }
-    if (value.attendeeType === "employee" && !value.employeeId) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["employeeId"], message: "employeeId is required for employee attendee" });
-    }
-    if (value.attendeeType === "external" && !value.externalName) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["externalName"], message: "externalName is required for external attendee" });
-    }
-  });
+  }));
+type EventAttendee = z.infer<typeof attendeeSchema>;
 
 const createEventSchema = z
   .object({
@@ -173,8 +158,8 @@ export async function POST(request: Request) {
     const uniqueEmployeeIds = Array.from(
       new Set(
         payload.attendees
-          .filter((attendee: AttendeeInput) => attendee.attendeeType === "employee" && attendee.employeeId)
-          .map((attendee: AttendeeInput) => String(attendee.employeeId))
+      .filter((attendee) => attendee.attendeeType === "employee" && attendee.employeeId)
+      .map((attendee) => String(attendee.employeeId))
       )
     );
 
@@ -200,7 +185,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const normalizedAttendeesRaw = payload.attendees.flatMap((attendee: AttendeeInput) => {
+    const normalizedAttendeesRaw = payload.attendees.flatMap((attendee: EventAttendee) => {
       if (attendee.attendeeType !== "employee" || !attendee.employeeId) return [attendee];
       const employeeId = String(attendee.employeeId);
       const linkedUserId = userIdByEmployeeId.get(employeeId);
@@ -210,12 +195,15 @@ export async function POST(request: Request) {
         {
           attendeeType: "user" as const,
           userId: linkedUserId,
+          employeeId: undefined,
+          externalName: undefined,
+          externalContact: undefined,
           responseStatus: attendee.responseStatus ?? "invited",
         },
       ];
     });
     const seenAttendees = new Set<string>();
-    const normalizedAttendees: AttendeeInput[] = [];
+    const normalizedAttendees: EventAttendee[] = [];
     for (const attendee of normalizedAttendeesRaw) {
       const key =
         attendee.attendeeType === "user"
@@ -229,8 +217,12 @@ export async function POST(request: Request) {
     }
 
     const employeeAttendeeIds = normalizedAttendees
-      .filter((attendee: AttendeeInput) => attendee.attendeeType === "employee" && attendee.employeeId)
-      .map((attendee: AttendeeInput) => String(attendee.employeeId));
+      .map((attendee) =>
+        attendee.attendeeType === "employee" && attendee.employeeId
+          ? String(attendee.employeeId)
+          : null
+      )
+      .filter((value): value is string => Boolean(value));
     if (employeeAttendeeIds.length > 0) {
       const startDate = payload.startsAt.slice(0, 10);
       const endDate = payload.endsAt.slice(0, 10);
@@ -278,8 +270,8 @@ export async function POST(request: Request) {
           event_type: payload.eventType,
           visibility: payload.visibility,
           created_by: access.userId,
-          attendees: normalizedAttendees.map((attendee: AttendeeInput) => ({
-            attendee_type: attendee.attendeeType!,
+          attendees: normalizedAttendees.map((attendee: EventAttendee) => ({
+            attendee_type: attendee.attendeeType,
             user_id: attendee.userId ?? null,
             employee_id: attendee.employeeId ?? null,
             external_name: attendee.externalName ?? null,
@@ -314,7 +306,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insertEventResult.error?.message ?? "Failed to create event" }, { status: 400 });
     }
 
-    const attendeesPayload = normalizedAttendees.map((attendee: AttendeeInput) => ({
+    const attendeesPayload = normalizedAttendees.map((attendee: EventAttendee) => ({
       company_id: companyId,
       event_id: insertEventResult.data.id,
       attendee_type: attendee.attendeeType,
@@ -349,8 +341,8 @@ export async function POST(request: Request) {
       new Set([
         access.userId,
         ...normalizedAttendees
-          .filter((attendee: AttendeeInput) => attendee.attendeeType === "user" && attendee.userId)
-          .map((attendee: AttendeeInput) => String(attendee.userId)),
+          .filter((attendee: EventAttendee) => attendee.attendeeType === "user" && attendee.userId)
+          .map((attendee: EventAttendee) => String(attendee.userId)),
       ])
     );
 

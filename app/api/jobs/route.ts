@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
@@ -96,6 +96,52 @@ const mapJob = (row: any) => {
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
   };
 };
+
+async function getJobAssignmentCounts(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  companyId: string,
+  jobIds: string[]
+) {
+  const empty = new Map<string, { crew: number; equipment: number }>();
+  if (jobIds.length === 0) return empty;
+
+  const [crewResult, equipmentResult] = await Promise.all([
+    supabase
+      .from("job_employees")
+      .select("job_id")
+      .eq("company_id", companyId)
+      .in("job_id", jobIds),
+    supabase
+      .from("job_equipment")
+      .select("job_id")
+      .eq("company_id", companyId)
+      .in("job_id", jobIds),
+  ]);
+
+  const counts = new Map<string, { crew: number; equipment: number }>();
+
+  if (!crewResult.error) {
+    for (const row of crewResult.data ?? []) {
+      const key = String((row as any).job_id ?? "");
+      if (!key) continue;
+      const current = counts.get(key) ?? { crew: 0, equipment: 0 };
+      current.crew += 1;
+      counts.set(key, current);
+    }
+  }
+
+  if (!equipmentResult.error) {
+    for (const row of equipmentResult.data ?? []) {
+      const key = String((row as any).job_id ?? "");
+      if (!key) continue;
+      const current = counts.get(key) ?? { crew: 0, equipment: 0 };
+      current.equipment += 1;
+      counts.set(key, current);
+    }
+  }
+
+  return counts;
+}
 
 const isMissingSchemaError = (message: string | undefined) =>
   /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
@@ -293,11 +339,21 @@ export async function GET(request: Request) {
     const hasMore = rows.length > limit;
     const trimmedRows = hasMore ? rows.slice(0, limit) : rows;
     const jobs = trimmedRows.map(mapJob);
+    const jobIds = jobs.map((job) => String(job.id));
+    const countsByJobId = await getJobAssignmentCounts(supabase, companyId, jobIds);
+    const jobsWithCounts = jobs.map((job) => {
+      const counts = countsByJobId.get(String(job.id)) ?? { crew: 0, equipment: 0 };
+      return {
+        ...job,
+        crew_assigned_count: counts.crew,
+        equipment_assigned_count: counts.equipment,
+      };
+    });
     const nextCursor = hasMore ? String(offset + limit) : null;
 
-    const total = typeof totalCount === "number" ? totalCount : jobs.length + offset;
+    const total = typeof totalCount === "number" ? totalCount : jobsWithCounts.length + offset;
     const page = Math.floor(offset / limit) + 1;
-    return NextResponse.json({ items: jobs, jobs, nextCursor, page, pageSize: limit, total });
+    return NextResponse.json({ items: jobsWithCounts, jobs: jobsWithCounts, nextCursor, page, pageSize: limit, total });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
@@ -52,6 +52,9 @@ const toDbStatus = (status: string | undefined) => {
   if (status === "scheduled") return "open";
   if (status === "in-progress") return "in_progress";
   if (status === "completed") return "closed";
+  if (status === "complete") return "closed";
+  if (status === "done") return "closed";
+  if (status === "closed") return "closed";
   return String(status).toLowerCase();
 };
 
@@ -59,17 +62,25 @@ const toUiStatus = (status: string | undefined) => {
   if (!status) return "scheduled";
   if (status === "in_progress") return "in-progress";
   if (status === "open") return "scheduled";
+  if (status === "scheduled") return "scheduled";
+  if (status === "in-progress") return "in-progress";
+  if (status === "waiting_parts") return "scheduled";
   if (status === "closed") return "completed";
+  if (status === "completed") return "completed";
+  if (status === "complete") return "completed";
+  if (status === "done") return "completed";
+  if (status === "resolved") return "completed";
   return status;
 };
 
 const statusCandidates = (status: string | undefined) => {
   if (!status) return [];
   const normalized = toDbStatus(status);
-  if (normalized === "in_progress") return ["in_progress", "in-progress"];
-  if (normalized === "closed") return ["closed", "completed"];
+  if (normalized === "in_progress") return ["in_progress", "in-progress", "inprogress"];
+  if (normalized === "completed") return ["closed", "completed", "complete", "done", "resolved"];
+  if (normalized === "closed") return ["closed", "completed", "complete", "done", "resolved"];
   if (normalized === "waiting_parts") return ["waiting_parts"];
-  if (normalized === "open") return ["open", "scheduled"];
+  if (normalized === "open") return ["open", "scheduled", "pending"];
   return [normalized];
 };
 
@@ -154,6 +165,16 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const effectiveRole = await getEffectiveRole();
+    const createAllowed =
+      effectiveRole === "admin" ||
+      effectiveRole === "mechanic" ||
+      effectiveRole === "foreman" ||
+      effectiveRole === "operator";
+    if (!createAllowed) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     let actor: Awaited<ReturnType<typeof requireRole>>;
     try {
       actor = await requireRole(["admin", "foreman", "mechanic", "operator"]);

@@ -1542,7 +1542,7 @@ const confirmDestructiveAction = (targetLabel) =>
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
           case 'messages': return <MessagesView employees={employees} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
-          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} />;
+          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
@@ -3422,14 +3422,17 @@ const confirmDestructiveAction = (targetLabel) =>
 
       const normalizeWoStatus = (status) => {
         const value = String(status || '').toLowerCase();
+        if (['complete', 'completed', 'closed', 'done'].includes(value)) return 'completed';
         if (value === 'open') return 'scheduled';
         if (value === 'in_progress') return 'in-progress';
-        if (value === 'closed') return 'completed';
         return value || 'scheduled';
       };
+      const getWoDisplayStatus = (status) => normalizeWoStatus(status);
       const filteredWOs = workOrders.filter((wo) => {
         const normalizedStatus = normalizeWoStatus(wo.status);
-        return filter === 'all' || normalizedStatus === filter || wo.type === filter;
+        if (filter === 'all') return true;
+        if (filter === 'scheduled') return normalizedStatus === 'scheduled';
+        return normalizedStatus === filter;
       });
       const selectedWO = workOrders.find(w => w.id === selectedWOId);
       const selectedEquipment = selectedWO ? equipment.find(e => e.id === selectedWO.equipmentId) : null;
@@ -3479,7 +3482,7 @@ const confirmDestructiveAction = (targetLabel) =>
           }
 
           setWorkOrders((prev) =>
-            prev.map((wo) => (wo.id === selectedWO.id ? payload.workOrder : wo))
+            prev.map((wo) => (String(wo.id) === String(selectedWO.id) ? payload.workOrder : wo))
           );
         } catch {
           setWoActionError('Failed to update work order');
@@ -3510,7 +3513,7 @@ const confirmDestructiveAction = (targetLabel) =>
             setWoActionLoading(false);
             return;
           }
-          setWorkOrders((prev) => prev.filter((wo) => wo.id !== selectedWO.id));
+          setWorkOrders((prev) => prev.filter((wo) => String(wo.id) !== String(selectedWO.id)));
           setSelectedWOId(null);
         } catch {
           setWoActionError('Failed to delete work order');
@@ -3533,7 +3536,7 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4 min-w-0">
               <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
-                {['all', 'in-progress', 'scheduled', 'completed', 'repair', 'preventive'].map(f => (
+                {['all', 'in-progress', 'scheduled', 'completed'].map(f => (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}
@@ -3585,7 +3588,7 @@ const confirmDestructiveAction = (targetLabel) =>
                           <p className="text-sm text-gray-500">{eq?.name}</p>
                         </div>
                       </div>
-                      <Badge className={getStatusColor(wo.status)}>{wo.status}</Badge>
+                      <Badge className={getStatusColor(getWoDisplayStatus(wo.status))}>{getWoDisplayStatus(wo.status)}</Badge>
                     </div>
                     <div className="flex items-center justify-between text-xs text-gray-500 mt-3">
                       <span><Icon name="user" className="mr-1" />{tech?.name || 'Unassigned'}</span>
@@ -3643,7 +3646,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     </Badge>
                     <h3 className="font-semibold text-gray-900">{selectedWO.title}</h3>
                   </div>
-                  <Badge className={getStatusColor(selectedWO.status)}>{selectedWO.status}</Badge>
+                  <Badge className={getStatusColor(getWoDisplayStatus(selectedWO.status))}>{getWoDisplayStatus(selectedWO.status)}</Badge>
                 </div>
 
                 <div className="space-y-4">
@@ -5142,7 +5145,8 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleCreateAction = async () => {
-        if (!newAction.safety_log_id || !newAction.title.trim()) {
+        const resolvedSafetyLogId = newAction.safety_log_id || (safetyLogs[0]?.id ? String(safetyLogs[0].id) : '');
+        if (!resolvedSafetyLogId || !newAction.title.trim()) {
           setActionsError('Action title and related log are required');
           return;
         }
@@ -5153,7 +5157,7 @@ const confirmDestructiveAction = (targetLabel) =>
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              safety_log_id: newAction.safety_log_id,
+              safety_log_id: resolvedSafetyLogId,
               title: newAction.title.trim(),
               owner_employee_id: newAction.owner_employee_id || null,
               due_date: newAction.due_date || null,
@@ -5162,7 +5166,13 @@ const confirmDestructiveAction = (targetLabel) =>
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload?.error || 'Failed to create action');
-          setNewAction((prev) => ({ ...prev, title: '', owner_employee_id: '', due_date: '' }));
+          setNewAction((prev) => ({
+            ...prev,
+            safety_log_id: resolvedSafetyLogId,
+            title: '',
+            owner_employee_id: '',
+            due_date: '',
+          }));
           await Promise.all([loadSafetyActions(), loadSafetySummary()]);
         } catch (error) {
           setActionsError(error instanceof Error ? error.message : 'Failed to create action');
@@ -7190,9 +7200,9 @@ const confirmDestructiveAction = (targetLabel) =>
                       size="sm"
                       className="flex-1"
                       onClick={() => {
-                        const phone = String(vendorProfile?.phone || '').trim();
+                        const phone = String(vendorProfile?.phone || selectedVendor?.phone || '').trim();
                         if (!phone) return;
-                        window.open(`tel:${phone.replace(/[^\d+]/g, '')}`, '_self');
+                        window.location.href = `tel:${phone.replace(/[^\d+]/g, '')}`;
                       }}
                     >
                       <Icon name="phone" className="mr-1" />Call
@@ -7202,9 +7212,9 @@ const confirmDestructiveAction = (targetLabel) =>
                       size="sm"
                       className="flex-1"
                       onClick={() => {
-                        const email = String(vendorProfile?.email || '').trim();
+                        const email = String(vendorProfile?.email || selectedVendor?.email || '').trim();
                         if (!email) return;
-                        window.open(`mailto:${email}`, '_self');
+                        window.location.href = `mailto:${email}`;
                       }}
                     >
                       <Icon name="envelope" className="mr-1" />Email

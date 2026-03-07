@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
@@ -24,12 +24,18 @@ const updateBidSchema = z
     status: bidStatusSchema.optional(),
     job_id: z.union([z.string(), z.number()]).nullable().optional(),
     client: z.string().optional(),
-    bid_date: z.union([z.string(), z.date()]).optional(),
+    client_name: z.string().optional(),
+    customer: z.string().optional(),
+    customer_name: z.string().optional(),
+    bid_date: z.union([z.string(), z.date(), z.null()]).optional(),
+    bidDate: z.union([z.string(), z.date(), z.null()]).optional(),
+    biddate: z.union([z.string(), z.date(), z.null()]).optional(),
     probability: z.coerce.number().min(0).max(100).optional(),
+    win_probability: z.coerce.number().min(0).max(100).optional(),
     notes: z.string().optional(),
     stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).optional(),
     owner_user_id: z.string().nullable().optional(),
-    due_date: z.union([z.string(), z.date()]).nullable().optional(),
+    due_date: z.union([z.string(), z.date(), z.null()]).nullable().optional(),
     review_ready: z.boolean().optional(),
     review_approved: z.boolean().optional(),
   })
@@ -41,6 +47,7 @@ type BidNotesMeta = {
   client?: string;
   bid_date?: string;
   probability?: number;
+  stage?: string;
 };
 
 const BID_META_PREFIX = "\n<!--GW_BID_META:";
@@ -68,6 +75,7 @@ function buildBidNotes(plainNotes: string, meta: BidNotesMeta): string {
   if (meta.client) compactMeta.client = meta.client;
   if (meta.bid_date) compactMeta.bid_date = meta.bid_date;
   if (typeof meta.probability === "number" && !Number.isNaN(meta.probability)) compactMeta.probability = meta.probability;
+  if (meta.stage) compactMeta.stage = meta.stage;
   const base = plainNotes?.trimEnd() ?? "";
   if (Object.keys(compactMeta).length === 0) return base;
   return `${base}${BID_META_PREFIX}${JSON.stringify(compactMeta)}${BID_META_SUFFIX}`;
@@ -89,31 +97,59 @@ const normalizeNumber = (value: unknown, fallback = 0) => {
 };
 
 const normalizeDate = (value: unknown, fallback: string | null = null) => {
-  if (!value || typeof value !== "string") return fallback;
-  const parsed = new Date(value);
+  if (!value) return fallback;
+  const parsed = value instanceof Date ? value : new Date(String(value));
   if (Number.isNaN(parsed.getTime())) return fallback;
   return parsed.toISOString().slice(0, 10);
+};
+
+const pickNonEmptyString = (...values: Array<unknown>) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text.length > 0) return text;
+  }
+  return "";
 };
 
 const mapBid = (row: any) => ({
   ...(() => {
     const parsedNotes = parseBidNotes(row.notes);
+    const client = pickNonEmptyString(
+      row.client,
+      row.client_name,
+      row.customer,
+      row.customer_name,
+      parsedNotes.meta.client
+    );
+    const bidDate = pickNonEmptyString(
+      row.bid_date,
+      row.bidDate,
+      row.biddate,
+      parsedNotes.meta.bid_date
+    );
+    const dbProbability = normalizeNumber(row.probability ?? row.win_probability ?? 0);
+    const notesProbability =
+      typeof parsedNotes.meta.probability === "number" && !Number.isNaN(parsedNotes.meta.probability)
+        ? parsedNotes.meta.probability
+        : null;
+    const probability = dbProbability === 0 && notesProbability !== null ? notesProbability : dbProbability;
     return {
   id: row.id,
   title: row.title ?? row.project_name ?? "",
   projectName: row.title ?? row.project_name ?? "",
-  client: row.client ?? row.client_name ?? row.customer ?? row.customer_name ?? parsedNotes.meta.client ?? "",
-  bid_date: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
-  bidDate: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
+  client,
+  bid_date: bidDate || null,
+  bidDate: bidDate || null,
   subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
   total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   status: row.status ?? "draft",
-  probability: normalizeNumber(row.probability ?? row.win_probability ?? parsedNotes.meta.probability ?? 0),
+  probability,
   notes: parsedNotes.plainNotes,
   job_id: normalizeId(row.job_id),
   jobId: normalizeId(row.job_id),
-  stage: row.stage ?? "estimating",
+  stage: row.stage ?? parsedNotes.meta.stage ?? "estimating",
   owner_user_id: row.owner_user_id ?? null,
   ownerUserId: row.owner_user_id ?? null,
   due_date: row.due_date ?? null,
@@ -232,20 +268,31 @@ export async function PATCH(
     }
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.job_id !== undefined) updatePayload.job_id = normalizeId(payload.job_id);
-    if (payload.client !== undefined) {
-      updatePayload.client = payload.client;
-      updatePayload.client_name = payload.client;
-      updatePayload.customer = payload.client;
-      updatePayload.customer_name = payload.client;
+    const resolvedClientInput =
+      payload.client ??
+      payload.client_name ??
+      payload.customer ??
+      payload.customer_name;
+    if (resolvedClientInput !== undefined) {
+      updatePayload.client = resolvedClientInput;
+      updatePayload.client_name = resolvedClientInput;
+      updatePayload.customer = resolvedClientInput;
+      updatePayload.customer_name = resolvedClientInput;
     }
-    if (payload.bid_date !== undefined) {
-      const normalizedBidDate = normalizeDate(payload.bid_date, null);
+    const resolvedBidDateInput =
+      payload.bid_date ??
+      payload.bidDate ??
+      payload.biddate;
+    if (resolvedBidDateInput !== undefined) {
+      const normalizedBidDate = normalizeDate(resolvedBidDateInput, null);
       updatePayload.bid_date = normalizedBidDate;
       updatePayload.bidDate = normalizedBidDate;
       updatePayload.biddate = normalizedBidDate;
     }
-    if (payload.probability !== undefined) {
-      const normalizedProbability = normalizeNumber(payload.probability);
+    const resolvedProbabilityInput =
+      payload.probability ?? payload.win_probability;
+    if (resolvedProbabilityInput !== undefined) {
+      const normalizedProbability = normalizeNumber(resolvedProbabilityInput);
       updatePayload.probability = normalizedProbability;
       updatePayload.win_probability = normalizedProbability;
     }
@@ -282,22 +329,27 @@ export async function PATCH(
 
     const beforeParsedNotes = parseBidNotes(beforeBid?.notes);
     const resolvedClient =
-      payload.client !== undefined
-        ? (payload.client ?? "")
+      resolvedClientInput !== undefined
+        ? (resolvedClientInput ?? "")
         : (beforeBid?.client ?? beforeBid?.client_name ?? beforeBid?.customer ?? beforeBid?.customer_name ?? beforeParsedNotes.meta.client ?? "");
     const resolvedBidDate =
-      payload.bid_date !== undefined
-        ? normalizeDate(payload.bid_date, null)
+      resolvedBidDateInput !== undefined
+        ? normalizeDate(resolvedBidDateInput, null)
         : (beforeBid?.bid_date ?? beforeBid?.bidDate ?? beforeBid?.biddate ?? beforeParsedNotes.meta.bid_date ?? null);
     const resolvedProbability =
-      payload.probability !== undefined
-        ? normalizeNumber(payload.probability)
+      resolvedProbabilityInput !== undefined
+        ? normalizeNumber(resolvedProbabilityInput)
         : normalizeNumber(beforeBid?.probability ?? beforeBid?.win_probability ?? beforeParsedNotes.meta.probability ?? 0);
+    const resolvedStage =
+      payload.stage !== undefined
+        ? payload.stage
+        : (beforeBid?.stage ?? beforeParsedNotes.meta.stage ?? "estimating");
     const plainNotes = payload.notes !== undefined ? (payload.notes ?? "") : beforeParsedNotes.plainNotes;
     updatePayload.notes = buildBidNotes(plainNotes, {
       client: resolvedClient || undefined,
       bid_date: resolvedBidDate || undefined,
       probability: resolvedProbability,
+      stage: resolvedStage || undefined,
     });
 
     const { error } = await updateWithVariants(supabase, companyId, bidId, updatePayload);

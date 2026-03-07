@@ -1,4 +1,4 @@
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
@@ -237,9 +237,10 @@ export async function GET(request: Request) {
           else if (userB && userB !== String(userId)) otherUserId = userB;
         }
       }
+      const directDisplayName = displayNameByUserId.get(String(otherUserId ?? ""));
       const resolvedDirectName =
         effectiveKind === "direct"
-          ? displayNameByUserId.get(String(otherUserId ?? "")) || (isLegacyDirectLikeName(rawName) ? "Team Member" : rawName || "Team Member")
+          ? (directDisplayName || (isLegacyDirectLikeName(rawName) ? "" : rawName || ""))
           : rawName;
       return {
         id: channel.id,
@@ -275,8 +276,8 @@ export async function GET(request: Request) {
     }
 
     const items = [...passThroughItems, ...Array.from(dedupedByDirectTarget.values())]
-      // Hide ambiguous/legacy direct rows that cannot be mapped to a real teammate.
-      .filter((item) => !(item.kind === "direct" && !item.other_user_id))
+      // Hide ambiguous/legacy direct rows that cannot be mapped to a real teammate display.
+      .filter((item) => !(item.kind === "direct" && (!item.other_user_id || !String(item.name || "").trim())))
       // Also hide legacy direct-like channel names unless they resolve to a real direct thread.
       .filter((item) => !(item.kind !== "direct" && isLegacyDirectLikeName(String(item.name || ""))));
     items.sort((a, b) => String(b.last_message_at || b.created_at).localeCompare(String(a.last_message_at || a.created_at)));

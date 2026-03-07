@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
@@ -237,7 +237,7 @@ export async function POST(request: Request) {
     const supabaseAdmin = getSupabaseAdmin();
     const storageClient = supabaseAdmin ?? supabase;
 
-    let entityType: "job" | "daily_report" | "work_order" | "document";
+    let entityType: "job" | "daily_report" | "work_order" | "document" | "vendor";
     let entityId: string | number | null;
     let fileName: string;
     let contentType: string;

@@ -1,4 +1,4 @@
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
@@ -74,7 +74,8 @@ export async function POST(request: Request) {
     const role = await resolveChecklistRole(supabase, companyId, userId);
     const roleItems = getOnboardingChecklistItemsForRole(role);
     const roleItemsMap = new Map(roleItems.map((item) => [item.key, item]));
-    const itemDef = roleItemsMap.get(parsedBody.data.key);
+    const key = parsedBody.data.key as (typeof roleItems)[number]["key"];
+    const itemDef = roleItemsMap.get(key);
     if (!itemDef) {
       return validationError([{ path: "key", message: "Invalid checklist key" }]);
     }
@@ -87,7 +88,7 @@ export async function POST(request: Request) {
       .from("onboarding_checklist")
       .select("id")
       .eq("company_id", companyId)
-      .eq("key", parsedBody.data.key)
+      .eq("key", key)
       .limit(1);
 
     const existingResult = rowUserId
@@ -102,7 +103,7 @@ export async function POST(request: Request) {
       const fallback = upsertFallbackChecklistRow({
         companyId,
         userId: rowUserId,
-        key: parsedBody.data.key,
+        key,
         completedAt,
         completedBy: parsedBody.data.completed ? userId : null,
       });
@@ -120,7 +121,7 @@ export async function POST(request: Request) {
     const mutationPayload = {
       company_id: companyId,
       user_id: rowUserId,
-      key: parsedBody.data.key,
+      key,
       completed_at: completedAt,
       completed_by: parsedBody.data.completed ? userId : null,
       updated_at: nowIso,

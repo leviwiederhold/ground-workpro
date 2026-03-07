@@ -69,6 +69,10 @@ export function MessagesView({ employees = [], ui }) {
     (channel) => String(channel?.kind || '') === 'direct' || Boolean(channel?.other_user_id),
     []
   );
+  const isGenericDirectLabel = useCallback((value) => {
+    const name = normalized(value);
+    return !name || name === 'direct message' || name === 'team member' || name.startsWith('dm-');
+  }, []);
 
   const contactOptions = useMemo(() => {
     const userById = new Map((availableUsers || []).map((user) => [String(user.userId), user]));
@@ -218,6 +222,66 @@ export function MessagesView({ employees = [], ui }) {
   }, []);
 
   useEffect(() => {
+    if (!myUserId) return;
+    const candidates = (channels || []).filter(
+      (channel) =>
+        isDirectChannel(channel) &&
+        (!channel.other_user_id || isGenericDirectLabel(channel.name))
+    );
+    if (candidates.length === 0) return;
+
+    let cancelled = false;
+    const resolve = async () => {
+      const updates = await Promise.all(
+        candidates.map(async (channel) => {
+          const response = await fetch(`/api/messages/channels/${channel.id}/members`, { cache: 'no-store' }).catch(() => null);
+          if (!response || !response.ok) return null;
+          const payload = await response.json().catch(() => ({}));
+          const members = Array.isArray(payload?.items) ? payload.items : [];
+          const other = members.find((member) => String(member.userId || '') !== String(myUserId));
+          if (!other?.userId) return null;
+          const resolvedName =
+            userDisplayNameById.get(String(other.userId)) ||
+            String(other.displayName || '').trim() ||
+            String(channel.name || '').trim();
+          if (!resolvedName) return null;
+          return {
+            id: String(channel.id),
+            otherUserId: String(other.userId),
+            name: resolvedName,
+          };
+        })
+      );
+
+      if (cancelled) return;
+      const byId = new Map(updates.filter(Boolean).map((update) => [String(update.id), update]));
+      if (byId.size === 0) return;
+      setChannels((prev) =>
+        prev.map((channel) => {
+          const patch = byId.get(String(channel.id));
+          if (!patch) return channel;
+          return {
+            ...channel,
+            other_user_id: patch.otherUserId,
+            name: patch.name,
+          };
+        })
+      );
+      setForcedDirectLabels((prev) => {
+        const next = { ...prev };
+        byId.forEach((patch, id) => {
+          next[String(id)] = String(patch.name);
+        });
+        return next;
+      });
+    };
+    resolve();
+    return () => {
+      cancelled = true;
+    };
+  }, [channels, isDirectChannel, isGenericDirectLabel, myUserId, userDisplayNameById]);
+
+  useEffect(() => {
     supabaseBrowser().auth.getUser().then(({ data }) => {
       setMyUserId(String(data?.user?.id || ''));
     }).catch(() => setMyUserId(''));
@@ -292,7 +356,7 @@ export function MessagesView({ employees = [], ui }) {
         normalized(displayName) === 'team member';
       // Hide anonymous legacy direct threads (e.g., "Direct Message" / dm-*) that are not
       // bound to a specific teammate in this session.
-      if (genericDirectLabel && !hasMessages) return false;
+      if (genericDirectLabel && !hasPersonBinding) return false;
       return hasPersonBinding || hasMessages || !looksLikeDmName(channel.name);
     })
     .filter((channel) =>
@@ -314,6 +378,10 @@ export function MessagesView({ employees = [], ui }) {
         String(channel.other_user_id || '') === String(contact.userId)
     );
     if (existing) {
+      setForcedDirectLabels((prev) => ({
+        ...prev,
+        [String(existing.id)]: String(contact.label || 'Team Member'),
+      }));
       setActiveChannel(existing);
       setPendingDirectContact(null);
       return;

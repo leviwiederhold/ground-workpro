@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 
@@ -14,16 +14,33 @@ const poStatusSchema = z.enum([
   "cancelled",
   "open",
   "closed",
+  "completed",
 ]);
 
 const poStatusCandidates = (status: string | undefined) => {
   if (!status) return [];
   const normalized = String(status).toLowerCase();
-  if (normalized === "cancelled") return ["cancelled", "canceled", "draft"];
-  if (normalized === "canceled") return ["canceled", "cancelled", "draft"];
-  if (normalized === "open") return ["open", "submitted", "approved", "ordered", "draft"];
-  if (normalized === "closed") return ["closed", "received", "approved"];
+  if (normalized === "approved") return ["approved", "submitted", "draft"];
+  if (normalized === "cancelled") return ["cancelled", "canceled"];
+  if (normalized === "canceled") return ["canceled", "cancelled"];
+  if (normalized === "ordered") return ["approved", "submitted", "draft"];
+  if (normalized === "open") return ["submitted", "draft"];
+  if (normalized === "closed") return ["received", "approved", "submitted", "draft"];
+  if (normalized === "completed") return ["received", "approved", "submitted", "draft"];
+  if (normalized === "received") return ["received", "approved", "submitted", "draft"];
+  if (normalized === "submitted") return ["submitted", "draft"];
   return [normalized];
+};
+
+const toDbStatus = (status: string | undefined) => {
+  if (!status) return status;
+  const normalized = String(status).toLowerCase();
+  if (normalized === "cancelled") return "canceled";
+  if (normalized === "open") return "submitted";
+  if (normalized === "closed") return "received";
+  if (normalized === "completed") return "received";
+  if (normalized === "ordered") return "approved";
+  return normalized;
 };
 
 const updatePurchaseOrderSchema = z
@@ -121,7 +138,7 @@ export async function PATCH(
     const updatePayload: Record<string, unknown> = {};
     if (payload.vendor_id !== undefined) updatePayload.vendor_id = normalizeId(payload.vendor_id);
     if (payload.job_id !== undefined) updatePayload.job_id = normalizeId(payload.job_id);
-    if (payload.status !== undefined) updatePayload.status = String(payload.status).toLowerCase();
+    if (payload.status !== undefined) updatePayload.status = toDbStatus(payload.status);
     if (payload.notes !== undefined) updatePayload.notes = payload.notes;
 
     let { error } = await updateWithColumnFallback(
@@ -142,9 +159,20 @@ export async function PATCH(
         error = retry.error;
         if (!error) break;
       }
+      if (error) {
+        const retryWithoutStatusPayload = { ...updatePayload };
+        delete retryWithoutStatusPayload.status;
+        const retryWithoutStatus = await updateWithColumnFallback(
+          supabase,
+          companyId,
+          normalizeRouteId(id),
+          retryWithoutStatusPayload
+        );
+        error = retryWithoutStatus.error;
+      }
     }
 
-    if (error?.message?.includes("purchase_orders_status_check")) {
+    if (error?.message?.includes("purchase_orders_status_check") && payload.status === undefined) {
       const retryWithoutStatusPayload = { ...updatePayload };
       delete retryWithoutStatusPayload.status;
       const retryWithoutStatus = await updateWithColumnFallback(

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getPublicProposalByToken } from "@/lib/proposals/publicProposal";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";

@@ -10,6 +10,22 @@ const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? Th
 
 export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) {
   const { StatGrid, StatCard, SearchInput, Card, Icon, Button, Badge, formatCurrency, formatDate } = ui;
+      const toDateOnly = (value) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) return '';
+        return parsed.toISOString().slice(0, 10);
+      };
+      const getBidClient = (bid) => bid?.client || bid?.client_name || bid?.customer || bid?.customer_name || '';
+      const getBidDate = (bid) => toDateOnly(bid?.bidDate || bid?.bid_date || bid?.biddate || '');
+      const getBidProbability = (bid) => {
+        const value = bid?.probability ?? bid?.win_probability ?? 0;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const getBidStage = (bid) => bid?.stage || bid?.status || 'estimating';
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [selectedBidId, setSelectedBidId] = useState(null);
@@ -66,15 +82,15 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
         const query = search.toLowerCase();
         return (
           (bid.projectName || bid.title || '').toLowerCase().includes(query) ||
-          (bid.client || '').toLowerCase().includes(query)
+          getBidClient(bid).toLowerCase().includes(query)
         );
       });
 
       const totalPending = bids
         .filter((bid) => ['lead', 'qualified', 'estimating', 'review'].includes(String(bid.stage || 'estimating')))
         .reduce((sum, bid) => sum + (Number(bid.amount) || 0), 0);
-      const wonCount = bids.filter((bid) => (bid.stage || bid.status) === 'won').length;
-      const closedCount = bids.filter((bid) => ['won', 'lost'].includes(String(bid.stage || bid.status))).length;
+      const wonCount = bids.filter((bid) => getBidStage(bid) === 'won').length;
+      const closedCount = bids.filter((bid) => ['won', 'lost'].includes(String(getBidStage(bid)))).length;
       const winRate = Math.round((wonCount / closedCount) * 100) || 0;
 
       const getStatusIcon = (status) => {
@@ -283,11 +299,11 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
         setBidForm({
           title: bid.projectName || bid.title || '',
           status: bid.status || 'draft',
-          stage: bid.stage || 'estimating',
+          stage: getBidStage(bid),
           job_id: bid.job_id || bid.jobId || '',
-          client: bid.client || '',
-          bid_date: bid.bid_date || bid.bidDate || '',
-          probability: Number(bid.probability) || 0,
+          client: getBidClient(bid),
+          bid_date: getBidDate(bid) || '',
+          probability: getBidProbability(bid),
           notes: bid.notes || '',
         });
         setEditingBidId(bid.id);
@@ -310,15 +326,31 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
         try {
           setSaveLoading(true);
           setFormError('');
+          const allowedStatuses = new Set([
+            'draft',
+            'pending',
+            'submitted',
+            'sent',
+            'accepted',
+            'rejected',
+            'archived',
+            'won',
+            'lost',
+            'canceled',
+          ]);
+          const normalizedStatus = allowedStatuses.has(String(bidForm.status || '').toLowerCase())
+            ? String(bidForm.status).toLowerCase()
+            : 'draft';
 
           const payload = {
             title: bidForm.title.trim(),
             stage: bidForm.stage,
             job_id: bidForm.job_id || null,
             client: bidForm.client.trim(),
-            bid_date: bidForm.bid_date || null,
+            bid_date: toDateOnly(bidForm.bid_date) || null,
             probability: Number(bidForm.probability) || 0,
             notes: bidForm.notes.trim(),
+            ...(editingBidId ? {} : { status: normalizedStatus }),
           };
 
           const response = await fetch(editingBidId ? `/api/bids/${editingBidId}` : '/api/bids', {
@@ -340,10 +372,30 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
             return;
           }
 
-          await refreshBids({ preserveSelection: true });
-          if (!editingBidId && parsed?.bid?.id) {
-            setSelectedBidId(parsed.bid.id);
+          const rawSavedBid = parsed?.bid || parsed?.item || null;
+          const savedBid = rawSavedBid?.id
+            ? {
+                ...rawSavedBid,
+                client: rawSavedBid.client ?? bidForm.client.trim(),
+                bid_date: toDateOnly(rawSavedBid.bid_date ?? rawSavedBid.bidDate ?? bidForm.bid_date),
+                bidDate: toDateOnly(rawSavedBid.bidDate ?? rawSavedBid.bid_date ?? bidForm.bid_date),
+                probability:
+                  Number.isFinite(Number(rawSavedBid.probability))
+                    ? Number(rawSavedBid.probability)
+                    : (Number(bidForm.probability) || 0),
+              }
+            : null;
+          if (savedBid?.id) {
+            setBids((prev) => {
+              const exists = prev.some((bid) => String(bid.id) === String(savedBid.id));
+              if (exists) {
+                return prev.map((bid) => (String(bid.id) === String(savedBid.id) ? { ...bid, ...savedBid } : bid));
+              }
+              return [savedBid, ...prev];
+            });
+            setSelectedBidId(savedBid.id);
           }
+          await refreshBids({ preserveSelection: true });
           setShowBidModal(false);
           resetBidForm();
         } catch {
@@ -599,7 +651,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
       return (
         <div className="space-y-6">
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
-            <StatCard icon="file-invoice-dollar" label="Active Opportunities" value={analytics?.counts?.open ?? bids.filter((bid) => !['won', 'lost'].includes(String(bid.stage || bid.status))).length} color="brand" />
+            <StatCard icon="file-invoice-dollar" label="Active Opportunities" value={analytics?.counts?.open ?? bids.filter((bid) => !['won', 'lost'].includes(String(getBidStage(bid)))).length} color="brand" />
             <StatCard icon="dollar-sign" label="Pipeline Value" value={formatCurrency((canSeePmAnalytics && analytics?.pipeline_value) || totalPending)} color="blue" />
             <StatCard icon="trophy" label="Win Rate" value={`${(canSeePmAnalytics && analytics?.win_rate_percent) ?? winRate}%`} color="green" />
             <StatCard icon="chart-line" label={isEstimatorView ? 'Avg Estimated Margin' : 'Cycle Time'} value={isEstimatorView ? `${(canSeePmAnalytics && analytics?.avg_estimated_margin_percent) ?? 0}%` : `${(canSeePmAnalytics && analytics?.avg_cycle_time_days) ?? 0}d`} color="yellow" />
@@ -649,15 +701,15 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                         </div>
                         <div>
                           <h4 className="font-semibold text-gray-900">{bid.projectName || bid.title}</h4>
-                          <p className="text-sm text-gray-500">{bid.client || 'No client'}</p>
-                          <p className="text-xs text-gray-400 mt-1">Bid Date: {formatDate(bid.bidDate || bid.bid_date)}</p>
+                          <p className="text-sm text-gray-500">{getBidClient(bid) || 'No client'}</p>
+                          <p className="text-xs text-gray-400 mt-1">Bid Date: {formatDate(getBidDate(bid))}</p>
                         </div>
                       </div>
                       <div className="text-right">
                         <p className="text-xl font-bold text-gray-900">{formatCurrency(bid.amount || 0)}</p>
-                        <Badge className={getStageBadgeClass(bid.stage || bid.status)}>{bid.stage || bid.status}</Badge>
-                        {['lead', 'qualified', 'estimating', 'review'].includes(String(bid.stage || 'estimating')) && (
-                          <p className="text-sm text-gray-500 mt-1">{bid.probability || 0}% probability</p>
+                        <Badge className={getStageBadgeClass(getBidStage(bid))}>{getBidStage(bid)}</Badge>
+                        {['lead', 'qualified', 'estimating', 'review'].includes(String(getBidStage(bid))) && (
+                          <p className="text-sm text-gray-500 mt-1">{getBidProbability(bid)}% probability</p>
                         )}
                       </div>
                     </div>
@@ -677,7 +729,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                   <div className="space-y-3">
                     <div>
                       <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
-                      <p className="text-sm text-gray-500">{selectedBid.client || 'No client selected'}</p>
+                      <p className="text-sm text-gray-500">{getBidClient(selectedBid) || 'No client selected'}</p>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
@@ -743,15 +795,15 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div>
                       <p className="text-gray-500">Stage</p>
-                      <p className="font-semibold text-gray-900 capitalize" data-testid="bid-status-value">{selectedBid.stage || selectedBid.status}</p>
+                      <p className="font-semibold text-gray-900 capitalize" data-testid="bid-status-value">{getBidStage(selectedBid)}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Bid Date</p>
-                      <p className="font-semibold text-gray-900">{formatDate(selectedBid.bidDate || selectedBid.bid_date)}</p>
+                      <p className="font-semibold text-gray-900">{formatDate(getBidDate(selectedBid))}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Probability</p>
-                      <p className="font-semibold text-gray-900">{selectedBid.probability || 0}%</p>
+                      <p className="font-semibold text-gray-900">{getBidProbability(selectedBid)}%</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Total</p>
@@ -930,15 +982,16 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Bid Date</label>
-                      <input
-                        type="date"
-                        value={bidForm.bid_date || ''}
-                        onChange={(e) => setBidForm({ ...bidForm, bid_date: e.target.value })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
-                    </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Bid Date</label>
+                    <input
+                      type="date"
+                      data-testid="bids-bid-date-input"
+                      value={bidForm.bid_date || ''}
+                      onChange={(e) => setBidForm({ ...bidForm, bid_date: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    />
+                  </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Related Job (Optional)</label>
@@ -959,6 +1012,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
                     <input
                       type="text"
+                      data-testid="bids-client-input"
                       value={bidForm.client}
                       onChange={(e) => setBidForm({ ...bidForm, client: e.target.value })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
@@ -968,6 +1022,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                     <label className="block text-sm font-medium text-gray-700 mb-1">Probability (%)</label>
                     <input
                       type="number"
+                      data-testid="bids-probability-input"
                       min="0"
                       max="100"
                       value={bidForm.probability}

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getPublicProposalByToken } from "@/lib/proposals/publicProposal";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";

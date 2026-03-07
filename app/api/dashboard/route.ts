@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { z } from "next/dist/compiled/zod";
+import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import type { AppRole } from "@/lib/nav/config";
@@ -53,6 +53,11 @@ function isMissingTable(message: string, table: string) {
   return normalized.includes(table) && (normalized.includes("does not exist") || normalized.includes("not find"));
 }
 
+function isMissingColumn(message: string) {
+  const normalized = String(message || "").toLowerCase();
+  return normalized.includes("column") && (normalized.includes("does not exist") || normalized.includes("not find"));
+}
+
 function toError(error: unknown) {
   if (error instanceof TenantResolverError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
@@ -85,6 +90,8 @@ export async function GET(request: Request) {
 
     const sevenDaysAgo = new Date(now);
     sevenDaysAgo.setDate(now.getDate() - 7);
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
     let activityQuery = supabase
       .from("notifications")
@@ -112,6 +119,10 @@ export async function GET(request: Request) {
       authUserResult,
       dailyReportTodayResult,
       recentActivityResult,
+      monthBidsResult,
+      allBidsCountResult,
+      sentOrWonBidsCountResult,
+      purchaseOrdersCountResult,
     ] = await Promise.all([
       supabase
         .from("jobs")
@@ -175,27 +186,59 @@ export async function GET(request: Request) {
         .eq("report_date", dateKey)
         .limit(200),
       activityQuery,
+      supabase
+        .from("bids")
+        .select("status,revenue,total,bid_date,created_at")
+        .eq("company_id", companyId)
+        .in("status", ["accepted", "approved", "won"]),
+      supabase
+        .from("bids")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId),
+      supabase
+        .from("bids")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .in("status", ["sent", "accepted", "approved", "won"]),
+      supabase
+        .from("purchase_orders")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId),
     ]);
 
-    if (activeJobsResult.error && !isMissingTable(activeJobsResult.error.message, "jobs")) {
+    if (
+      activeJobsResult.error &&
+      !isMissingTable(activeJobsResult.error.message, "jobs") &&
+      !isMissingColumn(activeJobsResult.error.message)
+    ) {
       throw new Error(activeJobsResult.error.message);
     }
-    if (activeJobsCountResult.error && !isMissingTable(activeJobsCountResult.error.message, "jobs")) {
+    if (
+      activeJobsCountResult.error &&
+      !isMissingTable(activeJobsCountResult.error.message, "jobs") &&
+      !isMissingColumn(activeJobsCountResult.error.message)
+    ) {
       throw new Error(activeJobsCountResult.error.message);
     }
-    if (equipmentResult.error && !isMissingTable(equipmentResult.error.message, "equipment")) {
+    if (
+      equipmentResult.error &&
+      !isMissingTable(equipmentResult.error.message, "equipment") &&
+      !isMissingColumn(equipmentResult.error.message)
+    ) {
       throw new Error(equipmentResult.error.message);
     }
-    if (employeesResult.error && !isMissingTable(employeesResult.error.message, "employees")) {
-      throw new Error(employeesResult.error.message);
-    }
-    if (employeesOnSiteCountResult.error && !isMissingTable(employeesOnSiteCountResult.error.message, "employees")) {
-      throw new Error(employeesOnSiteCountResult.error.message);
-    }
-    if (openWorkOrdersResult.error && !isMissingTable(openWorkOrdersResult.error.message, "work_orders")) {
+    if (
+      openWorkOrdersResult.error &&
+      !isMissingTable(openWorkOrdersResult.error.message, "work_orders") &&
+      !isMissingColumn(openWorkOrdersResult.error.message)
+    ) {
       throw new Error(openWorkOrdersResult.error.message);
     }
-    if (openWorkOrdersCountResult.error && !isMissingTable(openWorkOrdersCountResult.error.message, "work_orders")) {
+    if (
+      openWorkOrdersCountResult.error &&
+      !isMissingTable(openWorkOrdersCountResult.error.message, "work_orders") &&
+      !isMissingColumn(openWorkOrdersCountResult.error.message)
+    ) {
       throw new Error(openWorkOrdersCountResult.error.message);
     }
 
@@ -236,7 +279,18 @@ export async function GET(request: Request) {
 
     const safetyCount = safetyCountResult.error ? 0 : safetyCountResult.count ?? 0;
     const employeesOnSite = employeesOnSiteCountResult.error ? 0 : employeesOnSiteCountResult.count ?? 0;
-    const monthRevenuePlaceholder = 847500;
+    const monthBids = monthBidsResult.error ? [] : monthBidsResult.data ?? [];
+    const totalBidsCount = allBidsCountResult.error ? 0 : allBidsCountResult.count ?? 0;
+    const sentOrWonBidsCount = sentOrWonBidsCountResult.error ? 0 : sentOrWonBidsCountResult.count ?? 0;
+    const purchaseOrdersCount = purchaseOrdersCountResult.error ? 0 : purchaseOrdersCountResult.count ?? 0;
+    const monthRevenue = monthBids.reduce((sum, bid) => {
+      const rawDate = bid.bid_date ?? bid.created_at;
+      if (!rawDate) return sum;
+      const parsed = new Date(rawDate);
+      if (Number.isNaN(parsed.getTime())) return sum;
+      if (parsed < monthStart || parsed >= monthEnd) return sum;
+      return sum + asNumber(bid.revenue ?? bid.total ?? 0);
+    }, 0);
 
     const workOrderRows = openWorkOrdersResult.error ? [] : openWorkOrdersResult.data ?? [];
     const openWorkOrdersCount = openWorkOrdersCountResult.error ? workOrderRows.length : openWorkOrdersCountResult.count ?? workOrderRows.length;
@@ -257,16 +311,28 @@ export async function GET(request: Request) {
     }
     const onboardingDismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
     const roleChecklistItems = getOnboardingChecklistItemsForRole(role);
-    const checklistItems = roleChecklistItems.map((item) => ({
-      key: item.key,
-      label: item.label,
-      description: item.description,
-      view: item.view,
-      scope: item.scope,
-      completed: Boolean(
+    const derivedChecklistCompleted: Record<string, boolean> = {
+      invite_teammate: employeeRows.length > 1,
+      create_first_job: activeJobsCount > 0,
+      create_first_bid: totalBidsCount > 0,
+      send_first_proposal: sentOrWonBidsCount > 0,
+      add_first_equipment: equipmentRows.length > 0,
+      create_first_po: purchaseOrdersCount > 0,
+    };
+
+    const checklistItems = roleChecklistItems.map((item) => {
+      const persistedCompleted = Boolean(
         completedMap.get(`${item.key}::${item.scope === "company" ? "__company__" : userId}`)?.completed_at
-      ),
-    }));
+      );
+      return {
+        key: item.key,
+        label: item.label,
+        description: item.description,
+        view: item.view,
+        scope: item.scope,
+        completed: persistedCompleted || Boolean(derivedChecklistCompleted[item.key]),
+      };
+    });
 
     const kpis: DashboardResponse["item"]["sections"]["kpis"]["items"] = [];
     const primary: DashboardResponse["item"]["sections"]["primary"]["items"] = [];
@@ -296,7 +362,7 @@ export async function GET(request: Request) {
         { key: "active_jobs", label: "Active Jobs", value: String(activeJobsCount), href: "/jobs" },
         { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" },
         { key: "crew_on_site", label: "Crew On-Site", value: String(employeesOnSite), href: "/team" },
-        { key: "month_revenue", label: "Month Revenue", value: formatCurrency(monthRevenuePlaceholder), href: "/finance" }
+        { key: "month_revenue", label: "Month Revenue", value: formatCurrency(monthRevenue), href: "/finance" }
       );
 
       primary.push(

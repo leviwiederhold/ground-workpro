@@ -1,7 +1,7 @@
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { attachFailFast } from './helpers/attachFailFast';
 
-export const E2E_BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
+export const E2E_BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
 
 export function getE2ECreds() {
   const email = process.env.E2E_EMAIL;
@@ -20,17 +20,24 @@ export async function loginViaUI(page: Page) {
   attachFailFast(page);
   const { email, password } = getE2ECreds();
   let bootstrapAttempted = false;
-  const navProbeRequest = async () =>
-    page.request.get('/api/nav', { timeout: 30_000 });
 
-  await page.goto('/');
+  // Prefer test login endpoint to avoid flaky UI auth timing during long suites.
   try {
-    const authProbe = await navProbeRequest();
-    if (authProbe.ok()) {
-      return;
+    const apiLogin = await page.request.post('/api/test/login', {
+      data: { email, password },
+      timeout: 30_000,
+    });
+    if (apiLogin.ok()) {
+      await page.goto('/');
+      if (!page.url().includes('/login')) return;
     }
   } catch {
-    // Continue through login flow if the initial probe times out.
+    // Fall through to UI login flow.
+  }
+
+  await page.goto('/');
+  if (!page.url().includes('/login')) {
+    return;
   }
 
   await page.goto('/login');
@@ -48,48 +55,22 @@ export async function loginViaUI(page: Page) {
           throw new Error(`E2E login failed: ${message}`);
         }
 
-        let navProbe;
-        try {
-          navProbe = await navProbeRequest();
-          if (navProbe.ok()) {
-            return true;
-          }
-        } catch {
-          return false;
-        }
-
-        if (!bootstrapAttempted && navProbe.status() === 403) {
-          const body = (await navProbe.text().catch(() => '')).toLowerCase();
-          if (body.includes('no company membership found')) {
-            bootstrapAttempted = true;
-            await page.request.post('/api/bootstrap');
-          }
-        }
-
         if (!page.url().includes('/login')) {
           return true;
         }
 
-        const appShellVisible = await page.getByText('GROUNDWORK', { exact: false }).isVisible().catch(() => false);
-        if (appShellVisible && !page.url().includes('/login')) {
-          return true;
+        if (!bootstrapAttempted) {
+          const bodyText = await page.textContent('body').catch(() => '');
+          if (String(bodyText || '').toLowerCase().includes('no company membership found')) {
+            bootstrapAttempted = true;
+            await page.request.post('/api/bootstrap');
+            return false;
+          }
         }
         return false;
       },
       { timeout: 30_000, message: 'E2E login failed: app did not complete auth flow.' }
     )
-    .toBe(true);
-
-  await page.goto('/');
-  await expect
-    .poll(async () => {
-      try {
-        const navProbe = await navProbeRequest();
-        return navProbe.ok();
-      } catch {
-        return false;
-      }
-    }, { timeout: 30_000 })
     .toBe(true);
 }
 

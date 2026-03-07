@@ -3523,8 +3523,8 @@ const confirmDestructiveAction = (targetLabel) =>
         <div className="space-y-6">
           {/* Stats */}
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
-            <StatCard icon="clipboard-list" label="Open Work Orders" value={workOrders.filter(w => w.status !== 'completed').length} color="brand" />
-            <StatCard icon="circle-exclamation" label="High Priority" value={workOrders.filter(w => w.priority === 'high' && w.status !== 'completed').length} color="red" />
+            <StatCard icon="clipboard-list" label="Open Work Orders" value={workOrders.filter(w => normalizeWoStatus(w.status) !== 'completed').length} color="brand" />
+            <StatCard icon="circle-exclamation" label="High Priority" value={workOrders.filter(w => w.priority === 'high' && normalizeWoStatus(w.status) !== 'completed').length} color="red" />
             <StatCard icon="calendar-check" label="Scheduled PM" value={workOrders.filter(w => w.type === 'preventive').length} color="blue" />
             <StatCard icon="triangle-exclamation" label="PM Due Soon" value={upcomingPM.length} color="yellow" />
           </StatGrid>
@@ -3533,7 +3533,7 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4 min-w-0">
               <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
-                {['all', 'in-progress', 'scheduled', 'repair', 'preventive'].map(f => (
+                {['all', 'in-progress', 'scheduled', 'completed', 'repair', 'preventive'].map(f => (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}

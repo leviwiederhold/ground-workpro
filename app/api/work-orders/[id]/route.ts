@@ -66,10 +66,10 @@ const toUiStatus = (status: string | undefined) => {
 const statusCandidates = (status: string | undefined) => {
   if (!status) return [];
   const normalized = toDbStatus(status);
-  if (normalized === "in_progress") return ["in_progress", "in-progress", "open", "scheduled", "closed"];
-  if (normalized === "closed") return ["closed", "completed", "open", "scheduled"];
-  if (normalized === "waiting_parts") return ["waiting_parts", "open", "scheduled", "in_progress"];
-  if (normalized === "open") return ["open", "scheduled", "in_progress"];
+  if (normalized === "in_progress") return ["in_progress", "in-progress"];
+  if (normalized === "closed") return ["closed", "completed"];
+  if (normalized === "waiting_parts") return ["waiting_parts"];
+  if (normalized === "open") return ["open", "scheduled"];
   return [normalized];
 };
 
@@ -176,7 +176,7 @@ export async function PATCH(
       }
     }
 
-    if (error?.message?.includes("work_orders_status_check")) {
+    if (error?.message?.includes("work_orders_status_check") && payload.status === undefined) {
       const retryWithoutStatusPayload = { ...updatePayload };
       delete retryWithoutStatusPayload.status;
       const retryWithoutStatus = await updateWithColumnFallback(

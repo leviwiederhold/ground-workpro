@@ -31,6 +31,42 @@ const createBidSchema = z.object({
   due_date: z.string().optional().nullable(),
 });
 
+type BidNotesMeta = {
+  client?: string;
+  bid_date?: string;
+  probability?: number;
+};
+
+const BID_META_PREFIX = "\n<!--GW_BID_META:";
+const BID_META_SUFFIX = "-->";
+
+function parseBidNotes(raw: unknown): { plainNotes: string; meta: BidNotesMeta } {
+  const text = typeof raw === "string" ? raw : "";
+  const start = text.indexOf(BID_META_PREFIX);
+  const end = start >= 0 ? text.indexOf(BID_META_SUFFIX, start + BID_META_PREFIX.length) : -1;
+  if (start < 0 || end < 0) {
+    return { plainNotes: text, meta: {} };
+  }
+  const plainNotes = text.slice(0, start).trimEnd();
+  const jsonText = text.slice(start + BID_META_PREFIX.length, end).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as BidNotesMeta;
+    return { plainNotes, meta: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch {
+    return { plainNotes, meta: {} };
+  }
+}
+
+function buildBidNotes(plainNotes: string, meta: BidNotesMeta): string {
+  const compactMeta: BidNotesMeta = {};
+  if (meta.client) compactMeta.client = meta.client;
+  if (meta.bid_date) compactMeta.bid_date = meta.bid_date;
+  if (typeof meta.probability === "number" && !Number.isNaN(meta.probability)) compactMeta.probability = meta.probability;
+  const base = plainNotes?.trimEnd() ?? "";
+  if (Object.keys(compactMeta).length === 0) return base;
+  return `${base}${BID_META_PREFIX}${JSON.stringify(compactMeta)}${BID_META_SUFFIX}`;
+}
+
 const normalizeId = (id: unknown) => {
   if (id === null || id === undefined || id === "") return null;
   if (typeof id === "number") return id;
@@ -44,10 +80,10 @@ const normalizeNumber = (value: unknown, fallback = 0) => {
   return Number.isNaN(parsed) ? fallback : parsed;
 };
 
-const normalizeDate = (value: unknown) => {
-  if (!value || typeof value !== "string") return new Date().toISOString().slice(0, 10);
+const normalizeDate = (value: unknown, fallback: string | null = null) => {
+  if (!value || typeof value !== "string") return fallback;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return fallback;
   return parsed.toISOString().slice(0, 10);
 };
 
@@ -60,18 +96,21 @@ const statusFromStage = (stage: string | undefined) => {
 };
 
 const mapBid = (row: any) => ({
+  ...(() => {
+    const parsedNotes = parseBidNotes(row.notes);
+    return {
   id: row.id,
   title: row.title ?? row.project_name ?? "",
   projectName: row.title ?? row.project_name ?? "",
-  client: row.client ?? row.client_name ?? "",
-  bid_date: row.bid_date ?? null,
-  bidDate: row.bid_date ?? row.bidDate ?? null,
+  client: row.client ?? row.client_name ?? row.customer ?? row.customer_name ?? parsedNotes.meta.client ?? "",
+  bid_date: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
+  bidDate: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
   subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
   total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   status: row.status ?? "draft",
-  probability: normalizeNumber(row.probability ?? 0),
-  notes: row.notes ?? "",
+  probability: normalizeNumber(row.probability ?? row.win_probability ?? parsedNotes.meta.probability ?? 0),
+  notes: parsedNotes.plainNotes,
   job_id: normalizeId(row.job_id),
   jobId: normalizeId(row.job_id),
   stage: row.stage ?? "estimating",
@@ -87,6 +126,8 @@ const mapBid = (row: any) => ({
   convertedJobId: normalizeId(row.converted_job_id),
   converted_at: row.converted_at ?? null,
   convertedAt: row.converted_at ?? null,
+    };
+  })(),
 });
 
 async function insertWithColumnFallback(supabase: any, payload: Record<string, unknown>) {
@@ -187,17 +228,32 @@ export async function POST(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
 
+    const normalizedBidDate = normalizeDate(payload.bid_date, null);
+    const normalizedProbability = normalizeNumber(payload.probability ?? 0);
+
+    const notesWithMeta = buildBidNotes(payload.notes ?? "", {
+      client: payload.client ?? "",
+      bid_date: normalizedBidDate ?? undefined,
+      probability: normalizedProbability,
+    });
+
     const basePayload = {
       company_id: companyId,
       created_by: userId,
       title: payload.title,
       project_name: payload.title,
       client: payload.client ?? "",
-      bid_date: normalizeDate(payload.bid_date),
+      client_name: payload.client ?? "",
+      customer: payload.client ?? "",
+      customer_name: payload.client ?? "",
+      bid_date: normalizedBidDate,
+      bidDate: normalizedBidDate,
+      biddate: normalizedBidDate,
       amount: 0,
       total_amount: 0,
-      probability: normalizeNumber(payload.probability ?? 0),
-      notes: payload.notes ?? "",
+      probability: normalizedProbability,
+      win_probability: normalizedProbability,
+      notes: notesWithMeta,
       job_id: normalizeId(payload.job_id),
       stage: payload.stage ?? "estimating",
       owner_user_id: payload.owner_user_id ?? userId,

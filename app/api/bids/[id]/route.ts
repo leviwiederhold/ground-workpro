@@ -37,6 +37,42 @@ const updateBidSchema = z
     message: "At least one field is required",
   });
 
+type BidNotesMeta = {
+  client?: string;
+  bid_date?: string;
+  probability?: number;
+};
+
+const BID_META_PREFIX = "\n<!--GW_BID_META:";
+const BID_META_SUFFIX = "-->";
+
+function parseBidNotes(raw: unknown): { plainNotes: string; meta: BidNotesMeta } {
+  const text = typeof raw === "string" ? raw : "";
+  const start = text.indexOf(BID_META_PREFIX);
+  const end = start >= 0 ? text.indexOf(BID_META_SUFFIX, start + BID_META_PREFIX.length) : -1;
+  if (start < 0 || end < 0) {
+    return { plainNotes: text, meta: {} };
+  }
+  const plainNotes = text.slice(0, start).trimEnd();
+  const jsonText = text.slice(start + BID_META_PREFIX.length, end).trim();
+  try {
+    const parsed = JSON.parse(jsonText) as BidNotesMeta;
+    return { plainNotes, meta: parsed && typeof parsed === "object" ? parsed : {} };
+  } catch {
+    return { plainNotes, meta: {} };
+  }
+}
+
+function buildBidNotes(plainNotes: string, meta: BidNotesMeta): string {
+  const compactMeta: BidNotesMeta = {};
+  if (meta.client) compactMeta.client = meta.client;
+  if (meta.bid_date) compactMeta.bid_date = meta.bid_date;
+  if (typeof meta.probability === "number" && !Number.isNaN(meta.probability)) compactMeta.probability = meta.probability;
+  const base = plainNotes?.trimEnd() ?? "";
+  if (Object.keys(compactMeta).length === 0) return base;
+  return `${base}${BID_META_PREFIX}${JSON.stringify(compactMeta)}${BID_META_SUFFIX}`;
+}
+
 const normalizeRouteId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
 
 const normalizeId = (id: unknown) => {
@@ -52,26 +88,29 @@ const normalizeNumber = (value: unknown, fallback = 0) => {
   return Number.isNaN(parsed) ? fallback : parsed;
 };
 
-const normalizeDate = (value: unknown) => {
-  if (!value || typeof value !== "string") return new Date().toISOString().slice(0, 10);
+const normalizeDate = (value: unknown, fallback: string | null = null) => {
+  if (!value || typeof value !== "string") return fallback;
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return fallback;
   return parsed.toISOString().slice(0, 10);
 };
 
 const mapBid = (row: any) => ({
+  ...(() => {
+    const parsedNotes = parseBidNotes(row.notes);
+    return {
   id: row.id,
   title: row.title ?? row.project_name ?? "",
   projectName: row.title ?? row.project_name ?? "",
-  client: row.client ?? row.client_name ?? "",
-  bid_date: row.bid_date ?? null,
-  bidDate: row.bid_date ?? row.bidDate ?? null,
+  client: row.client ?? row.client_name ?? row.customer ?? row.customer_name ?? parsedNotes.meta.client ?? "",
+  bid_date: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
+  bidDate: row.bid_date ?? row.bidDate ?? row.biddate ?? parsedNotes.meta.bid_date ?? null,
   subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
   total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
   status: row.status ?? "draft",
-  probability: normalizeNumber(row.probability ?? 0),
-  notes: row.notes ?? "",
+  probability: normalizeNumber(row.probability ?? row.win_probability ?? parsedNotes.meta.probability ?? 0),
+  notes: parsedNotes.plainNotes,
   job_id: normalizeId(row.job_id),
   jobId: normalizeId(row.job_id),
   stage: row.stage ?? "estimating",
@@ -87,6 +126,8 @@ const mapBid = (row: any) => ({
   convertedJobId: normalizeId(row.converted_job_id),
   converted_at: row.converted_at ?? null,
   convertedAt: row.converted_at ?? null,
+    };
+  })(),
 });
 
 async function updateWithColumnFallback(
@@ -191,9 +232,23 @@ export async function PATCH(
     }
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.job_id !== undefined) updatePayload.job_id = normalizeId(payload.job_id);
-    if (payload.client !== undefined) updatePayload.client = payload.client;
-    if (payload.bid_date !== undefined) updatePayload.bid_date = normalizeDate(payload.bid_date);
-    if (payload.probability !== undefined) updatePayload.probability = normalizeNumber(payload.probability);
+    if (payload.client !== undefined) {
+      updatePayload.client = payload.client;
+      updatePayload.client_name = payload.client;
+      updatePayload.customer = payload.client;
+      updatePayload.customer_name = payload.client;
+    }
+    if (payload.bid_date !== undefined) {
+      const normalizedBidDate = normalizeDate(payload.bid_date, null);
+      updatePayload.bid_date = normalizedBidDate;
+      updatePayload.bidDate = normalizedBidDate;
+      updatePayload.biddate = normalizedBidDate;
+    }
+    if (payload.probability !== undefined) {
+      const normalizedProbability = normalizeNumber(payload.probability);
+      updatePayload.probability = normalizedProbability;
+      updatePayload.win_probability = normalizedProbability;
+    }
     if (payload.notes !== undefined) updatePayload.notes = payload.notes;
     if (payload.stage !== undefined) updatePayload.stage = payload.stage;
     if (payload.owner_user_id !== undefined) {
@@ -201,7 +256,7 @@ export async function PATCH(
       updatePayload.owner_user_id = trimmed || null;
     }
     if (payload.due_date !== undefined) {
-      updatePayload.due_date = payload.due_date ? normalizeDate(String(payload.due_date)) : null;
+      updatePayload.due_date = payload.due_date ? normalizeDate(String(payload.due_date), null) : null;
     }
     if (payload.review_ready !== undefined) {
       updatePayload.review_ready_at = payload.review_ready ? new Date().toISOString() : null;
@@ -220,10 +275,30 @@ export async function PATCH(
 
     const { data: beforeBid } = await supabase
       .from("bids")
-      .select("id, stage, status, review_ready_at, review_approved_at")
+      .select("id, stage, status, review_ready_at, review_approved_at, notes, client, client_name, customer, customer_name, bid_date, bidDate, biddate, probability, win_probability")
       .eq("company_id", companyId)
       .eq("id", bidId)
       .maybeSingle();
+
+    const beforeParsedNotes = parseBidNotes(beforeBid?.notes);
+    const resolvedClient =
+      payload.client !== undefined
+        ? (payload.client ?? "")
+        : (beforeBid?.client ?? beforeBid?.client_name ?? beforeBid?.customer ?? beforeBid?.customer_name ?? beforeParsedNotes.meta.client ?? "");
+    const resolvedBidDate =
+      payload.bid_date !== undefined
+        ? normalizeDate(payload.bid_date, null)
+        : (beforeBid?.bid_date ?? beforeBid?.bidDate ?? beforeBid?.biddate ?? beforeParsedNotes.meta.bid_date ?? null);
+    const resolvedProbability =
+      payload.probability !== undefined
+        ? normalizeNumber(payload.probability)
+        : normalizeNumber(beforeBid?.probability ?? beforeBid?.win_probability ?? beforeParsedNotes.meta.probability ?? 0);
+    const plainNotes = payload.notes !== undefined ? (payload.notes ?? "") : beforeParsedNotes.plainNotes;
+    updatePayload.notes = buildBidNotes(plainNotes, {
+      client: resolvedClient || undefined,
+      bid_date: resolvedBidDate || undefined,
+      probability: resolvedProbability,
+    });
 
     const { error } = await updateWithVariants(supabase, companyId, bidId, updatePayload);
 

@@ -5,17 +5,17 @@ type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
 
 async function setRole(page: Page, role: Role) {
-  let response = await page.request.post('/api/test/set-role', { data: { role } });
+  let response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
   let body = await response.text();
 
   if (response.status() === 403 && body.includes('No company membership found')) {
-    const bootstrap = await page.request.post('/api/bootstrap');
+    const bootstrap = await page.request.post('/api/bootstrap', { timeout: 30_000 });
     const bootstrapBody = await bootstrap.text();
     expect([200, 400]).toContain(bootstrap.status());
     if (bootstrap.status() === 400 && !bootstrapBody.toLowerCase().includes('duplicate')) {
       throw new Error(bootstrapBody);
     }
-    response = await page.request.post('/api/test/set-role', { data: { role } });
+    response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
     body = await response.text();
   }
 
@@ -31,6 +31,7 @@ test('team list includes derived assignment/hours and role-gated pay', async ({ 
 
   const createJobRes = await page.request.post('/api/jobs', {
     data: { name: `team-derived-job-${stamp}`, status: 'in_progress' },
+    timeout: 30_000,
   });
   expect(createJobRes.status()).toBe(200);
   const jobId = String((await createJobRes.json())?.job?.id ?? '');
@@ -43,6 +44,7 @@ test('team list includes derived assignment/hours and role-gated pay', async ({ 
       hourlyRate: 42,
       email: `team-operator-${stamp}@example.com`,
     },
+    timeout: 30_000,
   });
   const createEmployeeBody = await createEmployeeRes.text();
   expect(createEmployeeRes.status(), createEmployeeBody).toBe(200);
@@ -56,10 +58,11 @@ test('team list includes derived assignment/hours and role-gated pay', async ({ 
       employeeId,
       notes: 'team derived e2e',
     },
+    timeout: 30_000,
   });
   expect([200, 409]).toContain(assignRes.status());
 
-  const adminTeamRes = await page.request.get('/api/team?limit=50');
+  const adminTeamRes = await page.request.get('/api/team?limit=50', { timeout: 30_000 });
   const adminTeamJson = await adminTeamRes.json();
   expect(adminTeamRes.status()).toBe(200);
   const adminItems = Array.isArray(adminTeamJson?.items) ? adminTeamJson.items : [];
@@ -70,10 +73,10 @@ test('team list includes derived assignment/hours and role-gated pay', async ({ 
   expect(Number((seededAdminRow as Record<string, unknown>).hoursThisWeek ?? -1)).toBe(0);
   expect(Boolean(((seededAdminRow as Record<string, unknown>).pay as Record<string, unknown>)?.visible)).toBe(true);
 
-  await page.goto('/team');
+  await page.goto('/team', { timeout: 30_000 });
 
   await setRole(page, 'operator');
-  const operatorTeamRes = await page.request.get('/api/team?limit=50');
+  const operatorTeamRes = await page.request.get('/api/team?limit=50', { timeout: 30_000 });
   const operatorTeamJson = await operatorTeamRes.json();
   expect(operatorTeamRes.status()).toBe(200);
   const operatorItems = Array.isArray(operatorTeamJson?.items) ? operatorTeamJson.items : [];

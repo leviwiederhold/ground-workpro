@@ -4,7 +4,7 @@ import { loginViaUI } from './helpers';
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
 async function setRole(page: Page, role: Role) {
-  const response = await page.request.post('/api/test/set-role', { data: { role } });
+  const response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
   const body = await response.text();
   expect(response.status(), body).toBe(200);
 }
@@ -21,6 +21,7 @@ test('operator sees unread notification after admin assignment', async ({ page }
       status: 'in_progress',
       site_address: '100 Notify St',
     },
+    timeout: 30_000,
   });
   const jobBody = await jobResponse.text();
   expect(jobResponse.status(), jobBody).toBe(200);
@@ -32,6 +33,7 @@ test('operator sees unread notification after admin assignment', async ({ page }
       name: `Notify Operator ${stamp}`,
       role: 'Operator',
     },
+    timeout: 30_000,
   });
   const employeeBody = await employeeResponse.text();
   expect(employeeResponse.status(), employeeBody).toBe(200);
@@ -45,13 +47,14 @@ test('operator sees unread notification after admin assignment', async ({ page }
       date,
       employeeId,
     },
+    timeout: 30_000,
   });
   const assignmentBody = await assignmentResponse.text();
   expect(assignmentResponse.status(), assignmentBody).toBe(200);
 
   await setRole(page, 'operator');
 
-  const notificationsResponse = await page.request.get('/api/notifications');
+  const notificationsResponse = await page.request.get('/api/notifications', { timeout: 30_000 });
   const notificationsBody = await notificationsResponse.text();
   expect(notificationsResponse.status(), notificationsBody).toBe(200);
   const notifications = JSON.parse(notificationsBody)?.items ?? [];

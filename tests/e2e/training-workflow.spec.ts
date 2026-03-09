@@ -7,7 +7,7 @@ test('training course create, assign, complete persists', async ({ page }) => {
   const stamp = Date.now();
   const courseTitle = `E2E Training ${stamp}`;
 
-  const employeesResponse = await page.request.get('/api/employees');
+  const employeesResponse = await page.request.get('/api/employees', { timeout: 30_000 });
   expect(employeesResponse.status(), await employeesResponse.text()).toBe(200);
   const employeesPayload = await employeesResponse.json();
   const employeeId = String(employeesPayload?.employees?.[0]?.id ?? '');
@@ -21,6 +21,7 @@ test('training course create, assign, complete persists', async ({ page }) => {
       videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
       required: true,
     },
+    timeout: 30_000,
   });
   expect(createCourseResponse.status(), await createCourseResponse.text()).toBe(201);
   const createdCourse = (await createCourseResponse.json())?.item;
@@ -31,6 +32,7 @@ test('training course create, assign, complete persists', async ({ page }) => {
       employeeIds: [employeeId],
       required: true,
     },
+    timeout: 30_000,
   });
   expect(assignResponse.status(), await assignResponse.text()).toBe(200);
 

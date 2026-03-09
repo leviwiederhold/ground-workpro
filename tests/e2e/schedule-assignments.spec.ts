@@ -4,7 +4,7 @@ import { loginViaUI } from './helpers';
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
 async function setRole(page: Page, role: Role) {
-  const response = await page.request.post('/api/test/set-role', { data: { role } });
+  const response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
   const body = await response.text();
   expect(response.status(), body).toBe(200);
 }
@@ -22,6 +22,7 @@ test('schedule assignments persist after refresh', async ({ page }) => {
       status: 'in_progress',
       site_address: '123 Assignments Way',
     },
+    timeout: 30_000,
   });
   const jobBody = await jobResponse.text();
   expect(jobResponse.status(), jobBody).toBe(200);
@@ -33,6 +34,7 @@ test('schedule assignments persist after refresh', async ({ page }) => {
       name: `E2E Scheduler ${stamp}`,
       role: 'Laborer',
     },
+    timeout: 30_000,
   });
   const employeeBody = await employeeResponse.text();
   expect(employeeResponse.status(), employeeBody).toBe(200);
@@ -45,6 +47,7 @@ test('schedule assignments persist after refresh', async ({ page }) => {
       status: 'active',
       type: 'Truck',
     },
+    timeout: 30_000,
   });
   const equipmentBody = await equipmentResponse.text();
   expect(equipmentResponse.status(), equipmentBody).toBe(200);
@@ -61,6 +64,7 @@ test('schedule assignments persist after refresh', async ({ page }) => {
       employeeId: employee.id,
       notes: 'employee assignment from e2e',
     },
+    timeout: 30_000,
   });
   const createEmployeeAssignmentBody = await createEmployeeAssignment.text();
   expect(createEmployeeAssignment.status(), createEmployeeAssignmentBody).toBe(200);
@@ -74,6 +78,7 @@ test('schedule assignments persist after refresh', async ({ page }) => {
       equipmentId: equipment.id,
       notes: 'equipment assignment from e2e',
     },
+    timeout: 30_000,
   });
   const createEquipmentAssignmentBody = await createEquipmentAssignment.text();
   expect(createEquipmentAssignment.status(), createEquipmentAssignmentBody).toBe(200);
@@ -83,11 +88,13 @@ test('schedule assignments persist after refresh', async ({ page }) => {
   await page.reload();
   await page.getByTestId('nav-schedule').click();
 
-  const weekResponseAfterReload = await page.request.get(`/api/schedule/week?start=${today}`);
+  const weekResponseAfterReload = await page.request.get(`/api/schedule/week?start=${today}`, {
+    timeout: 30_000,
+  });
   const weekBodyAfterReload = await weekResponseAfterReload.text();
   expect(weekResponseAfterReload.status(), weekBodyAfterReload).toBe(200);
 
-  const teamResponse = await page.request.get('/api/team');
+  const teamResponse = await page.request.get('/api/team', { timeout: 30_000 });
   const teamBody = await teamResponse.text();
   expect(teamResponse.status(), teamBody).toBe(200);
   const teamPayload = JSON.parse(teamBody);

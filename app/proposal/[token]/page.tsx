@@ -103,7 +103,17 @@ export default function ProposalPage() {
         setError((parsed && "error" in parsed && parsed.error) || "Failed to approve proposal");
         return;
       }
-      setPayload(parsed.item);
+      setPayload((current) => ({
+        ...(current ?? parsed.item),
+        ...parsed.item,
+        proposal: {
+          ...(current?.proposal ?? parsed.item.proposal),
+          ...parsed.item.proposal,
+          status: "accepted",
+          accepted_at: parsed.item.proposal.accepted_at ?? new Date().toISOString(),
+        },
+      }));
+      void loadProposal();
     } catch {
       setError("Failed to approve proposal");
     } finally {

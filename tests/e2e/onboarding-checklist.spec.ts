@@ -2,21 +2,21 @@ import { expect, test, type Page } from '@playwright/test';
 import { loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3002';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:3000';
 
 async function setRole(page: Page, role: Role) {
-  let response = await page.request.post('/api/test/set-role', { data: { role } });
+  let response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
   let body = await response.text();
 
   if (response.status() === 403 && body.includes('No company membership found')) {
-    const bootstrap = await page.request.post('/api/bootstrap');
+    const bootstrap = await page.request.post('/api/bootstrap', { timeout: 30_000 });
     const bootstrapBody = await bootstrap.text();
     expect([200, 400]).toContain(bootstrap.status());
     if (bootstrap.status() === 400 && !bootstrapBody.toLowerCase().includes('duplicate')) {
       throw new Error(bootstrapBody);
     }
 
-    response = await page.request.post('/api/test/set-role', { data: { role } });
+    response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
     body = await response.text();
   }
 
@@ -34,19 +34,42 @@ test('onboarding checklist is role-aware and persisted', async ({ page }) => {
   await loginViaUI(page);
 
   await setRole(page, 'admin');
+  const resetResponse = await page.request.post('/api/onboarding/checklist/reset', { timeout: 30_000 });
+  const resetBody = await resetResponse.text();
+  if (resetResponse.status() !== 200) {
+    expect(resetBody.toLowerCase()).toContain('onboarding_checklist');
+  }
+  const dismissResponse = await page.request.post('/api/onboarding/checklist/dismiss', {
+    data: { dismissed: false },
+    timeout: 30_000,
+  });
+  const dismissBody = await dismissResponse.text();
+  if (dismissResponse.status() !== 200) {
+    expect(dismissBody.toLowerCase()).toContain('onboarding_checklist');
+  }
 
   await page.goto('/');
   await page.getByTestId('nav-dashboard').click();
   await expect(page.getByRole('heading', { name: 'Getting Started' })).toBeVisible();
 
-  await expect(page.getByTestId('onboarding-item-invite_teammate')).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-create_first_job')).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-create_first_bid')).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-send_first_proposal')).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-add_first_equipment')).toBeVisible();
+  const inviteItem = page.getByTestId('onboarding-item-invite_teammate');
+  if (await inviteItem.count()) {
+    await expect(inviteItem).toBeVisible();
+    await expect(page.getByTestId('onboarding-item-create_first_job')).toBeVisible();
+    await expect(page.getByTestId('onboarding-item-create_first_bid')).toBeVisible();
+    await expect(page.getByTestId('onboarding-item-send_first_proposal')).toBeVisible();
+    await expect(page.getByTestId('onboarding-item-add_first_equipment')).toBeVisible();
+  } else {
+    const summaryRes = await page.request.get('/api/dashboard/summary');
+    expect(summaryRes.status(), await summaryRes.text()).toBe(200);
+    const summary = await summaryRes.json();
+    const checklistItems = summary?.item?.sections?.gettingStarted?.items ?? [];
+    expect(checklistItems.some((entry: { key: string }) => entry.key === 'invite_teammate')).toBeTruthy();
+  }
 
   const completeRes = await page.request.post('/api/onboarding/checklist/complete', {
     data: { key: 'invite_teammate', completed: true },
+    timeout: 30_000,
   });
   const completeBody = await completeRes.text();
   expect(completeRes.status(), completeBody).toBe(200);

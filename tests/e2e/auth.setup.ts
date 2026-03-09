@@ -14,7 +14,7 @@ setup('authenticate', async ({ page }) => {
   if (!apiLogin.ok()) {
     await loginViaUI(page);
   } else {
-    await page.goto('/');
+    await page.goto('/login');
   }
 
   const bootstrapResponse = await page.request.post('/api/bootstrap');
@@ -39,7 +39,7 @@ setup('authenticate', async ({ page }) => {
   const roleResetIsDevChunkFlake =
     roleResetStatus === 500 &&
     roleResetBody.includes('Cannot find module') &&
-    roleResetBody.includes('/api/test/set-role');
+    roleResetBody.includes('.next/server/webpack-runtime.js');
   if (![200, 401, 403, 404].includes(roleResetStatus) && !roleResetIsDevChunkFlake) {
     throw new Error(`E2E setup role reset failed: ${roleResetBody}`);
   }

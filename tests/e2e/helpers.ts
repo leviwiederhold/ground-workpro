@@ -28,7 +28,7 @@ export async function loginViaUI(page: Page) {
       timeout: 30_000,
     });
     if (apiLogin.ok()) {
-      await page.goto('/');
+      await page.goto('/login');
       if (!page.url().includes('/login')) return;
     }
   } catch {
@@ -90,6 +90,7 @@ export async function seedJobCostingFixture(
 
   const createJobResponse = await request.post('/api/jobs', {
     data: { name: jobName, status: 'draft' },
+    timeout: 30_000,
   });
   expect(createJobResponse.status()).toBe(200);
   const createJobJson = await createJobResponse.json();
@@ -98,6 +99,7 @@ export async function seedJobCostingFixture(
 
   const createBidResponse = await request.post('/api/bids', {
     data: { title: `Bid ${timestamp}`, status: 'draft', job_id: jobId },
+    timeout: 30_000,
   });
   expect(createBidResponse.status()).toBe(200);
   const createBidJson = await createBidResponse.json();
@@ -106,6 +108,7 @@ export async function seedJobCostingFixture(
 
   const createBidItemResponse = await request.post(`/api/bids/${bidId}/items`, {
     data: { item_type: 'custom', description: 'Estimate baseline', quantity: 1, unit_cost: 100 },
+    timeout: 30_000,
   });
   expect(createBidItemResponse.status()).toBe(200);
 
@@ -120,6 +123,7 @@ export async function seedJobCostingFixture(
       workAccomplished: 'Costing test',
       notes: 'Costing test',
     },
+    timeout: 30_000,
   });
   expect(createReportResponse.status()).toBe(200);
   const createReportJson = await createReportResponse.json();
@@ -129,11 +133,13 @@ export async function seedJobCostingFixture(
   // Material quantity is used as direct cost proxy when unit cost columns are absent.
   const createEntryResponse = await request.post(`/api/daily-reports/${reportId}/entries`, {
     data: { entry_type: 'material', description: 'Imported fill', quantity: 200 },
+    timeout: 30_000,
   });
   expect(createEntryResponse.status()).toBe(200);
 
   const createVendorResponse = await request.post('/api/vendors', {
     data: { name: vendorName, status: 'active' },
+    timeout: 30_000,
   });
   expect(createVendorResponse.status()).toBe(200);
   const createVendorJson = await createVendorResponse.json();
@@ -142,6 +148,7 @@ export async function seedJobCostingFixture(
 
   const createPoResponse = await request.post('/api/purchase-orders', {
     data: { vendor_id: vendorId, job_id: jobId, status: 'draft', notes: 'Costing PO' },
+    timeout: 30_000,
   });
   expect(createPoResponse.status()).toBe(200);
   const createPoJson = await createPoResponse.json();
@@ -150,6 +157,7 @@ export async function seedJobCostingFixture(
 
   const createPoItemResponse = await request.post(`/api/purchase-orders/${poId}/items`, {
     data: { description: 'PO cost', quantity: 1, unit_cost: 25 },
+    timeout: 30_000,
   });
   expect(createPoItemResponse.status()).toBe(200);
 

@@ -625,6 +625,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
+      const [comingSoonMessage, setComingSoonMessage] = useState('');
       const [currentRole, setCurrentRole] = useState('executive');
       const [canSwitchRoleView, setCanSwitchRoleView] = useState(false);
       const [showRoleSelector, setShowRoleSelector] = useState(false);
@@ -638,6 +639,11 @@ const confirmDestructiveAction = (targetLabel) =>
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
+
+      const openComingSoon = useCallback((message) => {
+        setComingSoonMessage(message || 'This feature is coming soon.');
+        setShowModal({ type: 'coming-soon', data: null });
+      }, []);
 
       // Data State
       const [jobs, setJobs] = useState([]);
@@ -1874,7 +1880,17 @@ const confirmDestructiveAction = (targetLabel) =>
           </main>
 
           {/* Modals */}
-          <QuickActionsModal isOpen={showModal.type === 'quick-actions'} onClose={() => setShowModal({ type: null })} setShowModal={setShowModal} />
+          <QuickActionsModal
+            isOpen={showModal.type === 'quick-actions'}
+            onClose={() => setShowModal({ type: null })}
+            setShowModal={setShowModal}
+            onComingSoon={openComingSoon}
+          />
+          <ComingSoonModal
+            isOpen={showModal.type === 'coming-soon'}
+            onClose={() => setShowModal({ type: null })}
+            message={comingSoonMessage}
+          />
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
             onClose={() => setShowModal({ type: null })}
@@ -8825,12 +8841,12 @@ const confirmDestructiveAction = (targetLabel) =>
             parsed = {};
           }
           if (!response.ok) {
-            setConnectionsError(parsed?.error || raw || 'Failed to update integration');
+            setConnectionsError(parsed?.error || raw || 'Failed to update integration connection');
             return;
           }
           await loadConnections();
         } catch {
-          setConnectionsError('Failed to update integration');
+          setConnectionsError('Failed to update integration connection');
         } finally {
           setActiveProviderAction(null);
         }
@@ -8961,7 +8977,7 @@ const confirmDestructiveAction = (targetLabel) =>
                                 disabled={isBusy || !canDisconnect}
                                 data-testid={`integration-disconnect-${integration.provider}`}
                               >
-                                {isBusy ? 'Saving...' : 'Disconnect'}
+                                {isBusy ? '...' : 'Disconnect'}
                               </Button>
                             </div>
                           </>
@@ -8975,7 +8991,7 @@ const confirmDestructiveAction = (targetLabel) =>
                               disabled={isBusy || !canConnect}
                               data-testid={`integration-connect-${integration.provider}`}
                             >
-                              <Icon name="plug" className="mr-1" /> {isBusy ? 'Saving...' : 'Connect'}
+                              <Icon name="plug" className="mr-1" /> {isBusy ? '...' : 'Connect'}
                             </Button>
                           </>
                         )}
@@ -9473,7 +9489,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // MODALS
     // ============================================
 
-    const QuickActionsModal = ({ isOpen, onClose, setShowModal }) => (
+    const QuickActionsModal = ({ isOpen, onClose, setShowModal, onComingSoon }) => (
       <Modal isOpen={isOpen} onClose={onClose} title="Quick Actions" size="sm">
         <div className="grid grid-cols-2 gap-3">
           {[
@@ -9487,7 +9503,14 @@ const confirmDestructiveAction = (targetLabel) =>
           ].map(item => (
             <button
               key={item.action}
-              onClick={() => { onClose(); setShowModal({ type: item.action }); }}
+              onClick={() => {
+                onClose();
+                if (['time-clock', 'equipment-checkin', 'photo'].includes(item.action)) {
+                  onComingSoon(`${item.label} is coming soon.`);
+                  return;
+                }
+                setShowModal({ type: item.action });
+              }}
               className="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
             >
               <div className={`p-3 rounded-full bg-${item.color}-100`}>
@@ -9496,6 +9519,19 @@ const confirmDestructiveAction = (targetLabel) =>
               <span className="text-sm font-medium text-gray-700">{item.label}</span>
             </button>
           ))}
+        </div>
+      </Modal>
+    );
+
+    const ComingSoonModal = ({ isOpen, onClose, message }) => (
+      <Modal isOpen={isOpen} onClose={onClose} title="Coming Soon" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">{message || 'This feature is coming soon.'}</p>
+          <div className="flex justify-end">
+            <Button variant="brand" size="sm" onClick={onClose}>
+              Got it
+            </Button>
+          </div>
         </div>
       </Modal>
     );

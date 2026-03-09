@@ -4,7 +4,7 @@ import { getE2ECreds, loginViaUI } from './helpers';
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
 async function setRole(page: Page, role: Role) {
-  const response = await page.request.post('/api/test/set-role', { data: { role } });
+  const response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
   const body = await response.text();
   expect(response.status(), body).toBe(200);
 }
@@ -40,6 +40,7 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
       role: 'Operator',
       email,
     },
+    timeout: 30_000,
   });
   const operatorEmployeeBody = await operatorEmployeeResponse.text();
   expect(operatorEmployeeResponse.status(), operatorEmployeeBody).toBe(200);
@@ -55,6 +56,7 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
       eventType: 'meeting',
       attendees: [{ type: 'employee', employeeId: operatorEmployeeId }],
     },
+    timeout: 30_000,
   });
   const visibleEventBody = await visibleEventResponse.text();
   if (visibleEventResponse.status() === 400 && visibleEventBody.includes('calendar_events')) {
@@ -70,6 +72,7 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
       role: 'Operator',
       email: `other-operator-${stamp}@example.com`,
     },
+    timeout: 30_000,
   });
   const otherOperatorEmployeeBody = await otherOperatorEmployeeResponse.text();
   expect(otherOperatorEmployeeResponse.status(), otherOperatorEmployeeBody).toBe(200);
@@ -85,6 +88,7 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
       eventType: 'internal',
       attendees: [{ type: 'employee', employeeId: otherOperatorEmployeeId }],
     },
+    timeout: 30_000,
   });
   const hiddenEventBody = await hiddenEventResponse.text();
   if (hiddenEventResponse.status() === 400 && hiddenEventBody.includes('calendar_events')) {

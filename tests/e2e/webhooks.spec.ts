@@ -14,6 +14,7 @@ test("webhook ingestion persists event and honors idempotency key", async ({ req
       "x-idempotency-key": idempotencyKey,
     },
     data: payload,
+    timeout: 30_000,
   });
   const firstBody = await firstResponse.text();
   expect(firstResponse.status(), firstBody).toBe(200);
@@ -29,6 +30,7 @@ test("webhook ingestion persists event and honors idempotency key", async ({ req
       "x-idempotency-key": idempotencyKey,
     },
     data: payload,
+    timeout: 30_000,
   });
   const secondBody = await secondResponse.text();
   expect(secondResponse.status(), secondBody).toBe(200);

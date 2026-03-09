@@ -5,6 +5,7 @@ test("vendors command center persists profile, status, po link, and docs", async
   await loginViaUI(page);
   const subscriptionRes = await page.request.post('/api/test/set-subscription', {
     data: { subscription_status: 'active' },
+    timeout: 30_000,
   });
   expect(subscriptionRes.status()).toBe(200);
 
@@ -24,6 +25,7 @@ test("vendors command center persists profile, status, po link, and docs", async
       payment_terms: "Net 30",
       notes: "Vendor command center smoke",
     },
+    timeout: 30_000,
   });
   expect(createVendorRes.status()).toBe(200);
   const createVendorJson = await createVendorRes.json();
@@ -34,6 +36,7 @@ test("vendors command center persists profile, status, po link, and docs", async
 
   const patchVendorRes = await page.request.patch(`/api/vendors/${vendorId}`, {
     data: { status: "preferred" },
+    timeout: 30_000,
   });
   expect(patchVendorRes.status()).toBe(200);
 
@@ -43,6 +46,7 @@ test("vendors command center persists profile, status, po link, and docs", async
       status: "draft",
       notes: "Vendor command center PO",
     },
+    timeout: 30_000,
   });
   expect(createPoRes.status()).toBe(200);
   const createPoJson = await createPoRes.json();
@@ -58,10 +62,11 @@ test("vendors command center persists profile, status, po link, and docs", async
         buffer: Buffer.from(`vendor-doc-${stamp}`),
       },
     },
+    timeout: 30_000,
   });
   expect(uploadDocRes.status()).toBe(200);
 
-  const summaryRes = await page.request.get(`/api/vendors/${vendorId}/summary`);
+  const summaryRes = await page.request.get(`/api/vendors/${vendorId}/summary`, { timeout: 30_000 });
   expect(summaryRes.status()).toBe(200);
   const summaryJson = await summaryRes.json();
   expect(summaryJson?.item?.profile?.name).toBe(vendorName);

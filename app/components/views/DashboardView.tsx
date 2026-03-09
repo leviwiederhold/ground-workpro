@@ -72,7 +72,9 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
       const item = payload?.item ?? null;
       setDashboardSummary(item);
 
-      const gettingStarted = (item?.sections?.primary?.items || []).find((entry) => entry.type === 'getting_started')?.meta;
+      const gettingStarted =
+        item?.sections?.gettingStarted ??
+        (item?.sections?.primary?.items || []).find((entry) => entry.type === 'getting_started')?.meta;
       if (gettingStarted) {
         setOnboardingItems(
           Array.isArray(gettingStarted.items)

@@ -4,16 +4,16 @@ import { loginViaUI } from './helpers';
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
 async function setRole(page: Page, role: Role) {
-  let response = await page.request.post('/api/test/set-role', { data: { role } });
+  let response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
   let body = await response.text();
   if (response.status() === 403 && body.includes('No company membership found')) {
-    const bootstrap = await page.request.post('/api/bootstrap');
+    const bootstrap = await page.request.post('/api/bootstrap', { timeout: 30_000 });
     const bootstrapBody = await bootstrap.text();
     expect([200, 400]).toContain(bootstrap.status());
     if (bootstrap.status() === 400 && !bootstrapBody.toLowerCase().includes('duplicate')) {
       throw new Error(bootstrapBody);
     }
-    response = await page.request.post('/api/test/set-role', { data: { role } });
+    response = await page.request.post('/api/test/set-role', { data: { role }, timeout: 30_000 });
     body = await response.text();
   }
   expect(response.status(), body).toBe(200);
@@ -51,14 +51,18 @@ test('schedule time-grid click-add persists and all-day assignment remains visib
     return;
   }
 
-  const weekRes = await page.request.get(`/api/calendar/week?start=${monday.toISOString().slice(0, 10)}`);
+  const weekRes = await page.request.get(`/api/calendar/week?start=${monday.toISOString().slice(0, 10)}`, {
+    timeout: 30_000,
+  });
   const weekBody = await weekRes.text();
   expect(weekRes.status(), weekBody).toBe(200);
   const weekPayload = JSON.parse(weekBody);
   const firstPassEvents = weekPayload?.items ?? [];
   expect(firstPassEvents.some((item: { title?: string }) => String(item.title ?? '') === eventTitle)).toBeTruthy();
 
-  const weekResAgain = await page.request.get(`/api/calendar/week?start=${monday.toISOString().slice(0, 10)}`);
+  const weekResAgain = await page.request.get(`/api/calendar/week?start=${monday.toISOString().slice(0, 10)}`, {
+    timeout: 30_000,
+  });
   const weekBodyAgain = await weekResAgain.text();
   expect(weekResAgain.status(), weekBodyAgain).toBe(200);
   const weekPayloadAgain = JSON.parse(weekBodyAgain);

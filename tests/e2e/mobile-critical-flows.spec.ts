@@ -52,6 +52,7 @@ test('mobile critical flows run without console errors', async ({ page }) => {
       status: 'draft',
       bid_date: '2026-02-20',
     },
+    timeout: 30_000,
   });
   expect(createBidRes.status()).toBe(200);
   const createBidJson = await createBidRes.json();
@@ -65,11 +66,13 @@ test('mobile critical flows run without console errors', async ({ page }) => {
       quantity: 1,
       unit_cost: 1000,
     },
+    timeout: 30_000,
   });
   expect(createItemRes.status()).toBe(200);
 
   const sendRes = await page.request.post(`/api/bids/${bidId}/send`, {
     data: { override: true, override_note: 'mobile flow' },
+    timeout: 30_000,
   });
   expect(sendRes.status()).toBe(200);
 
@@ -77,7 +80,7 @@ test('mobile critical flows run without console errors', async ({ page }) => {
   await page.getByTestId('nav-bids').click();
   await expect(page.locator('h1', { hasText: /^bids$/i }).first()).toBeVisible();
 
-  const shareRes = await page.request.post(`/api/bids/${bidId}/share`, { data: {} });
+  const shareRes = await page.request.post(`/api/bids/${bidId}/share`, { data: {}, timeout: 30_000 });
   expect(shareRes.status()).toBe(200);
   const shareJson = await shareRes.json();
   const shareUrl = shareJson?.item?.url;

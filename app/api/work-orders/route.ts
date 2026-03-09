@@ -49,13 +49,10 @@ const normalizeUuid = (value: unknown) => {
 
 const toDbStatus = (status: string | undefined) => {
   if (!status) return status;
-  if (status === "scheduled") return "open";
-  if (status === "in-progress") return "in_progress";
-  if (status === "completed") return "closed";
-  if (status === "complete") return "closed";
-  if (status === "done") return "closed";
-  if (status === "closed") return "closed";
-  return String(status).toLowerCase();
+  const normalized = String(status).toLowerCase().trim();
+  if (normalized === "in-progress") return "in_progress";
+  if (["complete", "done", "closed", "resolved"].includes(normalized)) return "completed";
+  return normalized;
 };
 
 const toUiStatus = (status: string | undefined) => {
@@ -75,12 +72,18 @@ const toUiStatus = (status: string | undefined) => {
 
 const statusCandidates = (status: string | undefined) => {
   if (!status) return [];
-  const normalized = toDbStatus(status);
-  if (normalized === "in_progress") return ["in_progress", "in-progress", "inprogress"];
-  if (normalized === "completed") return ["closed", "completed", "complete", "done", "resolved"];
-  if (normalized === "closed") return ["closed", "completed", "complete", "done", "resolved"];
-  if (normalized === "waiting_parts") return ["waiting_parts"];
-  if (normalized === "open") return ["open", "scheduled", "pending"];
+  const raw = String(status).toLowerCase().trim();
+  if (["in-progress", "in_progress", "inprogress"].includes(raw)) {
+    return ["in_progress", "in-progress", "inprogress"];
+  }
+  if (["completed", "complete", "done", "closed", "resolved"].includes(raw)) {
+    return ["completed", "closed", "complete", "done", "resolved"];
+  }
+  if (["scheduled", "open", "pending"].includes(raw)) {
+    return ["open", "scheduled", "pending"];
+  }
+  if (raw === "waiting_parts") return ["waiting_parts"];
+  const normalized = String(toDbStatus(status) || raw).toLowerCase();
   return [normalized];
 };
 
@@ -103,7 +106,7 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   const currentPayload = { ...payload };
   let lastResult: any = null;
 
-  for (let i = 0; i < 16; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
     const result = await supabase.from("work_orders").insert(currentPayload).select("*").single();
     lastResult = result;
     const message = result.error?.message || "";

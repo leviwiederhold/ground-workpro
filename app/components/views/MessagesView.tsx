@@ -116,6 +116,16 @@ export function MessagesView({ employees = [], ui }) {
       ),
     [availableUsers]
   );
+  const contactDisplayNameByUserId = useMemo(() => {
+    const map = new Map();
+    for (const contact of contactOptions) {
+      if (!contact.userId) continue;
+      if (!map.has(String(contact.userId))) {
+        map.set(String(contact.userId), String(contact.label || 'Team Member'));
+      }
+    }
+    return map;
+  }, [contactOptions]);
 
   const getChannelDisplayName = useCallback(
     (channel) => {
@@ -127,11 +137,14 @@ export function MessagesView({ employees = [], ui }) {
       if (otherUserId && userDisplayNameById.has(otherUserId)) {
         return String(userDisplayNameById.get(otherUserId));
       }
+      if (otherUserId && contactDisplayNameByUserId.has(otherUserId)) {
+        return String(contactDisplayNameByUserId.get(otherUserId));
+      }
       const fallbackName = String(channel.name || '').trim();
       if (fallbackName && !looksLikeDmName(fallbackName)) return fallbackName;
       return 'Team Member';
     },
-    [forcedDirectLabels, isDirectChannel, userDisplayNameById, looksLikeDmName]
+    [forcedDirectLabels, isDirectChannel, userDisplayNameById, contactDisplayNameByUserId, looksLikeDmName]
   );
 
   const loadUsers = useCallback(async () => {
@@ -337,31 +350,21 @@ export function MessagesView({ employees = [], ui }) {
   }, [messages]);
 
   const filteredChannels = channels
-    .filter((channel) => {
-      const direct = isDirectChannel(channel);
-      const displayName = String(getChannelDisplayName(channel) || '');
-      const hasMessages = Number(channel.message_count || 0) > 0;
-      if (!direct) {
-        // Hide legacy junk rows named like DM but not actually direct channels.
-        if (looksLikeDmName(channel.name)) return false;
-        return true;
-      }
-      if (String(activeChannel?.id || '') === String(channel.id)) return true;
-      const hasPersonBinding =
-        Boolean(channel.other_user_id) ||
-        Boolean(forcedDirectLabels[String(channel.id || '')]);
-      const genericDirectLabel =
-        !displayName ||
-        normalized(displayName) === 'direct message' ||
-        normalized(displayName) === 'team member';
-      // Hide anonymous legacy direct threads (e.g., "Direct Message" / dm-*) that are not
-      // bound to a specific teammate in this session.
-      if (genericDirectLabel && !hasPersonBinding) return false;
-      return hasPersonBinding || hasMessages || !looksLikeDmName(channel.name);
-    })
+    .filter((channel) => !isDirectChannel(channel))
+    .filter((channel) => !looksLikeDmName(channel.name))
     .filter((channel) =>
       String(getChannelDisplayName(channel) || channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
     );
+  const directChannelByUserId = useMemo(() => {
+    const map = new Map();
+    for (const channel of channels) {
+      if (!isDirectChannel(channel)) continue;
+      const key = String(channel.other_user_id || '').trim();
+      if (!key) continue;
+      map.set(key, channel);
+    }
+    return map;
+  }, [channels, isDirectChannel]);
   const filteredContacts = contactOptions.filter(
     (contact) => contact.hasAccount && normalized(contact.label).includes(normalized(searchTerm))
   );
@@ -372,11 +375,7 @@ export function MessagesView({ employees = [], ui }) {
       setCreateChannelError('This team member does not have an account yet');
       return;
     }
-    const existing = channels.find(
-      (channel) =>
-        isDirectChannel(channel) &&
-        String(channel.other_user_id || '') === String(contact.userId)
-    );
+    const existing = directChannelByUserId.get(String(contact.userId));
     if (existing) {
       setForcedDirectLabels((prev) => ({
         ...prev,
@@ -596,20 +595,29 @@ export function MessagesView({ employees = [], ui }) {
           <div className="px-4 py-3 border-t border-gray-100">
             <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Team Members</p>
             <div className="space-y-1 max-h-48 overflow-y-auto">
-              {filteredContacts.map((contact) => (
+              {filteredContacts.map((contact) => {
+                const directChannel = contact.userId ? directChannelByUserId.get(String(contact.userId)) : null;
+                const isActiveDirect =
+                  Boolean(directChannel) && String(activeChannel?.id || '') === String(directChannel?.id || '');
+                const preview = directChannel?.last_message_at
+                  ? formatThreadSubtextTime(directChannel.last_message_at)
+                  : (directChannel?.last_message_preview || contact.subtitle || 'Team member');
+                return (
                 <button
                   key={`contact-${contact.key}`}
                   type="button"
                   onClick={() => startDirectChat(contact)}
-                  className="w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 flex items-center justify-between"
+                  className={`w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 flex items-center justify-between ${
+                    isActiveDirect ? 'bg-brand-50 border border-brand-200' : ''
+                  }`}
                 >
                   <div>
                     <p className="text-sm text-gray-900 truncate">{contact.label}</p>
-                    <p className="text-xs text-gray-500 truncate">{contact.subtitle || 'Team member'}</p>
+                    <p className="text-xs text-gray-500 truncate">{preview}</p>
                   </div>
                   <span className="text-[10px] text-gray-500">Chat</span>
                 </button>
-              ))}
+              )})}
             </div>
           </div>
         </div>

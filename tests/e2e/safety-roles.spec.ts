@@ -85,13 +85,13 @@ test('safety log actions are role scoped', async ({ page }) => {
   const safetyId = String(createdSafety.item?.id ?? '');
   expect(safetyId).toBeTruthy();
 
-  const operatorDelete = await page.request.delete(`/api/safety-logs/${safetyId}`);
+  const operatorDelete = await page.request.delete(`/api/safety-logs/${safetyId}`, { timeout: 30_000 });
   expect(operatorDelete.status()).toBe(403);
   expect(await operatorDelete.json()).toEqual({ error: 'Forbidden' });
 
   await setRole(page, 'admin');
 
-  const adminDelete = await page.request.delete(`/api/safety-logs/${safetyId}`);
+  const adminDelete = await page.request.delete(`/api/safety-logs/${safetyId}`, { timeout: 30_000 });
   expect(adminDelete.status()).toBe(200);
   expect(await adminDelete.json()).toEqual({ success: true });
 });

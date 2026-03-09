@@ -4,17 +4,17 @@ import { loginViaUI } from "./helpers";
 type Role = "admin" | "pm" | "foreman" | "mechanic" | "operator";
 
 async function setRealRole(page: Page, role: Role) {
-  let response = await page.request.post("/api/test/set-role", { data: { role } });
+  let response = await page.request.post("/api/test/set-role", { data: { role }, timeout: 30_000 });
   let body = await response.text();
 
   if (response.status() === 403 && body.includes("No company membership found")) {
-    const bootstrap = await page.request.post("/api/bootstrap");
+    const bootstrap = await page.request.post("/api/bootstrap", { timeout: 30_000 });
     const bootstrapBody = await bootstrap.text();
     expect([200, 400]).toContain(bootstrap.status());
     if (bootstrap.status() === 400 && !bootstrapBody.toLowerCase().includes("duplicate")) {
       throw new Error(bootstrapBody);
     }
-    response = await page.request.post("/api/test/set-role", { data: { role } });
+    response = await page.request.post("/api/test/set-role", { data: { role }, timeout: 30_000 });
     body = await response.text();
   }
 
@@ -26,13 +26,14 @@ test("only admin can switch acting role", async ({ page }) => {
 
   await setRealRole(page, "operator");
 
-  const navAsOperator = await page.request.get("/api/nav");
+  const navAsOperator = await page.request.get("/api/nav", { timeout: 30_000 });
   const navAsOperatorJson = await navAsOperator.json();
   expect(navAsOperator.status()).toBe(200);
   expect(navAsOperatorJson?.canSwitchRoleView).toBe(false);
 
   const deniedSwitch = await page.request.post("/api/rbac/acting-role", {
     data: { role: "admin" },
+    timeout: 30_000,
   });
   const deniedSwitchBody = await deniedSwitch.text();
   expect(deniedSwitch.status(), deniedSwitchBody).toBe(403);
@@ -43,13 +44,14 @@ test("only admin can switch acting role", async ({ page }) => {
 
   await setRealRole(page, "admin");
 
-  const navAsAdmin = await page.request.get("/api/nav");
+  const navAsAdmin = await page.request.get("/api/nav", { timeout: 30_000 });
   const navAsAdminJson = await navAsAdmin.json();
   expect(navAsAdmin.status()).toBe(200);
   expect(navAsAdminJson?.canSwitchRoleView).toBe(true);
 
   const allowedSwitch = await page.request.post("/api/rbac/acting-role", {
     data: { role: "operator" },
+    timeout: 30_000,
   });
   const allowedSwitchBody = await allowedSwitch.text();
   expect(allowedSwitch.status(), allowedSwitchBody).toBe(200);

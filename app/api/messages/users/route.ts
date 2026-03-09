@@ -32,7 +32,7 @@ export async function GET() {
 
     const userIds = (memberships.data ?? []).map((row) => String(row.user_id));
     const profiles = userIds.length
-      ? await supabase.from("profiles").select("id, full_name").in("id", userIds)
+      ? await supabase.from("profiles").select("id, full_name, email").in("id", userIds)
       : { data: [], error: null };
 
     if (profiles.error) return serverError();
@@ -54,7 +54,14 @@ export async function GET() {
     // Employees lookup is best-effort; if it fails, fall back to profiles-only names.
     const employeeRows = employees.error ? [] : employees.data ?? [];
 
-    const nameById = new Map((profiles.data ?? []).map((profile) => [String(profile.id), String(profile.full_name ?? "")])) as Map<string, string>;
+    const nameById = new Map<string, string>();
+    for (const profile of profiles.data ?? []) {
+      const fullName = String(profile.full_name ?? "").trim();
+      const emailLocal = String(profile.email ?? "").trim().split("@")[0] || "";
+      if (fullName || emailLocal) {
+        nameById.set(String(profile.id), fullName || emailLocal);
+      }
+    }
     for (const employee of employeeRows) {
       const employeeName = String(employee.name ?? employee.full_name ?? "").trim();
       if (employeeName) {

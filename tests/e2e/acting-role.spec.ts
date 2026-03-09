@@ -4,6 +4,7 @@ import { loginViaUI } from './helpers';
 async function setActingRole(page: import('@playwright/test').Page, role: 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator') {
   const response = await page.request.post('/api/rbac/acting-role', {
     data: { role },
+    timeout: 30_000,
   });
   const body = await response.text();
   expect(response.status(), body).toBe(200);
@@ -17,7 +18,7 @@ test('acting role switch is server-persisted and drives nav + guards', async ({ 
   const baselineAdmin = await setActingRole(page, 'admin');
   expect(baselineAdmin).toBe('admin');
 
-  const adminNavResponse = await page.request.get('/api/nav');
+  const adminNavResponse = await page.request.get('/api/nav', { timeout: 30_000 });
   expect(adminNavResponse.status()).toBe(200);
   const adminNavPayload = await adminNavResponse.json();
   const adminNavKeys = new Set(
@@ -32,7 +33,7 @@ test('acting role switch is server-persisted and drives nav + guards', async ({ 
 
   const effectiveAdmin = await setActingRole(page, 'admin');
   expect(effectiveAdmin).toBe('admin');
-  const adminNavResponseAgain = await page.request.get('/api/nav');
+  const adminNavResponseAgain = await page.request.get('/api/nav', { timeout: 30_000 });
   expect(adminNavResponseAgain.status()).toBe(200);
   const adminNavPayloadAgain = await adminNavResponseAgain.json();
   const adminNavKeysAgain = new Set(

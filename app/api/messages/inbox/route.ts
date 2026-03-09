@@ -221,9 +221,10 @@ export async function GET(request: Request) {
       const members = Array.from(new Set(memberUserIdsByChannel.get(key) ?? []));
       const hasCurrentUser = members.includes(String(userId));
       const hasOtherUser = members.some((id) => id !== String(userId));
+      const isTwoPartyDirect = hasCurrentUser && hasOtherUser && members.length === 2;
       // Legacy rows can have name-based DM markers; treat them as direct when they clearly map to current user + at least one teammate.
       const effectiveKind =
-        channel.kind === "direct" || (isLegacyDmName && hasCurrentUser && hasOtherUser)
+        (channel.kind === "direct" && isTwoPartyDirect) || (isLegacyDmName && isTwoPartyDirect)
           ? "direct"
           : channel.kind || "channel";
       let otherUserId: string | null = null;
@@ -240,7 +241,7 @@ export async function GET(request: Request) {
       const directDisplayName = displayNameByUserId.get(String(otherUserId ?? ""));
       const resolvedDirectName =
         effectiveKind === "direct"
-          ? (directDisplayName || (isLegacyDirectLikeName(rawName) ? "" : rawName || ""))
+          ? (directDisplayName || "")
           : rawName;
       return {
         id: channel.id,

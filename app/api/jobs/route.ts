@@ -108,22 +108,28 @@ async function getJobAssignmentCounts(
   const [crewResult, equipmentResult] = await Promise.all([
     supabase
       .from("job_employees")
-      .select("job_id")
+      .select("job_id, employee_id")
       .eq("company_id", companyId)
       .in("job_id", jobIds),
     supabase
       .from("job_equipment")
-      .select("job_id")
+      .select("job_id, equipment_id")
       .eq("company_id", companyId)
       .in("job_id", jobIds),
   ]);
 
   const counts = new Map<string, { crew: number; equipment: number }>();
+  const crewSeen = new Set<string>();
+  const equipmentSeen = new Set<string>();
 
   if (!crewResult.error) {
     for (const row of crewResult.data ?? []) {
       const key = String((row as any).job_id ?? "");
+      const employeeId = String((row as any).employee_id ?? "");
       if (!key) continue;
+      const dedupeKey = `${key}:${employeeId}`;
+      if (crewSeen.has(dedupeKey)) continue;
+      crewSeen.add(dedupeKey);
       const current = counts.get(key) ?? { crew: 0, equipment: 0 };
       current.crew += 1;
       counts.set(key, current);
@@ -133,7 +139,11 @@ async function getJobAssignmentCounts(
   if (!equipmentResult.error) {
     for (const row of equipmentResult.data ?? []) {
       const key = String((row as any).job_id ?? "");
+      const equipmentId = String((row as any).equipment_id ?? "");
       if (!key) continue;
+      const dedupeKey = `${key}:${equipmentId}`;
+      if (equipmentSeen.has(dedupeKey)) continue;
+      equipmentSeen.add(dedupeKey);
       const current = counts.get(key) ?? { crew: 0, equipment: 0 };
       current.equipment += 1;
       counts.set(key, current);

@@ -31,7 +31,7 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   const currentPayload = { ...payload };
   let lastResult: any = null;
 
-  for (let i = 0; i < 20; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
     const result = await supabase.from("inventory").insert(currentPayload).select("*").single();
     lastResult = result;
     const message = result.error?.message || "";

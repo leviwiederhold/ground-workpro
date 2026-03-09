@@ -70,6 +70,7 @@ test('operator is blocked from company week and only sees personal week data', a
         eventType: 'meeting',
         attendees: [{ attendeeType: 'employee', employeeId: operatorEmployeeId }],
       },
+      timeout: 30_000,
     }),
     page.request.post('/api/calendar/events', {
       data: {
@@ -80,6 +81,7 @@ test('operator is blocked from company week and only sees personal week data', a
         eventType: 'internal',
         attendees: [{ attendeeType: 'employee', employeeId: foremanEmployeeId }],
       },
+      timeout: 30_000,
     }),
   ]);
   expect(visibleEventRes.status(), await visibleEventRes.text()).toBe(200);

@@ -20,15 +20,16 @@ const poStatusSchema = z.enum([
 const poStatusCandidates = (status: string | undefined) => {
   if (!status) return [];
   const normalized = String(status).toLowerCase();
-  if (normalized === "approved") return ["approved", "submitted", "draft"];
-  if (normalized === "cancelled") return ["cancelled", "canceled"];
-  if (normalized === "canceled") return ["canceled", "cancelled"];
-  if (normalized === "ordered") return ["approved", "submitted", "draft"];
-  if (normalized === "open") return ["submitted", "draft"];
-  if (normalized === "closed") return ["received", "approved", "submitted", "draft"];
-  if (normalized === "completed") return ["received", "approved", "submitted", "draft"];
-  if (normalized === "received") return ["received", "approved", "submitted", "draft"];
-  if (normalized === "submitted") return ["submitted", "draft"];
+  const dedupe = (values: string[]) => Array.from(new Set(values));
+  if (normalized === "approved") return dedupe(["approved", "ordered", "submitted", "open", "draft"]);
+  if (normalized === "cancelled") return dedupe(["cancelled", "canceled"]);
+  if (normalized === "canceled") return dedupe(["canceled", "cancelled"]);
+  if (normalized === "ordered") return dedupe(["ordered", "approved", "submitted", "open", "draft"]);
+  if (normalized === "open") return dedupe(["open", "submitted", "draft"]);
+  if (normalized === "closed") return dedupe(["closed", "completed", "received", "approved", "submitted", "draft"]);
+  if (normalized === "completed") return dedupe(["completed", "closed", "received", "approved", "submitted", "draft"]);
+  if (normalized === "received") return dedupe(["received", "completed", "closed", "approved", "submitted", "draft"]);
+  if (normalized === "submitted") return dedupe(["submitted", "open", "draft"]);
   return [normalized];
 };
 
@@ -36,10 +37,6 @@ const toDbStatus = (status: string | undefined) => {
   if (!status) return status;
   const normalized = String(status).toLowerCase();
   if (normalized === "cancelled") return "canceled";
-  if (normalized === "open") return "submitted";
-  if (normalized === "closed") return "received";
-  if (normalized === "completed") return "received";
-  if (normalized === "ordered") return "approved";
   return normalized;
 };
 
@@ -81,7 +78,7 @@ async function updateWithColumnFallback(
   const currentPayload = { ...payload };
   let lastResult: any = null;
 
-  for (let i = 0; i < 20; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
     const result = await supabase
       .from("purchase_orders")
       .update(currentPayload)

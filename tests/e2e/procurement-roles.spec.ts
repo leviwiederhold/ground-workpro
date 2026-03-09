@@ -52,6 +52,7 @@ test('procurement APIs are role scoped', async ({ page }) => {
 
   const poCreateRes = await page.request.post('/api/purchase-orders', {
     data: { vendor_id: vendorId, status: 'draft', notes: `e2e-po-${stamp}` },
+    timeout: 30_000,
   });
   expect(poCreateRes.status()).toBe(200);
   const poId = String((await poCreateRes.json())?.purchase_order?.id ?? '');

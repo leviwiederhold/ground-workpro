@@ -38,18 +38,29 @@ type BidNotesMeta = {
   stage?: string;
 };
 
-const BID_META_PREFIX = "\n<!--GW_BID_META:";
+const BID_META_PREFIX = "<!--GW_BID_META:";
 const BID_META_SUFFIX = "-->";
+const BID_META_LEGACY_PREFIX = "\n<!--GW_BID_META:";
 
 function parseBidNotes(raw: unknown): { plainNotes: string; meta: BidNotesMeta } {
   const text = typeof raw === "string" ? raw : "";
-  const start = text.indexOf(BID_META_PREFIX);
-  const end = start >= 0 ? text.indexOf(BID_META_SUFFIX, start + BID_META_PREFIX.length) : -1;
+  const marker = (() => {
+    const normalizedIndex = text.indexOf(BID_META_PREFIX);
+    if (normalizedIndex >= 0) return { start: normalizedIndex, length: BID_META_PREFIX.length };
+    const legacyIndex = text.indexOf(BID_META_LEGACY_PREFIX);
+    if (legacyIndex >= 0) return { start: legacyIndex, length: BID_META_LEGACY_PREFIX.length };
+    return null;
+  })();
+  const start = marker?.start ?? -1;
+  if (!marker) {
+    return { plainNotes: text, meta: {} };
+  }
+  const end = text.indexOf(BID_META_SUFFIX, start + marker.length);
   if (start < 0 || end < 0) {
     return { plainNotes: text, meta: {} };
   }
   const plainNotes = text.slice(0, start).trimEnd();
-  const jsonText = text.slice(start + BID_META_PREFIX.length, end).trim();
+  const jsonText = text.slice(start + marker.length, end).trim();
   try {
     const parsed = JSON.parse(jsonText) as BidNotesMeta;
     return { plainNotes, meta: parsed && typeof parsed === "object" ? parsed : {} };
@@ -66,7 +77,8 @@ function buildBidNotes(plainNotes: string, meta: BidNotesMeta): string {
   if (meta.stage) compactMeta.stage = meta.stage;
   const base = plainNotes?.trimEnd() ?? "";
   if (Object.keys(compactMeta).length === 0) return base;
-  return `${base}${BID_META_PREFIX}${JSON.stringify(compactMeta)}${BID_META_SUFFIX}`;
+  const prefix = base.length > 0 ? `\n${BID_META_PREFIX}` : BID_META_PREFIX;
+  return `${base}${prefix}${JSON.stringify(compactMeta)}${BID_META_SUFFIX}`;
 }
 
 const normalizeId = (id: unknown) => {
@@ -164,7 +176,7 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   const currentPayload = { ...payload };
   let lastResult: any = null;
 
-  for (let i = 0; i < 20; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
     const result = await supabase.from("bids").insert(currentPayload).select("*").single();
     lastResult = result;
     const message = result.error?.message || "";
@@ -274,16 +286,8 @@ export async function POST(request: Request) {
       title: payload.title,
       project_name: payload.title,
       client: payload.client ?? "",
-      client_name: payload.client ?? "",
-      customer: payload.client ?? "",
-      customer_name: payload.client ?? "",
       bid_date: normalizedBidDate,
-      bidDate: normalizedBidDate,
-      biddate: normalizedBidDate,
-      amount: 0,
-      total_amount: 0,
       probability: normalizedProbability,
-      win_probability: normalizedProbability,
       notes: notesWithMeta,
       job_id: normalizeId(payload.job_id),
       stage: payload.stage ?? "estimating",

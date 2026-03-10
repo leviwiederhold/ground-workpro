@@ -114,6 +114,7 @@ export async function getOrCreateDirectThread(
     .insert({
       company_id: companyId,
       kind: "direct",
+      type: "direct",
       dm_user_a: dmUserA,
       dm_user_b: dmUserB,
       created_by: currentUserId,

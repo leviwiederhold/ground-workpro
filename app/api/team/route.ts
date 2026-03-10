@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 
@@ -60,6 +61,12 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireModuleAccess("team_management", "view");
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { supabase, companyId } = await getCompanyId();
     const effectiveRole = await getEffectiveRole();
     if (!effectiveRole) {

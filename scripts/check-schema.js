@@ -49,7 +49,13 @@ const required = [
   { table: "safety_logs", columnsAnyOf: [["id", "company_id", "occurred_on", "summary", "severity"]] },
   { table: "attachments", columnsAnyOf: [["id", "company_id", "entity_type", "entity_id", "file_name"]] },
   { table: "message_channels", columnsAnyOf: [["id", "company_id", "name"]] },
-  { table: "messages", columnsAnyOf: [["id", "company_id", "channel_id", "body", "sender_user_id"]] },
+  {
+    table: "messages",
+    columnsAnyOf: [
+      ["id", "company_id", "channel_id", "body", "sender_user_id"],
+      ["id", "company_id", "thread_id", "body", "sender_user_id"],
+    ],
+  },
   { table: "message_channel_members", columnsAnyOf: [["id", "company_id", "channel_id", "user_id"]] },
   { table: "notifications", columnsAnyOf: [["id", "company_id", "user_id", "type", "payload"]] },
   { table: "schedule_assignments", columnsAnyOf: [["id", "company_id", "job_id", "date"]] },

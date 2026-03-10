@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
@@ -135,6 +135,12 @@ async function insertSafetyLogWithFallback(
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireModuleAccess("safety", "view");
+    } catch {
+      return forbidden();
+    }
+
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId, userId } = await getCompanyId();
     const role = await resolveMembershipRole(supabase, companyId, userId);
@@ -201,7 +207,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman", "operator"]);
+      await requireModuleAccess("safety", "edit");
     } catch {
       return forbidden();
     }

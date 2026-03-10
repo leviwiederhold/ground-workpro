@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import {
   getDefaultPermissionsByRole,
   normalizePermissionPayload,
@@ -101,7 +101,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await requireRole(["admin", "pm"]);
+    await requireModuleAccess("team_management", "view");
     const { supabase, companyId } = await getCompanyId();
 
     const invitationWithName = await supabase
@@ -164,7 +164,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { userId } = await requireRole(["admin"]);
+    const { userId } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const body = await request.json().catch(() => ({}));

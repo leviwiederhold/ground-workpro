@@ -2060,7 +2060,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // SCHEDULE VIEW (Click-to-Add Calendar)
     // ============================================
     // ============================================
-    const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal, currentRole }) => {
+    const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal, moduleAccess = {} }) => {
       const EQUIPMENT_TYPE_OPTIONS = useMemo(
         () => [
           'Excavator',
@@ -2096,8 +2096,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [equipmentActionError, setEquipmentActionError] = useState('');
       const [selectedTypeOption, setSelectedTypeOption] = useState('Excavator');
       const [customTypeInput, setCustomTypeInput] = useState('');
-      const normalizedRole = String(currentRole || '').trim().toLowerCase();
-      const canManageFleet = ['executive', 'operations', 'admin', 'pm', 'mechanic'].includes(normalizedRole);
+      const canManageFleet = String(moduleAccess?.fleet || 'none') === 'edit';
 
       const EquipmentTypeGlyph = useCallback(({ type, className = '' }) => {
         const normalized = String(type || '').trim().toLowerCase();
@@ -2762,7 +2761,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // TEAM VIEW
     // ============================================
-    const TeamView = ({ employees, employeesLoading, setEmployees, jobs, setShowModal, currentRole }) => {
+    const TeamView = ({ employees, employeesLoading, setEmployees, jobs, setShowModal, currentRole, moduleAccess = {} }) => {
       const [filter, setFilter] = useState('all');
       const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
       const [employeeActionLoading, setEmployeeActionLoading] = useState(false);
@@ -2845,7 +2844,7 @@ const confirmDestructiveAction = (targetLabel) =>
       );
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
-      const canManageTeamProfiles = ['executive', 'operations', 'admin', 'pm'].includes(String(currentRole || '').toLowerCase());
+      const canManageTeamProfiles = String(moduleAccess?.team_management || 'none') === 'edit';
       const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
 
       const stats = {
@@ -2961,6 +2960,7 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [selectedEmployee, selectedEmployeeRecord]);
 
       const handleCreateEmployee = async () => {
+        if (!canManageTeamProfiles) return;
         setEmployeeActionError('');
         setInviteFeedback('');
         setPermissionModalMode('invite-create');
@@ -3332,7 +3332,7 @@ const confirmDestructiveAction = (targetLabel) =>
               <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
                 <Icon name="clock" className="mr-2" /> Time Clock
               </Button>
-              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee}>
+              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={!canManageTeamProfiles}>
                 <Icon name="user-plus" className="mr-2" /> Add Employee
               </Button>
             </div>
@@ -3358,10 +3358,10 @@ const confirmDestructiveAction = (targetLabel) =>
                             <p className="text-xs text-gray-600">{invite.email} · {invite.role}</p>
                           </div>
                           <div className="flex flex-wrap gap-1 justify-end">
-                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'copy')}>Copy</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'regenerate')}>Regenerate</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'edit')}>Edit</Button>
-                            <Button variant="danger" size="sm" onClick={() => handlePendingInviteAction(invite, 'cancel')}>Cancel</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'copy')} disabled={!canManageTeamProfiles}>Copy</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'regenerate')} disabled={!canManageTeamProfiles}>Regenerate</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'edit')} disabled={!canManageTeamProfiles}>Edit</Button>
+                            <Button variant="danger" size="sm" onClick={() => handlePendingInviteAction(invite, 'cancel')} disabled={!canManageTeamProfiles}>Cancel</Button>
                           </div>
                         </div>
                       </div>
@@ -3812,13 +3812,14 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // MAINTENANCE VIEW
     // ============================================
-    const MaintenanceView = ({ workOrders, workOrdersLoading, setWorkOrders, equipment, employees, setShowModal }) => {
+    const MaintenanceView = ({ workOrders, workOrdersLoading, setWorkOrders, equipment, employees, setShowModal, moduleAccess = {} }) => {
       const [filter, setFilter] = useState('all');
       const [selectedWOId, setSelectedWOId] = useState(null);
       const [woStatus, setWoStatus] = useState('scheduled');
       const [woPriority, setWoPriority] = useState('medium');
       const [woActionLoading, setWoActionLoading] = useState(false);
       const [woActionError, setWoActionError] = useState('');
+      const canEditMaintenance = String(moduleAccess?.maintenance || 'none') === 'edit';
 
       const normalizeWoStatus = (status) => {
         const value = String(status || '').toLowerCase();
@@ -3848,6 +3849,10 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [selectedWO]);
 
       const handleSaveWorkOrder = async () => {
+        if (!canEditMaintenance) {
+          setWoActionError('Forbidden');
+          return;
+        }
         if (!selectedWO) return;
         setWoActionLoading(true);
         setWoActionError('');
@@ -3892,6 +3897,10 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleDeleteWorkOrder = async () => {
+        if (!canEditMaintenance) {
+          setWoActionError('Forbidden');
+          return;
+        }
         if (!selectedWO) return;
         const confirmed = confirmDestructiveAction('this work order');
         if (!confirmed) return;
@@ -3949,7 +3958,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 ))}
               </div>
             </div>
-            <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'work-order' })}>
+            <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'work-order' })} disabled={!canEditMaintenance}>
               <Icon name="plus" className="mr-2" /> New Work Order
             </Button>
           </div>
@@ -4024,7 +4033,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             </Badge>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'work-order', data: { equipmentId: eq.id, type: 'preventive' } })}>
+                            <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'work-order', data: { equipmentId: eq.id, type: 'preventive' } })} disabled={!canEditMaintenance}>
                               Schedule
                             </Button>
                           </td>
@@ -4067,6 +4076,7 @@ const confirmDestructiveAction = (targetLabel) =>
                         value={woPriority}
                         onChange={(e) => setWoPriority(e.target.value)}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        disabled={!canEditMaintenance}
                       >
                         <option value="low">low</option>
                         <option value="medium">medium</option>
@@ -4085,6 +4095,7 @@ const confirmDestructiveAction = (targetLabel) =>
                       value={woStatus}
                       onChange={(e) => setWoStatus(e.target.value)}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      disabled={!canEditMaintenance}
                     >
                       <option value="scheduled">scheduled</option>
                       <option value="in-progress">in-progress</option>
@@ -4127,10 +4138,10 @@ const confirmDestructiveAction = (targetLabel) =>
                   )}
 
                   <div className="flex gap-2 pt-4">
-                    <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveWorkOrder} disabled={woActionLoading}>
+                    <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveWorkOrder} disabled={!canEditMaintenance || woActionLoading}>
                       <Icon name="check" className="mr-1" /> {woActionLoading ? 'Saving...' : 'Save'}
                     </Button>
-                    <Button variant="danger" size="sm" className="flex-1" onClick={handleDeleteWorkOrder} disabled={woActionLoading}>
+                    <Button variant="danger" size="sm" className="flex-1" onClick={handleDeleteWorkOrder} disabled={!canEditMaintenance || woActionLoading}>
                       <Icon name="trash" className="mr-1" /> Delete
                     </Button>
                   </div>
@@ -4150,7 +4161,7 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // REPORTS VIEW (with Charts)
     // ============================================
-    const ReportsView = ({ jobs, equipment, employees, dailyReports, dailyReportsLoading, setDailyReports, setShowModal }) => {
+    const ReportsView = ({ jobs, equipment, employees, dailyReports, dailyReportsLoading, setDailyReports, setShowModal, moduleAccess = {} }) => {
       const chartRef = useRef(null);
       const pieChartRef = useRef(null);
       const [activeTab, setActiveTab] = useState('overview');
@@ -4170,6 +4181,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [reportDateFrom, setReportDateFrom] = useState('');
       const [reportDateTo, setReportDateTo] = useState('');
       const [activeReportPreset, setActiveReportPreset] = useState('custom');
+      const canEditDailyReports = String(moduleAccess?.daily_reports || 'none') === 'edit';
 
       const normalizeJobStatusForReports = (status) => {
         const value = String(status || '').toLowerCase();
@@ -4234,6 +4246,7 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [activeTab, dailyReports, loadReportEntries]);
 
       const createEntry = async (reportId, entryType) => {
+        if (!canEditDailyReports) return;
         const form = entryFormByReport[reportId] || {};
         let body = null;
 
@@ -4306,6 +4319,7 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const deleteEntry = async (reportId, entryId) => {
+        if (!canEditDailyReports) return;
         const confirmed = confirmDestructiveAction('this report entry');
         if (!confirmed) return;
 
@@ -4685,7 +4699,7 @@ const confirmDestructiveAction = (targetLabel) =>
           {activeTab === 'daily' && (
             <div className="space-y-4">
               <div className="flex justify-end">
-                <Button variant="brand" size="sm" onClick={() => setShowModal({ type: 'daily-report' })}>
+                <Button variant="brand" size="sm" onClick={() => setShowModal({ type: 'daily-report' })} disabled={!canEditDailyReports}>
                   <Icon name="plus" className="mr-2" /> New Report
                 </Button>
               </div>
@@ -4696,7 +4710,7 @@ const confirmDestructiveAction = (targetLabel) =>
               ) : filteredDailyReports.length === 0 ? (
                 <Card className="p-4">
                   <p className="text-sm text-gray-500 mb-3">No daily reports yet.</p>
-                  <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'daily-report' })}>
+                  <Button variant="secondary" size="sm" onClick={() => setShowModal({ type: 'daily-report' })} disabled={!canEditDailyReports}>
                     Create your first report
                   </Button>
                 </Card>
@@ -4718,6 +4732,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 const materialEntries = reportEntries.filter((entry) => entry.entry_type === 'material' || entry.entry_type === 'note');
 
                 const startEdit = () => {
+                  if (!canEditDailyReports) return;
                   setEditingReportId(report.id);
                   setReportForm({
                     jobId: report.jobId ? String(report.jobId) : '',
@@ -4733,6 +4748,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 };
 
                 const saveReport = async () => {
+                  if (!canEditDailyReports) return;
                   setReportActionLoading(true);
                   setReportActionError('');
                   try {
@@ -4768,6 +4784,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 };
 
                 const deleteReport = async () => {
+                  if (!canEditDailyReports) return;
                   const confirmed = confirmDestructiveAction('this daily report');
                   if (!confirmed) return;
                   setReportActionLoading(true);
@@ -4812,7 +4829,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     <div className="flex flex-wrap items-center gap-2 mb-3">
                       {isEditing ? (
                         <>
-                          <Button variant="brand" size="sm" onClick={saveReport} disabled={reportActionLoading}>
+                          <Button variant="brand" size="sm" onClick={saveReport} disabled={!canEditDailyReports || reportActionLoading}>
                             {reportActionLoading ? 'Saving...' : 'Save'}
                           </Button>
                           <Button variant="secondary" size="sm" onClick={cancelEdit} disabled={reportActionLoading}>
@@ -4821,10 +4838,10 @@ const confirmDestructiveAction = (targetLabel) =>
                         </>
                       ) : (
                         <>
-                          <Button variant="secondary" size="sm" onClick={startEdit} disabled={reportActionLoading}>
+                          <Button variant="secondary" size="sm" onClick={startEdit} disabled={!canEditDailyReports || reportActionLoading}>
                             Edit
                           </Button>
-                          <Button variant="danger" size="sm" onClick={deleteReport} disabled={reportActionLoading}>
+                          <Button variant="danger" size="sm" onClick={deleteReport} disabled={!canEditDailyReports || reportActionLoading}>
                             Delete
                           </Button>
                         </>
@@ -4838,6 +4855,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             value={reportForm.jobId}
                             onChange={(e) => setReportForm((prev) => ({ ...prev, jobId: e.target.value }))}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            disabled={!canEditDailyReports}
                           >
                             <option value="">Select Job</option>
                             {jobs.map(jobOption => <option key={jobOption.id} value={jobOption.id}>{jobOption.name}</option>)}
@@ -4850,6 +4868,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             value={reportForm.date}
                             onChange={(e) => setReportForm((prev) => ({ ...prev, date: e.target.value }))}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            disabled={!canEditDailyReports}
                           />
                         </div>
                         <div className="md:col-span-1">
@@ -4859,6 +4878,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             value={reportForm.notes}
                             onChange={(e) => setReportForm((prev) => ({ ...prev, notes: e.target.value }))}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                            disabled={!canEditDailyReports}
                           />
                         </div>
                       </div>
@@ -4893,6 +4913,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             value={form.laborEmployeeId}
                             onChange={(e) => updateEntryForm(report.id, { laborEmployeeId: e.target.value })}
                             className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                            disabled={!canEditDailyReports}
                           >
                             <option value="">Employee</option>
                             {employees.map((employee) => (
@@ -4907,8 +4928,9 @@ const confirmDestructiveAction = (targetLabel) =>
                             onChange={(e) => updateEntryForm(report.id, { laborHours: e.target.value })}
                             placeholder="Hours"
                             className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                            disabled={!canEditDailyReports}
                           />
-                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'labor')} disabled={entryActionLoadingByReport[report.id]}>
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'labor')} disabled={!canEditDailyReports || entryActionLoadingByReport[report.id]}>
                             Add
                           </Button>
                         </div>
@@ -4918,7 +4940,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             return (
                               <div key={entry.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
                                 <span>{employee?.name || 'Employee'} ({entry.hours || 0}h)</span>
-                                <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600">Delete</button>
+                                <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600 disabled:text-gray-400" disabled={!canEditDailyReports}>Delete</button>
                               </div>
                             );
                           })}
@@ -4932,6 +4954,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             value={form.equipmentId}
                             onChange={(e) => updateEntryForm(report.id, { equipmentId: e.target.value })}
                             className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                            disabled={!canEditDailyReports}
                           >
                             <option value="">Equipment</option>
                             {equipment.map((item) => (
@@ -4946,8 +4969,9 @@ const confirmDestructiveAction = (targetLabel) =>
                             onChange={(e) => updateEntryForm(report.id, { equipmentHours: e.target.value })}
                             placeholder="Hours"
                             className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                            disabled={!canEditDailyReports}
                           />
-                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'equipment')} disabled={entryActionLoadingByReport[report.id]}>
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'equipment')} disabled={!canEditDailyReports || entryActionLoadingByReport[report.id]}>
                             Add
                           </Button>
                         </div>
@@ -4957,7 +4981,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             return (
                               <div key={entry.id} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1">
                                 <span>{item?.name || 'Equipment'} ({entry.hours || 0}h)</span>
-                                <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600">Delete</button>
+                                <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600 disabled:text-gray-400" disabled={!canEditDailyReports}>Delete</button>
                               </div>
                             );
                           })}
@@ -4973,6 +4997,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             onChange={(e) => updateEntryForm(report.id, { materialDescription: e.target.value })}
                             placeholder="Description"
                             className="flex-1 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                            disabled={!canEditDailyReports}
                           />
                           <input
                             type="number"
@@ -4982,11 +5007,12 @@ const confirmDestructiveAction = (targetLabel) =>
                             onChange={(e) => updateEntryForm(report.id, { materialQuantity: e.target.value })}
                             placeholder="Qty"
                             className="w-20 border border-gray-300 rounded-lg px-2 py-1.5 text-xs"
+                            disabled={!canEditDailyReports}
                           />
-                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'material')} disabled={entryActionLoadingByReport[report.id]}>
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'material')} disabled={!canEditDailyReports || entryActionLoadingByReport[report.id]}>
                             Add Material
                           </Button>
-                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'note')} disabled={entryActionLoadingByReport[report.id]}>
+                          <Button variant="secondary" size="sm" onClick={() => createEntry(report.id, 'note')} disabled={!canEditDailyReports || entryActionLoadingByReport[report.id]}>
                             Add Note
                           </Button>
                         </div>
@@ -4998,7 +5024,7 @@ const confirmDestructiveAction = (targetLabel) =>
                                 {entry.description}
                                 {entry.entry_type === 'material' ? ` (${entry.quantity || 0})` : ''}
                               </span>
-                              <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600">Delete</button>
+                              <button type="button" onClick={() => deleteEntry(report.id, entry.id)} className="text-red-600 disabled:text-gray-400" disabled={!canEditDailyReports}>Delete</button>
                             </div>
                           ))}
                         </div>
@@ -5428,6 +5454,7 @@ const confirmDestructiveAction = (targetLabel) =>
       safetyLogsError,
       onDeleteSafetyLog,
       deleteLoadingId,
+      moduleAccess = {},
     }) => {
       const [deleteError, setDeleteError] = useState('');
       const [summary, setSummary] = useState({ openHazards: 0, overdueActions: 0, highSeverity7d: 0, closedThisWeek: 0 });
@@ -5441,6 +5468,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [newAction, setNewAction] = useState({ safety_log_id: '', title: '', owner_employee_id: '', due_date: '', priority: 'medium' });
       const [newTalk, setNewTalk] = useState({ topic: '', summary: '', occurred_on: new Date().toISOString().slice(0, 10), attendee_employee_ids: [] });
       const [submitLoading, setSubmitLoading] = useState(false);
+      const canEditSafety = String(moduleAccess?.safety || 'none') === 'edit';
 
       const loadSafetySummary = useCallback(async () => {
         try {
@@ -5535,6 +5563,7 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleDeleteClick = async (id) => {
+        if (!canEditSafety) return;
         setDeleteError('');
         const result = await onDeleteSafetyLog(id);
         if (!result?.ok) {
@@ -5545,6 +5574,7 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleCreateAction = async () => {
+        if (!canEditSafety) return;
         const resolvedSafetyLogId = newAction.safety_log_id || (safetyLogs[0]?.id ? String(safetyLogs[0].id) : '');
         if (!resolvedSafetyLogId || !newAction.title.trim()) {
           setActionsError('Action title and related log are required');
@@ -5582,6 +5612,7 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleCloseAction = async (actionId) => {
+        if (!canEditSafety) return;
         try {
           const response = await fetch(`/api/safety-actions/${actionId}`, {
             method: 'PATCH',
@@ -5597,6 +5628,7 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleCreateToolboxTalk = async () => {
+        if (!canEditSafety) return;
         if (!newTalk.topic.trim()) {
           setToolboxError('Topic is required');
           return;
@@ -5636,7 +5668,7 @@ const confirmDestructiveAction = (targetLabel) =>
           </StatGrid>
 
           <div className="flex justify-end">
-            <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })} data-testid="safety-open-create">
+            <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })} data-testid="safety-open-create" disabled={!canEditSafety}>
               <Icon name="plus" className="mr-2" /> New Safety Log
             </Button>
           </div>
@@ -5675,7 +5707,7 @@ const confirmDestructiveAction = (targetLabel) =>
                             type="button"
                             className="mt-2 text-xs text-red-600 hover:text-red-700 disabled:opacity-50"
                             onClick={() => handleDeleteClick(log.id)}
-                            disabled={isDeleting}
+                            disabled={!canEditSafety || isDeleting}
                             data-testid={`safety-delete-${log.id}`}
                             aria-label="Delete safety log"
                           >
@@ -5732,7 +5764,7 @@ const confirmDestructiveAction = (targetLabel) =>
                       onChange={(event) => setNewAction((prev) => ({ ...prev, due_date: event.target.value }))}
                     />
                   </div>
-                  <Button variant="secondary" size="sm" onClick={handleCreateAction} disabled={submitLoading}>
+                  <Button variant="secondary" size="sm" onClick={handleCreateAction} disabled={!canEditSafety || submitLoading}>
                     <Icon name="plus" className="mr-2" />Add Action
                   </Button>
                   {actionsError && <p className="text-sm text-red-600">{actionsError}</p>}
@@ -5751,7 +5783,7 @@ const confirmDestructiveAction = (targetLabel) =>
                         <p className="text-xs text-gray-500">{action.status} {action.due_date ? `· due ${formatDate(action.due_date)}` : ''}</p>
                       </div>
                       {action.status !== 'closed' ? (
-                        <Button variant="secondary" size="sm" onClick={() => handleCloseAction(action.id)}>Close</Button>
+                        <Button variant="secondary" size="sm" onClick={() => handleCloseAction(action.id)} disabled={!canEditSafety}>Close</Button>
                       ) : (
                         <Badge variant="success">Closed</Badge>
                       )}
@@ -5800,7 +5832,7 @@ const confirmDestructiveAction = (targetLabel) =>
                       </label>
                     ))}
                   </div>
-                  <Button variant="secondary" size="sm" onClick={handleCreateToolboxTalk} disabled={submitLoading}>
+                  <Button variant="secondary" size="sm" onClick={handleCreateToolboxTalk} disabled={!canEditSafety || submitLoading}>
                     <Icon name="plus" className="mr-2" />Add Talk
                   </Button>
                   {toolboxError && <p className="text-sm text-red-600">{toolboxError}</p>}
@@ -7935,9 +7967,10 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // FINANCE VIEW (QBO Integration Placeholder)
     // ============================================
-    const FinanceView = ({ jobs = [], bids = [], vendors = [], inventory = [], workOrders = [], currentRole }) => {
-      const normalizedRole = String(currentRole || '').trim().toLowerCase();
-      const canViewPricingSettings = normalizedRole === 'executive' || normalizedRole === 'admin' || normalizedRole === 'pm' || normalizedRole.includes('operations');
+    const FinanceView = ({ jobs = [], bids = [], vendors = [], inventory = [], workOrders = [], moduleAccess = {} }) => {
+      const financeAccess = String(moduleAccess?.finance || 'none');
+      const canViewPricingSettings = financeAccess === 'view' || financeAccess === 'edit';
+      const canEditPricingSettings = financeAccess === 'edit';
       const [pricingLoading, setPricingLoading] = useState(true);
       const [pricingSaving, setPricingSaving] = useState(false);
       const [pricingError, setPricingError] = useState('');
@@ -8261,7 +8294,7 @@ const confirmDestructiveAction = (targetLabel) =>
                 <Icon name="sliders" className="mr-2 text-brand-500" />
                 Pricing Settings
               </h3>
-              <Button variant="brand" size="sm" onClick={handleSavePricingSettings} disabled={pricingSaving || pricingLoading}>
+              <Button variant="brand" size="sm" onClick={handleSavePricingSettings} disabled={!canEditPricingSettings || pricingSaving || pricingLoading}>
                 <Icon name={pricingSaving ? 'spinner' : 'floppy-disk'} className={`mr-2 ${pricingSaving ? 'animate-spin' : ''}`} />
                 {pricingSaving ? 'Saving...' : 'Save Rates'}
               </Button>
@@ -8279,6 +8312,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.operator_labor_rate}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, operator_labor_rate: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
                 <div>
@@ -8290,6 +8324,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.labor_burden_percent}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, labor_burden_percent: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
                 <div>
@@ -8301,6 +8336,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.hauling_rate_per_hour}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, hauling_rate_per_hour: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
                 <div>
@@ -8312,6 +8348,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.dump_fee_per_load}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, dump_fee_per_load: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
                 <div>
@@ -8323,6 +8360,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.target_margin_percent}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, target_margin_percent: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
                 <div>
@@ -8334,6 +8372,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.contingency_percent}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, contingency_percent: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
                 <div>
@@ -8345,6 +8384,7 @@ const confirmDestructiveAction = (targetLabel) =>
                     value={pricingSettings.markup_percent}
                     onChange={(e) => setPricingSettings({ ...pricingSettings, markup_percent: Number(e.target.value) || 0 })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditPricingSettings}
                   />
                 </div>
               </div>

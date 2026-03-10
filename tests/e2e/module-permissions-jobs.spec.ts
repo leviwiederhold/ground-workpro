@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const applyJobsAccess = async (
-  page: Parameters<typeof test>[0]["page"],
+  page: Page,
   access: "none" | "view" | "edit"
 ) => {
   const response = await page.request.post("/api/test/module-permissions", {

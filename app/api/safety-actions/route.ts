@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem, okItems } from "@/lib/http/json";
 import { createFallbackSafetyAction, listFallbackSafetyActions } from "@/lib/safety/opsFallbackStore";
@@ -36,6 +36,12 @@ function tenantError(error: TenantResolverError) {
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireModuleAccess("safety", "view");
+    } catch {
+      return forbidden();
+    }
+
     const { supabase, companyId } = await getCompanyId();
     const parsed = querySchema.safeParse({
       status: new URL(request.url).searchParams.get("status") ?? undefined,
@@ -74,7 +80,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman", "operator"]);
+      await requireModuleAccess("safety", "edit");
     } catch {
       return forbidden();
     }

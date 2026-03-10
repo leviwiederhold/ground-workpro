@@ -1,8 +1,11 @@
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 function toRoleLabel(role: unknown) {
   const normalized = String(role ?? "").trim().toLowerCase();
+  if (normalized === "ceo") return "CEO";
   if (normalized === "admin") return "CEO";
   if (normalized === "pm") return "Operations Manager";
   if (normalized === "foreman") return "Foreman";
@@ -19,9 +22,17 @@ function tenantError(error: TenantResolverError) {
 
 export async function GET() {
   try {
-    const { supabase, companyId, userId } = await getCompanyId();
+    try {
+      await requireModuleAccess("messages", "view");
+    } catch {
+      return forbidden();
+    }
 
-    const memberships = await supabase
+    const { supabase, companyId, userId } = await getCompanyId();
+    const admin = getSupabaseAdmin();
+    const db = admin ?? supabase;
+
+    const memberships = await db
       .from("memberships")
       .select("user_id, role")
       .eq("company_id", companyId)
@@ -32,20 +43,20 @@ export async function GET() {
 
     const userIds = (memberships.data ?? []).map((row) => String(row.user_id));
     const profiles = userIds.length
-      ? await supabase.from("profiles").select("id, full_name, email").in("id", userIds)
+      ? await db.from("profiles").select("id, full_name, email").in("id", userIds)
       : { data: [], error: null };
 
     if (profiles.error) return serverError();
 
     let employees: { data: Array<{ user_id: string; name?: string; full_name?: string }> | null; error: { message?: string } | null } = userIds.length
-      ? await supabase
+      ? await db
           .from("employees")
           .select("user_id, name, full_name")
           .eq("company_id", companyId)
           .in("user_id", userIds)
       : { data: [], error: null };
     if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
-      employees = await supabase
+      employees = await db
         .from("employees")
         .select("user_id, full_name")
         .eq("company_id", companyId)

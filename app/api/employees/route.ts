@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
@@ -89,6 +89,12 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireModuleAccess("team_management", "view");
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId } = await getCompanyId();
     let result = await supabase
@@ -126,7 +132,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm"]);
+      await requireModuleAccess("team_management", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

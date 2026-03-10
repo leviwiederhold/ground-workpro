@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import {
@@ -35,6 +36,12 @@ function toTenantErrorResponse(error: TenantResolverError) {
 
 export async function POST(request: Request) {
   try {
+    try {
+      await requireModuleAccess("messages", "edit");
+    } catch {
+      return forbidden();
+    }
+
     const parsedBody = bodySchema.safeParse(await request.json());
     if (!parsedBody.success) return validationError(toValidationDetails(parsedBody.error));
 

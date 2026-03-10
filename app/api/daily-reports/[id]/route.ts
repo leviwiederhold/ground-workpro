@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 
 const materialSchema = z.object({
   item: z.string().default(""),
@@ -103,7 +103,7 @@ export async function PATCH(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman"]);
+      await requireModuleAccess("daily_reports", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -177,7 +177,7 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm"]);
+      await requireModuleAccess("daily_reports", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

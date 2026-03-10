@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem, okSuccess } from "@/lib/http/json";
 import { deleteFallbackSafetyAction, updateFallbackSafetyAction } from "@/lib/safety/opsFallbackStore";
@@ -32,7 +32,7 @@ function tenantError(error: TenantResolverError) {
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman"]);
+      await requireModuleAccess("safety", "edit");
     } catch {
       return forbidden();
     }
@@ -136,7 +136,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     try {
-      await requireRole(["admin"]);
+      await requireModuleAccess("safety", "edit");
     } catch {
       return forbidden();
     }

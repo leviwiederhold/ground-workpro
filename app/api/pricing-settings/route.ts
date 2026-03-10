@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { errorResponse } from "@/lib/http/errorResponse";
 
@@ -68,7 +68,7 @@ export async function GET() {
   let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
     try {
-      const access = await requireRole(["admin", "pm"]);
+      const access = await requireModuleAccess("finance", "view");
       context = { companyId: access.companyId, userId: access.userId, role: access.role };
     } catch {
       return errorResponse("Forbidden", 403);
@@ -105,7 +105,7 @@ export async function PUT(request: Request) {
   let context: { companyId?: string; userId?: string; role?: string } = {};
   try {
     try {
-      const access = await requireRole(["admin"]);
+      const access = await requireModuleAccess("finance", "edit");
       context = { companyId: access.companyId, userId: access.userId, role: access.role };
     } catch {
       return errorResponse("Forbidden", 403);

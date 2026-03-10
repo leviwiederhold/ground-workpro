@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getRoleScopedEquipmentIds } from "@/lib/jobs/roleScope";
 
@@ -145,6 +145,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireModuleAccess("fleet", "view");
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { id } = await params;
     const { supabase, companyId, userId } = await getCompanyId();
     const role = await getEffectiveRole();
@@ -188,7 +194,7 @@ export async function PATCH(
 ) {
   try {
     try {
-      await requireRole(["admin", "mechanic"]);
+      await requireModuleAccess("fleet", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -292,7 +298,7 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireRole(["admin", "mechanic"]);
+      await requireModuleAccess("fleet", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

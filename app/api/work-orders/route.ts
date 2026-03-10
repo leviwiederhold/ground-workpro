@@ -2,11 +2,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { getRoleScopedEquipmentIds } from "@/lib/jobs/roleScope";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
-import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -123,12 +122,14 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
-    const { supabase, companyId, userId } = await getCompanyId();
-    const role = await getEffectiveRole();
-
-    if (!role || role === "operator") {
+    let access: Awaited<ReturnType<typeof requireModuleAccess>>;
+    try {
+      access = await requireModuleAccess("maintenance", "view");
+    } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const { supabase, companyId, userId } = await getCompanyId();
+    const role = access.role;
 
     const scopedEquipmentIds = role === "foreman"
       ? await getRoleScopedEquipmentIds(supabase, companyId, userId, role)
@@ -168,19 +169,9 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const effectiveRole = await getEffectiveRole();
-    const createAllowed =
-      effectiveRole === "admin" ||
-      effectiveRole === "mechanic" ||
-      effectiveRole === "foreman" ||
-      effectiveRole === "operator";
-    if (!createAllowed) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
-    let actor: Awaited<ReturnType<typeof requireRole>>;
+    let actor: Awaited<ReturnType<typeof requireModuleAccess>>;
     try {
-      actor = await requireRole(["admin", "foreman", "mechanic", "operator"]);
+      actor = await requireModuleAccess("maintenance", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

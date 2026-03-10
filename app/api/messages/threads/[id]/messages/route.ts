@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { getThreadIfParticipant, listMessagesForThread } from "@/lib/messages/mvp";
@@ -33,6 +34,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireModuleAccess("messages", "view");
+    } catch {
+      return forbidden();
+    }
+
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, {
       defaultPageSize: 100,
       maxPageSize: 500,

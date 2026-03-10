@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
@@ -37,6 +38,12 @@ function toTenantErrorResponse(error: TenantResolverError) {
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireModuleAccess("messages", "view");
+    } catch {
+      return forbidden();
+    }
+
     const url = new URL(request.url);
     const parsedQuery = querySchema.safeParse({
       page: url.searchParams.get("page") ?? undefined,

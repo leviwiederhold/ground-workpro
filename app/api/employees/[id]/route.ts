@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
@@ -113,9 +113,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    let actorRole: "admin" | "pm" | "foreman" | "mechanic" | "operator";
+    let actorRole: string;
     try {
-      const actor = await requireRole(["admin", "pm"]);
+      const actor = await requireModuleAccess("team_management", "edit");
       actorRole = actor.role;
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -325,7 +325,7 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm"]);
+      await requireModuleAccess("team_management", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

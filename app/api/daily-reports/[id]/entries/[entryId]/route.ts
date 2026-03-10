@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 
 const normalizeId = (id: unknown): string | number | null => {
   if (id === null || id === undefined || id === "") return null;
@@ -16,7 +16,7 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman"]);
+      await requireModuleAccess("daily_reports", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

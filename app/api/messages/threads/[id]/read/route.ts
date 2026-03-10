@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import { getThreadIfParticipant } from "@/lib/messages/mvp";
@@ -33,6 +34,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireModuleAccess("messages", "view");
+    } catch {
+      return forbidden();
+    }
+
     const parsedParams = paramsSchema.safeParse(await params);
     if (!parsedParams.success) return validationError(toValidationDetails(parsedParams.error));
 

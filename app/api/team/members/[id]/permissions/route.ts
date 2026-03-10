@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import {
   assertCeoAccessLocked,
   assertCeoSelfAccessNotReduced,
@@ -53,7 +53,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole(["admin", "pm"]);
+    await requireModuleAccess("team_management", "view");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);
@@ -117,7 +117,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { userId: actorUserId } = await requireRole(["admin"]);
+    const { userId: actorUserId } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);

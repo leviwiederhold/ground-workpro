@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import {
   normalizePermissionPayload,
   getDefaultPermissionsByRole,
@@ -90,7 +90,7 @@ export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { userId } = await requireRole(["admin"]);
+    const { userId } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);
@@ -208,7 +208,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    await requireRole(["admin"]);
+    await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);

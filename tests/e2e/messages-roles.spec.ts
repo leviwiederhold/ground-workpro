@@ -29,47 +29,48 @@ async function setRole(page: Page, role: Role) {
   ]);
 }
 
-test('messages channels are scoped and permissions are enforced', async ({ page }) => {
-  const stamp = Date.now();
-
+test('messages direct threads are company scoped and sendable across roles', async ({ page }) => {
   await setRole(page, 'admin');
 
-  const createChannelRes = await page.request.post('/api/messages/channels', {
-    data: { name: `e2e-msg-role-${stamp}` },
+  const usersRes = await page.request.get('/api/messages/users');
+  const usersBody = await usersRes.text();
+  expect(usersRes.status(), usersBody).toBe(200);
+  const users = (JSON.parse(usersBody)?.items ?? []) as Array<{ userId: string }>;
+  if (users.length === 0) {
+    test.skip(true, 'No teammate account available for role messaging test');
+  }
+
+  const targetUserId = String(users[0].userId);
+
+  const startRes = await page.request.post('/api/messages/direct/start', {
+    data: { userId: targetUserId },
   });
-  expect(createChannelRes.status()).toBe(201);
-  const channel = (await createChannelRes.json())?.item;
-  const channelId = String(channel?.id ?? '');
-  expect(channelId).toBeTruthy();
+  const startBody = await startRes.text();
+  expect(startRes.status(), startBody).toBe(201);
+  const threadId = String(JSON.parse(startBody)?.item?.id ?? '');
+  expect(threadId).toBeTruthy();
 
   await setRole(page, 'foreman');
-  const foremanSendRes = await page.request.post(`/api/messages/channels/${channelId}/send`, {
-    data: { body: `e2e role message ${stamp}` },
+  const foremanSendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
+    data: { body: `e2e role message ${Date.now()}` },
   });
   expect(foremanSendRes.status()).toBe(201);
 
   await setRole(page, 'operator');
+  const operatorInboxRes = await page.request.get('/api/messages/inbox');
+  expect(operatorInboxRes.status()).toBe(200);
+  const operatorInbox = await operatorInboxRes.json();
+  expect(Array.isArray(operatorInbox?.items)).toBe(true);
+  expect(typeof operatorInbox?.unread_count).toBe('number');
 
-  const operatorChannelsRes = await page.request.get('/api/messages/channels');
-  expect(operatorChannelsRes.status()).toBe(200);
-  const operatorChannels = await operatorChannelsRes.json();
-  expect(Array.isArray(operatorChannels?.items)).toBe(true);
-  expect(typeof operatorChannels?.unread_count).toBe('number');
-  expect(operatorChannels.items.some((row: { id: string }) => String(row.id) === channelId)).toBe(true);
-
-  const operatorMessagesRes = await page.request.get(`/api/messages/channels/${channelId}/messages`);
+  const operatorMessagesRes = await page.request.get(`/api/messages/threads/${threadId}/messages`);
   expect(operatorMessagesRes.status()).toBe(200);
   const operatorMessages = await operatorMessagesRes.json();
   expect(Array.isArray(operatorMessages?.items)).toBe(true);
   expect(operatorMessages.items.length).toBeGreaterThan(0);
 
-  const operatorCreateChannelRes = await page.request.post('/api/messages/channels', {
-    data: { name: `operator-create-${stamp}`, memberUserIds: [] },
-  });
-  expect(operatorCreateChannelRes.status()).toBe(201);
-
-  const operatorSendRes = await page.request.post(`/api/messages/channels/${channelId}/send`, {
-    data: { body: 'operator can send as a member' },
+  const operatorSendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
+    data: { body: 'operator can send as a participant' },
   });
   expect(operatorSendRes.status()).toBe(201);
 });

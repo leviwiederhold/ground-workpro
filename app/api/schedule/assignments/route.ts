@@ -270,7 +270,7 @@ export async function POST(request: Request) {
         supabase,
         companyId,
         userIds: Array.from(fallbackRecipientUserIds),
-        type: "assignment_created",
+        type: "task_assigned",
         payload: {
           assignmentId: fallbackAssignment.id,
           jobId: payload.jobId,
@@ -299,7 +299,7 @@ export async function POST(request: Request) {
       supabase,
       companyId,
       userIds: Array.from(recipientUserIds),
-      type: "assignment_created",
+      type: "task_assigned",
       payload: {
         assignmentId: insertResult.data.id,
         jobId: payload.jobId,

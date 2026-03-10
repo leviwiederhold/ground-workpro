@@ -166,27 +166,37 @@ export async function GET(request: Request) {
       return NextResponse.json({ items: [] });
     }
 
-    const inviteStatusResult = await supabase
-      .from("invite_tokens")
-      .select("employee_id, email, used_at, expires_at")
+    const pendingInviteResult = await supabase
+      .from("pending_invitations")
+      .select("employee_id, email, accepted_at, expires_at")
       .eq("company_id", companyId)
       .in("employee_id", employeeIds)
       .order("created_at", { ascending: false });
-    let inviteStatusRows = inviteStatusResult.data;
-    if (inviteStatusResult.error) {
-      if (isMissingSchemaError(inviteStatusResult.error.message)) {
-        inviteStatusRows = [];
-      } else {
-        return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
+    let inviteStatusRows: Array<Record<string, unknown>> = (pendingInviteResult.data ??
+      []) as Array<Record<string, unknown>>;
+    if (pendingInviteResult.error) {
+      const inviteStatusResult = await supabase
+        .from("invite_tokens")
+        .select("employee_id, email, used_at, expires_at")
+        .eq("company_id", companyId)
+        .in("employee_id", employeeIds)
+        .order("created_at", { ascending: false });
+      inviteStatusRows = (inviteStatusResult.data ?? []) as Array<Record<string, unknown>>;
+      if (inviteStatusResult.error) {
+        if (isMissingSchemaError(inviteStatusResult.error.message)) {
+          inviteStatusRows = [];
+        } else {
+          return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
+        }
       }
     }
     const pendingInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmails = new Set<string>();
-    for (const row of (inviteStatusRows ?? []) as Array<Record<string, unknown>>) {
+    for (const row of inviteStatusRows) {
       const employeeId = normalizeId(row.employee_id);
       if (!employeeId) continue;
-      const usedAt = row.used_at ? String(row.used_at) : "";
+      const usedAt = row.used_at ? String(row.used_at) : row.accepted_at ? String(row.accepted_at) : "";
       const expiresAt = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.POSITIVE_INFINITY;
       if (usedAt) {
         acceptedInviteEmployeeIds.add(employeeId);
@@ -207,12 +217,20 @@ export async function GET(request: Request) {
       )
     );
     if (employeeEmails.length > 0) {
-      const acceptedByEmailResult = await supabase
-        .from("invite_tokens")
+      let acceptedByEmailResult = await supabase
+        .from("pending_invitations")
         .select("email")
         .eq("company_id", companyId)
-        .not("used_at", "is", null)
+        .not("accepted_at", "is", null)
         .in("email", employeeEmails);
+      if (acceptedByEmailResult.error) {
+        acceptedByEmailResult = await supabase
+          .from("invite_tokens")
+          .select("email")
+          .eq("company_id", companyId)
+          .not("used_at", "is", null)
+          .in("email", employeeEmails);
+      }
       if (!acceptedByEmailResult.error) {
         for (const row of (acceptedByEmailResult.data ?? []) as Array<Record<string, unknown>>) {
           const value = String(row.email ?? "").trim().toLowerCase();

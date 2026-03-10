@@ -3,6 +3,7 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EmptyState, SkeletonBlock, InlineError } from '@/app/components/ui/FeedbackBlocks';
+import { ComingSoonOverlay } from '@/app/components/ui/ComingSoonOverlay';
 
 const KPI_ICON_BY_KEY = {
   active_jobs: { icon: 'briefcase', color: 'brand' },
@@ -444,24 +445,26 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
               )}
 
               {weatherVisible && (
-                <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">
-                    <Icon name="cloud-sun" className="mr-2 text-blue-500" />
-                    Weather - {weatherSection.locationLabel}
-                  </h3>
-                  <div className="text-center mb-4">
-                    <div className="flex items-center justify-center gap-4">
-                      <Icon name="sun" className="text-yellow-500 text-4xl" />
-                      <div>
-                        <p className="text-4xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
-                        <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
-                        {weatherHighF !== null && weatherLowF !== null && (
-                          <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
-                        )}
+                <ComingSoonOverlay>
+                  <Card className="p-4">
+                    <h3 className="font-semibold text-gray-900 mb-4">
+                      <Icon name="cloud-sun" className="mr-2 text-blue-500" />
+                      Weather - {weatherSection.locationLabel}
+                    </h3>
+                    <div className="text-center mb-4">
+                      <div className="flex items-center justify-center gap-4">
+                        <Icon name="sun" className="text-yellow-500 text-4xl" />
+                        <div>
+                          <p className="text-4xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
+                          <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
+                          {weatherHighF !== null && weatherLowF !== null && (
+                            <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </Card>
+                  </Card>
+                </ComingSoonOverlay>
               )}
             </div>
           </div>
@@ -469,15 +472,17 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
           {(equipmentLocationsSection?.enabled || openWorkOrdersSection) && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               {equipmentLocationsSection?.enabled && (
-                <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">
-                    <Icon name="map-location-dot" className="mr-2 text-brand-500" />
-                    Equipment Locations - Cincinnati Area
-                  </h3>
-                  <div className="h-[420px] rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center">
-                    <span className="text-sm text-gray-500">Location map not connected yet (deterministic placeholder)</span>
-                  </div>
-                </Card>
+                <ComingSoonOverlay>
+                  <Card className="p-4">
+                    <h3 className="font-semibold text-gray-900 mb-4">
+                      <Icon name="map-location-dot" className="mr-2 text-brand-500" />
+                      Equipment Locations - Cincinnati Area
+                    </h3>
+                    <div className="h-[420px] rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center">
+                      <span className="text-sm text-gray-500">Location map not connected yet (deterministic placeholder)</span>
+                    </div>
+                  </Card>
+                </ComingSoonOverlay>
               )}
 
               {openWorkOrdersSection && (
@@ -600,14 +605,16 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
               </Card>
             )}
             {weatherVisible && (
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">Weather - {weatherSection.locationLabel}</h3>
-                <p className="text-3xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
-                <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
-                {weatherHighF !== null && weatherLowF !== null && (
-                  <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
-                )}
-              </Card>
+              <ComingSoonOverlay>
+                <Card className="p-4">
+                  <h3 className="font-semibold text-gray-900 mb-4">Weather - {weatherSection.locationLabel}</h3>
+                  <p className="text-3xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
+                  <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
+                  {weatherHighF !== null && weatherLowF !== null && (
+                    <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
+                  )}
+                </Card>
+              </ComingSoonOverlay>
             )}
           </div>
         </div>

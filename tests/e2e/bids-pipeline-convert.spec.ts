@@ -41,7 +41,10 @@ test("bids pipeline stage flow and convert-to-job", async ({ page }) => {
   const jobsBody = await jobsRes.text();
   expect(jobsRes.status(), jobsBody).toBe(200);
   const jobs = JSON.parse(jobsBody)?.items ?? JSON.parse(jobsBody)?.jobs ?? [];
-  expect(jobs.some((job: { id: string }) => String(job.id) === jobId)).toBeTruthy();
+  const convertedJob = jobs.find((job: { id: string }) => String(job.id) === jobId);
+  expect(Boolean(convertedJob)).toBeTruthy();
+  expect(String(convertedJob?.status ?? "")).toBe("in_progress");
+  expect(String(convertedJob?.source_bid_id ?? convertedJob?.sourceBidId ?? "")).toBe(bidId);
 
   const bidsRes = await page.request.get("/api/bids");
   const bidsBody = await bidsRes.text();
@@ -49,4 +52,8 @@ test("bids pipeline stage flow and convert-to-job", async ({ page }) => {
   const bidsPayload = JSON.parse(bidsBody);
   const persistedBid = (bidsPayload?.bids ?? []).find((bid: { id: string }) => String(bid.id) === bidId);
   expect(Boolean(persistedBid)).toBeTruthy();
+  expect(String(persistedBid?.stage ?? "")).toBe("won");
+  expect(String(persistedBid?.status ?? "")).toBe("accepted");
+  expect(String(persistedBid?.job_id ?? persistedBid?.jobId ?? "")).toBe(jobId);
+  expect(String(persistedBid?.converted_job_id ?? persistedBid?.convertedJobId ?? "")).toBe(jobId);
 });

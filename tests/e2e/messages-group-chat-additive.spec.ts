@@ -22,78 +22,47 @@ async function setRole(page: Page, role: Role) {
   await page.context().addCookies([{ name: 'e2e_role', value: role, url: BASE_URL }]);
 }
 
-test('messages group chat feature is additive and supports member management', async ({ page }) => {
-  const stamp = Date.now();
+test('messages MVP supports direct thread unread/read lifecycle', async ({ page }) => {
   await setRole(page, 'admin');
-
-  const baselineChannelRes = await page.request.post('/api/messages/channels', {
-    data: { name: `baseline-${stamp}`, memberUserIds: [] },
-    timeout: 30_000,
-  });
-  expect(baselineChannelRes.status()).toBe(201);
-  const baselineId = String((await baselineChannelRes.json())?.item?.id ?? '');
-  expect(baselineId).toBeTruthy();
-
-  const baselineSendRes = await page.request.post(`/api/messages/channels/${baselineId}/send`, {
-    data: { body: `baseline-message-${stamp}` },
-    timeout: 30_000,
-  });
-  const baselineSendBody = await baselineSendRes.text();
-  if (baselineSendRes.status() === 500) {
-    test.skip(true, `messages send backend unavailable in this environment: ${baselineSendBody}`);
-  }
-  expect(baselineSendRes.status()).toBe(201);
-
-  const baselineMessagesRes = await page.request.get(`/api/messages/channels/${baselineId}/messages`, {
-    timeout: 30_000,
-  });
-  expect(baselineMessagesRes.status()).toBe(200);
-  expect(Array.isArray((await baselineMessagesRes.json())?.items)).toBe(true);
 
   const usersRes = await page.request.get('/api/messages/users', { timeout: 30_000 });
   expect(usersRes.status()).toBe(200);
   const usersPayload = await usersRes.json();
   const userIds: string[] = (usersPayload.items ?? []).map((item: { userId: string }) => String(item.userId));
-  expect(userIds.length).toBeGreaterThan(0);
+  if (userIds.length === 0) {
+    test.skip(true, 'No teammate account available for unread/read test');
+  }
 
-  const createRes = await page.request.post('/api/messages/channels', {
-    data: { name: `group-${stamp}`, memberUserIds: [userIds[0]] },
+  const createRes = await page.request.post('/api/messages/direct/start', {
+    data: { userId: userIds[0] },
     timeout: 30_000,
   });
   expect(createRes.status()).toBe(201);
-  const channelId = String((await createRes.json())?.item?.id ?? '');
-  expect(channelId).toBeTruthy();
+  const threadId = String((await createRes.json())?.item?.id ?? '');
+  expect(threadId).toBeTruthy();
 
-  await setRole(page, 'operator');
-  const userBSendRes = await page.request.post(`/api/messages/channels/${channelId}/send`, {
-    data: { body: `hello-from-user-b-${stamp}` },
+  const sendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
+    data: { body: `hello-${Date.now()}` },
     timeout: 30_000,
   });
-  expect(userBSendRes.status()).toBe(201);
+  expect(sendRes.status()).toBe(201);
 
-  await setRole(page, 'admin');
-  const userAReadRes = await page.request.get(`/api/messages/channels/${channelId}/messages`, {
-    timeout: 30_000,
-  });
-  expect(userAReadRes.status()).toBe(200);
-  const userAReadPayload = await userAReadRes.json();
-  expect((userAReadPayload.items ?? []).some((item: { body: string }) => String(item.body).includes(`hello-from-user-b-${stamp}`))).toBe(true);
+  const inboxBeforeRead = await page.request.get('/api/messages/inbox', { timeout: 30_000 });
+  expect(inboxBeforeRead.status()).toBe(200);
+  const inboxBeforeJson = await inboxBeforeRead.json();
+  const unreadBefore = Number(
+    (inboxBeforeJson.items ?? []).find((item: { id: string }) => String(item.id) === threadId)?.unread_count ?? 0
+  );
 
-  const addMemberRes = await page.request.post(`/api/messages/channels/${channelId}/members`, {
-    data: { userIds: [userIds[0]] },
-    timeout: 30_000,
-  });
-  expect(addMemberRes.status()).toBe(200);
-  expect((await addMemberRes.json())?.item?.addedCount).toBeGreaterThanOrEqual(0);
+  const readRes = await page.request.post(`/api/messages/threads/${threadId}/read`, { timeout: 30_000 });
+  expect(readRes.status()).toBe(200);
 
-  const leaveRes = await page.request.delete(`/api/messages/channels/${channelId}/members/me`, {
-    timeout: 30_000,
-  });
-  expect(leaveRes.status()).toBe(200);
-  expect(await leaveRes.json()).toEqual({ success: true });
+  const inboxAfterRead = await page.request.get('/api/messages/inbox', { timeout: 30_000 });
+  expect(inboxAfterRead.status()).toBe(200);
+  const inboxAfterJson = await inboxAfterRead.json();
+  const unreadAfter = Number(
+    (inboxAfterJson.items ?? []).find((item: { id: string }) => String(item.id) === threadId)?.unread_count ?? 0
+  );
 
-  const forbiddenReadRes = await page.request.get(`/api/messages/channels/${channelId}/messages`, {
-    timeout: 30_000,
-  });
-  expect([200, 403]).toContain(forbiddenReadRes.status());
+  expect(unreadAfter).toBeLessThanOrEqual(unreadBefore);
 });

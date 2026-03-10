@@ -1,0 +1,330 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type ParticipantRow = {
+  thread_id: string;
+  user_id: string;
+  last_read_at: string | null;
+};
+
+type ThreadRow = {
+  id: string;
+  company_id: string;
+  kind: string;
+  dm_user_a: string;
+  dm_user_b: string;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+};
+
+type MessageRow = {
+  id: string;
+  thread_id: string;
+  sender_user_id: string;
+  body: string;
+  created_at: string;
+};
+
+export function sortDirectPair(userA: string, userB: string): [string, string] {
+  return [userA, userB].sort((a, b) => a.localeCompare(b)) as [string, string];
+}
+
+export async function ensureCompanyMember(
+  supabase: SupabaseClient,
+  companyId: string,
+  userId: string
+): Promise<boolean> {
+  const result = await supabase
+    .from("memberships")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  return !result.error && Boolean(result.data?.user_id);
+}
+
+export async function findDirectThread(
+  supabase: SupabaseClient,
+  companyId: string,
+  userA: string,
+  userB: string
+): Promise<ThreadRow | null> {
+  const [dmUserA, dmUserB] = sortDirectPair(userA, userB);
+  const result = await supabase
+    .from("message_threads")
+    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .eq("company_id", companyId)
+    .eq("kind", "direct")
+    .eq("dm_user_a", dmUserA)
+    .eq("dm_user_b", dmUserB)
+    .limit(1)
+    .maybeSingle();
+
+  if (result.error || !result.data) return null;
+  return result.data as ThreadRow;
+}
+
+export async function ensureParticipants(
+  supabase: SupabaseClient,
+  companyId: string,
+  threadId: string,
+  userIds: string[]
+): Promise<void> {
+  if (userIds.length === 0) return;
+
+  const uniqueUserIds = Array.from(new Set(userIds.map((id) => String(id).trim()).filter(Boolean)));
+  if (uniqueUserIds.length === 0) return;
+
+  const now = new Date().toISOString();
+  const rows = uniqueUserIds.map((userId) => ({
+    company_id: companyId,
+    thread_id: threadId,
+    user_id: userId,
+    last_read_at: now,
+  }));
+
+  const upsertResult = await supabase
+    .from("message_participants")
+    .upsert(rows, { onConflict: "company_id,thread_id,user_id", ignoreDuplicates: false });
+
+  if (upsertResult.error) {
+    throw new Error(upsertResult.error.message);
+  }
+}
+
+export async function getOrCreateDirectThread(
+  supabase: SupabaseClient,
+  companyId: string,
+  currentUserId: string,
+  otherUserId: string
+): Promise<ThreadRow> {
+  const [dmUserA, dmUserB] = sortDirectPair(currentUserId, otherUserId);
+
+  const existing = await findDirectThread(supabase, companyId, dmUserA, dmUserB);
+  if (existing) {
+    await ensureParticipants(supabase, companyId, existing.id, [currentUserId, otherUserId]);
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const insertResult = await supabase
+    .from("message_threads")
+    .insert({
+      company_id: companyId,
+      kind: "direct",
+      dm_user_a: dmUserA,
+      dm_user_b: dmUserB,
+      created_by: currentUserId,
+      created_at: now,
+      updated_at: now,
+      last_message_at: null,
+    })
+    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .single();
+
+  if (insertResult.error) {
+    const maybeExisting = await findDirectThread(supabase, companyId, dmUserA, dmUserB);
+    if (!maybeExisting) {
+      throw new Error(insertResult.error.message || "Failed to create direct thread");
+    }
+    await ensureParticipants(supabase, companyId, maybeExisting.id, [currentUserId, otherUserId]);
+    return maybeExisting;
+  }
+
+  const thread = insertResult.data as ThreadRow;
+  await ensureParticipants(supabase, companyId, thread.id, [currentUserId, otherUserId]);
+  return thread;
+}
+
+export async function getThreadIfParticipant(
+  supabase: SupabaseClient,
+  companyId: string,
+  threadId: string,
+  userId: string
+): Promise<{ thread: ThreadRow | null; participant: ParticipantRow | null }> {
+  const participantResult = await supabase
+    .from("message_participants")
+    .select("thread_id, user_id, last_read_at")
+    .eq("company_id", companyId)
+    .eq("thread_id", threadId)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (participantResult.error || !participantResult.data) {
+    return { thread: null, participant: null };
+  }
+
+  const threadResult = await supabase
+    .from("message_threads")
+    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .eq("company_id", companyId)
+    .eq("id", threadId)
+    .limit(1)
+    .maybeSingle();
+
+  if (threadResult.error || !threadResult.data) {
+    return { thread: null, participant: participantResult.data as ParticipantRow };
+  }
+
+  return {
+    thread: threadResult.data as ThreadRow,
+    participant: participantResult.data as ParticipantRow,
+  };
+}
+
+export async function listParticipantRowsForUser(
+  supabase: SupabaseClient,
+  companyId: string,
+  userId: string
+): Promise<ParticipantRow[]> {
+  const result = await supabase
+    .from("message_participants")
+    .select("thread_id, user_id, last_read_at")
+    .eq("company_id", companyId)
+    .eq("user_id", userId);
+
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []) as ParticipantRow[];
+}
+
+export async function listParticipantRowsForThreads(
+  supabase: SupabaseClient,
+  companyId: string,
+  threadIds: string[]
+): Promise<ParticipantRow[]> {
+  if (threadIds.length === 0) return [];
+  const result = await supabase
+    .from("message_participants")
+    .select("thread_id, user_id, last_read_at")
+    .eq("company_id", companyId)
+    .in("thread_id", threadIds);
+
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []) as ParticipantRow[];
+}
+
+export async function listThreadsByIds(
+  supabase: SupabaseClient,
+  companyId: string,
+  threadIds: string[]
+): Promise<ThreadRow[]> {
+  if (threadIds.length === 0) return [];
+
+  const result = await supabase
+    .from("message_threads")
+    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .eq("company_id", companyId)
+    .in("id", threadIds);
+
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []) as ThreadRow[];
+}
+
+export async function listMessagesByThreadIds(
+  supabase: SupabaseClient,
+  companyId: string,
+  threadIds: string[]
+): Promise<MessageRow[]> {
+  if (threadIds.length === 0) return [];
+
+  const result = await supabase
+    .from("messages")
+    .select("id, thread_id, sender_user_id, body, created_at")
+    .eq("company_id", companyId)
+    .in("thread_id", threadIds)
+    .order("created_at", { ascending: false });
+
+  if (result.error) throw new Error(result.error.message);
+  return (result.data ?? []) as MessageRow[];
+}
+
+export async function listMessagesForThread(
+  supabase: SupabaseClient,
+  companyId: string,
+  threadId: string,
+  from: number,
+  to: number
+): Promise<{ items: MessageRow[]; count: number }> {
+  const result = await supabase
+    .from("messages")
+    .select("id, thread_id, sender_user_id, body, created_at", { count: "exact" })
+    .eq("company_id", companyId)
+    .eq("thread_id", threadId)
+    .order("created_at", { ascending: true })
+    .range(from, to);
+
+  if (result.error) throw new Error(result.error.message);
+  return {
+    items: (result.data ?? []) as MessageRow[],
+    count: Number(result.count ?? 0),
+  };
+}
+
+export async function resolveDisplayNames(
+  supabase: SupabaseClient,
+  companyId: string,
+  userIds: string[]
+): Promise<Map<string, string>> {
+  const unique = Array.from(new Set(userIds.map((id) => String(id).trim()).filter(Boolean)));
+  const map = new Map<string, string>();
+  if (unique.length === 0) return map;
+
+  const profilesResult = await supabase
+    .from("profiles")
+    .select("id, full_name, email")
+    .in("id", unique);
+
+  if (!profilesResult.error) {
+    for (const row of profilesResult.data ?? []) {
+      const fullName = String(row.full_name ?? "").trim();
+      const email = String(row.email ?? "").trim();
+      const emailLocal = email.includes("@") ? email.split("@")[0] : "";
+      map.set(String(row.id), fullName || emailLocal || "Team Member");
+    }
+  }
+
+  const employeesPrimaryResult = await supabase
+    .from("employees")
+    .select("user_id, name, full_name")
+    .eq("company_id", companyId)
+    .in("user_id", unique);
+
+  let employeeRows: Array<{ user_id?: string; name?: string; full_name?: string }> = [];
+  if (!employeesPrimaryResult.error) {
+    employeeRows = (employeesPrimaryResult.data ?? []) as Array<{
+      user_id?: string;
+      name?: string;
+      full_name?: string;
+    }>;
+  } else if (
+    /column employees\.name does not exist|Could not find the 'name' column/i.test(
+      employeesPrimaryResult.error.message || ""
+    )
+  ) {
+    const employeesFallbackResult = await supabase
+      .from("employees")
+      .select("user_id, full_name")
+      .eq("company_id", companyId)
+      .in("user_id", unique);
+    if (!employeesFallbackResult.error) {
+      employeeRows = (employeesFallbackResult.data ?? []) as Array<{
+        user_id?: string;
+        full_name?: string;
+      }>;
+    }
+  }
+
+  for (const employee of employeeRows) {
+    const name = String(employee.name ?? employee.full_name ?? "").trim();
+    if (name) map.set(String(employee.user_id ?? ""), name);
+  }
+
+  for (const id of unique) {
+    if (!map.has(id)) map.set(id, "Team Member");
+  }
+
+  return map;
+}

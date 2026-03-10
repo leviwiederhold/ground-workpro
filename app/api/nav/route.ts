@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseServer } from "@/lib/supabase/server";
-import { normalizeAppRole, toNavItems, type AppRole } from "@/lib/nav/config";
+import { NAV_ITEMS, normalizeAppRole, toNavItems, type AppRole } from "@/lib/nav/config";
+import {
+  applyPermissionOverrideFromCookie,
+  hasModuleAccess,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
+import type { ModulePermissionKey } from "@/lib/permissions/types";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +56,17 @@ function clampRole(realRole: AppRole, requestedRole: AppRole): AppRole {
   return ROLE_RANK[requestedRole] <= ROLE_RANK[realRole] ? requestedRole : realRole;
 }
 
+const NAV_MODULE_MAP: Partial<Record<string, ModulePermissionKey>> = {
+  jobs: "jobs",
+  fleet: "fleet",
+  maintenance: "maintenance",
+  safety: "safety",
+  messages: "messages",
+  finance: "finance",
+  team: "team_management",
+  reports: "daily_reports",
+};
+
 export async function GET() {
   const context = await resolveContext();
   if ("error" in context) return context.error;
@@ -62,12 +80,34 @@ export async function GET() {
     const actingRole = normalizeAppRole(cookieStore.get(ACTING_ROLE_COOKIE)?.value);
 
     const role = e2eRole ?? (actingRole ? clampRole(context.realRole, actingRole) : context.realRole);
+    let modulePermissions = await resolveUserModulePermissions({
+      supabase: context.supabase,
+      companyId: context.companyId,
+      userId: context.userId,
+      role,
+    });
+    if (process.env.NODE_ENV !== "production") {
+      modulePermissions = applyPermissionOverrideFromCookie(
+        modulePermissions,
+        cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value
+      );
+    }
+
+    const roleNavKeys = new Set(toNavItems(role).map((item) => item.key));
+    const filteredItems = NAV_ITEMS.filter((item) => {
+      const moduleKey = NAV_MODULE_MAP[item.key];
+      if (moduleKey) {
+        return hasModuleAccess(modulePermissions, moduleKey, "view");
+      }
+      return roleNavKeys.has(item.key);
+    });
 
     return NextResponse.json({
-      items: toNavItems(role),
+      items: filteredItems,
       role,
       realRole: context.realRole,
       canSwitchRoleView: role === "admin",
+      moduleAccess: modulePermissions,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal server error";

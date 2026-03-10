@@ -1,5 +1,10 @@
 import { supabaseServer } from "@/lib/supabase/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ensureCompanyHasAtLeastOneCeoMembership,
+  isCeoMembershipRole,
+  listCompanyMembershipRoles,
+} from "@/lib/auth/ceoGuard";
 
 export class TenantResolverError extends Error {
   status: number;
@@ -72,46 +77,68 @@ export async function getCompanyId() {
       }
 
       if (!inviteEmployee.error && inviteEmployee.data?.company_id) {
-        const roleRaw = String(inviteEmployee.data.role ?? "").toLowerCase();
-        const membershipRole =
-          roleRaw.includes("admin") || roleRaw.includes("executive") || roleRaw.includes("ceo")
-            ? "admin"
-            : roleRaw === "pm" || roleRaw.includes("operations") || roleRaw.includes("projectmanager")
-              ? "pm"
-              : roleRaw.includes("foreman")
-                ? "foreman"
-                : roleRaw.includes("mechanic")
-                  ? "mechanic"
-                  : "operator";
+        try {
+          const roleRaw = String(inviteEmployee.data.role ?? "").toLowerCase();
+          const membershipRole =
+            roleRaw.includes("admin") || roleRaw.includes("executive") || roleRaw.includes("ceo")
+              ? "admin"
+              : roleRaw === "pm" || roleRaw.includes("operations") || roleRaw.includes("projectmanager")
+                ? "pm"
+                : roleRaw.includes("foreman")
+                  ? "foreman"
+                  : roleRaw.includes("mechanic")
+                    ? "mechanic"
+                    : "operator";
 
-        const membershipInsert = await client.from("memberships").insert({
-          company_id: inviteEmployee.data.company_id,
-          user_id: userData.user.id,
-          role: membershipRole,
-        });
+          const existingCompanyMemberships = await listCompanyMembershipRoles(
+            client,
+            String(inviteEmployee.data.company_id)
+          );
+          const hasCeoMembership = existingCompanyMemberships.some((row) =>
+            isCeoMembershipRole(row.role)
+          );
+          const safeMembershipRole = hasCeoMembership ? membershipRole : "ceo";
+          const safeEmployeeRole = safeMembershipRole === "ceo" ? "admin" : safeMembershipRole;
 
-        if (
-          membershipInsert.error &&
-          !/duplicate key|unique/i.test(membershipInsert.error.message || "")
-        ) {
-          throw new TenantResolverError(membershipInsert.error.message || "Failed to create membership", 400);
-        }
+          const membershipInsert = await client.from("memberships").insert({
+            company_id: inviteEmployee.data.company_id,
+            user_id: userData.user.id,
+            role: safeMembershipRole,
+          });
 
-        const employeeUpdate = await client
-          .from("employees")
-          .update({ user_id: userData.user.id, role: membershipRole })
-          .eq("id", inviteEmployee.data.id)
-          .eq("company_id", inviteEmployee.data.company_id);
+          if (
+            membershipInsert.error &&
+            !/duplicate key|unique/i.test(membershipInsert.error.message || "")
+          ) {
+            throw new TenantResolverError(membershipInsert.error.message || "Failed to create membership", 400);
+          }
 
-        if (
-          employeeUpdate.error &&
-          /Could not find the 'user_id' column/i.test(employeeUpdate.error.message || "")
-        ) {
-          await client
+          const employeeUpdate = await client
             .from("employees")
-            .update({ role: membershipRole })
+            .update({ user_id: userData.user.id, role: safeEmployeeRole })
             .eq("id", inviteEmployee.data.id)
             .eq("company_id", inviteEmployee.data.company_id);
+
+          if (
+            employeeUpdate.error &&
+            /Could not find the 'user_id' column/i.test(employeeUpdate.error.message || "")
+          ) {
+            await client
+              .from("employees")
+              .update({ role: safeEmployeeRole })
+              .eq("id", inviteEmployee.data.id)
+              .eq("company_id", inviteEmployee.data.company_id);
+          }
+
+          await ensureCompanyHasAtLeastOneCeoMembership(
+            client,
+            String(inviteEmployee.data.company_id)
+          );
+        } catch (error) {
+          throw new TenantResolverError(
+            error instanceof Error ? error.message : "Failed to resolve membership",
+            400
+          );
         }
 
         const reloaded = await loadMembership();

@@ -2,12 +2,12 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
-import { getMyMembership } from "@/lib/messages/members";
+import { getThreadIfParticipant } from "@/lib/messages/mvp";
 
 export const dynamic = "force-dynamic";
 
 const paramsSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
 });
 
 type ValidationIssue = {
@@ -28,11 +28,6 @@ function toTenantErrorResponse(error: TenantResolverError) {
   return serverError(error.message);
 }
 
-function isMissingReadColumn(message: string) {
-  const normalized = message.toLowerCase();
-  return normalized.includes("column") && normalized.includes("last_read_at");
-}
-
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -40,58 +35,47 @@ export async function POST(
   try {
     const parsedParams = paramsSchema.safeParse(await params);
     if (!parsedParams.success) return validationError(toValidationDetails(parsedParams.error));
-    const channelId = parsedParams.data.id;
 
+    const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
-    const membership = await getMyMembership(supabase, companyId, channelId, userId);
-    if (membership.error) {
-      const now = new Date().toISOString();
-      return okItem({ channelId, userId, lastReadAt: now, success: true });
-    }
-    if (!membership.data) {
-      const channel = await supabase
-        .from("message_channels")
+
+    const { thread, participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
+    if (!participant) {
+      const threadResult = await supabase
+        .from("message_threads")
         .select("id")
         .eq("company_id", companyId)
-        .eq("id", channelId)
+        .eq("id", threadId)
+        .limit(1)
         .maybeSingle();
-      if (channel.error) {
-        const now = new Date().toISOString();
-        return okItem({ channelId, userId, lastReadAt: now, success: true });
-      }
-      if (!channel.data) return notFound("Thread not found");
+      if (!threadResult.data) return notFound("Thread not found");
       return forbidden();
     }
+    if (!thread) return notFound("Thread not found");
 
     const now = new Date().toISOString();
-    const updated = await supabase
-      .from("message_channel_members")
+    const updateResult = await supabase
+      .from("message_participants")
       .update({ last_read_at: now })
       .eq("company_id", companyId)
-      .eq("channel_id", channelId)
+      .eq("thread_id", thread.id)
       .eq("user_id", userId)
-      .select("channel_id, user_id, last_read_at")
+      .select("thread_id, user_id, last_read_at")
       .maybeSingle();
-    if (updated.error || !updated.data) {
-      if (updated.error && !isMissingReadColumn(updated.error.message || "")) {
-        // Keep read endpoint resilient for mixed-schema environments.
-      }
-      return okItem({
-        channelId,
-        userId,
-        lastReadAt: now,
-        success: true,
-      });
+
+    if (updateResult.error || !updateResult.data) {
+      return serverError(updateResult.error?.message || "Failed to mark thread read");
     }
 
     return okItem({
-      channelId: updated.data.channel_id,
-      userId: updated.data.user_id,
-      lastReadAt: updated.data.last_read_at,
+      threadId: updateResult.data.thread_id,
+      channelId: updateResult.data.thread_id,
+      userId: updateResult.data.user_id,
+      lastReadAt: updateResult.data.last_read_at,
       success: true,
     });
   } catch (error) {
     if (error instanceof TenantResolverError) return toTenantErrorResponse(error);
-    return serverError();
+    return serverError(error instanceof Error ? error.message : "Internal server error");
   }
 }

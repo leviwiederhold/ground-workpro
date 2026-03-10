@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ensureCompanyHasAtLeastOneCeoMembership,
+  isCeoMembershipRole,
+  listCompanyMembershipRoles,
+} from "@/lib/auth/ceoGuard";
 
 const bodySchema = z.object({
   token: z.string().min(20),
@@ -18,9 +23,10 @@ type InviteRow = {
   expires_at: string | null;
 };
 
-const normalizeRole = (value: unknown): "admin" | "pm" | "foreman" | "mechanic" | "operator" => {
+const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" => {
   const raw = String(value ?? "").trim().toLowerCase();
-  if (raw.includes("admin") || raw.includes("executive") || raw.includes("ceo")) return "admin";
+  if (raw.includes("ceo")) return "ceo";
+  if (raw.includes("admin") || raw.includes("executive")) return "admin";
   if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
   if (raw.includes("foreman")) return "foreman";
   if (raw.includes("mechanic")) return "mechanic";
@@ -46,24 +52,58 @@ export async function POST(request: Request) {
   const email = parsed.data.email.trim().toLowerCase();
   const token = parsed.data.token.trim();
 
-  const inviteResult = await admin
-    .from("invite_tokens")
-    .select("token, company_id, employee_id, email, role, used_at, expires_at")
-    .eq("token", token)
-    .maybeSingle<InviteRow>();
-  if (inviteResult.error) {
+  const pendingInvite = await admin
+    .from("pending_invitations")
+    .select("id, company_id, employee_id, email, role, accepted_at, expires_at")
+    .eq("invite_token", token)
+    .maybeSingle();
+  if (pendingInvite.error) {
+    return NextResponse.json({ error: pendingInvite.error.message }, { status: 400 });
+  }
+
+  const inviteResult = !pendingInvite.data
+    ? await admin
+        .from("invite_tokens")
+        .select("token, company_id, employee_id, email, role, used_at, expires_at")
+        .eq("token", token)
+        .maybeSingle<InviteRow>()
+    : null;
+  if (inviteResult?.error) {
     return NextResponse.json({ error: inviteResult.error.message }, { status: 400 });
   }
-  if (!inviteResult.data) {
+
+  const invitation = pendingInvite.data
+    ? {
+        company_id: pendingInvite.data.company_id,
+        employee_id: pendingInvite.data.employee_id,
+        email: pendingInvite.data.email,
+        role: pendingInvite.data.role,
+        used_at: pendingInvite.data.accepted_at,
+        expires_at: pendingInvite.data.expires_at,
+        pending_id: pendingInvite.data.id,
+      }
+    : inviteResult?.data
+      ? {
+          company_id: inviteResult.data.company_id,
+          employee_id: inviteResult.data.employee_id,
+          email: inviteResult.data.email,
+          role: inviteResult.data.role,
+          used_at: inviteResult.data.used_at,
+          expires_at: inviteResult.data.expires_at,
+          pending_id: null,
+        }
+      : null;
+
+  if (!invitation) {
     return NextResponse.json({ error: "Invalid invite token" }, { status: 404 });
   }
-  if (inviteResult.data.used_at) {
+  if (invitation.used_at) {
     return NextResponse.json({ error: "Invite already used" }, { status: 409 });
   }
-  if (inviteResult.data.expires_at && new Date(inviteResult.data.expires_at).getTime() < Date.now()) {
+  if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ error: "Invite expired" }, { status: 410 });
   }
-  if (inviteResult.data.email.trim().toLowerCase() !== email) {
+  if (invitation.email.trim().toLowerCase() !== email) {
     return NextResponse.json({ error: "Invite email does not match" }, { status: 403 });
   }
 
@@ -94,39 +134,97 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Failed to resolve invite user" }, { status: 500 });
   }
 
-  const role = normalizeRole(inviteResult.data.role);
+  const role = normalizeRole(invitation.role);
+  const existingCompanyMemberships = await listCompanyMembershipRoles(
+    admin,
+    String(invitation.company_id)
+  );
+  const ceoUserIds = new Set(
+    existingCompanyMemberships
+      .filter((row) => isCeoMembershipRole(row.role))
+      .map((row) => row.user_id)
+  );
+  const userIsExistingCeo = ceoUserIds.has(userId);
+  const roleIsCeo = isCeoMembershipRole(role);
+  if (!roleIsCeo && ceoUserIds.size === 0) {
+    return NextResponse.json({ error: "Company must always have at least one CEO membership" }, { status: 409 });
+  }
+  if (!roleIsCeo && userIsExistingCeo && ceoUserIds.size <= 1) {
+    return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
+  }
 
   const membershipInsert = await admin.from("memberships").insert({
-    company_id: inviteResult.data.company_id,
+    company_id: invitation.company_id,
     user_id: userId,
     role,
   });
   if (membershipInsert.error && !/duplicate key|unique/i.test(membershipInsert.error.message || "")) {
     return NextResponse.json({ error: membershipInsert.error.message }, { status: 400 });
   }
+  try {
+    await ensureCompanyHasAtLeastOneCeoMembership(admin, String(invitation.company_id));
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
+  }
+
+  const employeeRole = role === "ceo" ? "admin" : role;
 
   let employeeUpdate = await admin
-    .from("employees")
-    .update({ user_id: userId, role })
-    .eq("company_id", inviteResult.data.company_id)
-    .eq("id", inviteResult.data.employee_id);
+      .from("employees")
+      .update({ user_id: userId, role: employeeRole })
+      .eq("company_id", invitation.company_id)
+      .eq("id", invitation.employee_id);
   if (employeeUpdate.error && /Could not find the 'user_id' column/i.test(employeeUpdate.error.message || "")) {
     employeeUpdate = await admin
-      .from("employees")
-      .update({ role })
-      .eq("company_id", inviteResult.data.company_id)
-      .eq("id", inviteResult.data.employee_id);
+        .from("employees")
+        .update({ role: employeeRole })
+        .eq("company_id", invitation.company_id)
+        .eq("id", invitation.employee_id);
   }
   if (employeeUpdate.error) {
     return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
   }
 
-  const tokenUse = await admin
-    .from("invite_tokens")
-    .update({ used_at: new Date().toISOString() })
-    .eq("token", token);
-  if (tokenUse.error) {
-    return NextResponse.json({ error: tokenUse.error.message }, { status: 400 });
+  const acceptedAt = new Date().toISOString();
+  if (invitation.pending_id) {
+    const pendingUse = await admin
+      .from("pending_invitations")
+      .update({ accepted_at: acceptedAt, accepted_user_id: userId })
+      .eq("id", invitation.pending_id);
+    if (pendingUse.error) {
+      return NextResponse.json({ error: pendingUse.error.message }, { status: 400 });
+    }
+
+    const invitePermissions = await admin
+      .from("module_permissions")
+      .select("module_key, access_level")
+      .eq("company_id", invitation.company_id)
+      .eq("invitation_id", invitation.pending_id);
+    if (invitePermissions.error) {
+      return NextResponse.json({ error: invitePermissions.error.message }, { status: 400 });
+    }
+    if ((invitePermissions.data ?? []).length > 0) {
+      await admin.from("module_permissions").delete().eq("company_id", invitation.company_id).eq("user_id", userId);
+      const insertPermissions = await admin.from("module_permissions").insert(
+        (invitePermissions.data ?? []).map((row) => ({
+          company_id: invitation.company_id,
+          user_id: userId,
+          module_key: row.module_key,
+          access_level: row.access_level,
+        }))
+      );
+      if (insertPermissions.error) {
+        return NextResponse.json({ error: insertPermissions.error.message }, { status: 400 });
+      }
+    }
+  } else {
+    const tokenUse = await admin
+      .from("invite_tokens")
+      .update({ used_at: acceptedAt })
+      .eq("token", token);
+    if (tokenUse.error) {
+      return NextResponse.json({ error: tokenUse.error.message }, { status: 400 });
+    }
   }
 
   return NextResponse.json({ item: { success: true, userId } });

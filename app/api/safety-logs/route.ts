@@ -289,7 +289,7 @@ export async function POST(request: Request) {
             supabase,
             companyId,
             userIds: recipientIds,
-            type: "safety_log_created",
+            type: "safety_assigned",
             payload: {
               id: String((data as Record<string, unknown>).id ?? ""),
               summary: parsedBody.data.summary,

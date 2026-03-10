@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -162,6 +163,18 @@ export async function PATCH(
 
     const { supabase, companyId } = await getCompanyId();
     const payload = parsed.data;
+    const existingResult = await supabase
+      .from("work_orders")
+      .select("id, title, assigned_to, due_date")
+      .eq("company_id", companyId)
+      .eq("id", normalizeRouteId(id))
+      .maybeSingle();
+    if (existingResult.error) {
+      return NextResponse.json({ error: existingResult.error.message }, { status: 400 });
+    }
+    if (!existingResult.data) {
+      return NextResponse.json({ error: "Work order not found" }, { status: 404 });
+    }
 
     const updatePayload: Record<string, unknown> = {};
     if (payload.equipmentId !== undefined) updatePayload.equipment_id = normalizeId(payload.equipmentId);
@@ -211,6 +224,29 @@ export async function PATCH(
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    try {
+      const previousAssignedTo = String(existingResult.data.assigned_to ?? "").trim();
+      const nextAssignedTo = String((data as Record<string, unknown>)?.assigned_to ?? "").trim();
+      if (nextAssignedTo && nextAssignedTo !== previousAssignedTo) {
+        await enqueueNotifications({
+          supabase,
+          companyId,
+          userIds: [nextAssignedTo],
+          type: "maintenance_assigned",
+          payload: {
+            workOrderId: String((data as Record<string, unknown>)?.id ?? normalizeRouteId(id)),
+            title: String((data as Record<string, unknown>)?.title ?? existingResult.data.title ?? ""),
+            date: String((data as Record<string, unknown>)?.due_date ?? existingResult.data.due_date ?? ""),
+            href: "/maintenance",
+          },
+          entityType: "work_order",
+          entityId: String((data as Record<string, unknown>)?.id ?? normalizeRouteId(id)),
+        });
+      }
+    } catch {
+      // Non-blocking notification fanout.
     }
 
     return NextResponse.json({ workOrder: mapWorkOrder(data) });

@@ -26,6 +26,28 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
         return Number.isFinite(parsed) ? parsed : 0;
       };
       const getBidStage = (bid) => bid?.stage || bid?.status || 'estimating';
+      const getBidFinancials = (bid) => {
+        const revenue = Number(
+          bid?.revenue ??
+          bid?.amount ??
+          bid?.total ??
+          bid?.total_amount ??
+          0
+        ) || 0;
+        const actualJobCost = Number(
+          bid?.actual_job_cost ??
+          bid?.actualJobCost ??
+          bid?.subtotal ??
+          0
+        ) || 0;
+        const profit = Number.isFinite(Number(bid?.profit))
+          ? Number(bid?.profit)
+          : (revenue - actualJobCost);
+        const margin = Number.isFinite(Number(bid?.margin))
+          ? Number(bid?.margin)
+          : (revenue > 0 ? (profit / revenue) : 0);
+        return { revenue, actualJobCost, profit, margin };
+      };
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [selectedBidId, setSelectedBidId] = useState(null);
@@ -60,6 +82,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
         client: '',
         bid_date: '',
         probability: 0,
+        actual_job_cost: 0,
+        revenue: 0,
         notes: '',
       });
       const [itemForm, setItemForm] = useState({
@@ -128,6 +152,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           client: '',
           bid_date: '',
           probability: 0,
+          actual_job_cost: 0,
+          revenue: 0,
           notes: '',
         });
         setEditingBidId(null);
@@ -296,6 +322,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
       };
 
       const openEditBid = (bid) => {
+        const financials = getBidFinancials(bid);
         setBidForm({
           title: bid.projectName || bid.title || '',
           status: bid.status || 'draft',
@@ -304,6 +331,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           client: getBidClient(bid),
           bid_date: getBidDate(bid) || '',
           probability: getBidProbability(bid),
+          actual_job_cost: financials.actualJobCost,
+          revenue: financials.revenue,
           notes: bid.notes || '',
         });
         setEditingBidId(bid.id);
@@ -349,6 +378,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
             client: bidForm.client.trim(),
             bid_date: toDateOnly(bidForm.bid_date) || null,
             probability: Number(bidForm.probability) || 0,
+            actual_job_cost: Number(bidForm.actual_job_cost) || 0,
+            revenue: Number(bidForm.revenue) || 0,
             notes: bidForm.notes.trim(),
             ...(editingBidId ? {} : { status: normalizedStatus }),
           };
@@ -383,6 +414,11 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                   Number.isFinite(Number(rawSavedBid.probability))
                     ? Number(rawSavedBid.probability)
                     : (Number(bidForm.probability) || 0),
+                actual_job_cost: Number(rawSavedBid.actual_job_cost ?? rawSavedBid.actualJobCost ?? bidForm.actual_job_cost ?? 0) || 0,
+                actualJobCost: Number(rawSavedBid.actualJobCost ?? rawSavedBid.actual_job_cost ?? bidForm.actual_job_cost ?? 0) || 0,
+                revenue: Number(rawSavedBid.revenue ?? rawSavedBid.total ?? rawSavedBid.amount ?? bidForm.revenue ?? 0) || 0,
+                profit: Number(rawSavedBid.profit ?? ((Number(rawSavedBid.revenue ?? bidForm.revenue ?? 0) || 0) - (Number(rawSavedBid.actual_job_cost ?? bidForm.actual_job_cost ?? 0) || 0))) || 0,
+                margin: Number(rawSavedBid.margin ?? 0),
               }
             : null;
           if (savedBid?.id) {
@@ -822,20 +858,20 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                   <div className="grid grid-cols-2 gap-3 text-sm pt-2 border-t border-gray-200">
                     <div>
                       <p className="text-gray-500">Revenue</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.revenue || 0))}</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(Number(getBidFinancials(selectedBid).revenue || bidSummary?.revenue || 0))}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">Cost</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.subtotalCost || 0))}</p>
+                      <p className="text-gray-500">Actual Job Cost</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(Number(getBidFinancials(selectedBid).actualJobCost || bidSummary?.subtotalCost || 0))}</p>
                     </div>
                     <div>
                       <p className="text-gray-500">Profit</p>
-                      <p className="font-semibold text-gray-900">{formatCurrency(Number(bidSummary?.profit || 0))}</p>
+                      <p className="font-semibold text-gray-900">{formatCurrency(Number(getBidFinancials(selectedBid).profit || bidSummary?.profit || 0))}</p>
                     </div>
                     <div>
-                      <p className="text-gray-500">Margin %</p>
+                      <p className="text-gray-500">Margin</p>
                       <p className="font-semibold text-gray-900" data-testid="bids-summary-margin">
-                        {Number(bidSummary?.marginPercent || 0).toFixed(2)}%
+                        {(Number(getBidFinancials(selectedBid).margin || 0) * 100).toFixed(2)}%
                       </p>
                     </div>
                   </div>
@@ -1029,6 +1065,46 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                       onChange={(e) => setBidForm({ ...bidForm, probability: Number(e.target.value) })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Actual Job Cost</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={bidForm.actual_job_cost}
+                        onChange={(e) => setBidForm({ ...bidForm, actual_job_cost: Number(e.target.value) || 0 })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Revenue</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={bidForm.revenue}
+                        onChange={(e) => setBidForm({ ...bidForm, revenue: Number(e.target.value) || 0 })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Profit</label>
+                      <p className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">
+                        {formatCurrency((Number(bidForm.revenue) || 0) - (Number(bidForm.actual_job_cost) || 0))}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Margin</label>
+                      <p className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">
+                        {(((Number(bidForm.revenue) || 0) > 0
+                          ? (((Number(bidForm.revenue) || 0) - (Number(bidForm.actual_job_cost) || 0)) / (Number(bidForm.revenue) || 0))
+                          : 0) * 100).toFixed(2)}%
+                      </p>
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>

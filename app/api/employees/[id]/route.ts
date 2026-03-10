@@ -159,9 +159,14 @@ export async function PATCH(
     }
     const existingEmployee = existingEmployeeResult.data;
     const payload = parsed.data;
+    const existingRole = normalizeRoleValue(existingEmployee.role);
 
     if (payload.role !== undefined && actorRole !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    if (payload.role !== undefined && existingRole === "admin" && normalizeRoleValue(payload.role) !== "admin") {
+      return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
     }
 
     const updatePayload: Record<string, unknown> = {};
@@ -275,7 +280,7 @@ export async function PATCH(
             supabase,
             companyId,
             userIds: [linkedUserId],
-            type: "assignment_created",
+            type: "job_assigned",
             payload: {
               jobId: String(updatedEmployee.job_id),
               jobName: String(jobResult.data?.name ?? "Assigned Job"),

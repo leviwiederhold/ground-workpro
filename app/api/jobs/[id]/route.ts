@@ -87,6 +87,8 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+  source_bid_id: row.source_bid_id ?? null,
+  sourceBidId: row.source_bid_id ?? null,
   };
 };
 
@@ -382,6 +384,33 @@ export async function DELETE(
       return null;
     };
 
+    const cleanupPurchaseOrderItemsByJob = async () => {
+      const poResult = await supabase
+        .from("purchase_orders")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("job_id", normalizedId);
+      if (poResult.error) {
+        if (isMissingTableError(poResult.error.message) || isMissingSchemaError(poResult.error.message)) return null;
+        return poResult.error.message;
+      }
+      const purchaseOrderIds = (poResult.data ?? [])
+        .map((row: Record<string, unknown>) => String(row.id ?? ""))
+        .filter(Boolean);
+      if (purchaseOrderIds.length === 0) return null;
+
+      const deleteResult = await supabase
+        .from("purchase_order_items")
+        .delete()
+        .eq("company_id", companyId)
+        .in("purchase_order_id", purchaseOrderIds);
+      if (deleteResult.error) {
+        if (isMissingTableError(deleteResult.error.message) || isMissingSchemaError(deleteResult.error.message)) return null;
+        return deleteResult.error.message;
+      }
+      return null;
+    };
+
     const cleanupErrors = await Promise.all([
       dependentCleanup("job_employees"),
       dependentCleanup("job_equipment"),
@@ -389,7 +418,7 @@ export async function DELETE(
       dependentCleanup("daily_reports"),
       dependentCleanup("safety_logs"),
       dependentCleanup("inventory_transactions"),
-      dependentCleanup("purchase_order_items"),
+      cleanupPurchaseOrderItemsByJob(),
     ]);
     const firstCleanupError = cleanupErrors.find(Boolean);
     if (firstCleanupError) {

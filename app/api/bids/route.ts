@@ -29,6 +29,8 @@ const createBidSchema = z.object({
   stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).default("estimating").optional(),
   owner_user_id: z.string().uuid().nullable().optional(),
   due_date: z.string().optional().nullable(),
+  actual_job_cost: z.number().nonnegative().optional(),
+  revenue: z.number().nonnegative().optional(),
 });
 
 type BidNotesMeta = {
@@ -101,6 +103,14 @@ const normalizeDate = (value: unknown, fallback: string | null = null) => {
   return parsed.toISOString().slice(0, 10);
 };
 
+const toBidFinancials = (actualJobCost: number, revenue: number) => {
+  const normalizedCost = normalizeNumber(actualJobCost);
+  const normalizedRevenue = normalizeNumber(revenue);
+  const profit = normalizedRevenue - normalizedCost;
+  const margin = normalizedRevenue > 0 ? profit / normalizedRevenue : 0;
+  return { actualJobCost: normalizedCost, revenue: normalizedRevenue, profit, margin };
+};
+
 const pickNonEmptyString = (...values: Array<unknown>) => {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -140,6 +150,10 @@ const mapBid = (row: any) => ({
         ? parsedNotes.meta.probability
         : null;
     const probability = dbProbability === 0 && notesProbability !== null ? notesProbability : dbProbability;
+    const revenue = normalizeNumber(row.revenue ?? row.total ?? row.total_amount ?? row.amount ?? 0);
+    const actualJobCost = normalizeNumber(row.actual_job_cost ?? row.subtotal ?? row.sub_total ?? 0);
+    const profit = normalizeNumber(row.profit, revenue - actualJobCost);
+    const margin = normalizeNumber(row.margin, revenue > 0 ? profit / revenue : 0);
     return {
   id: row.id,
   title: row.title ?? row.project_name ?? "",
@@ -147,9 +161,14 @@ const mapBid = (row: any) => ({
   client,
   bid_date: bidDate || null,
   bidDate: bidDate || null,
-  subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
-  total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
-  amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
+  subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? actualJobCost),
+  total: revenue,
+  amount: revenue,
+  actual_job_cost: actualJobCost,
+  actualJobCost,
+  revenue,
+  profit,
+  margin,
   status: row.status ?? "draft",
   probability,
   notes: parsedNotes.plainNotes,
@@ -272,6 +291,10 @@ export async function POST(request: Request) {
 
     const normalizedBidDate = normalizeDate(payload.bid_date, null);
     const normalizedProbability = normalizeNumber(payload.probability ?? 0);
+    const financials = toBidFinancials(
+      payload.actual_job_cost ?? 0,
+      payload.revenue ?? 0
+    );
 
     const notesWithMeta = buildBidNotes(payload.notes ?? "", {
       client: payload.client ?? "",
@@ -290,6 +313,14 @@ export async function POST(request: Request) {
       probability: normalizedProbability,
       notes: notesWithMeta,
       job_id: normalizeId(payload.job_id),
+      actual_job_cost: financials.actualJobCost,
+      revenue: financials.revenue,
+      profit: financials.profit,
+      margin: financials.margin,
+      subtotal: financials.actualJobCost,
+      total: financials.revenue,
+      amount: financials.revenue,
+      total_amount: financials.revenue,
       stage: payload.stage ?? "estimating",
       owner_user_id: payload.owner_user_id ?? userId,
       due_date: payload.due_date ?? null,

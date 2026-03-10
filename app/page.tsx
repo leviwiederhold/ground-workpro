@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
+import { ComingSoonOverlay } from '@/app/components/ui/ComingSoonOverlay';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -631,6 +632,7 @@ const confirmDestructiveAction = (targetLabel) =>
       const [showRoleSelector, setShowRoleSelector] = useState(false);
       const [actingRoleSaving, setActingRoleSaving] = useState(false);
       const [serverNavItems, setServerNavItems] = useState([]);
+      const [moduleAccess, setModuleAccess] = useState({});
       const [navLoaded, setNavLoaded] = useState(false);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
@@ -747,6 +749,7 @@ const confirmDestructiveAction = (targetLabel) =>
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) {
             setServerNavItems(fallbackNavByRole(currentRole));
+            setModuleAccess({});
             return;
           }
           const uiRole = mapServerRoleToUiRole(payload?.role);
@@ -754,48 +757,85 @@ const confirmDestructiveAction = (targetLabel) =>
           setCanSwitchRoleView(Boolean(payload?.canSwitchRoleView));
           const resolvedItems = Array.isArray(payload?.items) && payload.items.length > 0 ? payload.items : fallbackNavByRole(uiRole);
           setServerNavItems(resolvedItems);
+          setModuleAccess(payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {});
         } catch {
           setServerNavItems(fallbackNavByRole(currentRole));
+          setModuleAccess({});
         } finally {
           setNavLoaded(true);
         }
       }, [currentRole, fallbackNavByRole, mapServerRoleToUiRole]);
 
+      const moduleForView = useCallback((view) => {
+        const map = {
+          jobs: 'jobs',
+          fleet: 'fleet',
+          maintenance: 'maintenance',
+          reports: 'daily_reports',
+          safety: 'safety',
+          messages: 'messages',
+          finance: 'finance',
+          team: 'team_management',
+        };
+        return map[String(view || '').toLowerCase()] || null;
+      }, []);
+
+      const canViewModule = useCallback((moduleKey) => {
+        if (!moduleKey) return true;
+        const level = String(moduleAccess?.[moduleKey] || 'none');
+        return level === 'view' || level === 'edit';
+      }, [moduleAccess]);
+
+      const canEditModule = useCallback((moduleKey) => {
+        if (!moduleKey) return true;
+        return String(moduleAccess?.[moduleKey] || 'none') === 'edit';
+      }, [moduleAccess]);
+
       const notificationVisuals = {
-        assignment_created: {
-          icon: 'calendar-plus',
+        new_message: {
+          icon: 'message',
           containerClass: 'bg-blue-100',
           iconClass: 'text-blue-700',
         },
-        assignment_removed: {
-          icon: 'calendar-xmark',
-          containerClass: 'bg-yellow-100',
-          iconClass: 'text-yellow-700',
-        },
-        event_invited: {
+        calendar_invite: {
           icon: 'calendar-check',
           containerClass: 'bg-green-100',
           iconClass: 'text-green-700',
         },
-        event_updated: {
+        calendar_event_reminder: {
           icon: 'calendar-days',
           containerClass: 'bg-indigo-100',
           iconClass: 'text-indigo-700',
         },
-        event_canceled: {
-          icon: 'calendar-xmark',
-          containerClass: 'bg-red-100',
-          iconClass: 'text-red-700',
+        job_assigned: {
+          icon: 'calendar-plus',
+          containerClass: 'bg-blue-100',
+          iconClass: 'text-blue-700',
         },
-        safety_log_created: {
-          icon: 'shield-halved',
+        task_assigned: {
+          icon: 'list-check',
+          containerClass: 'bg-cyan-100',
+          iconClass: 'text-cyan-700',
+        },
+        company_invite: {
+          icon: 'user-plus',
+          containerClass: 'bg-violet-100',
+          iconClass: 'text-violet-700',
+        },
+        bid_won: {
+          icon: 'trophy',
           containerClass: 'bg-emerald-100',
           iconClass: 'text-emerald-700',
         },
-        work_order_reported: {
+        maintenance_assigned: {
           icon: 'screwdriver-wrench',
           containerClass: 'bg-orange-100',
           iconClass: 'text-orange-700',
+        },
+        safety_assigned: {
+          icon: 'shield-halved',
+          containerClass: 'bg-emerald-100',
+          iconClass: 'text-emerald-700',
         },
         default: {
           icon: 'bell',
@@ -820,7 +860,7 @@ const confirmDestructiveAction = (targetLabel) =>
         try {
           setNotificationsLoading(true);
           const [listResponse, countResponse] = await Promise.all([
-            fetch('/api/activity/feed?limit=30', { cache: 'no-store' }),
+            fetch('/api/notifications?limit=30', { cache: 'no-store' }),
             fetch('/api/notifications/unread-count', { cache: 'no-store' }),
           ]);
           const payload = await listResponse.json();
@@ -830,7 +870,7 @@ const confirmDestructiveAction = (targetLabel) =>
           if (countResponse.ok) {
             setUnreadNotificationsCount(Number(countPayload?.item?.count ?? 0));
           } else {
-            setUnreadNotificationsCount((payload.items || []).filter((item) => item.source === 'notification' && !item.is_read).length);
+            setUnreadNotificationsCount((payload.items || []).filter((item) => !item.is_read).length);
           }
         } catch {
           setNotifications([]);
@@ -932,7 +972,7 @@ const confirmDestructiveAction = (targetLabel) =>
 
       const handleMarkNotificationRead = async (notificationId) => {
         const notification = notifications.find((item) => String(item.id) === String(notificationId));
-        if (!notification || notification.source !== 'notification') return;
+        if (!notification) return;
         const rawId = String(notification.id).startsWith('n:') ? String(notification.id).slice(2) : String(notification.id);
         try {
           const response = await fetch(`/api/notifications/${rawId}/read`, { method: 'POST' });
@@ -956,11 +996,17 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       const handleMarkAllNotificationsRead = async () => {
-        const unreadIds = notifications
-          .filter((item) => item.source === 'notification' && !item.is_read)
-          .map((item) => item.id);
+        const unreadIds = notifications.filter((item) => !item.is_read).map((item) => item.id);
         if (unreadIds.length === 0) return;
-        await Promise.all(unreadIds.map((id) => handleMarkNotificationRead(id)));
+        try {
+          const response = await fetch('/api/notifications/read-all', { method: 'POST' });
+          if (!response.ok) return;
+          const now = new Date().toISOString();
+          setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? now })));
+          setUnreadNotificationsCount(0);
+        } catch {
+          // no-op
+        }
       };
 
       const notificationItems = useMemo(() => {
@@ -971,7 +1017,7 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [notifications, notificationFilter]);
 
       const handleOpenNotification = useCallback(async (notification) => {
-        const href = String(notification?.payload?.href || '').trim();
+        const href = String(notification?.link || notification?.payload?.href || '').trim();
         if (!href) return;
         const routeMap = {
           '/jobs': 'jobs',
@@ -1541,25 +1587,37 @@ const confirmDestructiveAction = (targetLabel) =>
         Badge,
         AttachmentPanel,
         formatDate,
+        moduleAccess,
+        canViewModule,
+        canEditModule,
       };
 
       const renderView = () => {
+        const moduleKey = moduleForView(currentView);
+        if (moduleKey && !canViewModule(moduleKey)) {
+          return (
+            <Card className="p-8 text-center text-gray-600">
+              <div className="text-lg font-semibold text-gray-800 mb-2">Access Restricted</div>
+              <div>You do not have permission to view this module.</div>
+            </Card>
+          );
+        }
         switch(currentView) {
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
           case 'messages': return <MessagesView employees={employees} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} />;
-          case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} />;
-          case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} />;
+          case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
+          case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
-          case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} />;
+          case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} trainingLoading={trainingLoading} trainingError={trainingError} onRefreshTraining={loadTraining} />;
-          case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} safetyLogs={safetyLogs} safetyLogsLoading={safetyLogsLoading} safetyLogsError={safetyLogsError} onDeleteSafetyLog={handleDeleteSafetyLog} deleteLoadingId={safetyDeleteLoadingId} />;
+          case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} safetyLogs={safetyLogs} safetyLogsLoading={safetyLogsLoading} safetyLogsError={safetyLogsError} onDeleteSafetyLog={handleDeleteSafetyLog} deleteLoadingId={safetyDeleteLoadingId} moduleAccess={moduleAccess} />;
           case 'bids': return <BidsView bids={bids} bidsLoading={bidsLoading} setBids={setBids} jobs={jobs} ui={bidsViewUi} currentRole={currentRole} />;
           case 'vendors': return <VendorsView vendors={vendors} vendorsLoading={vendorsLoading} setVendors={setVendors} jobs={jobs} inventory={inventory} />;
-          case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} />;
-          case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} />;
-          case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} currentRole={currentRole} />;
+          case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
+          case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} moduleAccess={moduleAccess} />;
+          case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'subscribe': return <SubscribeView employees={employees} currentRole={currentRole} />;
           case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
           case 'audit': return <AuditView currentRole={currentRole} />;
@@ -1776,8 +1834,7 @@ const confirmDestructiveAction = (targetLabel) =>
                                       <div className="mt-1 flex items-center justify-between gap-3">
                                         <p className="text-xs text-gray-400">{formatNotificationTime(notification.created_at)}</p>
                                         <div className="flex items-center gap-3">
-                                          {notification.source === 'notification' &&
-                                            notification.notification_type === 'event_invited' &&
+                                          {notification.notification_type === 'calendar_invite' &&
                                             !notification.is_read &&
                                             notification?.payload?.eventId && (
                                               <>
@@ -1795,7 +1852,7 @@ const confirmDestructiveAction = (targetLabel) =>
                                                 </button>
                                               </>
                                             )}
-                                          {notification?.payload?.href && (
+                                          {(notification?.link || notification?.payload?.href) && (
                                             <button
                                               className="text-xs text-gray-600 hover:text-gray-800 font-medium"
                                               onClick={() => handleOpenNotification(notification)}
@@ -2730,6 +2787,48 @@ const confirmDestructiveAction = (targetLabel) =>
       const [employeeSaveLoading, setEmployeeSaveLoading] = useState(false);
       const [employeeDeleteLoading, setEmployeeDeleteLoading] = useState(false);
       const [inviteFeedback, setInviteFeedback] = useState('');
+      const permissionModules = [
+        { key: 'jobs', label: 'Jobs' },
+        { key: 'fleet', label: 'Fleet' },
+        { key: 'maintenance', label: 'Maintenance' },
+        { key: 'daily_reports', label: 'Daily Reports' },
+        { key: 'safety', label: 'Safety' },
+        { key: 'messages', label: 'Messages' },
+        { key: 'finance', label: 'Finance' },
+        { key: 'team_management', label: 'Team Management' },
+      ];
+      const permissionLevels = ['none', 'view', 'edit'];
+      const roleTemplateDefaults = {
+        ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'edit', team_management: 'edit' },
+        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'view', team_management: 'view' },
+        foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
+        mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', finance: 'none', team_management: 'none' },
+        operator: { jobs: 'view', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
+        fieldstaff: { jobs: 'view', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', finance: 'none', team_management: 'none' },
+      };
+      const appRoleToInviteRole = (role) => {
+        const normalized = String(role || '').toLowerCase();
+        if (normalized === 'admin' || normalized === 'executive' || normalized === 'ceo') return 'ceo';
+        if (normalized === 'pm' || normalized === 'operations' || normalized === 'manager') return 'manager';
+        if (normalized === 'foreman') return 'foreman';
+        if (normalized === 'mechanic') return 'mechanic';
+        if (normalized === 'fieldstaff') return 'fieldstaff';
+        return 'operator';
+      };
+      const [showInviteModal, setShowInviteModal] = useState(false);
+      const [inviteSaveLoading, setInviteSaveLoading] = useState(false);
+      const [pendingInvites, setPendingInvites] = useState([]);
+      const [pendingInviteLoading, setPendingInviteLoading] = useState(false);
+      const [pendingInviteError, setPendingInviteError] = useState('');
+      const [permissionModalMode, setPermissionModalMode] = useState('invite-create');
+      const [inviteForm, setInviteForm] = useState({
+        id: '',
+        full_name: '',
+        email: '',
+        role: 'operator',
+        invite_url: '',
+      });
+      const [permissionForm, setPermissionForm] = useState({ ...roleTemplateDefaults.operator });
 
       const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
@@ -2740,6 +2839,10 @@ const confirmDestructiveAction = (targetLabel) =>
 
       const selectedEmployee = teamItems.find(e => String(e.id) === String(selectedEmployeeId));
       const selectedEmployeeRecord = employees.find((employee) => String(employee.id) === String(selectedEmployeeId));
+      const normalizeRoleLabel = (value) => String(value || '').trim().toLowerCase();
+      const isSelectedEmployeeCeo = ['admin', 'executive', 'ceo'].includes(
+        normalizeRoleLabel(selectedEmployeeRecord?.role || selectedEmployee?.role)
+      );
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
       const canManageTeamProfiles = ['executive', 'operations', 'admin', 'pm'].includes(String(currentRole || '').toLowerCase());
@@ -2792,6 +2895,23 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       }, []);
 
+      const loadPendingInvites = useCallback(async () => {
+        try {
+          setPendingInviteLoading(true);
+          setPendingInviteError('');
+          const response = await fetch('/api/team/invitations', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load pending invites');
+          const mapped = Array.isArray(payload?.items) ? payload.items : [];
+          setPendingInvites(mapped);
+        } catch (error) {
+          setPendingInvites([]);
+          setPendingInviteError(error instanceof Error ? error.message : 'Failed to load pending invites');
+        } finally {
+          setPendingInviteLoading(false);
+        }
+      }, []);
+
       const refreshEmployees = useCallback(async () => {
         try {
           const response = await fetch('/api/employees', { cache: 'no-store' });
@@ -2808,6 +2928,10 @@ const confirmDestructiveAction = (targetLabel) =>
       useEffect(() => {
         loadTeamItems();
       }, [loadTeamItems]);
+
+      useEffect(() => {
+        loadPendingInvites();
+      }, [loadPendingInvites]);
 
       useEffect(() => {
         if (!selectedEmployeeId) return;
@@ -2837,37 +2961,12 @@ const confirmDestructiveAction = (targetLabel) =>
       }, [selectedEmployee, selectedEmployeeRecord]);
 
       const handleCreateEmployee = async () => {
-        const name = window.prompt('Employee name');
-        if (!name || !name.trim()) return;
-        const role = window.prompt('Role', 'Laborer') || 'Laborer';
-        setEmployeeActionLoading(true);
         setEmployeeActionError('');
-        try {
-          const response = await fetch('/api/employees', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name.trim(), role: role.trim() || 'Laborer' }),
-          });
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-          if (!response.ok || !payload?.employee) {
-            setEmployeeActionError(payload?.error || raw || 'Failed to create employee');
-            setEmployeeActionLoading(false);
-            return;
-          }
-          setEmployees((prev) => [payload.employee, ...prev]);
-          setSelectedEmployeeId(payload.employee.id);
-          await loadTeamItems();
-        } catch {
-          setEmployeeActionError('Failed to create employee');
-        } finally {
-          setEmployeeActionLoading(false);
-        }
+        setInviteFeedback('');
+        setPermissionModalMode('invite-create');
+        setInviteForm({ id: '', full_name: '', email: '', role: 'operator', invite_url: '' });
+        setPermissionForm({ ...roleTemplateDefaults.operator });
+        setShowInviteModal(true);
       };
 
       const handleSaveEmployee = async () => {
@@ -2960,33 +3059,6 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       };
 
-      const getInvitePayload = () => {
-        const email = (employeeForm.email || selectedEmployee?.email || '').trim();
-        const name = (employeeForm.name || selectedEmployee?.name || '').trim();
-        const role = String(employeeForm.role || selectedEmployee?.role || 'operator').toLowerCase();
-        return { email, name, role };
-      };
-
-      const buildInviteLink = async () => {
-        const { email, name, role } = getInvitePayload();
-        if (!selectedEmployee?.id) throw new Error('Select employee first');
-        if (!email) throw new Error('Employee email is required');
-        const response = await fetch('/api/invite/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ employeeId: String(selectedEmployee.id), email, role }),
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(payload?.error || 'Failed to create invite');
-        }
-        const inviteUrl = payload?.item?.url;
-        if (!inviteUrl || typeof inviteUrl !== 'string') {
-          throw new Error('Invalid invite response');
-        }
-        return inviteUrl;
-      };
-
       const copyText = async (value) => {
         if (!value) throw new Error('Nothing to copy');
         if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
@@ -3006,7 +3078,8 @@ const confirmDestructiveAction = (targetLabel) =>
       const handleCopyInviteLink = async () => {
         setInviteFeedback('');
         try {
-          const inviteLink = await buildInviteLink();
+          const inviteLink = inviteForm.invite_url;
+          if (!inviteLink) throw new Error('Create invite first');
           await copyText(inviteLink);
           setInviteFeedback('Invite link copied.');
         } catch (error) {
@@ -3017,15 +3090,162 @@ const confirmDestructiveAction = (targetLabel) =>
       const handleCopyInviteMessage = async () => {
         setInviteFeedback('');
         try {
-          const { name, role } = getInvitePayload();
+          const name = inviteForm.full_name;
+          const role = inviteForm.role;
           const greeting = name ? `Hi ${name},` : 'Hi,';
           const roleLine = role ? `role: ${role}` : 'role: team member';
-          const inviteLink = await buildInviteLink();
+          const inviteLink = inviteForm.invite_url;
+          if (!inviteLink) throw new Error('Create invite first');
           const message = `${greeting}\n\nYou are invited to Groundwork Pro (${roleLine}).\nUse this link to create your account:\n${inviteLink}`;
           await copyText(message);
           setInviteFeedback('Invite message copied.');
         } catch (error) {
           setInviteFeedback(error instanceof Error ? error.message : 'Failed to copy invite message.');
+        }
+      };
+
+      const permissionsPayload = useMemo(
+        () =>
+          permissionModules.map((module) => ({
+            module_key: module.key,
+            access_level: permissionForm[module.key] || 'none',
+          })),
+        [permissionForm]
+      );
+
+      const handleSaveInvite = async () => {
+        if (!inviteForm.full_name.trim() || !inviteForm.email.trim() || !inviteForm.role) {
+          setInviteFeedback('Name, email, role, and permissions are required.');
+          return;
+        }
+        setInviteSaveLoading(true);
+        setInviteFeedback('');
+        try {
+          const endpoint = permissionModalMode === 'invite-edit' && inviteForm.id
+            ? `/api/team/invitations/${inviteForm.id}`
+            : '/api/team/invitations';
+          const method = permissionModalMode === 'invite-edit' ? 'PATCH' : 'POST';
+          const response = await fetch(endpoint, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              full_name: inviteForm.full_name.trim(),
+              email: inviteForm.email.trim().toLowerCase(),
+              role: inviteForm.role,
+              permissions: permissionsPayload,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload?.error || 'Failed to save invite');
+          setInviteForm((prev) => ({ ...prev, id: payload?.item?.id || prev.id, invite_url: payload?.item?.invite_url || '' }));
+          await loadPendingInvites();
+          setInviteFeedback('Invite saved.');
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to save invite');
+        } finally {
+          setInviteSaveLoading(false);
+        }
+      };
+
+      const handlePendingInviteAction = async (invite, action) => {
+        setInviteFeedback('');
+        try {
+          if (action === 'copy') {
+            await copyText(invite.invite_url || '');
+            setInviteFeedback('Invite link copied.');
+            return;
+          }
+          if (action === 'edit') {
+            const nextPermissions = { ...roleTemplateDefaults[invite.role || 'operator'] };
+            for (const row of invite.permissions || []) nextPermissions[row.module_key] = row.access_level;
+            setPermissionForm(nextPermissions);
+            setInviteForm({
+              id: invite.id,
+              full_name: invite.full_name || '',
+              email: invite.email || '',
+              role: invite.role || 'operator',
+              invite_url: invite.invite_url || '',
+            });
+            setPermissionModalMode('invite-edit');
+            setShowInviteModal(true);
+            return;
+          }
+          if (action === 'regenerate') {
+            const response = await fetch(`/api/team/invitations/${invite.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ regenerate: true }),
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload?.error || 'Failed to regenerate invite');
+            await loadPendingInvites();
+            setInviteFeedback('Invite regenerated.');
+            return;
+          }
+          if (action === 'cancel') {
+            const confirmed = confirmDestructiveAction('this pending invite');
+            if (!confirmed) return;
+            const response = await fetch(`/api/team/invitations/${invite.id}`, { method: 'DELETE' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload?.error || 'Failed to cancel invite');
+            await loadPendingInvites();
+            setInviteFeedback('Invite canceled.');
+          }
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Invite action failed.');
+        }
+      };
+
+      const handleEditMemberPermissions = async () => {
+        if (!selectedEmployee?.id) return;
+        setInviteFeedback('');
+        try {
+          const response = await fetch(`/api/team/members/${selectedEmployee.id}/permissions`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to load permissions');
+          const role = payload.item.role || appRoleToInviteRole(selectedEmployee.role || 'operator');
+          const nextPermissions = { ...roleTemplateDefaults[role || 'operator'] };
+          for (const row of payload.item.permissions || []) nextPermissions[row.module_key] = row.access_level;
+          setPermissionForm(nextPermissions);
+          setInviteForm({
+            id: String(selectedEmployee.id),
+            full_name: selectedEmployee.name || '',
+            email: selectedEmployee.email || '',
+            role,
+            invite_url: '',
+          });
+          setPermissionModalMode('member-edit');
+          setShowInviteModal(true);
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to load member permissions');
+        }
+      };
+
+      const handleSaveMemberPermissions = async () => {
+        if (!selectedEmployee?.id) return;
+        if (permissionModalMode === 'member-edit' && inviteForm.role === 'ceo') {
+          setInviteFeedback('CEO role and permissions are locked at full access.');
+          return;
+        }
+        setInviteSaveLoading(true);
+        setInviteFeedback('');
+        try {
+          const response = await fetch(`/api/team/members/${selectedEmployee.id}/permissions`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: inviteForm.role,
+              permissions: permissionsPayload,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload?.error || 'Failed to update member permissions');
+          setInviteFeedback('Permissions updated.');
+          setShowInviteModal(false);
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to update member permissions');
+        } finally {
+          setInviteSaveLoading(false);
         }
       };
 
@@ -3112,7 +3332,7 @@ const confirmDestructiveAction = (targetLabel) =>
               <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
                 <Icon name="clock" className="mr-2" /> Time Clock
               </Button>
-              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={employeeActionLoading}>
+              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee}>
                 <Icon name="user-plus" className="mr-2" /> Add Employee
               </Button>
             </div>
@@ -3121,6 +3341,35 @@ const confirmDestructiveAction = (targetLabel) =>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Employee List */}
             <div className="lg:col-span-2 space-y-3">
+              {pendingInviteLoading ? (
+                <LoadingBlock>Loading pending invites...</LoadingBlock>
+              ) : pendingInvites.length > 0 ? (
+                <Card className="p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="font-semibold text-gray-900">Pending Invitations</h4>
+                    <span className="text-xs text-gray-500">{pendingInvites.length}</span>
+                  </div>
+                  <div className="space-y-2">
+                    {pendingInvites.map((invite) => (
+                      <div key={invite.id} className="border border-gray-200 rounded-lg px-3 py-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">{invite.full_name || invite.email}</p>
+                            <p className="text-xs text-gray-600">{invite.email} · {invite.role}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-1 justify-end">
+                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'copy')}>Copy</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'regenerate')}>Regenerate</Button>
+                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'edit')}>Edit</Button>
+                            <Button variant="danger" size="sm" onClick={() => handlePendingInviteAction(invite, 'cancel')}>Cancel</Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ) : null}
+
               {employeesLoading || teamLoading ? (
                 <LoadingBlock testId="team-loading">Loading employees...</LoadingBlock>
               ) : filteredEmployees.length === 0 ? (
@@ -3220,7 +3469,7 @@ const confirmDestructiveAction = (targetLabel) =>
                       value={employeeForm.role}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, role: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      disabled={!canManageTeamProfiles}
+                      disabled={!canManageTeamProfiles || isSelectedEmployeeCeo}
                     >
                       <option value="admin">Admin</option>
                       <option value="pm">PM</option>
@@ -3229,6 +3478,9 @@ const confirmDestructiveAction = (targetLabel) =>
                       <option value="operator">Operator</option>
                       <option value="operator">Laborer</option>
                     </select>
+                    {isSelectedEmployeeCeo && (
+                      <p className="text-xs text-amber-700 mt-1">CEO role is locked.</p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -3334,6 +3586,13 @@ const confirmDestructiveAction = (targetLabel) =>
                       </Button>
                     )}
                   </div>
+                  {canManageTeamProfiles && selectedEmployee.accountStatus === 'active' && (
+                    <div className="pt-2">
+                      <Button variant="secondary" size="sm" className="w-full" onClick={handleEditMemberPermissions}>
+                        <Icon name="shield-halved" className="mr-1" /> Edit Permissions
+                      </Button>
+                    </div>
+                  )}
                   {canManageTeamProfiles && (
                     <div className="pt-2">
                       <Button
@@ -3349,10 +3608,10 @@ const confirmDestructiveAction = (targetLabel) =>
                   )}
                   {canManageTeamProfiles && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
+                      <Button variant="secondary" size="sm" onClick={handleCopyInviteLink} disabled={!inviteForm.invite_url}>
                         <Icon name="link" className="mr-1" /> Copy Invite Link
                       </Button>
-                      <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage}>
+                      <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage} disabled={!inviteForm.invite_url}>
                         <Icon name="envelope" className="mr-1" /> Copy Invite Message
                       </Button>
                     </div>
@@ -3370,6 +3629,131 @@ const confirmDestructiveAction = (targetLabel) =>
             )}
 
           </div>
+
+          <Modal
+            isOpen={showInviteModal}
+            onClose={() => {
+              setShowInviteModal(false);
+              setPermissionModalMode('invite-create');
+            }}
+            title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Employee'}
+            size="md"
+          >
+            <div className="space-y-4">
+              {permissionModalMode !== 'member-edit' && (
+                <>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      value={inviteForm.full_name}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, full_name: event.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Email</label>
+                    <input
+                      type="email"
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      value={inviteForm.email}
+                      onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))}
+                    />
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Role</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  value={inviteForm.role}
+                  disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'ceo'}
+                  onChange={(event) => {
+                    const nextRole = event.target.value;
+                    setInviteForm((prev) => ({ ...prev, role: nextRole }));
+                    setPermissionForm({ ...roleTemplateDefaults[nextRole] });
+                  }}
+                >
+                  <option value="ceo">CEO</option>
+                  <option value="manager">Manager</option>
+                  <option value="foreman">Foreman</option>
+                  <option value="mechanic">Mechanic</option>
+                  <option value="operator">Operator</option>
+                  <option value="fieldstaff">Field Staff</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-500 mb-2">Module Permissions</label>
+                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                  {permissionModules.map((module) => (
+                    <div key={module.key} className="flex items-center justify-between gap-2 px-3 py-2">
+                      <span className="text-sm text-gray-800">{module.label}</span>
+                      <select
+                        className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                        value={permissionForm[module.key] || 'none'}
+                        disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'ceo'}
+                        onChange={(event) =>
+                          setPermissionForm((prev) => ({
+                            ...prev,
+                            [module.key]: event.target.value,
+                          }))
+                        }
+                      >
+                        {permissionLevels.map((level) => (
+                          <option key={level} value={level}>{level}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {permissionModalMode === 'member-edit' && inviteForm.role === 'ceo' && (
+                <p className="text-xs text-amber-700">CEO role and permissions are locked at full access.</p>
+              )}
+
+              {permissionModalMode !== 'member-edit' && inviteForm.invite_url && (
+                <div className="border border-green-200 bg-green-50 rounded-lg p-3">
+                  <p className="text-xs text-green-700 mb-2">Invite link generated</p>
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
+                      <Icon name="link" className="mr-1" /> Copy Link
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage}>
+                      <Icon name="envelope" className="mr-1" /> Copy Message
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {inviteFeedback && <p className="text-xs text-gray-600">{inviteFeedback}</p>}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setShowInviteModal(false);
+                    setPermissionModalMode('invite-create');
+                  }}
+                >
+                  Close
+                </Button>
+                <Button
+                  type="button"
+                  variant="brand"
+                  size="sm"
+                  disabled={inviteSaveLoading}
+                  onClick={permissionModalMode === 'member-edit' ? handleSaveMemberPermissions : handleSaveInvite}
+                >
+                  {inviteSaveLoading ? 'Saving...' : permissionModalMode === 'member-edit' ? 'Save Permissions' : 'Save & Generate Link'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
 
           <Modal isOpen={showAssignModal} onClose={() => setShowAssignModal(false)} title="Assign" size="sm">
             <form className="space-y-3" onSubmit={handleAssignSubmit}>
@@ -8853,7 +9237,8 @@ const confirmDestructiveAction = (targetLabel) =>
       };
 
       return (
-        <div className="space-y-6">
+        <ComingSoonOverlay>
+          <div className="space-y-6">
           {/* Header */}
           <div className="flex items-center justify-between">
             <div>
@@ -9023,7 +9408,8 @@ const confirmDestructiveAction = (targetLabel) =>
               </Button>
             </div>
           </Card>
-        </div>
+          </div>
+        </ComingSoonOverlay>
       );
     };
 

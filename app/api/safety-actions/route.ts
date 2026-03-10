@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem, okItems } from "@/lib/http/json";
 import { createFallbackSafetyAction, listFallbackSafetyActions } from "@/lib/safety/opsFallbackStore";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +82,7 @@ export async function POST(request: Request) {
     const parsed = createSchema.safeParse(await request.json());
     if (!parsed.success) return validationError(details(parsed.error));
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
 
     const logCheck = await supabase
       .from("safety_logs")
@@ -138,6 +139,37 @@ export async function POST(request: Request) {
         closure_notes: null,
       });
       return okItem(fallback, 201);
+    }
+    try {
+      const ownerEmployeeId = String(data.owner_employee_id ?? "").trim();
+      if (ownerEmployeeId) {
+        const ownerResult = await supabase
+          .from("employees")
+          .select("user_id")
+          .eq("company_id", companyId)
+          .eq("id", ownerEmployeeId)
+          .maybeSingle();
+        const ownerUserId = String(ownerResult.data?.user_id ?? "").trim();
+        if (!ownerResult.error && ownerUserId) {
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: [ownerUserId],
+            type: "safety_assigned",
+            payload: {
+              safetyActionId: String(data.id),
+              title: String(data.title ?? parsed.data.title),
+              dueDate: String(data.due_date ?? ""),
+              href: "/safety",
+            },
+            entityType: "safety_action",
+            entityId: String(data.id),
+            actorUserId: userId,
+          });
+        }
+      }
+    } catch {
+      // Non-blocking notification fanout.
     }
     return okItem(data, 201);
   } catch (error) {

@@ -245,7 +245,7 @@ export async function POST(
             supabase,
             companyId,
             userIds: [employeeUserId],
-            type: "assignment_created",
+            type: "job_assigned",
             payload: {
               jobId: String(jobId),
               jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
@@ -338,7 +338,7 @@ export async function POST(
             supabase,
             companyId,
             userIds: [employeeUserId],
-            type: "assignment_created",
+            type: "job_assigned",
             payload: {
               jobId: String(jobId),
               jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),

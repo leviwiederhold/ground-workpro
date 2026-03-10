@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
@@ -94,6 +94,8 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+  source_bid_id: row.source_bid_id ?? null,
+  sourceBidId: row.source_bid_id ?? null,
   };
 };
 
@@ -240,6 +242,12 @@ function resolveStatusFilters(status: ListStatus): string[] | null {
 
 export async function GET(request: Request) {
   try {
+    try {
+      await requireModuleAccess("jobs", "view");
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const url = new URL(request.url);
     const parsedQuery = listQuerySchema.safeParse({
       status: url.searchParams.get("status") ?? undefined,
@@ -270,10 +278,6 @@ export async function GET(request: Request) {
     if (!role || !effectiveRole) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (effectiveRole === "operator" || effectiveRole === "mechanic") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, effectiveRole);
     if (scopedJobIds && scopedJobIds.length === 0) {
       return NextResponse.json({ items: [], jobs: [], nextCursor: null });
@@ -375,7 +379,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm"]);
+      await requireModuleAccess("jobs", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

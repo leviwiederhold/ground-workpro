@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -11,6 +12,34 @@ const paramsSchema = z.object({
 const bodySchema = z.object({
   job_name: z.string().min(1).optional(),
 });
+
+async function insertJobWithColumnFallback(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  payload: Record<string, unknown>
+) {
+  const insertPayload: Record<string, unknown> = { ...payload };
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const result = await supabase
+      .from("jobs")
+      .insert(insertPayload)
+      .select("id, name, status, source_bid_id")
+      .single();
+    if (!result.error) return result;
+
+    const message = result.error.message ?? "";
+    const missingColumn = message.match(/Could not find the '([^']+)' column/i)?.[1];
+    if (!missingColumn) return result;
+    if (!(missingColumn in insertPayload)) return result;
+    delete insertPayload[missingColumn];
+  }
+
+  return supabase
+    .from("jobs")
+    .insert(insertPayload)
+    .select("id, name, status, source_bid_id")
+    .single();
+}
 
 export async function POST(
   request: Request,
@@ -48,7 +77,15 @@ export async function POST(
 
     const bid = bidResult.data;
     if (bid.converted_job_id) {
-      return NextResponse.json({ item: { job_id: bid.converted_job_id, alreadyConverted: true } });
+      const existingJobResult = await supabase
+        .from("jobs")
+        .select("id, name, status, source_bid_id")
+        .eq("company_id", companyId)
+        .eq("id", bid.converted_job_id)
+        .maybeSingle();
+      if (!existingJobResult.error && existingJobResult.data) {
+        return NextResponse.json({ item: { job_id: bid.converted_job_id, job: existingJobResult.data, alreadyConverted: true } });
+      }
     }
 
     const now = new Date().toISOString();
@@ -60,36 +97,33 @@ export async function POST(
       bid.notes ? `Bid Notes: ${bid.notes}` : "",
     ].filter(Boolean).join("\n");
 
-    const jobInsert = await supabase
-      .from("jobs")
-      .insert({
-        company_id: companyId,
-        name: jobName,
-        status: "draft",
-        notes,
-        client: bid.client ?? "",
-        created_by: userId,
-      })
-      .select("id, name, status")
-      .single();
+    const baseInsertPayload = {
+      company_id: companyId,
+      name: jobName,
+      status: "in_progress",
+      notes,
+      client: bid.client ?? "",
+      created_by: userId,
+      source_bid_id: bidId,
+    };
+
+    const jobInsert = await insertJobWithColumnFallback(supabase, baseInsertPayload);
 
     if (jobInsert.error || !jobInsert.data) {
-      const fallbackInsert = await supabase
-        .from("jobs")
-        .insert({
-          company_id: companyId,
-          name: jobName,
-          status: "draft",
-          notes,
-        })
-        .select("id, name, status")
-        .single();
+      const fallbackInsert = await insertJobWithColumnFallback(supabase, {
+        company_id: companyId,
+        name: jobName,
+        status: "in_progress",
+        notes,
+        source_bid_id: bidId,
+      });
       if (fallbackInsert.error || !fallbackInsert.data) {
         return NextResponse.json({ error: fallbackInsert.error?.message || "Failed to create job" }, { status: 400 });
       }
       const updateFallback = await supabase
         .from("bids")
         .update({
+          job_id: fallbackInsert.data.id,
           converted_job_id: fallbackInsert.data.id,
           converted_at: now,
           stage: "won",
@@ -121,12 +155,42 @@ export async function POST(
           job_name: fallbackInsert.data.name ?? null,
         },
       });
+      try {
+        const membersResult = await supabase
+          .from("memberships")
+          .select("user_id, role")
+          .eq("company_id", companyId)
+          .in("role", ["ceo", "admin", "pm"]);
+        if (!membersResult.error) {
+          const recipientUserIds = (membersResult.data ?? [])
+            .map((row) => String((row as { user_id?: string }).user_id ?? ""))
+            .filter(Boolean);
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: recipientUserIds,
+            type: "bid_won",
+            payload: {
+              bidId,
+              bidTitle: bid.title ?? bid.project_name ?? "Bid",
+              jobId: fallbackInsert.data.id,
+              href: `/bids`,
+            },
+            entityType: "bid",
+            entityId: bidId,
+            actorUserId: userId,
+          });
+        }
+      } catch {
+        // Non-blocking notification fanout.
+      }
       return NextResponse.json({ item: { job_id: fallbackInsert.data.id, job: fallbackInsert.data } });
     }
 
     const updateResult = await supabase
       .from("bids")
       .update({
+        job_id: jobInsert.data.id,
         converted_job_id: jobInsert.data.id,
         converted_at: now,
         stage: "won",
@@ -158,6 +222,35 @@ export async function POST(
         job_name: jobInsert.data.name ?? null,
       },
     });
+    try {
+      const membersResult = await supabase
+        .from("memberships")
+        .select("user_id, role")
+        .eq("company_id", companyId)
+        .in("role", ["ceo", "admin", "pm"]);
+      if (!membersResult.error) {
+        const recipientUserIds = (membersResult.data ?? [])
+          .map((row) => String((row as { user_id?: string }).user_id ?? ""))
+          .filter(Boolean);
+        await enqueueNotifications({
+          supabase,
+          companyId,
+          userIds: recipientUserIds,
+          type: "bid_won",
+          payload: {
+            bidId,
+            bidTitle: bid.title ?? bid.project_name ?? "Bid",
+            jobId: jobInsert.data.id,
+            href: `/bids`,
+          },
+          entityType: "bid",
+          entityId: bidId,
+          actorUserId: userId,
+        });
+      }
+    } catch {
+      // Non-blocking notification fanout.
+    }
 
     return NextResponse.json({ item: { job_id: jobInsert.data.id, job: jobInsert.data } });
   } catch (error) {

@@ -133,6 +133,8 @@ test('bid edit persists client date probability', async ({ page }) => {
   await page.getByTestId('bids-client-input').fill('Acme Client');
   await page.getByTestId('bids-bid-date-input').fill('2026-03-10');
   await page.getByTestId('bids-probability-input').fill('55');
+  await page.locator('label:has-text("Actual Job Cost") + input').fill('4000');
+  await page.locator('label:has-text("Revenue") + input').fill('5600');
   await page.getByTestId('bids-save').click();
   await expect(page.getByLabel('Close bid modal')).toHaveCount(0, { timeout: 10_000 });
 
@@ -146,4 +148,8 @@ test('bid edit persists client date probability', async ({ page }) => {
   expect(String(row.client ?? '')).toBe('Acme Client');
   expect(String(row.bid_date ?? row.bidDate ?? '')).toBe('2026-03-10');
   expect(Number(row.probability ?? 0)).toBe(55);
+  expect(Number(row.actual_job_cost ?? row.actualJobCost ?? 0)).toBe(4000);
+  expect(Number(row.revenue ?? 0)).toBe(5600);
+  expect(Number(row.profit ?? 0)).toBe(1600);
+  expect(Number(row.margin ?? 0)).toBeCloseTo(1600 / 5600, 6);
 });

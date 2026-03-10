@@ -64,7 +64,7 @@ test('operator sees unread notification after admin assignment', async ({ page }
 
   const assignmentNotice = notifications.find(
     (item: { notification_type?: string; payload?: { jobId?: string } }) =>
-      item.notification_type === 'assignment_created' && String(item.payload?.jobId) === String(jobId)
+      item.notification_type === 'job_assigned' && String(item.payload?.jobId) === String(jobId)
   );
   expect(Boolean(assignmentNotice)).toBe(true);
 });

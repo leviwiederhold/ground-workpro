@@ -200,7 +200,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
     const now = new Date().toISOString().slice(0, 10);
     const isFieldRequester = actor.role === "operator" || actor.role === "foreman";
@@ -255,29 +255,23 @@ export async function POST(request: Request) {
     }
 
     try {
-      const recipientsResult = await supabase
-        .from("memberships")
-        .select("user_id, role")
-        .eq("company_id", companyId)
-        .in("role", ["admin", "pm", "mechanic"]);
-
-      if (!recipientsResult.error) {
-        const recipientUserIds = (recipientsResult.data ?? [])
-          .map((row: { user_id: string | null }) => String(row.user_id ?? ""))
-          .filter(Boolean);
-
+      const assignedUserId = String(data.assigned_to ?? "").trim();
+      if (assignedUserId) {
         await enqueueNotifications({
           supabase,
           companyId,
-          userIds: recipientUserIds,
-          type: "work_order_reported",
+          userIds: [assignedUserId],
+          type: "maintenance_assigned",
           payload: {
             workOrderId: String(data.id),
             title: String(data.title ?? payload.title),
             date: now,
-            reportedByRole: actor.role,
+            reportedByRole: String(actor.role ?? ""),
             href: "/maintenance",
           },
+          entityType: "work_order",
+          entityId: String(data.id),
+          actorUserId: userId,
         });
       }
     } catch {

@@ -2,8 +2,15 @@ import type { NextRequest, NextFetchEvent } from "next/server";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseEnv } from "@/lib/supabase/env";
-import { normalizeAppRole, ROUTE_GUARDS } from "@/lib/nav/config";
+import { normalizeAppRole } from "@/lib/nav/config";
 import { ACTING_ROLE_COOKIE, clampActingRole } from "@/lib/auth/effectiveRole";
+import {
+  applyPermissionOverrideFromCookie,
+  hasModuleAccess,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
+import type { ModuleAccessLevel, ModulePermissionKey } from "@/lib/permissions/types";
 
 const shouldLogRequests = process.env.REQUEST_LOGGING_ENABLED !== "false";
 const REQUEST_ID_HEADER = "x-request-id";
@@ -15,9 +22,47 @@ function buildRequestId(request: NextRequest) {
   return crypto.randomUUID();
 }
 
-function findGuardedPrefix(pathname: string) {
-  const prefixes = Object.keys(ROUTE_GUARDS);
-  return prefixes.find((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+const PAGE_MODULE_GUARDS: Array<{ prefix: string; module: ModulePermissionKey }> = [
+  { prefix: "/jobs", module: "jobs" },
+  { prefix: "/fleet", module: "fleet" },
+  { prefix: "/maintenance", module: "maintenance" },
+  { prefix: "/reports", module: "daily_reports" },
+  { prefix: "/safety", module: "safety" },
+  { prefix: "/messages", module: "messages" },
+  { prefix: "/finance", module: "finance" },
+  { prefix: "/team", module: "team_management" },
+];
+
+const API_MODULE_GUARDS: Array<{ prefix: string; module: ModulePermissionKey }> = [
+  { prefix: "/api/jobs", module: "jobs" },
+  { prefix: "/api/fleet", module: "fleet" },
+  { prefix: "/api/equipment", module: "fleet" },
+  { prefix: "/api/work-orders", module: "maintenance" },
+  { prefix: "/api/maintenance", module: "maintenance" },
+  { prefix: "/api/daily-reports", module: "daily_reports" },
+  { prefix: "/api/safety", module: "safety" },
+  { prefix: "/api/safety-logs", module: "safety" },
+  { prefix: "/api/safety-actions", module: "safety" },
+  { prefix: "/api/toolbox-talks", module: "safety" },
+  { prefix: "/api/messages", module: "messages" },
+  { prefix: "/api/finance", module: "finance" },
+  { prefix: "/api/pricing-settings", module: "finance" },
+  { prefix: "/api/team", module: "team_management" },
+  { prefix: "/api/employees", module: "team_management" },
+];
+
+function findGuardedModule(
+  pathname: string,
+  guards: Array<{ prefix: string; module: ModulePermissionKey }>
+) {
+  return guards.find((entry) => pathname === entry.prefix || pathname.startsWith(`${entry.prefix}/`));
+}
+
+function requiredAccessForApiMethod(method: string): ModuleAccessLevel {
+  const normalized = method.toUpperCase();
+  return normalized === "GET" || normalized === "HEAD" || normalized === "OPTIONS"
+    ? "view"
+    : "edit";
 }
 
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
@@ -58,21 +103,26 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   // Required for Supabase SSR auth cookie refresh.
   const { data: authData } = await supabase.auth.getUser();
 
-  if (!request.nextUrl.pathname.startsWith("/api/")) {
-    const guardedPrefix = findGuardedPrefix(request.nextUrl.pathname);
-    if (guardedPrefix) {
+  const isApi = request.nextUrl.pathname.startsWith("/api/");
+  const guardedPage = !isApi ? findGuardedModule(request.nextUrl.pathname, PAGE_MODULE_GUARDS) : null;
+  const guardedApi = isApi ? findGuardedModule(request.nextUrl.pathname, API_MODULE_GUARDS) : null;
+  const guardedModule = guardedPage?.module ?? guardedApi?.module ?? null;
+
+  if (guardedModule) {
       const cookieRole = process.env.NODE_ENV !== "production" ? request.cookies.get("e2e_role")?.value : null;
       let resolvedRole = normalizeAppRole(cookieRole);
+      let companyId: string | null = null;
+      const userId: string | null = authData?.user?.id ?? null;
+      let permissions: Awaited<ReturnType<typeof resolveUserModulePermissions>> | null = null;
 
       if (!resolvedRole) {
-        const userId = authData?.user?.id ?? null;
         if (!userId) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
         const { data: memberships, error: membershipError } = await supabase
           .from("memberships")
-          .select("role")
+          .select("company_id, role")
           .eq("user_id", userId)
           .limit(1);
 
@@ -80,6 +130,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
+        companyId = String(memberships?.[0]?.company_id ?? "");
         const realRole = normalizeAppRole(memberships?.[0]?.role);
         if (!realRole) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -87,13 +138,36 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 
         const actingRole = normalizeAppRole(request.cookies.get(ACTING_ROLE_COOKIE)?.value);
         resolvedRole = actingRole ? clampActingRole(realRole, actingRole) : realRole;
+      } else if (userId) {
+        const { data: memberships } = await supabase
+          .from("memberships")
+          .select("company_id")
+          .eq("user_id", userId)
+          .limit(1);
+        companyId = String(memberships?.[0]?.company_id ?? "");
       }
 
-      const allowedRoles = ROUTE_GUARDS[guardedPrefix] ?? [];
-      if (!resolvedRole || !allowedRoles.includes(resolvedRole)) {
+      if (!resolvedRole || !userId || !companyId) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
-    }
+
+      permissions = await resolveUserModulePermissions({
+        supabase,
+        companyId,
+        userId,
+        role: resolvedRole,
+      });
+      if (process.env.NODE_ENV !== "production") {
+        permissions = applyPermissionOverrideFromCookie(
+          permissions,
+          request.cookies.get(TEST_MODULE_ACCESS_COOKIE)?.value
+        );
+      }
+
+      const required = guardedApi ? requiredAccessForApiMethod(request.method) : "view";
+      if (!hasModuleAccess(permissions, guardedModule, required)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
   }
 
   response.headers.set(REQUEST_ID_HEADER, requestId);

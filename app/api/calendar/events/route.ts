@@ -4,6 +4,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { enqueueUpcomingEventReminder } from "@/lib/notifications/calendarReminders";
 import { createFallbackEvent } from "@/lib/calendar/fallbackStore";
 
 const attendeeSchema = z
@@ -350,7 +351,7 @@ export async function POST(request: Request) {
       supabase,
       companyId,
       userIds: recipientUserIds,
-      type: "event_invited",
+      type: "calendar_invite",
       payload: {
         eventId: insertEventResult.data.id,
         title: payload.title,
@@ -360,6 +361,16 @@ export async function POST(request: Request) {
         visibility: payload.visibility,
         href: `/schedule`,
       },
+    });
+    await enqueueUpcomingEventReminder({
+      supabase,
+      companyId,
+      userIds: recipientUserIds,
+      eventId: insertEventResult.data.id,
+      eventTitle: payload.title,
+      startsAt: payload.startsAt,
+      endsAt: payload.endsAt,
+      actorUserId: access.userId,
     });
 
     const item = mapEvent(insertEventResult.data, insertedAttendees);

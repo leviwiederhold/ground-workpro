@@ -12,6 +12,11 @@ function isMissingNotificationsTable(message: string) {
   );
 }
 
+function isMissingNotificationsColumns(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes('column') && (normalized.includes('is_read') || normalized.includes('read_at'));
+}
+
 export async function GET() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
@@ -21,13 +26,25 @@ export async function GET() {
       .select('id', { count: 'exact', head: true })
       .eq('company_id', companyId)
       .eq('user_id', userId)
-      .is('read_at', null);
+      .eq('is_read', false);
     const result = await query;
     const fallbackCount = countFallbackUnread({
       companyId,
       userId,
       companyWide: false,
     });
+
+    if (result.error && isMissingNotificationsColumns(result.error.message || '')) {
+      const legacyQuery = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('company_id', companyId)
+        .eq('user_id', userId)
+        .is('read_at', null);
+      if (!legacyQuery.error) {
+        return NextResponse.json({ item: { count: (legacyQuery.count ?? 0) + fallbackCount } });
+      }
+    }
 
     if (result.error) {
       if (isMissingNotificationsTable(result.error.message)) {

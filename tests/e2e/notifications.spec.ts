@@ -78,4 +78,58 @@ test('notifications are created for schedule assignment and unread count decreas
   const unreadAfter = Number(JSON.parse(unreadAfterBody)?.item?.count ?? 0);
 
   expect(unreadAfter).toBeLessThan(unreadBefore);
+
+  const markAllRes = await page.request.post('/api/notifications/read-all');
+  const markAllBody = await markAllRes.text();
+  expect(markAllRes.status(), markAllBody).toBe(200);
+
+  const unreadAfterAllRes = await page.request.get('/api/notifications/unread-count');
+  const unreadAfterAllBody = await unreadAfterAllRes.text();
+  expect(unreadAfterAllRes.status(), unreadAfterAllBody).toBe(200);
+  const unreadAfterAll = Number(JSON.parse(unreadAfterAllBody)?.item?.count ?? 0);
+  expect(unreadAfterAll).toBe(0);
+});
+
+test('calendar invite and upcoming reminder notifications are created for near-term events', async ({ page }) => {
+  await loginViaUI(page);
+  await setRole(page, 'admin');
+
+  const stamp = Date.now();
+  const startsAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const endsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+  const eventResponse = await page.request.post('/api/calendar/events', {
+    data: {
+      title: `E2E Notify Event ${stamp}`,
+      startsAt,
+      endsAt,
+      visibility: 'attendees',
+      eventType: 'meeting',
+      attendees: [],
+    },
+  });
+  const eventBody = await eventResponse.text();
+  if (eventResponse.status() === 400 && eventBody.includes('calendar_events')) {
+    test.skip(true, 'calendar tables are not present in this environment');
+  }
+  expect(eventResponse.status(), eventBody).toBe(200);
+  const eventId = JSON.parse(eventBody)?.item?.id;
+  expect(eventId).toBeTruthy();
+
+  const listResponse = await page.request.get('/api/notifications?limit=100');
+  const listBody = await listResponse.text();
+  expect(listResponse.status(), listBody).toBe(200);
+  const notifications = JSON.parse(listBody)?.items ?? [];
+
+  const inviteNotification = notifications.find(
+    (item: { notification_type?: string; payload?: { eventId?: string } }) =>
+      item.notification_type === 'calendar_invite' && String(item.payload?.eventId) === String(eventId)
+  );
+  expect(Boolean(inviteNotification)).toBe(true);
+
+  const reminderNotification = notifications.find(
+    (item: { notification_type?: string; payload?: { eventId?: string } }) =>
+      item.notification_type === 'calendar_event_reminder' && String(item.payload?.eventId) === String(eventId)
+  );
+  expect(Boolean(reminderNotification)).toBe(true);
 });

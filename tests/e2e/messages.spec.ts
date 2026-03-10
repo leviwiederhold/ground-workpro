@@ -12,31 +12,36 @@ async function forceAdminRole(page: Page) {
   expect(response.status(), body).toBe(200);
 }
 
-test('messages channels and messages persist across reload (api contract)', async ({ page }) => {
+test('messages direct threads persist across reload (api contract)', async ({ page }) => {
   await loginViaUI(page);
   await forceAdminRole(page);
 
-  const channelName = `e2e-channel-${Date.now()}`;
+  const usersRes = await page.request.get('/api/messages/users');
+  const usersBody = await usersRes.text();
+  expect(usersRes.status(), usersBody).toBe(200);
+  const users = (JSON.parse(usersBody)?.items ?? []) as Array<{ userId: string }>;
+  if (users.length === 0) {
+    test.skip(true, 'No teammate account available for direct-message test');
+  }
+
+  const targetUserId = String(users[0].userId);
   const messageBody = `e2e message ${Date.now()}`;
 
-  const createChannelRes = await page.request.post('/api/messages/channels', {
-    data: { name: channelName, memberUserIds: [] },
+  const startRes = await page.request.post('/api/messages/direct/start', {
+    data: { userId: targetUserId },
   });
-  const createChannelBody = await createChannelRes.text();
-  expect(createChannelRes.status(), createChannelBody).toBe(201);
-  const channelId = String(JSON.parse(createChannelBody)?.item?.id ?? '');
-  expect(channelId).toBeTruthy();
+  const startBody = await startRes.text();
+  expect(startRes.status(), startBody).toBe(201);
+  const threadId = String(JSON.parse(startBody)?.item?.id ?? '');
+  expect(threadId).toBeTruthy();
 
-  const sendRes = await page.request.post(`/api/messages/channels/${channelId}/send`, {
+  const sendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
     data: { body: messageBody },
   });
   const sendBody = await sendRes.text();
-  if (sendRes.status() === 500) {
-    test.skip(true, `messages send backend unavailable in this environment: ${sendBody}`);
-  }
   expect(sendRes.status(), sendBody).toBe(201);
 
-  const readRes = await page.request.get(`/api/messages/channels/${channelId}/messages`);
+  const readRes = await page.request.get(`/api/messages/threads/${threadId}/messages`);
   expect(readRes.status()).toBe(200);
   const readJson = await readRes.json();
   const rows = Array.isArray(readJson?.items) ? readJson.items : [];
@@ -44,7 +49,7 @@ test('messages channels and messages persist across reload (api contract)', asyn
 
   await page.reload();
 
-  const readResAfter = await page.request.get(`/api/messages/channels/${channelId}/messages`);
+  const readResAfter = await page.request.get(`/api/messages/threads/${threadId}/messages`);
   expect(readResAfter.status()).toBe(200);
   const readJsonAfter = await readResAfter.json();
   const rowsAfter = Array.isArray(readJsonAfter?.items) ? readJsonAfter.items : [];

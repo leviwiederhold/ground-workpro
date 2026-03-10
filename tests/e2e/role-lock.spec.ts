@@ -57,3 +57,35 @@ test("only admin can switch acting role", async ({ page }) => {
   expect(allowedSwitch.status(), allowedSwitchBody).toBe(200);
   expect(JSON.parse(allowedSwitchBody)?.item?.role).toBe("operator");
 });
+
+test("CEO member role and permissions remain locked", async ({ page }) => {
+  await loginViaUI(page);
+  await setRealRole(page, "admin");
+
+  const teamResponse = await page.request.get("/api/team?limit=50");
+  const teamBody = await teamResponse.text();
+  expect(teamResponse.status(), teamBody).toBe(200);
+  const teamItems = JSON.parse(teamBody)?.items ?? [];
+  const ceo = teamItems.find((item: { role?: string; accountStatus?: string }) => {
+    const role = String(item?.role ?? "").toLowerCase();
+    return role === "admin" && String(item?.accountStatus ?? "").toLowerCase() === "active";
+  });
+  expect(Boolean(ceo)).toBeTruthy();
+
+  const roleChangeResponse = await page.request.patch(`/api/employees/${ceo.id}`, {
+    data: { role: "pm" },
+  });
+  const roleChangeBody = await roleChangeResponse.text();
+  expect(roleChangeResponse.status(), roleChangeBody).toBe(400);
+  expect(JSON.parse(roleChangeBody)?.error).toContain("CEO role is locked");
+
+  const permissionChangeResponse = await page.request.patch(`/api/team/members/${ceo.id}/permissions`, {
+    data: {
+      role: "manager",
+      permissions: [{ module_key: "jobs", access_level: "view" }],
+    },
+  });
+  const permissionChangeBody = await permissionChangeResponse.text();
+  expect(permissionChangeResponse.status(), permissionChangeBody).toBe(400);
+  expect(JSON.parse(permissionChangeBody)?.error).toContain("CEO role is locked");
+});

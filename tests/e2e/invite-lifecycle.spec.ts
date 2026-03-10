@@ -62,6 +62,7 @@ test("invite lifecycle transitions pending to active after employee accepts invi
   const pendingMember = (pendingTeamJson?.items ?? []).find((item: { id: string }) => String(item.id) === employeeId);
   expect(pendingMember).toBeTruthy();
   expect(String(pendingMember.accountStatus)).toBe("pending");
+  expect(String(pendingMember.role)).toBe("operator");
 
   const acceptInviteRes = await page.request.post("/api/test/accept-invite", {
     data: {
@@ -82,9 +83,9 @@ test("invite lifecycle transitions pending to active after employee accepts invi
         const activeMember = (activeTeamJson?.items ?? []).find(
           (item: { id: string }) => String(item.id) === employeeId
         );
-        return String(activeMember?.accountStatus ?? "missing");
+        return `${String(activeMember?.accountStatus ?? "missing")}::${String(activeMember?.role ?? "missing")}`;
       },
       { timeout: 30_000 }
     )
-    .toBe("active");
+    .toBe("active::operator");
 });

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
-import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { enqueueUpcomingEventReminder } from "@/lib/notifications/calendarReminders";
 import { deleteFallbackEvent, getFallbackEventById, updateFallbackEvent } from "@/lib/calendar/fallbackStore";
 
 const paramsSchema = z.object({
@@ -167,17 +167,15 @@ export async function PATCH(
           .filter(Boolean) as string[]),
       ])
     );
-    await enqueueNotifications({
+    await enqueueUpcomingEventReminder({
       supabase,
       companyId,
       userIds: recipientUserIds,
-      type: "event_updated",
-      payload: {
-        eventId: updateResult.data.id,
-        eventTitle: updateResult.data.title,
-        startsAt: updateResult.data.starts_at,
-        endsAt: updateResult.data.ends_at,
-      },
+      eventId: updateResult.data.id,
+      eventTitle: updateResult.data.title,
+      startsAt: updateResult.data.starts_at,
+      endsAt: updateResult.data.ends_at,
+      actorUserId: access.userId,
     });
 
     return NextResponse.json({ item: mapEvent(updateResult.data) });
@@ -195,9 +193,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    let access: Awaited<ReturnType<typeof requireRole>>;
     try {
-      access = await requireRole(["admin", "pm"]);
+      await requireRole(["admin", "pm"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -242,13 +239,6 @@ export async function DELETE(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    const attendeeResult = await supabase
-      .from("calendar_event_attendees")
-      .select("user_id")
-      .eq("company_id", companyId)
-      .eq("event_id", parsedParams.data.id)
-      .eq("attendee_type", "user");
-
     const deleteResult = await supabase
       .from("calendar_events")
       .delete()
@@ -262,27 +252,6 @@ export async function DELETE(
     if (!deleteResult.data || deleteResult.data.length === 0) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
-
-    const recipientUserIds = Array.from(
-      new Set([
-        access.userId,
-        ...((attendeeResult.data ?? [])
-          .map((item: { user_id: string | null }) => item.user_id)
-          .filter(Boolean) as string[]),
-      ])
-    );
-    await enqueueNotifications({
-      supabase,
-      companyId,
-      userIds: recipientUserIds,
-      type: "event_canceled",
-      payload: {
-        eventId: eventResult.data.id,
-        eventTitle: eventResult.data.title,
-        startsAt: eventResult.data.starts_at,
-        endsAt: eventResult.data.ends_at,
-      },
-    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

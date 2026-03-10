@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getCompanyId, TenantResolverError } from '@/lib/tenant/getCompanyId';
 import { formatNotification, type NotificationType } from '@/lib/notifications/format';
-import { getEffectiveRole } from '@/lib/auth/effectiveRole';
 import { listFallbackNotifications } from '@/lib/notifications/fallbackStore';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +10,14 @@ type NotificationRow = {
   id: string;
   user_id: string;
   type: NotificationType;
+  title: string | null;
+  body: string | null;
+  link: string | null;
+  actor_user_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
   payload: Record<string, unknown> | null;
+  is_read: boolean | null;
   read_at: string | null;
   created_at: string;
 };
@@ -25,6 +31,19 @@ function isMissingNotificationsTable(message: string) {
   return (
     normalized.includes('notifications') &&
     (normalized.includes('does not exist') || normalized.includes('not find'))
+  );
+}
+
+function isMissingNotificationsColumns(message: string) {
+  const normalized = message.toLowerCase();
+  return normalized.includes('column') && (
+    normalized.includes('title') ||
+    normalized.includes('body') ||
+    normalized.includes('link') ||
+    normalized.includes('is_read') ||
+    normalized.includes('actor_user_id') ||
+    normalized.includes('entity_type') ||
+    normalized.includes('entity_id')
   );
 }
 
@@ -49,87 +68,100 @@ export async function GET(request: Request) {
     const limit = parsed.data.limit;
 
     const { supabase, companyId, userId } = await getCompanyId();
-    const role = await getEffectiveRole();
-    const isCompanyWide = role === 'admin' || role === 'pm';
 
-    let query = supabase
+    const primaryResult = await supabase
       .from('notifications')
-      .select('id, user_id, type, payload, read_at, created_at')
+      .select('id, user_id, type, title, body, link, actor_user_id, entity_type, entity_id, payload, is_read, read_at, created_at')
       .eq('company_id', companyId)
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit);
-    if (!isCompanyWide) {
-      query = query.eq('user_id', userId);
+
+    let rows: NotificationRow[] = (primaryResult.data ?? []) as NotificationRow[];
+    let resultError: { message: string } | null = primaryResult.error
+      ? { message: String(primaryResult.error.message ?? 'Failed to load notifications') }
+      : null;
+
+    if (resultError && isMissingNotificationsColumns(resultError.message || '')) {
+      const legacy = await supabase
+        .from('notifications')
+        .select('id, user_id, type, payload, read_at, created_at')
+        .eq('company_id', companyId)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (!legacy.error) {
+        rows = (legacy.data ?? []).map((row) => ({
+          ...(row as NotificationRow),
+          title: null,
+          body: null,
+          link: null,
+          actor_user_id: null,
+          entity_type: null,
+          entity_id: null,
+          is_read: Boolean((row as { read_at?: string | null }).read_at),
+        })) as NotificationRow[];
+        resultError = null;
+      }
     }
-    const result = await query;
+
     const fallbackRows = listFallbackNotifications({
       companyId,
       userId,
-      companyWide: isCompanyWide,
+      companyWide: false,
       limit,
     });
 
-    if (result.error) {
-      if (isMissingNotificationsTable(result.error.message)) {
+    if (resultError) {
+      if (isMissingNotificationsTable(resultError.message)) {
         const items = fallbackRows.map((row) => {
           const payload = (row.payload ?? {}) as Record<string, unknown>;
           const display = formatNotification(row.type, payload);
+          const isRead = Boolean((row as { is_read?: boolean }).is_read ?? row.read_at);
           return {
             id: row.id,
             userId: row.user_id,
-            actorName: isCompanyWide ? 'Team member' : null,
             type: row.type,
-            createdAt: row.created_at,
-            readAt: row.read_at,
             notification_type: row.type,
             title: display.title,
             message: display.message,
+            body: display.message,
+            link: display.link || String(payload.href ?? ''),
+            actor_user_id: null,
+            entity_type: null,
+            entity_id: null,
             payload,
-            is_read: Boolean(row.read_at),
+            is_read: isRead,
             read_at: row.read_at,
             created_at: row.created_at,
           };
         });
         return NextResponse.json({ items });
       }
-      return NextResponse.json({ error: result.error.message }, { status: 400 });
-    }
-
-    const rows = (result.data ?? []) as NotificationRow[];
-    const userIds = Array.from(new Set(rows.map((row) => String(row.user_id ?? "")).filter(Boolean)));
-    const employeeLookup = new Map<string, string>();
-    if (isCompanyWide && userIds.length > 0) {
-      const employeesResult = await supabase
-        .from('employees')
-        .select('user_id, name, full_name')
-        .eq('company_id', companyId)
-        .in('user_id', userIds);
-      if (!employeesResult.error) {
-        for (const row of employeesResult.data ?? []) {
-          const name = String((row as { name?: string; full_name?: string }).name ?? (row as { name?: string; full_name?: string }).full_name ?? '').trim();
-          if (!name) continue;
-          employeeLookup.set(String((row as { user_id?: string }).user_id ?? ''), name);
-        }
-      }
+      return NextResponse.json({ error: resultError.message }, { status: 400 });
     }
 
     const items = rows.map((row) => {
       const payload = row.payload ?? {};
       const display = formatNotification(row.type, payload);
+      const isRead = Boolean(row.is_read ?? row.read_at);
+      const title = String(row.title ?? display.title);
+      const body = String(row.body ?? display.message);
+      const link = String(row.link ?? display.link ?? (payload.href ?? ''));
       return {
         id: row.id,
-        userId: (row as unknown as { user_id?: string }).user_id ?? null,
-        actorName:
-          employeeLookup.get(String((row as unknown as { user_id?: string }).user_id ?? '')) ??
-          (isCompanyWide ? 'Team member' : null),
+        userId: row.user_id,
         type: row.type,
-        createdAt: row.created_at,
-        readAt: row.read_at,
         notification_type: row.type,
-        title: display.title,
-        message: display.message,
+        title,
+        message: body,
+        body,
+        link,
+        actor_user_id: row.actor_user_id,
+        entity_type: row.entity_type,
+        entity_id: row.entity_id,
         payload,
-        is_read: Boolean(row.read_at),
+        is_read: isRead,
         read_at: row.read_at,
         created_at: row.created_at,
       };
@@ -138,18 +170,21 @@ export async function GET(request: Request) {
     const fallbackItems = fallbackRows.map((row) => {
       const payload = (row.payload ?? {}) as Record<string, unknown>;
       const display = formatNotification(row.type, payload);
+      const isRead = Boolean((row as { is_read?: boolean }).is_read ?? row.read_at);
       return {
         id: row.id,
         userId: row.user_id,
-        actorName: isCompanyWide ? 'Team member' : null,
         type: row.type,
-        createdAt: row.created_at,
-        readAt: row.read_at,
         notification_type: row.type,
         title: display.title,
         message: display.message,
+        body: display.message,
+        link: String(display.link ?? payload.href ?? ''),
+        actor_user_id: null,
+        entity_type: null,
+        entity_id: null,
         payload,
-        is_read: Boolean(row.read_at),
+        is_read: isRead,
         read_at: row.read_at,
         created_at: row.created_at,
       };

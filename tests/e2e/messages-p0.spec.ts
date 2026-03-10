@@ -8,41 +8,28 @@ test("messages p0 supports direct thread + persistence + read", async ({ page })
   const usersBody = await usersRes.text();
   expect(usersRes.status(), usersBody).toBe(200);
   const users = (JSON.parse(usersBody)?.items ?? []) as Array<{ userId: string }>;
-  let threadId = "";
-  if (users.length > 1) {
-    const candidate = users[0];
-    const startRes = await page.request.post("/api/messages/direct/start", {
-      data: { userId: candidate.userId },
-      timeout: 15_000,
-    });
-    const startBody = await startRes.text();
-    if (startRes.status() >= 200 && startRes.status() < 300) {
-      threadId = String(JSON.parse(startBody)?.item?.id ?? "");
-    }
-  } else {
-    const channelName = `p0-${Date.now()}`;
-    const createRes = await page.request.post("/api/messages/channels", {
-      data: { name: channelName },
-      timeout: 30_000,
-    });
-    const createBody = await createRes.text();
-    expect(createRes.status(), createBody).toBe(201);
-    threadId = String(JSON.parse(createBody)?.item?.id ?? "");
+  if (users.length === 0) {
+    test.skip(true, "No teammate account available for direct-message p0 test");
   }
+
+  const startRes = await page.request.post("/api/messages/direct/start", {
+    data: { userId: users[0].userId },
+    timeout: 15_000,
+  });
+  const startBody = await startRes.text();
+  expect(startRes.status(), startBody).toBeGreaterThanOrEqual(200);
+  expect(startRes.status(), startBody).toBeLessThan(300);
+
+  const threadId = String(JSON.parse(startBody)?.item?.id ?? "");
   expect(threadId).toBeTruthy();
 
   const messageBody = `p0-${Date.now()}`;
-  let sendRes;
-  try {
-    sendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
-      data: { body: messageBody },
-      timeout: 30_000,
-    });
-  } catch (error) {
-    test.skip(true, `messages send transport unstable in this environment: ${String(error)}`);
-  }
-  const sendBody = await sendRes!.text();
-  expect(sendRes!.status(), sendBody).toBe(201);
+  const sendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
+    data: { body: messageBody },
+    timeout: 30_000,
+  });
+  const sendBody = await sendRes.text();
+  expect(sendRes.status(), sendBody).toBe(201);
 
   const persistedRes = await page.request.get(`/api/messages/threads/${threadId}/messages`, { timeout: 30_000 });
   const persistedBody = await persistedRes.text();

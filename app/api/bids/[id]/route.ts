@@ -36,6 +36,9 @@ const updateBidSchema = z
     stage: z.enum(["lead", "qualified", "estimating", "review", "won", "lost"]).optional(),
     owner_user_id: z.string().nullable().optional(),
     due_date: z.union([z.string(), z.date(), z.null()]).nullable().optional(),
+    actual_job_cost: z.coerce.number().nonnegative().optional(),
+    actualJobCost: z.coerce.number().nonnegative().optional(),
+    revenue: z.coerce.number().nonnegative().optional(),
     review_ready: z.boolean().optional(),
     review_approved: z.boolean().optional(),
   })
@@ -115,6 +118,14 @@ const normalizeDate = (value: unknown, fallback: string | null = null) => {
   return parsed.toISOString().slice(0, 10);
 };
 
+const toBidFinancials = (actualJobCost: number, revenue: number) => {
+  const normalizedCost = normalizeNumber(actualJobCost);
+  const normalizedRevenue = normalizeNumber(revenue);
+  const profit = normalizedRevenue - normalizedCost;
+  const margin = normalizedRevenue > 0 ? profit / normalizedRevenue : 0;
+  return { actualJobCost: normalizedCost, revenue: normalizedRevenue, profit, margin };
+};
+
 const pickNonEmptyString = (...values: Array<unknown>) => {
   for (const value of values) {
     if (value === null || value === undefined) continue;
@@ -146,6 +157,10 @@ const mapBid = (row: any) => ({
         ? parsedNotes.meta.probability
         : null;
     const probability = dbProbability === 0 && notesProbability !== null ? notesProbability : dbProbability;
+    const revenue = normalizeNumber(row.revenue ?? row.total ?? row.total_amount ?? row.amount ?? 0);
+    const actualJobCost = normalizeNumber(row.actual_job_cost ?? row.subtotal ?? row.sub_total ?? 0);
+    const profit = normalizeNumber(row.profit, revenue - actualJobCost);
+    const margin = normalizeNumber(row.margin, revenue > 0 ? profit / revenue : 0);
     return {
   id: row.id,
   title: row.title ?? row.project_name ?? "",
@@ -153,9 +168,14 @@ const mapBid = (row: any) => ({
   client,
   bid_date: bidDate || null,
   bidDate: bidDate || null,
-  subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? 0),
-  total: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
-  amount: normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? 0),
+  subtotal: normalizeNumber(row.subtotal ?? row.sub_total ?? actualJobCost),
+  total: revenue,
+  amount: revenue,
+  actual_job_cost: actualJobCost,
+  actualJobCost,
+  revenue,
+  profit,
+  margin,
   status: row.status ?? "draft",
   probability,
   notes: parsedNotes.plainNotes,
@@ -280,6 +300,20 @@ export async function PATCH(
     }
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.job_id !== undefined) updatePayload.job_id = normalizeId(payload.job_id);
+    const resolvedActualJobCostInput =
+      payload.actual_job_cost ?? payload.actualJobCost;
+    const resolvedRevenueInput = payload.revenue;
+    if (resolvedActualJobCostInput !== undefined) {
+      updatePayload.actual_job_cost = normalizeNumber(resolvedActualJobCostInput);
+      updatePayload.subtotal = normalizeNumber(resolvedActualJobCostInput);
+    }
+    if (resolvedRevenueInput !== undefined) {
+      const normalizedRevenue = normalizeNumber(resolvedRevenueInput);
+      updatePayload.revenue = normalizedRevenue;
+      updatePayload.total = normalizedRevenue;
+      updatePayload.amount = normalizedRevenue;
+      updatePayload.total_amount = normalizedRevenue;
+    }
     const resolvedClientInput =
       payload.client ??
       payload.client_name ??
@@ -328,7 +362,7 @@ export async function PATCH(
 
     const { data: beforeBid } = await supabase
       .from("bids")
-      .select("id, stage, status, review_ready_at, review_approved_at, notes, client, client_name, customer, customer_name, bid_date, bidDate, biddate, probability, win_probability")
+      .select("id, stage, status, review_ready_at, review_approved_at, notes, client, client_name, customer, customer_name, bid_date, bidDate, biddate, probability, win_probability, actual_job_cost, subtotal, revenue, total, total_amount, amount")
       .eq("company_id", companyId)
       .eq("id", bidId)
       .maybeSingle();
@@ -357,6 +391,23 @@ export async function PATCH(
       probability: resolvedProbability,
       stage: resolvedStage || undefined,
     });
+    const resolvedActualJobCost =
+      resolvedActualJobCostInput !== undefined
+        ? normalizeNumber(resolvedActualJobCostInput)
+        : normalizeNumber(beforeBid?.actual_job_cost ?? beforeBid?.subtotal ?? 0);
+    const resolvedRevenue =
+      resolvedRevenueInput !== undefined
+        ? normalizeNumber(resolvedRevenueInput)
+        : normalizeNumber(beforeBid?.revenue ?? beforeBid?.total ?? beforeBid?.total_amount ?? beforeBid?.amount ?? 0);
+    const financials = toBidFinancials(resolvedActualJobCost, resolvedRevenue);
+    updatePayload.actual_job_cost = financials.actualJobCost;
+    updatePayload.revenue = financials.revenue;
+    updatePayload.profit = financials.profit;
+    updatePayload.margin = financials.margin;
+    updatePayload.subtotal = financials.actualJobCost;
+    updatePayload.total = financials.revenue;
+    updatePayload.amount = financials.revenue;
+    updatePayload.total_amount = financials.revenue;
 
     const { error } = await updateWithVariants(supabase, companyId, bidId, updatePayload);
 

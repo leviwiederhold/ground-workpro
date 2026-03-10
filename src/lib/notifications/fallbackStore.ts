@@ -8,6 +8,7 @@ type FallbackNotification = {
   user_id: string;
   type: NotificationType;
   payload: NotificationPayload;
+  is_read?: boolean;
   read_at: string | null;
   created_at: string;
 };
@@ -89,7 +90,7 @@ export function countFallbackUnread(input: {
 }) {
   return readStore().notifications.filter((row) => {
     if (row.company_id !== input.companyId) return false;
-    return !row.read_at;
+    return !(row.is_read ?? Boolean(row.read_at));
   }).length;
 }
 
@@ -106,7 +107,28 @@ export function markFallbackNotificationRead(input: {
     return true;
   });
   if (!row) return null;
+  row.is_read = true;
   row.read_at = new Date().toISOString();
   writeStore(store);
   return row;
+}
+
+export function markAllFallbackNotificationsRead(input: {
+  companyId: string;
+  userId: string;
+  companyWide: boolean;
+}) {
+  const store = readStore();
+  let updated = 0;
+  const now = new Date().toISOString();
+  for (const row of store.notifications) {
+    if (row.company_id !== input.companyId) continue;
+    if (row.user_id !== input.userId) continue;
+    if (row.is_read ?? Boolean(row.read_at)) continue;
+    row.is_read = true;
+    row.read_at = now;
+    updated += 1;
+  }
+  writeStore(store);
+  return updated;
 }

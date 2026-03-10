@@ -4,6 +4,7 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem, okSuccess } from "@/lib/http/json";
 import { deleteFallbackSafetyAction, updateFallbackSafetyAction } from "@/lib/safety/opsFallbackStore";
+import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const { supabase, companyId, userId } = await getCompanyId();
     const body = parsedBody.data;
+    const existingResult = await supabase
+      .from("safety_actions")
+      .select("id, title, owner_employee_id, due_date")
+      .eq("company_id", companyId)
+      .eq("id", parsedParams.data.id)
+      .maybeSingle();
+    if (existingResult.error) return serverError(existingResult.error.message);
+
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
     if (body.title !== undefined) updates.title = body.title;
@@ -82,6 +91,39 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         });
       }
       return serverError(result.error.message);
+    }
+
+    try {
+      const previousOwner = String(existingResult.data?.owner_employee_id ?? "").trim();
+      const nextOwner = String(result.data.owner_employee_id ?? "").trim();
+      if (body.owner_employee_id !== undefined && nextOwner && nextOwner !== previousOwner) {
+        const ownerResult = await supabase
+          .from("employees")
+          .select("user_id")
+          .eq("company_id", companyId)
+          .eq("id", nextOwner)
+          .maybeSingle();
+        const ownerUserId = String(ownerResult.data?.user_id ?? "").trim();
+        if (!ownerResult.error && ownerUserId) {
+          await enqueueNotifications({
+            supabase,
+            companyId,
+            userIds: [ownerUserId],
+            type: "safety_assigned",
+            payload: {
+              safetyActionId: String(result.data.id),
+              title: String(result.data.title ?? existingResult.data?.title ?? ""),
+              dueDate: String(result.data.due_date ?? existingResult.data?.due_date ?? ""),
+              href: "/safety",
+            },
+            entityType: "safety_action",
+            entityId: String(result.data.id),
+            actorUserId: userId,
+          });
+        }
+      }
+    } catch {
+      // Non-blocking notification fanout.
     }
 
     return okItem(result.data);

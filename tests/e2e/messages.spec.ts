@@ -213,6 +213,10 @@ test('recipient sees CEO direct thread and message body', async ({ page }) => {
   const members = (JSON.parse(membersBody)?.items ?? []) as Array<{ userId?: string }>;
   expect(members.some((member) => String(member.userId || '') === managerUserId)).toBeTruthy();
   expect(members.length).toBeGreaterThanOrEqual(2);
+  const ceoUserId = String(
+    members.find((member) => String(member.userId || '') !== managerUserId)?.userId ?? ''
+  );
+  expect(ceoUserId).toBeTruthy();
 
   const messageBody = `ceo-to-manager-${stamp}`;
   const sendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
@@ -231,6 +235,21 @@ test('recipient sees CEO direct thread and message body', async ({ page }) => {
   expect(loginManagerRes.status(), loginManagerBody).toBe(200);
 
   await setRole(page, 'pm');
+
+  const usersRes = await page.request.get('/api/messages/users');
+  const usersBody = await usersRes.text();
+  expect(usersRes.status(), usersBody).toBe(200);
+  const users = (JSON.parse(usersBody)?.items ?? []) as Array<{ userId?: string; displayName?: string }>;
+  const ceoRecipient = users.find((item) => String(item.userId || '') === ceoUserId);
+  expect(ceoRecipient).toBeTruthy();
+  expect(String(ceoRecipient?.displayName || '').trim().toLowerCase()).not.toBe('team member');
+
+  const managerStartRes = await page.request.post('/api/messages/direct/start', {
+    data: { userId: ceoUserId },
+  });
+  const managerStartBody = await managerStartRes.text();
+  expect(managerStartRes.status(), managerStartBody).toBe(201);
+  expect(String(JSON.parse(managerStartBody)?.item?.id || '')).toBe(threadId);
 
   const inboxRes = await page.request.get('/api/messages/inbox');
   const inboxBody = await inboxRes.text();

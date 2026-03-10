@@ -275,30 +275,52 @@ export async function resolveDisplayNames(
 
   const profilesResult = await supabase
     .from("profiles")
-    .select("id, full_name, email")
+    .select("id, full_name, display_name, email")
     .in("id", unique);
-
+  let profileRows: Array<{ id?: string; full_name?: string; display_name?: string; email?: string }> = [];
   if (!profilesResult.error) {
-    for (const row of profilesResult.data ?? []) {
-      const fullName = String(row.full_name ?? "").trim();
-      const email = String(row.email ?? "").trim();
-      const emailLocal = email.includes("@") ? email.split("@")[0] : "";
-      map.set(String(row.id), fullName || emailLocal || "Team Member");
+    profileRows = (profilesResult.data ?? []) as Array<{
+      id?: string;
+      full_name?: string;
+      display_name?: string;
+      email?: string;
+    }>;
+  } else if (
+    /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")
+  ) {
+    const fallbackProfilesResult = await supabase
+      .from("profiles")
+      .select("id, full_name, email")
+      .in("id", unique);
+    if (!fallbackProfilesResult.error) {
+      profileRows = (fallbackProfilesResult.data ?? []).map((row) => ({
+        id: (row as { id?: string }).id,
+        full_name: (row as { full_name?: string }).full_name,
+        email: (row as { email?: string }).email,
+      }));
     }
+  }
+
+  for (const row of profileRows) {
+      const fullName = String(row.full_name ?? "").trim();
+      const displayName = String((row as { display_name?: string }).display_name ?? "").trim();
+      const email = String(row.email ?? "").trim();
+      map.set(String(row.id), fullName || displayName || email || "Team Member");
   }
 
   const employeesPrimaryResult = await supabase
     .from("employees")
-    .select("user_id, name, full_name")
+    .select("user_id, name, full_name, email")
     .eq("company_id", companyId)
     .in("user_id", unique);
 
-  let employeeRows: Array<{ user_id?: string; name?: string; full_name?: string }> = [];
+  let employeeRows: Array<{ user_id?: string; name?: string; full_name?: string; email?: string }> = [];
   if (!employeesPrimaryResult.error) {
     employeeRows = (employeesPrimaryResult.data ?? []) as Array<{
       user_id?: string;
       name?: string;
       full_name?: string;
+      email?: string;
     }>;
   } else if (
     /column employees\.name does not exist|Could not find the 'name' column/i.test(
@@ -319,8 +341,14 @@ export async function resolveDisplayNames(
   }
 
   for (const employee of employeeRows) {
-    const name = String(employee.name ?? employee.full_name ?? "").trim();
-    if (name) map.set(String(employee.user_id ?? ""), name);
+    const key = String(employee.user_id ?? "").trim();
+    if (!key || map.has(key)) continue;
+    const fullName = String(employee.full_name ?? "").trim();
+    const displayName = String(employee.name ?? "").trim();
+    const email = String(employee.email ?? "").trim();
+    if (fullName || displayName || email) {
+      map.set(key, fullName || displayName || email);
+    }
   }
 
   for (const id of unique) {

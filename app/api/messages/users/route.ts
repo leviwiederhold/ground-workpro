@@ -20,6 +20,24 @@ function tenantError(error: TenantResolverError) {
   return serverError(error.message);
 }
 
+const pickDisplayName = ({
+  fullName,
+  displayName,
+  email,
+}: {
+  fullName?: unknown;
+  displayName?: unknown;
+  email?: unknown;
+}) => {
+  const normalizedFullName = String(fullName ?? "").trim();
+  if (normalizedFullName) return normalizedFullName;
+  const normalizedDisplayName = String(displayName ?? "").trim();
+  if (normalizedDisplayName) return normalizedDisplayName;
+  const normalizedEmail = String(email ?? "").trim();
+  if (normalizedEmail) return normalizedEmail;
+  return "Team Member";
+};
+
 export async function GET() {
   try {
     try {
@@ -32,26 +50,56 @@ export async function GET() {
     const admin = getSupabaseAdmin();
     const db = admin ?? supabase;
 
-    const memberships = await db
+    let memberships = await db
       .from("memberships")
       .select("user_id, role")
       .eq("company_id", companyId)
       .neq("user_id", userId)
       .order("created_at", { ascending: true });
 
+    if (memberships.error && /created_at|Could not find the 'created_at' column/i.test(memberships.error.message || "")) {
+      memberships = await db
+        .from("memberships")
+        .select("user_id, role")
+        .eq("company_id", companyId)
+        .neq("user_id", userId)
+        .order("user_id", { ascending: true });
+    }
+
     if (memberships.error) return serverError();
 
-    const userIds = (memberships.data ?? []).map((row) => String(row.user_id));
-    const profiles = userIds.length
-      ? await db.from("profiles").select("id, full_name, email").in("id", userIds)
+    const userIds = Array.from(
+      new Set(
+        (memberships.data ?? [])
+          .map((row) => String(row.user_id ?? "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    let profiles: { data: Array<{ id?: string; full_name?: string; display_name?: string; email?: string }> | null; error: { message?: string } | null } = userIds.length
+      ? await db.from("profiles").select("id, full_name, display_name, email").in("id", userIds)
       : { data: [], error: null };
+
+    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
+      const fallbackProfiles = userIds.length
+        ? await db.from("profiles").select("id, full_name, email").in("id", userIds)
+        : { data: [], error: null };
+      profiles = {
+        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string; email?: string }) => ({
+          id: row.id,
+          full_name: row.full_name,
+          email: row.email,
+        })),
+        error: fallbackProfiles.error,
+      };
+    }
 
     if (profiles.error) return serverError();
 
-    let employees: { data: Array<{ user_id: string; name?: string; full_name?: string }> | null; error: { message?: string } | null } = userIds.length
+    let employees: { data: Array<{ user_id: string; name?: string; full_name?: string; email?: string }> | null; error: { message?: string } | null } = userIds.length
       ? await db
           .from("employees")
-          .select("user_id, name, full_name")
+          .select("user_id, name, full_name, email")
           .eq("company_id", companyId)
           .in("user_id", userIds)
       : { data: [], error: null };
@@ -67,16 +115,41 @@ export async function GET() {
 
     const nameById = new Map<string, string>();
     for (const profile of profiles.data ?? []) {
-      const fullName = String(profile.full_name ?? "").trim();
-      const emailLocal = String(profile.email ?? "").trim().split("@")[0] || "";
-      if (fullName || emailLocal) {
-        nameById.set(String(profile.id), fullName || emailLocal);
-      }
+      nameById.set(
+        String(profile.id),
+        pickDisplayName({
+          fullName: profile.full_name,
+          displayName: profile.display_name,
+          email: profile.email,
+        })
+      );
     }
     for (const employee of employeeRows) {
-      const employeeName = String(employee.name ?? employee.full_name ?? "").trim();
+      const userIdKey = String(employee.user_id ?? "").trim();
+      if (!userIdKey || nameById.has(userIdKey)) continue;
+      const employeeName = pickDisplayName({
+        fullName: employee.full_name ?? employee.name,
+        displayName: employee.name,
+        email: employee.email,
+      });
       if (employeeName) {
-        nameById.set(String(employee.user_id), employeeName);
+        nameById.set(userIdKey, employeeName);
+      }
+    }
+
+    if (admin) {
+      const missingUserIds = userIds.filter((id) => !nameById.has(id));
+      if (missingUserIds.length > 0) {
+        const listUsersResult = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        if (!listUsersResult.error) {
+          const emailById = new Map(
+            (listUsersResult.data.users ?? []).map((user) => [String(user.id), String(user.email ?? "").trim()])
+          );
+          for (const missingUserId of missingUserIds) {
+            const email = emailById.get(missingUserId);
+            if (email) nameById.set(missingUserId, email);
+          }
+        }
       }
     }
 
@@ -84,7 +157,7 @@ export async function GET() {
       items: (memberships.data ?? []).map((row) => ({
         userId: row.user_id,
         role: toRoleLabel(row.role),
-        displayName: nameById.get(String(row.user_id)) || "Team Member",
+        displayName: nameById.get(String(row.user_id ?? "").trim()) || "Team Member",
       })),
     });
   } catch (error) {

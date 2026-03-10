@@ -151,3 +151,96 @@ test('employee can message CEO and first direct message succeeds', async ({ page
   const sendBody = await sendRes.text();
   expect(sendRes.status(), sendBody).toBe(201);
 });
+
+test('recipient sees CEO direct thread and message body', async ({ page }) => {
+  await loginViaUI(page);
+  await forceAdminRole(page);
+
+  const stamp = Date.now();
+  const managerEmail = `msg-manager-${stamp}@example.com`;
+  const managerPassword = `MsgManager!${stamp}`;
+
+  const createEmployeeRes = await page.request.post('/api/employees', {
+    data: {
+      name: `Msg Manager ${stamp}`,
+      email: managerEmail,
+      role: 'PM',
+      status: 'active',
+    },
+  });
+  const createEmployeeBody = await createEmployeeRes.text();
+  expect(createEmployeeRes.status(), createEmployeeBody).toBe(200);
+  const employeeId = String(JSON.parse(createEmployeeBody)?.employee?.id ?? '');
+  expect(employeeId).toBeTruthy();
+
+  const inviteRes = await page.request.post('/api/invite/create', {
+    data: {
+      employeeId,
+      email: managerEmail,
+      role: 'manager',
+    },
+  });
+  const inviteBody = await inviteRes.text();
+  expect(inviteRes.status(), inviteBody).toBe(200);
+  const inviteToken = String(JSON.parse(inviteBody)?.item?.token ?? '');
+  expect(inviteToken.length).toBeGreaterThanOrEqual(20);
+
+  const acceptRes = await page.request.post('/api/test/accept-invite', {
+    data: {
+      token: inviteToken,
+      email: managerEmail,
+      password: managerPassword,
+    },
+  });
+  const acceptBody = await acceptRes.text();
+  expect(acceptRes.status(), acceptBody).toBe(200);
+  const managerUserId = String(JSON.parse(acceptBody)?.item?.userId ?? '');
+  expect(managerUserId).toBeTruthy();
+
+  await forceAdminRole(page);
+
+  const startRes = await page.request.post('/api/messages/direct/start', {
+    data: { userId: managerUserId },
+  });
+  const startBody = await startRes.text();
+  expect(startRes.status(), startBody).toBe(201);
+  const threadId = String(JSON.parse(startBody)?.item?.id ?? '');
+  expect(threadId).toBeTruthy();
+
+  const membersRes = await page.request.get(`/api/messages/channels/${threadId}/members`);
+  const membersBody = await membersRes.text();
+  expect(membersRes.status(), membersBody).toBe(200);
+  const members = (JSON.parse(membersBody)?.items ?? []) as Array<{ userId?: string }>;
+  expect(members.some((member) => String(member.userId || '') === managerUserId)).toBeTruthy();
+  expect(members.length).toBeGreaterThanOrEqual(2);
+
+  const messageBody = `ceo-to-manager-${stamp}`;
+  const sendRes = await page.request.post(`/api/messages/threads/${threadId}/send`, {
+    data: { body: messageBody },
+  });
+  const sendBody = await sendRes.text();
+  expect(sendRes.status(), sendBody).toBe(201);
+
+  const loginManagerRes = await page.request.post('/api/test/login', {
+    data: {
+      email: managerEmail,
+      password: managerPassword,
+    },
+  });
+  const loginManagerBody = await loginManagerRes.text();
+  expect(loginManagerRes.status(), loginManagerBody).toBe(200);
+
+  await setRole(page, 'pm');
+
+  const inboxRes = await page.request.get('/api/messages/inbox');
+  const inboxBody = await inboxRes.text();
+  expect(inboxRes.status(), inboxBody).toBe(200);
+  const inboxItems = (JSON.parse(inboxBody)?.items ?? []) as Array<{ id?: string }>;
+  expect(inboxItems.some((item) => String(item.id || '') === threadId)).toBeTruthy();
+
+  const threadMessagesRes = await page.request.get(`/api/messages/threads/${threadId}/messages`);
+  const threadMessagesBody = await threadMessagesRes.text();
+  expect(threadMessagesRes.status(), threadMessagesBody).toBe(200);
+  const threadMessages = (JSON.parse(threadMessagesBody)?.items ?? []) as Array<{ body?: string }>;
+  expect(threadMessages.some((row) => String(row.body || '') === messageBody)).toBeTruthy();
+});

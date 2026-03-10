@@ -350,10 +350,10 @@ export function MessagesView({ employees = [], ui }) {
   }, [messages]);
 
   const filteredChannels = channels
-    .filter((channel) => !isDirectChannel(channel))
-    .filter((channel) => !looksLikeDmName(channel.name))
     .filter((channel) =>
-      String(getChannelDisplayName(channel) || channel.name || '').toLowerCase().includes(searchTerm.toLowerCase())
+      String(getChannelDisplayName(channel) || channel.name || '')
+        .toLowerCase()
+        .includes(searchTerm.toLowerCase())
     );
   const directChannelByUserId = useMemo(() => {
     const map = new Map();

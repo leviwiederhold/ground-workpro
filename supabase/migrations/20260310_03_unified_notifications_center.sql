@@ -1,5 +1,15 @@
 -- Unified in-app notifications center schema updates.
 
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  type text not null,
+  payload jsonb not null default '{}'::jsonb,
+  read_at timestamptz null,
+  created_at timestamptz not null default now()
+);
+
 alter table if exists public.notifications
   add column if not exists title text,
   add column if not exists body text,

@@ -89,3 +89,113 @@ test("invite lifecycle transitions pending to active after employee accepts invi
     )
     .toBe("active::operator");
 });
+
+test("team pending invitation is accepted and removed from pending for new and existing user", async ({ page }) => {
+  await loginViaUI(page);
+  await setRoleAdmin(page);
+
+  const stamp = Date.now();
+  const email = `team-invite-${stamp}@example.com`;
+  const password = `InvitePass!${stamp}`;
+
+  const createPendingRes = await page.request.post("/api/team/invitations", {
+    data: {
+      full_name: `Team Invite ${stamp}`,
+      email,
+      role: "manager",
+      permissions: [{ module_key: "jobs", access_level: "edit" }],
+    },
+  });
+  const createPendingText = await createPendingRes.text();
+  expect(createPendingRes.status(), createPendingText).toBe(200);
+  const createPendingJson = JSON.parse(createPendingText);
+  const invitationId = String(createPendingJson?.item?.id ?? "");
+  const inviteToken = String(createPendingJson?.item?.invite_token ?? "");
+  expect(invitationId).toBeTruthy();
+  expect(inviteToken.length).toBeGreaterThanOrEqual(20);
+
+  const pendingBeforeRes = await page.request.get("/api/team/invitations");
+  const pendingBeforeText = await pendingBeforeRes.text();
+  expect(pendingBeforeRes.status(), pendingBeforeText).toBe(200);
+  const pendingBeforeJson = JSON.parse(pendingBeforeText);
+  expect((pendingBeforeJson?.items ?? []).some((item: { id: string }) => String(item.id) === invitationId)).toBeTruthy();
+
+  const acceptNewUserRes = await page.request.post("/api/test/accept-invite", {
+    data: {
+      token: inviteToken,
+      email,
+      password,
+    },
+  });
+  const acceptNewUserText = await acceptNewUserRes.text();
+  expect(acceptNewUserRes.status(), acceptNewUserText).toBe(200);
+
+  await expect
+    .poll(
+      async () => {
+        const pendingAfterRes = await page.request.get("/api/team/invitations");
+        if (!pendingAfterRes.ok()) return "pending";
+        const pendingAfterJson = await pendingAfterRes.json();
+        return (pendingAfterJson?.items ?? []).some((item: { id: string }) => String(item.id) === invitationId)
+          ? "pending"
+          : "accepted";
+      },
+      { timeout: 30_000 }
+    )
+    .toBe("accepted");
+
+  await expect
+    .poll(
+      async () => {
+        const teamRes = await page.request.get("/api/team?limit=100");
+        if (!teamRes.ok()) return "missing";
+        const teamJson = await teamRes.json();
+        const member = (teamJson?.items ?? []).find(
+          (item: { email?: string }) => String(item.email ?? "").toLowerCase() === email
+        );
+        return String(member?.accountStatus ?? "missing");
+      },
+      { timeout: 30_000 }
+    )
+    .toBe("active");
+
+  const createSecondPendingRes = await page.request.post("/api/team/invitations", {
+    data: {
+      full_name: `Team Invite Existing ${stamp}`,
+      email,
+      role: "manager",
+      permissions: [{ module_key: "jobs", access_level: "edit" }],
+    },
+  });
+  const createSecondPendingText = await createSecondPendingRes.text();
+  expect(createSecondPendingRes.status(), createSecondPendingText).toBe(200);
+  const createSecondPendingJson = JSON.parse(createSecondPendingText);
+  const secondInvitationId = String(createSecondPendingJson?.item?.id ?? "");
+  const secondInviteToken = String(createSecondPendingJson?.item?.invite_token ?? "");
+  expect(secondInvitationId).toBeTruthy();
+  expect(secondInviteToken.length).toBeGreaterThanOrEqual(20);
+
+  const acceptExistingUserRes = await page.request.post("/api/test/accept-invite", {
+    data: {
+      token: secondInviteToken,
+      email,
+      password,
+    },
+  });
+  const acceptExistingUserText = await acceptExistingUserRes.text();
+  expect(acceptExistingUserRes.status(), acceptExistingUserText).toBe(200);
+
+  await expect
+    .poll(
+      async () => {
+        const pendingAfterSecondRes = await page.request.get("/api/team/invitations");
+        if (!pendingAfterSecondRes.ok()) return "pending";
+        const pendingAfterSecondJson = await pendingAfterSecondRes.json();
+        return (pendingAfterSecondJson?.items ?? []).some((item: { id: string }) => String(item.id) === secondInvitationId)
+          ? "pending"
+          : "accepted";
+      },
+      { timeout: 30_000 }
+    )
+    .toBe("accepted");
+});

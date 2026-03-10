@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
@@ -243,8 +243,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    let access: Awaited<ReturnType<typeof requireModuleAccess>>;
     try {
-      await requireRole(["admin", "pm"]);
+      access = await requireModuleAccess("jobs", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -271,9 +272,18 @@ export async function PATCH(
       );
     }
 
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { supabase } = await getCompanyId();
+    const { companyId, userId } = access;
     const updatesBody = parsed.data;
     const normalizedId = normalizeId(id);
+    const role = (await getEffectiveRole()) ?? (await resolveMembershipRole(supabase, companyId, userId));
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { data: beforeRow } = await supabase
       .from("jobs")
@@ -355,15 +365,25 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    let access: Awaited<ReturnType<typeof requireModuleAccess>>;
     try {
-      await requireRole(["admin"]);
+      access = await requireModuleAccess("jobs", "edit");
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const { id } = await params;
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { supabase } = await getCompanyId();
+    const { companyId, userId } = access;
     const normalizedId = normalizeId(id);
+    const role = (await getEffectiveRole()) ?? (await resolveMembershipRole(supabase, companyId, userId));
+    if (!role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { data: beforeRow } = await supabase
       .from("jobs")

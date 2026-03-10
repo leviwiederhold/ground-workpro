@@ -54,6 +54,11 @@ test("module permissions enforce none/view/edit for jobs", async ({ page }) => {
   });
   expect(jobsCreateBlocked.status()).toBe(403);
 
+  const viewJobSeed = await page.request.post("/api/jobs", {
+    data: { name: `perm-view-seed-${Date.now()}`, status: "draft" },
+  });
+  expect(viewJobSeed.status()).toBe(403);
+
   const setPm = await page.request.post("/api/test/set-role", {
     data: { role: "pm" },
   });
@@ -65,4 +70,15 @@ test("module permissions enforce none/view/edit for jobs", async ({ page }) => {
     data: { name: `perm-edit-${Date.now()}`, status: "in_progress" },
   });
   expect(jobsCreateAllowed.status()).toBe(200);
+  const jobsCreateAllowedJson = await jobsCreateAllowed.json();
+  const jobId = String(jobsCreateAllowedJson?.job?.id ?? "");
+  expect(jobId).toBeTruthy();
+
+  const jobsPatchAllowed = await page.request.patch(`/api/jobs/${jobId}`, {
+    data: { name: `perm-edit-updated-${Date.now()}` },
+  });
+  expect(jobsPatchAllowed.status()).toBe(200);
+
+  const jobsDeleteAllowed = await page.request.delete(`/api/jobs/${jobId}`);
+  expect(jobsDeleteAllowed.status()).toBe(200);
 });

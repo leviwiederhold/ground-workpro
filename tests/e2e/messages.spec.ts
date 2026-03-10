@@ -55,3 +55,14 @@ test('messages direct threads persist across reload (api contract)', async ({ pa
   const rowsAfter = Array.isArray(readJsonAfter?.items) ? readJsonAfter.items : [];
   expect(rowsAfter.some((row: { body: string }) => String(row.body) === messageBody)).toBeTruthy();
 });
+
+test('messages inbox loads without RLS recursion errors', async ({ page }) => {
+  await loginViaUI(page);
+  await forceAdminRole(page);
+
+  const inboxRes = await page.request.get('/api/messages/inbox');
+  const inboxBody = await inboxRes.text();
+  expect(inboxRes.status(), inboxBody).toBe(200);
+  expect(inboxBody.toLowerCase()).not.toContain('infinite recursion');
+  expect(inboxBody.toLowerCase()).not.toContain('message_participants');
+});

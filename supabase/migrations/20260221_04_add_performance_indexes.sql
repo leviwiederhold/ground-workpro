@@ -12,7 +12,18 @@ create index if not exists idx_work_orders_company_created_at on public.work_ord
 create index if not exists idx_purchase_orders_company_created_at on public.purchase_orders (company_id, created_at desc);
 create index if not exists idx_bids_company_created_at on public.bids (company_id, created_at desc);
 
-create index if not exists idx_daily_reports_company_date on public.daily_reports (company_id, date desc);
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'daily_reports'
+      and column_name = 'date'
+  ) then
+    create index if not exists idx_daily_reports_company_date on public.daily_reports (company_id, date desc);
+  end if;
+end $$;
 create index if not exists idx_daily_reports_company_created_at on public.daily_reports (company_id, created_at desc);
 
 create index if not exists idx_cost_codes_company_code on public.cost_codes (company_id, code);

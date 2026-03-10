@@ -16,27 +16,33 @@ create index if not exists notifications_company_created_idx
 
 alter table public.notifications enable row level security;
 
-create policy if not exists notifications_select_own
-  on public.notifications
-  for select
-  using (
-    user_id = auth.uid()
-    or exists (
-      select 1
-      from public.memberships m
-      where m.company_id = notifications.company_id
-        and m.user_id = auth.uid()
-        and lower(m.role) in ('admin','executive','ceo')
-    )
-  );
+do $$ begin
+  create policy notifications_select_own
+    on public.notifications
+    for select
+    using (
+      user_id = auth.uid()
+      or exists (
+        select 1
+        from public.memberships m
+        where m.company_id = notifications.company_id
+          and m.user_id = auth.uid()
+          and lower(m.role) in ('admin','executive','ceo')
+      )
+    );
+exception when duplicate_object then null; end $$;
 
-create policy if not exists notifications_insert_member
-  on public.notifications
-  for insert
-  with check (public.is_company_member(company_id));
+do $$ begin
+  create policy notifications_insert_member
+    on public.notifications
+    for insert
+    with check (public.is_company_member(company_id));
+exception when duplicate_object then null; end $$;
 
-create policy if not exists notifications_update_own
-  on public.notifications
-  for update
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid() and public.is_company_member(company_id));
+do $$ begin
+  create policy notifications_update_own
+    on public.notifications
+    for update
+    using (user_id = auth.uid())
+    with check (user_id = auth.uid() and public.is_company_member(company_id));
+exception when duplicate_object then null; end $$;

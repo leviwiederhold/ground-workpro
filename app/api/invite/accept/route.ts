@@ -34,6 +34,22 @@ const toValidationError = (issues: { path: (string | number)[]; message: string 
   })),
 });
 
+const isMissingSchemaError = (message: string | undefined) =>
+  /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
+    message ?? ""
+  );
+
+const parseMissingColumn = (message: string | undefined): string | null => {
+  if (!message) return null;
+  const quoted = message.match(/Could not find the '([^']+)' column/i);
+  if (quoted?.[1]) return quoted[1];
+  const relation = message.match(/column "?([a-zA-Z0-9_]+)"? of relation/i);
+  if (relation?.[1]) return relation[1];
+  const generic = message.match(/column "?([a-zA-Z0-9_]+)"? does not exist/i);
+  if (generic?.[1]) return generic[1];
+  return null;
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
@@ -190,29 +206,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
     }
 
-    let employeeProfile = await client
-      .from("employees")
-      .select("id, company_id, name, full_name")
-      .eq("id", invitationData.employee_id)
-      .eq("company_id", invitationData.company_id)
-      .limit(1)
-      .maybeSingle();
-    if (employeeProfile.error && /column employees\.(name|full_name) does not exist/i.test(employeeProfile.error.message || "")) {
-      employeeProfile = await client
-        .from("employees")
-        .select("id, company_id")
-        .eq("id", invitationData.employee_id)
-        .eq("company_id", invitationData.company_id)
-        .limit(1)
-        .maybeSingle();
-    }
-    if (employeeProfile.error) {
-      return NextResponse.json({ error: employeeProfile.error.message }, { status: 400 });
-    }
-
     const profileName = String(
-      (employeeProfile.data as { name?: string; full_name?: string } | null)?.name ??
-        (employeeProfile.data as { name?: string; full_name?: string } | null)?.full_name ??
+      authData.user.user_metadata?.full_name ??
+        authData.user.user_metadata?.name ??
         authData.user.email ??
         ""
     ).trim();
@@ -232,21 +228,92 @@ export async function POST(request: Request) {
     }
 
     const employeeRole = resolvedRole === "ceo" ? "admin" : resolvedRole;
+    const inviteEmail = tokenEmail || email;
+    let employeeId = String(invitationData.employee_id ?? "").trim();
 
-    let employeeUpdate = await client
-      .from("employees")
-      .update({ user_id: userId, role: employeeRole })
-      .eq("id", invitationData.employee_id)
-      .eq("company_id", invitationData.company_id);
-    if (employeeUpdate.error && /Could not find the 'user_id' column/i.test(employeeUpdate.error.message || "")) {
-      employeeUpdate = await client
+    if (!employeeId) {
+      const employeeByEmail = await client
         .from("employees")
-        .update({ role: employeeRole })
-        .eq("id", invitationData.employee_id)
-        .eq("company_id", invitationData.company_id);
+        .select("id")
+        .eq("company_id", invitationData.company_id)
+        .ilike("email", inviteEmail)
+        .limit(1)
+        .maybeSingle();
+      if (!employeeByEmail.error && employeeByEmail.data?.id) {
+        employeeId = String(employeeByEmail.data.id);
+      }
     }
-    if (employeeUpdate.error) {
-      return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
+
+    if (!employeeId) {
+      const insertPayload: Record<string, unknown> = {
+        company_id: invitationData.company_id,
+        email: inviteEmail,
+        role: employeeRole,
+        user_id: userId,
+        name: profileName || inviteEmail,
+        full_name: profileName || inviteEmail,
+        status: "active",
+      };
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const insertResult = await client.from("employees").insert(insertPayload).select("id").maybeSingle();
+        if (!insertResult.error && insertResult.data?.id) {
+          employeeId = String(insertResult.data.id);
+          break;
+        }
+        const message = insertResult.error?.message ?? "";
+        if (/duplicate key|unique/i.test(message)) {
+          const existingByEmail = await client
+            .from("employees")
+            .select("id")
+            .eq("company_id", invitationData.company_id)
+            .ilike("email", inviteEmail)
+            .limit(1)
+            .maybeSingle();
+          if (!existingByEmail.error && existingByEmail.data?.id) {
+            employeeId = String(existingByEmail.data.id);
+            break;
+          }
+        }
+        if (!isMissingSchemaError(message)) {
+          return NextResponse.json({ error: message || "Failed to create employee record" }, { status: 400 });
+        }
+        const missingColumn = parseMissingColumn(message);
+        if (!missingColumn || !(missingColumn in insertPayload)) {
+          return NextResponse.json({ error: message || "Failed to create employee record" }, { status: 400 });
+        }
+        delete insertPayload[missingColumn];
+      }
+    }
+
+    if (!employeeId) {
+      return NextResponse.json({ error: "Failed to resolve employee record for invite" }, { status: 400 });
+    }
+
+    const employeeUpdatePayload: Record<string, unknown> = {
+      role: employeeRole,
+      user_id: userId,
+      email: inviteEmail,
+    };
+    if (profileName) {
+      employeeUpdatePayload.name = profileName;
+      employeeUpdatePayload.full_name = profileName;
+    }
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const employeeUpdate = await client
+        .from("employees")
+        .update(employeeUpdatePayload)
+        .eq("id", employeeId)
+        .eq("company_id", invitationData.company_id);
+      if (!employeeUpdate.error) break;
+      const message = employeeUpdate.error.message ?? "";
+      if (!isMissingSchemaError(message)) {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+      const missingColumn = parseMissingColumn(message);
+      if (!missingColumn || !(missingColumn in employeeUpdatePayload)) {
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+      delete employeeUpdatePayload[missingColumn];
     }
 
     const acceptedAt = new Date().toISOString();

@@ -10907,13 +10907,16 @@ const confirmDestructiveAction = (targetLabel) =>
         const inviteParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
         const isInviteFlow = inviteParams?.get('invite') === '1';
         const inviteRole = inviteParams?.get('role') || undefined;
+        const inviteEmail = inviteParams?.get('email') || undefined;
+        const inviteEmployeeId = inviteParams?.get('employeeId') || undefined;
+        const inviteToken = inviteParams?.get('token') || undefined;
 
         const acceptInviteIfNeeded = async () => {
           if (!isInviteFlow) return;
           const response = await fetch('/api/invite/accept', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: inviteRole }),
+            body: JSON.stringify({ role: inviteRole, email: inviteEmail, employeeId: inviteEmployeeId, token: inviteToken }),
           });
           if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
@@ -10946,6 +10949,20 @@ const confirmDestructiveAction = (targetLabel) =>
           if (error) {
             const normalized = error.message.toLowerCase();
             if (normalized.includes('already') || normalized.includes('exists') || normalized.includes('registered')) {
+              if (isInviteFlow) {
+                const fallbackLogin = await supabase.auth.signInWithPassword({
+                  email: formData.email,
+                  password: formData.password,
+                });
+                if (!fallbackLogin.error) {
+                  await supabase.auth.getSession();
+                  await acceptInviteIfNeeded();
+                  onLogin(formData);
+                  return;
+                }
+                setAuthError('This invite email already has an account. Sign in with the existing password to accept the invite.');
+                return;
+              }
               setAuthError('This email is already registered. Please log in.');
               return;
             }
@@ -10955,6 +10972,20 @@ const confirmDestructiveAction = (targetLabel) =>
 
           const identityCount = Array.isArray(data?.user?.identities) ? data.user.identities.length : 1;
           if (data?.user && identityCount === 0) {
+            if (isInviteFlow) {
+              const fallbackLogin = await supabase.auth.signInWithPassword({
+                email: formData.email,
+                password: formData.password,
+              });
+              if (!fallbackLogin.error) {
+                await supabase.auth.getSession();
+                await acceptInviteIfNeeded();
+                onLogin(formData);
+                return;
+              }
+              setAuthError('This invite email already has an account. Sign in with the existing password to accept the invite.');
+              return;
+            }
             setAuthError('This email is already registered. Please log in.');
             return;
           }

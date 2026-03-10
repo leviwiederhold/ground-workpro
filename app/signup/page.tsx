@@ -48,6 +48,8 @@ export default function SignupPage() {
     setNotice(null);
 
     const supabase = supabaseBrowser();
+    const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+    const inviteMode = params?.get("invite") === "1";
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -57,6 +59,18 @@ export default function SignupPage() {
       if (signUpError) {
         const normalized = signUpError.message.toLowerCase();
         if (normalized.includes("already") || normalized.includes("exists") || normalized.includes("registered")) {
+          if (inviteMode) {
+            const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+            if (!signInError) {
+              await supabase.auth.getSession();
+              await ensureTenantContext();
+              router.replace("/");
+              router.refresh();
+              return;
+            }
+            setError("This invite email already has an account. Sign in with the existing password to accept the invite.");
+            return;
+          }
           setError("This email is already registered. Please log in.");
           return;
         }
@@ -66,6 +80,18 @@ export default function SignupPage() {
 
       const identityCount = Array.isArray(data?.user?.identities) ? data.user.identities.length : 1;
       if (data?.user && identityCount === 0) {
+        if (inviteMode) {
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (!signInError) {
+            await supabase.auth.getSession();
+            await ensureTenantContext();
+            router.replace("/");
+            router.refresh();
+            return;
+          }
+          setError("This invite email already has an account. Sign in with the existing password to accept the invite.");
+          return;
+        }
         setError("This email is already registered. Please log in.");
         return;
       }
@@ -126,7 +152,13 @@ export default function SignupPage() {
         </form>
 
         <p className="text-sm text-gray-500 mt-5 text-center">
-          Already registered? <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium">Log in</Link>
+          Already registered?{" "}
+          <Link
+            href={typeof window !== "undefined" && window.location.search ? `/login${window.location.search}` : "/login"}
+            className="text-brand-600 hover:text-brand-700 font-medium"
+          >
+            Log in
+          </Link>
         </p>
       </div>
     </main>

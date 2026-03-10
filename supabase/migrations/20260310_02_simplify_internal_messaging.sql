@@ -30,6 +30,27 @@ create table if not exists public.message_threads (
   constraint message_threads_dm_pair_check check (dm_user_a <> dm_user_b)
 );
 
+alter table if exists public.message_threads
+  add column if not exists kind text,
+  add column if not exists dm_user_a uuid references auth.users(id) on delete cascade,
+  add column if not exists dm_user_b uuid references auth.users(id) on delete cascade,
+  add column if not exists created_by uuid references auth.users(id) on delete cascade,
+  add column if not exists created_at timestamptz not null default now(),
+  add column if not exists updated_at timestamptz not null default now(),
+  add column if not exists last_message_at timestamptz null;
+
+update public.message_threads
+set kind = coalesce(nullif(kind, ''), 'direct')
+where kind is null or kind = '';
+
+alter table if exists public.message_threads
+  alter column kind set default 'direct';
+
+do $$ begin
+  alter table public.message_threads
+    add constraint message_threads_kind_check check (kind in ('direct'));
+exception when duplicate_object then null; end $$;
+
 create unique index if not exists message_threads_company_direct_pair_key
   on public.message_threads(company_id, dm_user_a, dm_user_b)
   where kind = 'direct';

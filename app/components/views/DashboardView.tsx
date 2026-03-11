@@ -201,6 +201,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
       inventory: 'inventory',
       finance: 'finance',
       settings: 'settings',
+      integrations: 'integrations',
     };
     if (viewMap[view]) {
       setCurrentView(viewMap[view]);

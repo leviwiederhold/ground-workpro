@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 type ParticipantRow = {
   thread_id: string;
@@ -23,6 +24,24 @@ type MessageRow = {
   sender_user_id: string;
   body: string;
   created_at: string;
+};
+
+const pickDisplayName = ({
+  fullName,
+  displayName,
+  email,
+}: {
+  fullName?: unknown;
+  displayName?: unknown;
+  email?: unknown;
+}) => {
+  const normalizedFullName = String(fullName ?? "").trim();
+  if (normalizedFullName) return normalizedFullName;
+  const normalizedDisplayName = String(displayName ?? "").trim();
+  if (normalizedDisplayName) return normalizedDisplayName;
+  const normalizedEmail = String(email ?? "").trim();
+  if (normalizedEmail) return normalizedEmail;
+  return "";
 };
 
 export function sortDirectPair(userA: string, userB: string): [string, string] {
@@ -302,10 +321,12 @@ export async function resolveDisplayNames(
   }
 
   for (const row of profileRows) {
-      const fullName = String(row.full_name ?? "").trim();
-      const displayName = String((row as { display_name?: string }).display_name ?? "").trim();
-      const email = String(row.email ?? "").trim();
-      map.set(String(row.id), fullName || displayName || email || "Team Member");
+      const resolved = pickDisplayName({
+        fullName: row.full_name,
+        displayName: (row as { display_name?: string }).display_name,
+        email: row.email,
+      });
+      if (resolved) map.set(String(row.id), resolved);
   }
 
   const employeesPrimaryResult = await supabase
@@ -343,11 +364,31 @@ export async function resolveDisplayNames(
   for (const employee of employeeRows) {
     const key = String(employee.user_id ?? "").trim();
     if (!key || map.has(key)) continue;
-    const fullName = String(employee.full_name ?? "").trim();
-    const displayName = String(employee.name ?? "").trim();
-    const email = String(employee.email ?? "").trim();
-    if (fullName || displayName || email) {
-      map.set(key, fullName || displayName || email);
+    const resolved = pickDisplayName({
+      fullName: employee.full_name,
+      displayName: employee.name,
+      email: employee.email,
+    });
+    if (resolved) map.set(key, resolved);
+  }
+
+  const admin = getSupabaseAdmin();
+  if (admin) {
+    const missingUserIds = unique.filter((id) => !map.has(id));
+    if (missingUserIds.length > 0) {
+      const listUsersResult = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      if (!listUsersResult.error) {
+        const emailByUserId = new Map(
+          (listUsersResult.data.users ?? []).map((row) => [
+            String(row.id),
+            String(row.email ?? "").trim(),
+          ])
+        );
+        for (const missingUserId of missingUserIds) {
+          const email = emailByUserId.get(missingUserId);
+          if (email) map.set(missingUserId, email);
+        }
+      }
     }
   }
 

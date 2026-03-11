@@ -106,7 +106,7 @@ export async function GET() {
       items: filteredItems,
       role,
       realRole: context.realRole,
-      canSwitchRoleView: role === "admin",
+      canSwitchRoleView: false,
       moduleAccess: modulePermissions,
     });
   } catch (error) {

@@ -32,6 +32,16 @@ const JobsView = dynamic(
 const confirmDestructiveAction = (targetLabel) =>
   window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 
+const pickDisplayName = ({ fullName, displayName, email }) => {
+  const normalizedFullName = String(fullName ?? '').trim();
+  if (normalizedFullName) return normalizedFullName;
+  const normalizedDisplayName = String(displayName ?? '').trim();
+  if (normalizedDisplayName) return normalizedDisplayName;
+  const normalizedEmail = String(email ?? '').trim();
+  if (normalizedEmail) return normalizedEmail;
+  return 'Team Member';
+};
+
 
     // ============================================
     // MOCK DATA - Would come from API in production
@@ -641,6 +651,22 @@ const confirmDestructiveAction = (targetLabel) =>
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
+      const resolvedUserDisplayName = pickDisplayName({
+        fullName: currentUser?.fullName ?? currentUser?.name,
+        displayName: currentUser?.displayName,
+        email: currentUser?.email,
+      });
+      const resolvedUserEmail = String(currentUser?.email ?? '').trim();
+      const showUserEmailLine =
+        Boolean(resolvedUserEmail) &&
+        resolvedUserEmail.toLowerCase() !== resolvedUserDisplayName.toLowerCase();
+      const resolvedCompanyName = String(currentUser?.company ?? '').trim() || 'My Company';
+      const resolvedCompanyLogo = String(currentUser?.companyLogo ?? '').trim();
+
+      const navigateFromUserMenu = useCallback((path) => {
+        setShowUserMenu(false);
+        window.location.assign(path);
+      }, []);
 
       const openComingSoon = useCallback((message) => {
         setComingSoonMessage(message || 'This feature is coming soon.');
@@ -880,6 +906,11 @@ const confirmDestructiveAction = (targetLabel) =>
         }
       }, []);
 
+      const applyNotificationState = useCallback((nextItems) => {
+        setNotifications(nextItems);
+        setUnreadNotificationsCount(nextItems.filter((item) => !item.is_read).length);
+      }, []);
+
       const loadSafetyLogs = useCallback(async () => {
         try {
           setSafetyLogsLoading(true);
@@ -978,18 +1009,15 @@ const confirmDestructiveAction = (targetLabel) =>
           const response = await fetch(`/api/notifications/${rawId}/read`, { method: 'POST' });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) return;
-          setNotifications((prev) =>
-            prev.map((item) =>
+          setNotifications((prev) => {
+            const next = prev.map((item) =>
               String(item.id) === String(notificationId)
                 ? { ...item, is_read: true, read_at: payload?.item?.readAt ?? item.read_at }
                 : item
-            )
-          );
-          const countResponse = await fetch('/api/notifications/unread-count', { cache: 'no-store' });
-          if (countResponse.ok) {
-            const countPayload = await countResponse.json().catch(() => ({}));
-            setUnreadNotificationsCount(Number(countPayload?.item?.count ?? 0));
-          }
+            );
+            setUnreadNotificationsCount(next.filter((item) => !item.is_read).length);
+            return next;
+          });
         } catch {
           // no-op
         }
@@ -1002,11 +1030,29 @@ const confirmDestructiveAction = (targetLabel) =>
           const response = await fetch('/api/notifications/read-all', { method: 'POST' });
           if (!response.ok) return;
           const now = new Date().toISOString();
-          setNotifications((prev) => prev.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? now })));
-          setUnreadNotificationsCount(0);
+          applyNotificationState(
+            notifications.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? now }))
+          );
         } catch {
           // no-op
         }
+      };
+
+      const handleClearReadNotifications = async () => {
+        const readItems = notifications.filter((item) => item.is_read);
+        if (readItems.length === 0) return;
+        try {
+          const response = await fetch('/api/notifications/clear-read', { method: 'POST' });
+          if (!response.ok) return;
+          applyNotificationState(notifications.filter((item) => !item.is_read));
+        } catch {
+          // no-op
+        }
+      };
+
+      const handleViewAllNotifications = () => {
+        setShowNotifications(false);
+        window.location.assign('/notifications');
       };
 
       const notificationItems = useMemo(() => {
@@ -1721,41 +1767,43 @@ const confirmDestructiveAction = (targetLabel) =>
                 </div>
                 <div className="flex items-center gap-3">
                   {/* Role Selector */}
-                  <div className="relative hidden md:block">
-                    <button
-                      onClick={() => {
-                        if (!canSwitchRoleView) return;
-                        setShowRoleSelector(!showRoleSelector);
-                      }}
-                      disabled={actingRoleSaving || !canSwitchRoleView}
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                        canSwitchRoleView ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-100 opacity-80 cursor-default'
-                      }`}
-                    >
-                      <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
-                      <span className="text-sm font-medium text-gray-700">{ROLES[currentRole].label}</span>
-                      {canSwitchRoleView && <Icon name="chevron-down" className="text-gray-400 text-xs" />}
-                    </button>
-                    {showRoleSelector && canSwitchRoleView && (
-                      <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
-                        <div className="px-3 py-2 border-b border-gray-100">
-                          <p className="text-xs font-medium text-gray-500 uppercase">Switch Role View</p>
+                  {canSwitchRoleView && (
+                    <div className="relative hidden md:block">
+                      <button
+                        onClick={() => {
+                          if (!canSwitchRoleView) return;
+                          setShowRoleSelector(!showRoleSelector);
+                        }}
+                        disabled={actingRoleSaving || !canSwitchRoleView}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
+                          canSwitchRoleView ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-100 opacity-80 cursor-default'
+                        }`}
+                      >
+                        <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
+                        <span className="text-sm font-medium text-gray-700">{ROLES[currentRole].label}</span>
+                        {canSwitchRoleView && <Icon name="chevron-down" className="text-gray-400 text-xs" />}
+                      </button>
+                      {showRoleSelector && canSwitchRoleView && (
+                        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
+                          <div className="px-3 py-2 border-b border-gray-100">
+                            <p className="text-xs font-medium text-gray-500 uppercase">Switch Role View</p>
+                          </div>
+                          {Object.entries(ROLES).map(([key, role]) => (
+                            <button
+                              key={key}
+                              disabled={actingRoleSaving}
+                              onClick={() => { handleRoleSwitch(key); }}
+                              className={`w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors ${currentRole === key ? 'bg-brand-50' : ''}`}
+                            >
+                              <Icon name={role.icon} className={`${role.color} w-5`} />
+                              <span className="text-sm text-gray-700">{role.label}</span>
+                              {currentRole === key && <Icon name="check" className="ml-auto text-brand-500" />}
+                            </button>
+                          ))}
                         </div>
-                        {Object.entries(ROLES).map(([key, role]) => (
-                          <button
-                            key={key}
-                            disabled={actingRoleSaving}
-                            onClick={() => { handleRoleSwitch(key); }}
-                            className={`w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors ${currentRole === key ? 'bg-brand-50' : ''}`}
-                          >
-                            <Icon name={role.icon} className={`${role.color} w-5`} />
-                            <span className="text-sm text-gray-700">{role.label}</span>
-                            {currentRole === key && <Icon name="check" className="ml-auto text-brand-500" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                      )}
+                    </div>
+                  )}
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1787,12 +1835,22 @@ const confirmDestructiveAction = (targetLabel) =>
                       <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden">
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                           <h3 className="font-semibold text-gray-900">Notifications</h3>
-                          <button
-                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                            onClick={handleMarkAllNotificationsRead}
-                          >
-                            Mark all read
-                          </button>
+                          <div className="flex items-center gap-3">
+                            <button
+                              className="text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-60"
+                              onClick={handleMarkAllNotificationsRead}
+                              disabled={!notifications.some((item) => !item.is_read)}
+                            >
+                              Mark all read
+                            </button>
+                            <button
+                              className="text-xs text-gray-600 hover:text-gray-800 font-medium disabled:opacity-60"
+                              onClick={handleClearReadNotifications}
+                              disabled={!notifications.some((item) => item.is_read)}
+                            >
+                              Clear read
+                            </button>
+                          </div>
                         </div>
                         <div className="px-3 py-2 border-b border-gray-100 bg-white flex items-center gap-2">
                           <button
@@ -1877,6 +1935,17 @@ const confirmDestructiveAction = (targetLabel) =>
                             })
                           )}
                         </div>
+                        <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
+                          <p className="text-xs text-gray-500">
+                            {unreadNotificationsCount} unread
+                          </p>
+                          <button
+                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
+                            onClick={handleViewAllNotifications}
+                          >
+                            View all notifications
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1887,29 +1956,51 @@ const confirmDestructiveAction = (targetLabel) =>
                       className="flex items-center gap-2 hover:bg-gray-100 rounded-lg p-1 sm:pr-2 transition-colors"
                     >
                       <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                        {currentUser?.name?.split(' ').map(n => n[0]).join('') || 'JD'}
+                        {resolvedCompanyLogo ? (
+                          <img
+                            src={resolvedCompanyLogo}
+                            alt={`${resolvedCompanyName} logo`}
+                            className="w-full h-full rounded-full object-cover"
+                          />
+                        ) : (
+                          resolvedUserDisplayName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase() || 'TM'
+                        )}
                       </div>
-                      <span className="text-sm font-medium text-gray-700 hidden lg:inline">{currentUser?.name || 'John Doe'}</span>
+                      <span className="text-sm font-medium text-gray-700 hidden lg:inline">{resolvedUserDisplayName}</span>
                       <Icon name="chevron-down" className="text-gray-400 text-xs" />
                     </button>
                     {showUserMenu && (
                       <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
                         <div className="px-4 py-3 border-b border-gray-100">
-                          <p className="font-medium text-gray-900">{currentUser?.name || 'John Doe'}</p>
-                          <p className="text-sm text-gray-500">{currentUser?.email || 'john@company.com'}</p>
-                          <p className="text-xs text-gray-400 mt-1">{currentUser?.company || 'Demo Company'}</p>
+                          <p className="font-medium text-gray-900">{resolvedUserDisplayName}</p>
+                          {showUserEmailLine && (
+                            <p className="text-sm text-gray-500 break-all">{resolvedUserEmail}</p>
+                          )}
+                          <p className="text-xs text-gray-400 mt-1">{resolvedCompanyName}</p>
                         </div>
                         <div className="py-1">
-                          <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <button
+                            onClick={() => navigateFromUserMenu('/profile')}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
                             <Icon name="user" className="text-gray-400" /> My Profile
                           </button>
-                          <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <button
+                            onClick={() => navigateFromUserMenu('/settings/account')}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
                             <Icon name="gear" className="text-gray-400" /> Account Settings
                           </button>
-                          <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <button
+                            onClick={() => navigateFromUserMenu('/settings/company')}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
                             <Icon name="building" className="text-gray-400" /> Company Settings
                           </button>
-                          <button className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                          <button
+                            onClick={() => navigateFromUserMenu('/settings/billing')}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
                             <Icon name="credit-card" className="text-gray-400" /> Billing
                           </button>
                         </div>
@@ -11645,19 +11736,123 @@ const confirmDestructiveAction = (targetLabel) =>
     // ============================================
     // ROOT - Authentication Wrapper
     // ============================================
-    const Root = () => {
-      const [isAuthenticated, setIsAuthenticated] = useState(false);
-      const [currentUser, setCurrentUser] = useState(null);
+	    const Root = () => {
+	      const [isAuthenticated, setIsAuthenticated] = useState(false);
+	      const [currentUser, setCurrentUser] = useState(null);
+	      const hydrateCurrentUser = useCallback(async (sessionUser) => {
+	        const supabase = supabaseBrowser();
+	        const userId = String(sessionUser?.id ?? '');
+	        let email = String(sessionUser?.email ?? '').trim();
 
-      const handleLogin = (data) => {
-        setCurrentUser({ name: data.name || 'John Doe', email: data.email, company: data.company || 'Demo Company' });
-        setIsAuthenticated(true);
-      };
+	        let fullName = '';
+	        let displayName = '';
 
-      const handleSignup = (data) => {
-        setCurrentUser({ name: data.name, email: data.email, company: data.company });
-        setIsAuthenticated(true);
-      };
+	        if (userId) {
+	          const profileWithDisplayName = await supabase
+	            .from('profiles')
+	            .select('full_name, display_name, email')
+	            .eq('id', userId)
+	            .maybeSingle();
+
+	          if (!profileWithDisplayName.error) {
+	            fullName = String(profileWithDisplayName.data?.full_name ?? '').trim();
+	            displayName = String(profileWithDisplayName.data?.display_name ?? '').trim();
+	            const profileEmail = String(profileWithDisplayName.data?.email ?? '').trim();
+	            if (!email && profileEmail) email = profileEmail;
+	          } else if (/display_name|Could not find the 'display_name' column/i.test(profileWithDisplayName.error.message || '')) {
+	            const fallbackProfile = await supabase
+	              .from('profiles')
+	              .select('full_name, email')
+	              .eq('id', userId)
+	              .maybeSingle();
+	            if (!fallbackProfile.error) {
+	              fullName = String(fallbackProfile.data?.full_name ?? '').trim();
+	              const profileEmail = String(fallbackProfile.data?.email ?? '').trim();
+	              if (!email && profileEmail) email = profileEmail;
+	            }
+	          }
+	        }
+
+	        let companyName = 'My Company';
+	        let companyLogo = '';
+	        if (userId) {
+	          let membership = await supabase
+	            .from('memberships')
+	            .select('company_id')
+	            .eq('user_id', userId)
+	            .order('created_at', { ascending: false })
+	            .limit(1)
+	            .maybeSingle();
+
+	          if (membership.error && /created_at|Could not find the 'created_at' column/i.test(membership.error.message || '')) {
+	            membership = await supabase
+	              .from('memberships')
+	              .select('company_id')
+	              .eq('user_id', userId)
+	              .order('company_id', { ascending: true })
+	              .limit(1)
+	              .maybeSingle();
+	          }
+
+	          const companyId = String(membership.data?.company_id ?? '').trim();
+	          if (companyId) {
+	            let company = await supabase
+	              .from('companies')
+	              .select('name, company_logo')
+	              .eq('id', companyId)
+	              .maybeSingle();
+
+	            if (company.error && /company_logo|Could not find the 'company_logo' column/i.test(company.error.message || '')) {
+	              company = await supabase
+	                .from('companies')
+	                .select('name')
+	                .eq('id', companyId)
+	                .maybeSingle();
+	            }
+
+	            const resolvedCompany = String(company.data?.name ?? '').trim();
+	            if (resolvedCompany) companyName = resolvedCompany;
+	            companyLogo = String(company.data?.company_logo ?? '').trim();
+	          }
+	        }
+
+	        return {
+	          name: pickDisplayName({ fullName, displayName, email }),
+	          email,
+	          company: companyName,
+	          companyLogo,
+	          fullName,
+	          displayName,
+	        };
+	      }, []);
+
+	      const handleLogin = (data) => {
+	        const email = String(data?.email ?? '').trim();
+	        const fullName = String(data?.name ?? '').trim();
+	        setCurrentUser({
+	          name: pickDisplayName({ fullName, email }),
+	          email,
+	          company: String(data?.company ?? '').trim() || 'My Company',
+	          companyLogo: '',
+	          fullName,
+	          displayName: '',
+	        });
+	        setIsAuthenticated(true);
+	      };
+
+	      const handleSignup = (data) => {
+	        const email = String(data?.email ?? '').trim();
+	        const fullName = String(data?.name ?? '').trim();
+	        setCurrentUser({
+	          name: pickDisplayName({ fullName, email }),
+	          email,
+	          company: String(data?.company ?? '').trim() || 'My Company',
+	          companyLogo: '',
+	          fullName,
+	          displayName: '',
+	        });
+	        setIsAuthenticated(true);
+	      };
 
       const handleLogout = async () => {
         await supabaseBrowser().auth.signOut();
@@ -11669,39 +11864,35 @@ const confirmDestructiveAction = (targetLabel) =>
         let isMounted = true;
         const supabase = supabaseBrowser();
 
-        supabase.auth.getSession().then(({ data }) => {
-          if (!isMounted) return;
-          setIsAuthenticated(!!data.session);
-          if (data.session?.user) {
-            const email = data.session.user.email || '';
-            setCurrentUser({
-              name: email || 'John Doe',
-              email,
-              company: 'Demo Company',
-            });
-          }
-        });
+	        supabase.auth.getSession().then(({ data }) => {
+	          if (!isMounted) return;
+	          setIsAuthenticated(!!data.session);
+	          if (data.session?.user) {
+	            hydrateCurrentUser(data.session.user).then((user) => {
+	              if (!isMounted) return;
+	              setCurrentUser(user);
+	            });
+	          }
+	        });
 
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
           if (!isMounted) return;
           setIsAuthenticated(!!session);
-          if (!session?.user) {
-            setCurrentUser(null);
-            return;
-          }
-          const email = session.user.email || '';
-          setCurrentUser({
-            name: email || 'John Doe',
-            email,
-            company: 'Demo Company',
-          });
-        });
+	          if (!session?.user) {
+	            setCurrentUser(null);
+	            return;
+	          }
+	          hydrateCurrentUser(session.user).then((user) => {
+	            if (!isMounted) return;
+	            setCurrentUser(user);
+	          });
+	        });
 
         return () => {
           isMounted = false;
           authListener.subscription.unsubscribe();
         };
-      }, []);
+	      }, [hydrateCurrentUser]);
 
       if (!isAuthenticated) {
         return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;

@@ -142,6 +142,11 @@ export async function GET() {
       .from("onboarding_checklist")
       .select("key, user_id, completed_at")
       .eq("company_id", companyId);
+    const companyQuery = supabase
+      .from("companies")
+      .select("id,name,timezone,phone,email,address,website,industry,employee_count,default_work_hours,currency,date_format,company_logo")
+      .eq("id", companyId)
+      .maybeSingle();
 
     const inventoryLowPartsCountQuery = supabase
       .from("inventory")
@@ -158,6 +163,7 @@ export async function GET() {
       openWorkOrdersCountResult,
       onboardingResult,
       inventoryLowPartsResult,
+      companyResult,
     ] = await Promise.all([
       activeJobsQuery,
       activeJobsCountQuery,
@@ -168,6 +174,7 @@ export async function GET() {
       openWorkOrdersCountQuery,
       onboardingQuery,
       inventoryLowPartsCountQuery,
+      companyQuery,
     ]);
 
     if (activeJobsResult.error) throw new Error(activeJobsResult.error.message);
@@ -243,6 +250,29 @@ export async function GET() {
     }
     const onboardingDismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
     const roleChecklistItems = getOnboardingChecklistItemsForRole(role);
+    const companyProfile = companyResult.error ? null : companyResult.data;
+    const derivedChecklistCompleted: Record<string, boolean> = {
+      complete_company_settings: Boolean(
+        String(companyProfile?.name ?? "").trim() &&
+          String(companyProfile?.phone ?? "").trim() &&
+          String(companyProfile?.email ?? "").trim() &&
+          String(companyProfile?.address ?? "").trim() &&
+          String(companyProfile?.industry ?? "").trim() &&
+          String(companyProfile?.currency ?? "").trim() &&
+          String(companyProfile?.date_format ?? "").trim()
+      ),
+      upload_company_logo: Boolean(String(companyProfile?.company_logo ?? "").trim()),
+      set_company_timezone: Boolean(String(companyProfile?.timezone ?? "").trim()),
+      invite_teammate: false,
+      configure_permissions: false,
+      connect_integrations: false,
+      finish_profile: false,
+      create_first_job: activeJobsCount > 0,
+      create_first_bid: false,
+      send_first_proposal: false,
+      add_first_equipment: equipmentRows.length > 0,
+      create_first_po: false,
+    };
     const checklistItems = roleChecklistItems.map((item) => ({
       key: item.key,
       label: item.label,
@@ -251,7 +281,7 @@ export async function GET() {
       scope: item.scope,
       completed: Boolean(
         completedMap.get(`${item.key}::${item.scope === "company" ? "__company__" : userId}`)?.completed_at
-      ),
+      ) || Boolean(derivedChecklistCompleted[item.key]),
     }));
     const completedCount = checklistItems.filter((item) => item.completed).length;
 

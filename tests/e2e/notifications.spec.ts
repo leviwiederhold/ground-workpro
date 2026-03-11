@@ -88,6 +88,16 @@ test('notifications are created for schedule assignment and unread count decreas
   expect(unreadAfterAllRes.status(), unreadAfterAllBody).toBe(200);
   const unreadAfterAll = Number(JSON.parse(unreadAfterAllBody)?.item?.count ?? 0);
   expect(unreadAfterAll).toBe(0);
+
+  const clearReadRes = await page.request.post('/api/notifications/clear-read');
+  const clearReadBody = await clearReadRes.text();
+  expect(clearReadRes.status(), clearReadBody).toBe(200);
+
+  const listAfterClearRes = await page.request.get('/api/notifications?limit=20');
+  const listAfterClearBody = await listAfterClearRes.text();
+  expect(listAfterClearRes.status(), listAfterClearBody).toBe(200);
+  const listAfterClear = JSON.parse(listAfterClearBody)?.items ?? [];
+  expect(listAfterClear.every((item: { is_read?: boolean }) => !item.is_read)).toBeTruthy();
 });
 
 test('calendar invite and upcoming reminder notifications are created for near-term events', async ({ page }) => {

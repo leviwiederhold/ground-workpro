@@ -45,6 +45,15 @@ function writeStore(store: FallbackStore) {
   }
 }
 
+function matchesScope(
+  row: FallbackNotification,
+  input: { companyId: string; userId: string; companyWide: boolean }
+) {
+  if (row.company_id !== input.companyId) return false;
+  if (input.companyWide) return true;
+  return row.user_id === input.userId;
+}
+
 export function createFallbackNotifications(input: {
   companyId: string;
   userIds: string[];
@@ -75,8 +84,7 @@ export function listFallbackNotifications(input: {
 }) {
   const rows = readStore()
     .notifications.filter((row) => {
-      if (row.company_id !== input.companyId) return false;
-      return true;
+      return matchesScope(row, input);
     })
     .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   if (!input.limit || input.limit <= 0) return rows;
@@ -89,7 +97,7 @@ export function countFallbackUnread(input: {
   companyWide: boolean;
 }) {
   return readStore().notifications.filter((row) => {
-    if (row.company_id !== input.companyId) return false;
+    if (!matchesScope(row, input)) return false;
     return !(row.is_read ?? Boolean(row.read_at));
   }).length;
 }
@@ -102,7 +110,7 @@ export function markFallbackNotificationRead(input: {
 }) {
   const store = readStore();
   const row = store.notifications.find((candidate) => {
-    if (candidate.company_id !== input.companyId) return false;
+    if (!matchesScope(candidate, input)) return false;
     if (String(candidate.id) !== String(input.notificationId)) return false;
     return true;
   });
@@ -122,8 +130,7 @@ export function markAllFallbackNotificationsRead(input: {
   let updated = 0;
   const now = new Date().toISOString();
   for (const row of store.notifications) {
-    if (row.company_id !== input.companyId) continue;
-    if (row.user_id !== input.userId) continue;
+    if (!matchesScope(row, input)) continue;
     if (row.is_read ?? Boolean(row.read_at)) continue;
     row.is_read = true;
     row.read_at = now;
@@ -131,4 +138,20 @@ export function markAllFallbackNotificationsRead(input: {
   }
   writeStore(store);
   return updated;
+}
+
+export function clearFallbackReadNotifications(input: {
+  companyId: string;
+  userId: string;
+  companyWide: boolean;
+}) {
+  const store = readStore();
+  const before = store.notifications.length;
+  store.notifications = store.notifications.filter((row) => {
+    if (!matchesScope(row, input)) return true;
+    return !(row.is_read ?? Boolean(row.read_at));
+  });
+  const deleted = before - store.notifications.length;
+  writeStore(store);
+  return deleted;
 }

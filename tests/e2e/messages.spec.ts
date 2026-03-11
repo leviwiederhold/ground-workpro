@@ -254,8 +254,10 @@ test('recipient sees CEO direct thread and message body', async ({ page }) => {
   const inboxRes = await page.request.get('/api/messages/inbox');
   const inboxBody = await inboxRes.text();
   expect(inboxRes.status(), inboxBody).toBe(200);
-  const inboxItems = (JSON.parse(inboxBody)?.items ?? []) as Array<{ id?: string }>;
-  expect(inboxItems.some((item) => String(item.id || '') === threadId)).toBeTruthy();
+  const inboxItems = (JSON.parse(inboxBody)?.items ?? []) as Array<{ id?: string; name?: string }>;
+  const managerThread = inboxItems.find((item) => String(item.id || '') === threadId);
+  expect(managerThread).toBeTruthy();
+  expect(String(managerThread?.name || '').trim().toLowerCase()).not.toBe('team member');
 
   const threadMessagesRes = await page.request.get(`/api/messages/threads/${threadId}/messages`);
   const threadMessagesBody = await threadMessagesRes.text();

@@ -123,6 +123,7 @@ export async function GET(request: Request) {
       allBidsCountResult,
       sentOrWonBidsCountResult,
       purchaseOrdersCountResult,
+      companyResult,
     ] = await Promise.all([
       supabase
         .from("jobs")
@@ -204,6 +205,11 @@ export async function GET(request: Request) {
         .from("purchase_orders")
         .select("id", { count: "exact", head: true })
         .eq("company_id", companyId),
+      supabase
+        .from("companies")
+        .select("id,name,timezone,phone,email,address,website,industry,employee_count,default_work_hours,currency,date_format,company_logo")
+        .eq("id", companyId)
+        .maybeSingle(),
     ]);
 
     if (
@@ -240,6 +246,13 @@ export async function GET(request: Request) {
       !isMissingColumn(openWorkOrdersCountResult.error.message)
     ) {
       throw new Error(openWorkOrdersCountResult.error.message);
+    }
+    if (
+      companyResult.error &&
+      !isMissingTable(companyResult.error.message, "companies") &&
+      !isMissingColumn(companyResult.error.message)
+    ) {
+      throw new Error(companyResult.error.message);
     }
 
     const activeJobs = activeJobsResult.error ? [] : activeJobsResult.data ?? [];
@@ -283,6 +296,18 @@ export async function GET(request: Request) {
     const totalBidsCount = allBidsCountResult.error ? 0 : allBidsCountResult.count ?? 0;
     const sentOrWonBidsCount = sentOrWonBidsCountResult.error ? 0 : sentOrWonBidsCountResult.count ?? 0;
     const purchaseOrdersCount = purchaseOrdersCountResult.error ? 0 : purchaseOrdersCountResult.count ?? 0;
+    const companyProfile = companyResult.error ? null : companyResult.data;
+    const companySettingsCompleted = Boolean(
+      String(companyProfile?.name ?? "").trim() &&
+      String(companyProfile?.phone ?? "").trim() &&
+      String(companyProfile?.email ?? "").trim() &&
+      String(companyProfile?.address ?? "").trim() &&
+      String(companyProfile?.industry ?? "").trim() &&
+      String(companyProfile?.currency ?? "").trim() &&
+      String(companyProfile?.date_format ?? "").trim()
+    );
+    const companyTimezoneConfigured = Boolean(String(companyProfile?.timezone ?? "").trim());
+    const companyLogoUploaded = Boolean(String(companyProfile?.company_logo ?? "").trim());
     const monthRevenue = monthBids.reduce((sum, bid) => {
       const rawDate = bid.bid_date ?? bid.created_at;
       if (!rawDate) return sum;
@@ -311,8 +336,22 @@ export async function GET(request: Request) {
     }
     const onboardingDismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
     const roleChecklistItems = getOnboardingChecklistItemsForRole(role);
+    const authUser = authUserResult.error ? null : authUserResult.data?.user ?? null;
+    const profileNameCompleted = Boolean(
+      String(
+        authUser?.user_metadata?.full_name ??
+          authUser?.user_metadata?.name ??
+          ""
+      ).trim()
+    );
     const derivedChecklistCompleted: Record<string, boolean> = {
+      complete_company_settings: companySettingsCompleted,
+      upload_company_logo: companyLogoUploaded,
+      set_company_timezone: companyTimezoneConfigured,
       invite_teammate: employeeRows.length > 1,
+      configure_permissions: employeeRows.length > 1,
+      connect_integrations: false,
+      finish_profile: profileNameCompleted,
       create_first_job: activeJobsCount > 0,
       create_first_bid: totalBidsCount > 0,
       send_first_proposal: sentOrWonBidsCount > 0,

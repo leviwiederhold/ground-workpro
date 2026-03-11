@@ -73,6 +73,17 @@ export function MessagesView({ employees = [], ui }) {
     const name = normalized(value);
     return !name || name === 'direct message' || name === 'team member' || name.startsWith('dm-');
   }, []);
+  const resolveBestName = useCallback((candidate) => {
+    const fullName = String(candidate?.full_name ?? '').trim();
+    if (fullName) return fullName;
+    const displayName = String(candidate?.display_name ?? candidate?.name ?? candidate?.displayName ?? '').trim();
+    if (displayName && normalized(displayName) !== 'team member') return displayName;
+    const email = String(candidate?.email ?? '').trim();
+    if (email) return email;
+    const fallbackDisplayName = String(candidate?.displayName ?? '').trim();
+    if (fallbackDisplayName) return fallbackDisplayName;
+    return 'Team Member';
+  }, []);
 
   const contactOptions = useMemo(() => {
     const userById = new Map((availableUsers || []).map((user) => [String(user.userId), user]));
@@ -82,7 +93,12 @@ export function MessagesView({ employees = [], ui }) {
       const explicitUserId = employee?.user_id ? String(employee.user_id) : null;
       if (explicitUserId && myUserId && explicitUserId === myUserId) continue;
       const matchedUser = explicitUserId ? userById.get(explicitUserId) : null;
-      const preferredLabel = matchedUser?.displayName || employee?.name || employee?.full_name || "Team Member";
+      const preferredLabel = resolveBestName({
+        full_name: employee?.full_name,
+        display_name: employee?.display_name ?? employee?.name,
+        email: employee?.email,
+        displayName: matchedUser?.displayName,
+      });
       const preferredRole = matchedUser?.role || employee?.role || "";
       options.push({
         key: explicitUserId ? `user:${explicitUserId}` : `employee:${employee.id}`,
@@ -99,7 +115,10 @@ export function MessagesView({ employees = [], ui }) {
       if (options.some((item) => item.key === key)) continue;
       options.push({
         key,
-        label: String(user.displayName || 'Team Member'),
+        label: resolveBestName({
+          displayName: user.displayName,
+          email: user.email,
+        }),
         subtitle: String(user.role || ''),
         userId: String(user.userId),
         hasAccount: true,
@@ -107,14 +126,15 @@ export function MessagesView({ employees = [], ui }) {
     }
 
     return options.sort((a, b) => a.label.localeCompare(b.label));
-  }, [availableUsers, employees, myUserId]);
+  }, [availableUsers, employees, myUserId, resolveBestName]);
 
   const userDisplayNameById = useMemo(
     () =>
-      new Map(
-        (availableUsers || []).map((user) => [String(user.userId), String(user.displayName || 'Team Member')])
-      ),
-    [availableUsers]
+      new Map((availableUsers || []).map((user) => [
+        String(user.userId),
+        resolveBestName({ displayName: user.displayName, email: user.email }),
+      ])),
+    [availableUsers, resolveBestName]
   );
   const contactDisplayNameByUserId = useMemo(() => {
     const map = new Map();

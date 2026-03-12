@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 type CurrentUserIdentityLite = {
   fullName: string;
@@ -37,6 +38,8 @@ async function toDataUrl(file: File) {
 }
 
 export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite }) {
+  const searchParams = useSearchParams();
+  const backHref = searchParams.get("onboarding") === "1" ? "/setup" : "/";
   const [form, setForm] = useState<ProfileForm>({
     full_name: identity.fullName || "",
     display_name: identity.displayName || "",
@@ -233,8 +236,8 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <Link href="/" className="text-sm font-medium text-brand-600 hover:text-brand-700">
-            Back to Dashboard
+          <Link href={backHref} className="text-sm font-medium text-brand-600 hover:text-brand-700">
+            {backHref === "/setup" ? "Back to Setup" : "Back to Dashboard"}
           </Link>
         </div>
       </div>

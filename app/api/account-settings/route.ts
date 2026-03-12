@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { resolveDisplayName } from "@/lib/user/identity";
+import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 
 const accountSettingsSchema = z.object({
   timezone: z.string().trim().max(120).optional().or(z.literal("")),
@@ -97,7 +98,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { supabase, userId, userEmail } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getCompanyId();
     const body = await request.json().catch(() => null);
     const parsed = accountSettingsSchema.safeParse(body);
     if (!parsed.success) {
@@ -159,6 +160,14 @@ export async function PATCH(request: Request) {
     if (upsertResult.error) {
       return NextResponse.json({ error: upsertResult.error.message }, { status: 400 });
     }
+
+    await markSetupStepCompleted({
+      supabase,
+      companyId,
+      userId,
+      key: "complete_account_settings",
+      scope: "user",
+    });
 
     return NextResponse.json({ item: normalizeSettings(upsertResult.data as SettingsRow, fallbackEmail) });
   } catch (error) {

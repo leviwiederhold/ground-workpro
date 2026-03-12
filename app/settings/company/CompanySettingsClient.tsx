@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 type CompanySettings = {
   company_name: string;
@@ -47,6 +48,8 @@ const initialsFromName = (name: string) => {
 };
 
 export function CompanySettingsClient() {
+  const searchParams = useSearchParams();
+  const backHref = searchParams.get("onboarding") === "1" ? "/setup" : "/";
   const [settings, setSettings] = useState<CompanySettings>(EMPTY_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -158,8 +161,8 @@ export function CompanySettingsClient() {
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <Link href="/" className="inline-flex items-center text-sm font-medium text-brand-600 hover:text-brand-700">
-          ← Back to Dashboard
+        <Link href={backHref} className="inline-flex items-center text-sm font-medium text-brand-600 hover:text-brand-700">
+          {backHref === "/setup" ? "← Back to Setup" : "← Back to Dashboard"}
         </Link>
         <h1 className="text-2xl font-semibold text-gray-900">Company Settings</h1>
         <p className="mt-2 text-sm text-gray-600">

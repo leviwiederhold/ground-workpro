@@ -1715,7 +1715,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       };
 
       return (
-        <div className="app-shell relative flex h-screen bg-gray-50">
+        <div className="app-shell relative flex h-[100dvh] min-h-[100dvh] bg-gray-50">
           {mobileSidebarOpen && (
             <button
               aria-label="Close sidebar"
@@ -1786,9 +1786,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           </aside>
 
           {/* Main Content */}
-          <main className="flex-1 flex flex-col overflow-hidden">
+          <main className="flex-1 flex min-h-0 flex-col overflow-hidden">
             {/* Header */}
-            <header className="bg-white border-b border-gray-200 px-3 sm:px-4 md:px-6 py-4">
+            <header className="sticky top-0 z-20 bg-white border-b border-gray-200 px-3 sm:px-4 md:px-6 py-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-start gap-3">
                   <button
@@ -2033,7 +2033,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             </header>
 
             {/* Content Area */}
-            <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
               <div className="max-w-screen-2xl mx-auto">
                 {renderView()}
               </div>
@@ -2200,6 +2200,8 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [equipmentActionError, setEquipmentActionError] = useState('');
       const [selectedTypeOption, setSelectedTypeOption] = useState('Excavator');
       const [customTypeInput, setCustomTypeInput] = useState('');
+      const [isMobileFleet, setIsMobileFleet] = useState(false);
+      const [showFleetDetails, setShowFleetDetails] = useState(false);
       const canManageFleet = String(moduleAccess?.fleet || 'none') === 'edit';
 
       const EquipmentTypeGlyph = useCallback(({ type, className = '' }) => {
@@ -2327,6 +2329,22 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           setFleetItemsLoading(false);
         }
       }, []);
+
+      useEffect(() => {
+        const media = window.matchMedia('(max-width: 1023px)');
+        const update = () => setIsMobileFleet(media.matches);
+        update();
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+      }, []);
+
+      useEffect(() => {
+        if (!isMobileFleet) setShowFleetDetails(false);
+      }, [isMobileFleet]);
+
+      useEffect(() => {
+        if (!selectedEquipment) setShowFleetDetails(false);
+      }, [selectedEquipment]);
 
       useEffect(() => {
         if (!selectedEquipment) return;
@@ -2566,7 +2584,10 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                     key={eq.id}
                     data-testid={`fleet-row-${eq.id}`}
                     className={`p-4 cursor-pointer transition-all ${selectedEquipmentId === eq.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                    onClick={() => setSelectedEquipmentId(eq.id)}
+                    onClick={() => {
+                      setSelectedEquipmentId(eq.id);
+                      if (isMobileFleet) setShowFleetDetails(true);
+                    }}
                   >
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -2629,7 +2650,10 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                     key={eq.id}
                     data-testid={`fleet-row-${eq.id}`}
                     className={`p-3 cursor-pointer transition-all ${selectedEquipmentId === eq.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                    onClick={() => setSelectedEquipmentId(eq.id)}
+                    onClick={() => {
+                      setSelectedEquipmentId(eq.id);
+                      if (isMobileFleet) setShowFleetDetails(true);
+                    }}
                   >
                     <div className="flex items-center gap-4">
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
@@ -2663,12 +2687,30 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 
             {/* Equipment Detail */}
             {selectedEquipment ? (
-              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
+              <>
+              {isMobileFleet && showFleetDetails && (
+                <button
+                  type="button"
+                  aria-label="Close equipment details"
+                  className="fixed inset-0 z-40 bg-black/50"
+                  onClick={() => setShowFleetDetails(false)}
+                />
+              )}
+              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
                       <p className="text-sm text-gray-500">{selectedEquipment.type}</p>
                     </div>
+                  {isMobileFleet && (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                      onClick={() => setShowFleetDetails(false)}
+                    >
+                      Close
+                    </button>
+                  )}
                   <Badge className={getStatusColor(selectedEquipment.status)}>
                     {selectedEquipment.status}
                   </Badge>
@@ -2851,11 +2893,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   </div>
                 </div>
               </Card>
+              </>
             ) : (
-              <Card className="p-8 text-center text-gray-500">
+              !isMobileFleet ? <Card className="p-8 text-center text-gray-500">
                 <Icon name="truck-monster" className="text-4xl mb-2 text-gray-300" />
                 <p>Select equipment to view details</p>
-              </Card>
+              </Card> : null
             )}
           </div>
         </div>
@@ -2933,6 +2976,8 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         invite_url: '',
       });
       const [permissionForm, setPermissionForm] = useState({ ...roleTemplateDefaults.operator });
+      const [isMobileTeam, setIsMobileTeam] = useState(false);
+      const [showTeamDetails, setShowTeamDetails] = useState(false);
 
       const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
@@ -2964,6 +3009,22 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           ? selectedEmployee.certifications
           : [];
       const expiringCerts = selectedEmployeeCertifications.filter(c => getDaysUntil(c.expires) < 90) || [];
+
+      useEffect(() => {
+        const media = window.matchMedia('(max-width: 1023px)');
+        const update = () => setIsMobileTeam(media.matches);
+        update();
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+      }, []);
+
+      useEffect(() => {
+        if (!isMobileTeam) setShowTeamDetails(false);
+      }, [isMobileTeam]);
+
+      useEffect(() => {
+        if (!selectedEmployee) setShowTeamDetails(false);
+      }, [selectedEmployee]);
 
       const loadTeamItems = useCallback(async () => {
         try {
@@ -3517,7 +3578,10 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   <Card
                     key={emp.id}
                     className={`p-4 cursor-pointer transition-all ${selectedEmployeeId === emp.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                    onClick={() => setSelectedEmployeeId(emp.id)}
+                    onClick={() => {
+                      setSelectedEmployeeId(emp.id);
+                      if (isMobileTeam) setShowTeamDetails(true);
+                    }}
                   >
                     <div className="flex items-center gap-4">
                       <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-medium overflow-hidden ${getContactCircleColor(emp.id || emp.name)}`}>
@@ -3582,11 +3646,29 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 
             {/* Employee Detail */}
             {selectedEmployee ? (
-              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
+              <>
+              {isMobileTeam && showTeamDetails && (
+                <button
+                  type="button"
+                  aria-label="Close team member details"
+                  className="fixed inset-0 z-40 bg-black/50"
+                  onClick={() => setShowTeamDetails(false)}
+                />
+              )}
+              <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
                 <div className="text-center mb-4">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
                     {selectedEmployee.name.split(' ').map(n => n[0]).join('')}
                   </div>
+                  {isMobileTeam && (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 mb-2"
+                      onClick={() => setShowTeamDetails(false)}
+                    >
+                      Close
+                    </button>
+                  )}
                   <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>
                   <p className="text-sm text-gray-500">{selectedEmployee.role}</p>
                   <Badge className={`mt-2 ${getStatusColor(selectedEmployee.status)}`}>
@@ -3764,11 +3846,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   {teamError && <InlineError>{teamError}</InlineError>}
                 </div>
               </Card>
+              </>
             ) : (
-              <Card className="p-8 text-center text-gray-500">
+              !isMobileTeam ? <Card className="p-8 text-center text-gray-500">
                 <Icon name="user" className="text-4xl mb-2 text-gray-300" />
                 <p>Select an employee to view details</p>
-              </Card>
+              </Card> : null
             )}
 
           </div>
@@ -4013,6 +4096,8 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [woPriority, setWoPriority] = useState('medium');
       const [woActionLoading, setWoActionLoading] = useState(false);
       const [woActionError, setWoActionError] = useState('');
+      const [isMobileMaintenance, setIsMobileMaintenance] = useState(false);
+      const [showMaintenanceDetails, setShowMaintenanceDetails] = useState(false);
       const canEditMaintenance = String(moduleAccess?.maintenance || 'none') === 'edit';
 
       const normalizeWoStatus = (status) => {
@@ -4034,6 +4119,22 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const assignee = selectedWO ? employees.find(e => e.id === selectedWO.assignedTo) : null;
 
       const upcomingPM = equipment.filter(e => (e.nextService - e.hours) < 250);
+
+      useEffect(() => {
+        const media = window.matchMedia('(max-width: 1023px)');
+        const update = () => setIsMobileMaintenance(media.matches);
+        update();
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+      }, []);
+
+      useEffect(() => {
+        if (!isMobileMaintenance) setShowMaintenanceDetails(false);
+      }, [isMobileMaintenance]);
+
+      useEffect(() => {
+        if (!selectedWO) setShowMaintenanceDetails(false);
+      }, [selectedWO]);
 
       useEffect(() => {
         if (!selectedWO) return;
@@ -4172,7 +4273,10 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   <Card
                     key={wo.id}
                     className={`p-4 cursor-pointer transition-all ${selectedWOId === wo.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                    onClick={() => setSelectedWOId(wo.id)}
+                    onClick={() => {
+                      setSelectedWOId(wo.id);
+                      if (isMobileMaintenance) setShowMaintenanceDetails(true);
+                    }}
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-start gap-3">
@@ -4241,7 +4345,16 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 
             {/* Work Order Detail */}
             {selectedWO ? (
-              <Card className="p-4 h-fit sticky top-4">
+              <>
+              {isMobileMaintenance && showMaintenanceDetails && (
+                <button
+                  type="button"
+                  aria-label="Close work order details"
+                  className="fixed inset-0 z-40 bg-black/50"
+                  onClick={() => setShowMaintenanceDetails(false)}
+                />
+              )}
+              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4'}>
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <Badge className={`mb-2 ${wo => wo.type === 'repair' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
@@ -4249,6 +4362,15 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                     </Badge>
                     <h3 className="font-semibold text-gray-900">{selectedWO.title}</h3>
                   </div>
+                  {isMobileMaintenance && (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700 mr-2"
+                      onClick={() => setShowMaintenanceDetails(false)}
+                    >
+                      Close
+                    </button>
+                  )}
                   <Badge className={getStatusColor(getWoDisplayStatus(selectedWO.status))}>{getWoDisplayStatus(selectedWO.status)}</Badge>
                 </div>
 
@@ -4341,11 +4463,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   </div>
                 </div>
               </Card>
+              </>
             ) : (
-              <Card className="p-8 text-center text-gray-500">
+              !isMobileMaintenance ? <Card className="p-8 text-center text-gray-500">
                 <Icon name="wrench" className="text-4xl mb-2 text-gray-300" />
                 <p>Select a work order to view details</p>
-              </Card>
+              </Card> : null
             )}
           </div>
         </div>
@@ -11913,6 +12036,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	    const Root = () => {
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
 	      const [currentUser, setCurrentUser] = useState(null);
+	      const [setupChecked, setSetupChecked] = useState(false);
 	      const hydrateCurrentUser = useCallback(async (sessionUser) => {
 	        const supabase = supabaseBrowser();
 	        const userId = String(sessionUser?.id ?? '');
@@ -12001,6 +12125,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	          displayName: '',
 	        });
 	        setIsAuthenticated(true);
+	        setSetupChecked(false);
 	      };
 
 	      const handleSignup = (data) => {
@@ -12016,12 +12141,14 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	          displayName: '',
 	        });
 	        setIsAuthenticated(true);
+	        setSetupChecked(false);
 	      };
 
       const handleLogout = async () => {
         await supabaseBrowser().auth.signOut();
         setIsAuthenticated(false);
         setCurrentUser(null);
+        setSetupChecked(true);
       };
 
       useEffect(() => {
@@ -12031,6 +12158,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	        supabase.auth.getSession().then(({ data }) => {
 	          if (!isMounted) return;
 	          setIsAuthenticated(!!data.session);
+	          setSetupChecked(!data.session);
 	          if (data.session?.user) {
 	            hydrateCurrentUser(data.session.user).then((user) => {
 	              if (!isMounted) return;
@@ -12042,6 +12170,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
           if (!isMounted) return;
           setIsAuthenticated(!!session);
+          setSetupChecked(!session);
 	          if (!session?.user) {
 	            setCurrentUser(null);
 	            return;
@@ -12058,8 +12187,52 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         };
 	      }, [hydrateCurrentUser]);
 
+      useEffect(() => {
+        let cancelled = false;
+
+        const verifySetup = async () => {
+          if (!isAuthenticated) {
+            setSetupChecked(true);
+            return;
+          }
+
+          try {
+            const response = await fetch('/api/onboarding/setup-status', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            const isComplete = Boolean(payload?.item?.is_complete);
+            if (!isComplete) {
+              if (typeof window !== 'undefined' && window.location.pathname !== '/setup') {
+                window.location.replace('/setup');
+                return;
+              }
+            }
+          } catch {
+            // no-op
+          } finally {
+            if (!cancelled) setSetupChecked(true);
+          }
+        };
+
+        setSetupChecked(false);
+        void verifySetup();
+
+        return () => {
+          cancelled = true;
+        };
+      }, [isAuthenticated]);
+
       if (!isAuthenticated) {
         return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;
+      }
+
+      if (!setupChecked) {
+        return (
+          <main className="min-h-screen bg-gray-50 p-6">
+            <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+              <p className="text-sm text-gray-600">Preparing your workspace...</p>
+            </div>
+          </main>
+        );
       }
 
       return <App currentUser={currentUser} onLogout={handleLogout} />;

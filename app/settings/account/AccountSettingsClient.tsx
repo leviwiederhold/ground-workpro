@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import {
+  normalizeAppearancePreference,
+  setAppearancePreference,
+} from "@/lib/theme/appearance";
 
 type AccountSettingsItem = {
   email: string;
@@ -33,6 +38,8 @@ const defaultSettings: AccountSettingsItem = {
 };
 
 export function AccountSettingsClient() {
+  const searchParams = useSearchParams();
+  const backHref = searchParams.get("onboarding") === "1" ? "/setup" : "/";
   const [settings, setSettings] = useState<AccountSettingsItem>(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,12 +60,13 @@ export function AccountSettingsClient() {
         setSettings({
           ...defaultSettings,
           ...payload.item,
-          appearance: payload.item.appearance || "system",
+          appearance: normalizeAppearancePreference(payload.item.appearance),
           notification_preferences: {
             ...defaultSettings.notification_preferences,
             ...(payload.item.notification_preferences || {}),
           },
         });
+        setAppearancePreference(normalizeAppearancePreference(payload.item.appearance));
       } catch (loadError) {
         if (cancelled) return;
         setError(loadError instanceof Error ? loadError.message : "Failed to load account settings");
@@ -93,11 +101,13 @@ export function AccountSettingsClient() {
       setSettings((prev) => ({
         ...prev,
         ...payload.item,
+        appearance: normalizeAppearancePreference(payload.item.appearance ?? prev.appearance),
         notification_preferences: {
           ...defaultSettings.notification_preferences,
           ...(payload.item.notification_preferences || {}),
         },
       }));
+      setAppearancePreference(normalizeAppearancePreference(payload.item.appearance ?? settings.appearance));
       setStatus("Account settings saved.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Failed to save account settings");
@@ -160,10 +170,14 @@ export function AccountSettingsClient() {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2"
                 value={settings.appearance}
                 onChange={(event) =>
-                  setSettings((prev) => ({
-                    ...prev,
-                    appearance: event.target.value as AccountSettingsItem["appearance"],
-                  }))
+                  {
+                    const nextAppearance = normalizeAppearancePreference(event.target.value);
+                    setSettings((prev) => ({
+                      ...prev,
+                      appearance: nextAppearance,
+                    }));
+                    setAppearancePreference(nextAppearance);
+                  }
                 }
               >
                 <option value="system">System</option>
@@ -230,8 +244,8 @@ export function AccountSettingsClient() {
         </div>
 
         <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <Link href="/" className="text-sm font-medium text-brand-600 hover:text-brand-700">
-            Back to Dashboard
+          <Link href={backHref} className="text-sm font-medium text-brand-600 hover:text-brand-700">
+            {backHref === "/setup" ? "Back to Setup" : "Back to Dashboard"}
           </Link>
         </div>
       </div>

@@ -96,6 +96,100 @@ nav button span {
   border-radius: 9999px !important;
 }
 
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] body {
+  background: #0b1220 !important;
+  color: #e5e7eb !important;
+}
+
+html[data-theme="dark"] .bg-white {
+  background-color: #111827 !important;
+}
+
+html[data-theme="dark"] .bg-gray-50 {
+  background-color: #0b1220 !important;
+}
+
+html[data-theme="dark"] .bg-gray-100 {
+  background-color: #111827 !important;
+}
+
+html[data-theme="dark"] .bg-gray-200 {
+  background-color: #1f2937 !important;
+}
+
+html[data-theme="dark"] .text-gray-900,
+html[data-theme="dark"] .text-gray-800 {
+  color: #f3f4f6 !important;
+}
+
+html[data-theme="dark"] .text-gray-700,
+html[data-theme="dark"] .text-gray-600,
+html[data-theme="dark"] .text-gray-500,
+html[data-theme="dark"] .text-gray-400 {
+  color: #cbd5e1 !important;
+}
+
+html[data-theme="dark"] .border-gray-100,
+html[data-theme="dark"] .border-gray-200,
+html[data-theme="dark"] .border-gray-300 {
+  border-color: #334155 !important;
+}
+
+html[data-theme="dark"] .hover\:bg-gray-50:hover {
+  background-color: #1f2937 !important;
+}
+
+html[data-theme="dark"] .hover\:bg-gray-100:hover {
+  background-color: #334155 !important;
+}
+
+html[data-theme="dark"] .hover\:text-gray-700:hover,
+html[data-theme="dark"] .hover\:text-gray-800:hover {
+  color: #f9fafb !important;
+}
+
+html[data-theme="dark"] .shadow-sm,
+html[data-theme="dark"] .shadow,
+html[data-theme="dark"] .shadow-md {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45) !important;
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  background-color: #0f172a !important;
+  color: #e5e7eb !important;
+  border-color: #334155 !important;
+}
+
+html[data-theme="dark"] input:disabled,
+html[data-theme="dark"] select:disabled,
+html[data-theme="dark"] textarea:disabled {
+  background-color: #1e293b !important;
+  color: #94a3b8 !important;
+}
+
+html[data-theme="dark"] input::placeholder,
+html[data-theme="dark"] textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html[data-theme="dark"] .scrollbar-thin::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+html[data-theme="dark"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+html[data-theme="dark"] .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
 @media (max-width: 768px) {
   .app-shell .mobile-tap-target {
     min-height: 44px;
@@ -153,5 +247,14 @@ nav button span {
     letter-spacing: 0.03em;
     margin-bottom: 0.12rem;
     font-weight: 600;
+  }
+
+  html[data-theme="dark"] .app-shell table tr {
+    border-color: #334155;
+    background: #111827;
+  }
+
+  html[data-theme="dark"] .app-shell table td::before {
+    color: #94a3b8;
   }
 }

@@ -40,6 +40,8 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const [equipmentActionError, setEquipmentActionError] = useState('');
   const [financialSummary, setFinancialSummary] = useState(null);
   const [financialLoading, setFinancialLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showMobileDetails, setShowMobileDetails] = useState(false);
   const syncSelectedJobCounts = useCallback((crewCount, equipmentCount) => {
     if (!selectedJobId) return;
     setJobs((prev) =>
@@ -120,6 +122,22 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         (item) => !jobEquipment.some((assigned) => String(assigned.id) === String(item.id))
       )
     : [];
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobile(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) setShowMobileDetails(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (!selectedJob) setShowMobileDetails(false);
+  }, [selectedJob]);
 
   useEffect(() => {
     if (!selectedJob) return;
@@ -567,7 +585,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 key={job.id}
                 data-testid={`job-row-${job.id}`}
                 className={`p-4 cursor-pointer transition-all ${selectedJobId === job.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
-                onClick={() => setSelectedJobId(job.id)}
+                onClick={() => {
+                  setSelectedJobId(job.id);
+                  if (isMobile) setShowMobileDetails(true);
+                }}
               >
                 <div className="flex items-start justify-between mb-3">
                   <div>
@@ -611,7 +632,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         </div>
 
         {/* Job Detail Panel */}
-        {selectedJob ? (
+        {!isMobile && (selectedJob ? (
           <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
             <h3 className="font-semibold text-gray-900 mb-4">{selectedJob.name}</h3>
 
@@ -868,8 +889,76 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
             <Icon name="hand-pointer" className="text-4xl mb-2 text-gray-300" />
             <p>Select a job to view details</p>
           </Card>
-        )}
+        ))}
       </div>
+
+      {isMobile && showMobileDetails && selectedJob && (
+        <>
+          <button
+            type="button"
+            aria-label="Close job details"
+            className="fixed inset-0 z-40 bg-black/50"
+            onClick={() => setShowMobileDetails(false)}
+          />
+          <Card className="fixed inset-x-3 top-16 bottom-3 z-50 overflow-y-auto p-4">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">{selectedJob.name}</h3>
+              <button
+                type="button"
+                className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                onClick={() => setShowMobileDetails(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Name</p>
+                <input type="text" value={jobForm.name} onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Status</p>
+                <select value={jobForm.status} onChange={(e) => setJobForm({ ...jobForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="active">active</option>
+                  <option value="completed">completed</option>
+                </select>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Client</p>
+                <input type="text" value={jobForm.client} onChange={(e) => setJobForm({ ...jobForm, client: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Address</p>
+                <input type="text" value={jobForm.site_address} onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Start Date</p>
+                  <input type="date" value={jobForm.start_date} onChange={(e) => setJobForm({ ...jobForm, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Target End Date</p>
+                  <input type="date" value={jobForm.target_end_date} onChange={(e) => setJobForm({ ...jobForm, target_end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Notes</p>
+                <textarea value={jobForm.notes} onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" />
+              </div>
+              <AttachmentPanel entityType="job" entityId={selectedJob.id} />
+              {jobActionError && <p className="text-sm text-red-600">{jobActionError}</p>}
+              <div className="flex items-center gap-2 pt-2">
+                <Button variant="brand" size="sm" onClick={handleSaveJob} disabled={saveLoading || deleteLoading} data-testid="jobs-save-mobile">
+                  {saveLoading ? 'Saving...' : 'Save'}
+                </Button>
+                <Button variant="danger" size="sm" onClick={handleDeleteJob} disabled={saveLoading || deleteLoading} data-testid="jobs-delete-mobile">
+                  {deleteLoading ? 'Deleting...' : 'Delete'}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </>
+      )}
     </div>
   );
 };

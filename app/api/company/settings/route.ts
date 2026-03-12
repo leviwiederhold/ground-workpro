@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 
 const companySettingsSchema = z.object({
   company_name: z.string().trim().min(1).max(160),
@@ -108,7 +109,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const body = await request.json().catch(() => null);
     const parsed = companySettingsSchema.safeParse(body);
     if (!parsed.success) {
@@ -171,6 +172,14 @@ export async function PATCH(request: Request) {
     if (result.error) {
       return NextResponse.json({ error: result.error.message }, { status: 400 });
     }
+
+    await markSetupStepCompleted({
+      supabase,
+      companyId,
+      userId,
+      key: "complete_company_settings",
+      scope: "company",
+    });
 
     return NextResponse.json({ item: normalizeCompanySettings(result.data as CompanySettingsRow) });
   } catch (error) {

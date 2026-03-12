@@ -6,6 +6,7 @@ export type OnboardingChecklistKey =
   | "configure_permissions"
   | "connect_integrations"
   | "finish_profile"
+  | "complete_account_settings"
   | "create_first_job"
   | "create_first_bid"
   | "send_first_proposal"
@@ -85,6 +86,14 @@ const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
     key: "finish_profile",
     label: "Finish profile",
     description: "Complete your personal profile details.",
+    view: "settings",
+    scope: "user",
+    roles: ["admin", "pm", "foreman", "mechanic", "operator"],
+  },
+  {
+    key: "complete_account_settings",
+    label: "Complete account settings",
+    description: "Set your notification and account preferences.",
     view: "settings",
     scope: "user",
     roles: ["admin", "pm", "foreman", "mechanic", "operator"],

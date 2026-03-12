@@ -404,6 +404,7 @@ export function MessagesView({ employees = [], ui }) {
   const filteredContacts = contactOptions.filter(
     (contact) => contact.hasAccount && normalized(contact.label).includes(normalized(searchTerm))
   );
+  const showConversationPanel = Boolean(activeChannel || pendingDirectContact);
 
   const startDirectChat = async (contact) => {
     setCreateChannelError('');
@@ -579,8 +580,8 @@ export function MessagesView({ employees = [], ui }) {
   };
 
   return (
-    <div className="h-[calc(100vh-190px)] min-h-[700px] flex rounded-xl overflow-hidden border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)]">
-      <div className="w-full md:w-80 bg-white border-r border-gray-200 flex flex-col">
+    <div className="h-[calc(100dvh-170px)] min-h-[560px] md:min-h-[700px] flex rounded-xl overflow-hidden border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)]">
+      <div className={`w-full md:w-80 bg-white border-r border-gray-200 flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-gray-800 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-gray-900 tracking-wide">Messages</h3>
@@ -672,6 +673,16 @@ export function MessagesView({ employees = [], ui }) {
         <div className="flex-1 flex flex-col bg-white">
           <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
             <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                className="md:hidden rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                onClick={() => {
+                  setActiveChannel(null);
+                  setPendingDirectContact(null);
+                }}
+              >
+                Back
+              </button>
               {isDirectChannel(activeChannel) && (
                 <span className="h-9 w-9 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-xs font-semibold text-gray-700 shrink-0">
                   {userAvatarById.get(String(activeChannel.other_user_id || '')) ? (
@@ -742,9 +753,18 @@ export function MessagesView({ employees = [], ui }) {
       ) : pendingDirectContact ? (
         <div className="flex-1 flex flex-col bg-white">
           <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
-            <div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                className="md:hidden rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                onClick={() => setPendingDirectContact(null)}
+              >
+                Back
+              </button>
+              <div>
               <h3 className="font-semibold text-gray-900">Message {pendingDirectContact.label}</h3>
               <p className="text-xs text-gray-500">No messages yet</p>
+              </div>
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50/40">

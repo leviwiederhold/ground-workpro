@@ -74,6 +74,8 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
       const [pipelineLoading, setPipelineLoading] = useState(false);
       const [analytics, setAnalytics] = useState(null);
       const [analyticsLoading, setAnalyticsLoading] = useState(false);
+      const [isMobile, setIsMobile] = useState(false);
+      const [showMobileDetails, setShowMobileDetails] = useState(false);
       const [bidForm, setBidForm] = useState({
         title: '',
         status: 'draft',
@@ -255,6 +257,22 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
         setBidSummary(parsed?.summary || null);
         setBidSummaryError('');
       };
+
+      useEffect(() => {
+        const media = window.matchMedia('(max-width: 1279px)');
+        const update = () => setIsMobile(media.matches);
+        update();
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+      }, []);
+
+      useEffect(() => {
+        if (!isMobile) setShowMobileDetails(false);
+      }, [isMobile]);
+
+      useEffect(() => {
+        if (!selectedBid) setShowMobileDetails(false);
+      }, [selectedBid]);
 
       useEffect(() => {
         if (!selectedBidId && bids.length > 0) {
@@ -728,7 +746,10 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                     key={bid.id}
                     data-testid={`bid-row-${bid.id}`}
                     className={`p-4 cursor-pointer ${String(selectedBidId) === String(bid.id) ? 'ring-2 ring-brand-orange border-brand-orange' : ''}`}
-                    onClick={() => setSelectedBidId(bid.id)}
+                    onClick={() => {
+                      setSelectedBidId(bid.id);
+                      if (isMobile) setShowMobileDetails(true);
+                    }}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-4">
@@ -759,6 +780,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
               )}
             </div>
 
+            {!isMobile && (
             <Card className="p-4">
               {selectedBid ? (
                 <div className="space-y-4">
@@ -979,7 +1001,90 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                 </EmptyState>
               )}
             </Card>
+            )}
           </div>
+
+          {isMobile && showMobileDetails && selectedBid && (
+            <>
+              <button
+                type="button"
+                aria-label="Close bid details"
+                className="fixed inset-0 z-40 bg-black/50"
+                onClick={() => setShowMobileDetails(false)}
+              />
+              <Card className="fixed inset-x-3 top-16 bottom-3 z-50 overflow-y-auto p-4">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
+                    <p className="text-sm text-gray-500">{getBidClient(selectedBid) || 'No client selected'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                    onClick={() => setShowMobileDetails(false)}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
+                      <Icon name="pen" className="mr-2" />Edit
+                    </Button>
+                    <Button variant="brand" onClick={handleConvertToJob} disabled={pipelineLoading || Boolean(selectedBid.convertedJobId)}>
+                      {selectedBid.convertedJobId ? 'Converted' : 'Convert to Job'}
+                    </Button>
+                    <Button variant="brand" onClick={() => handleSendBid({ override: false })} disabled={sendLoading || selectedBid.status === 'sent'}>
+                      {sendLoading ? 'Sending...' : (selectedBid.status === 'sent' ? 'Sent' : 'Send')}
+                    </Button>
+                    <Button variant="danger" onClick={() => handleDeleteBid(selectedBid.id)} disabled={deleteLoading}>
+                      Delete
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div><p className="text-gray-500">Stage</p><p className="font-semibold text-gray-900 capitalize">{getBidStage(selectedBid)}</p></div>
+                    <div><p className="text-gray-500">Bid Date</p><p className="font-semibold text-gray-900">{formatDate(getBidDate(selectedBid))}</p></div>
+                    <div><p className="text-gray-500">Revenue</p><p className="font-semibold text-gray-900">{formatCurrency(Number(getBidFinancials(selectedBid).revenue || bidSummary?.revenue || 0))}</p></div>
+                    <div><p className="text-gray-500">Actual Job Cost</p><p className="font-semibold text-gray-900">{formatCurrency(Number(getBidFinancials(selectedBid).actualJobCost || bidSummary?.subtotalCost || 0))}</p></div>
+                    <div><p className="text-gray-500">Profit</p><p className="font-semibold text-gray-900">{formatCurrency(Number(getBidFinancials(selectedBid).profit || bidSummary?.profit || 0))}</p></div>
+                    <div><p className="text-gray-500">Margin</p><p className="font-semibold text-gray-900">{(Number(getBidFinancials(selectedBid).margin || 0) * 100).toFixed(2)}%</p></div>
+                  </div>
+
+                  <BidShareLinkPanel bidId={selectedBid ? String(selectedBid.id) : null} />
+
+                  <div className="pt-2 border-t border-gray-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h5 className="font-semibold text-gray-900">Line Items</h5>
+                      <Button variant="brand" onClick={openCreateItem}>
+                        <Icon name="plus" className="mr-2" />Add Item
+                      </Button>
+                    </div>
+                    {bidItemsLoading ? (
+                      <LoadingBlock>Loading items...</LoadingBlock>
+                    ) : bidItems.length === 0 ? (
+                      <EmptyState>No bid items yet.</EmptyState>
+                    ) : (
+                      <div className="space-y-2">
+                        {bidItems.map((item) => (
+                          <div key={item.id} className="border border-gray-200 rounded-lg p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <p className="font-medium text-gray-900">{item.description}</p>
+                                <p className="text-xs text-gray-500 capitalize">{item.item_type} • {item.quantity} × {formatCurrency(item.unit_cost)}</p>
+                              </div>
+                              <p className="font-semibold text-gray-900">{formatCurrency(item.total_cost)}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
 
           {showBidModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center px-4">

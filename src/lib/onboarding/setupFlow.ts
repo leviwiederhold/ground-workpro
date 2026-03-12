@@ -143,8 +143,7 @@ function isCompanyDerivedComplete(company: Record<string, unknown> | null) {
     hasTruthy(company.timezone) &&
     hasTruthy(company.phone) &&
     hasTruthy(company.email) &&
-    hasTruthy(company.address) &&
-    hasTruthy(company.industry)
+    hasTruthy(company.address)
   );
 }
 

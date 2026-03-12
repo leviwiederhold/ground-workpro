@@ -35,6 +35,13 @@ const EMPTY_SETTINGS: CompanySettings = {
   company_logo: "",
 };
 
+const TIMEZONE_OPTIONS = [
+  { label: "Eastern Time (ET)", value: "America/New_York" },
+  { label: "Central Time (CT)", value: "America/Chicago" },
+  { label: "Mountain Time (MT)", value: "America/Denver" },
+  { label: "Pacific Time (PT)", value: "America/Los_Angeles" },
+] as const;
+
 const initialsFromName = (name: string) => {
   const parts = String(name || "")
     .trim()
@@ -49,13 +56,15 @@ const initialsFromName = (name: string) => {
 
 export function CompanySettingsClient() {
   const searchParams = useSearchParams();
-  const backHref = searchParams.get("onboarding") === "1" ? "/setup" : "/";
+  const isOnboarding = searchParams.get("onboarding") === "1";
+  const backHref = isOnboarding ? "/setup" : "/";
   const [settings, setSettings] = useState<CompanySettings>(EMPTY_SETTINGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -103,6 +112,7 @@ export function CompanySettingsClient() {
     setSaving(true);
     setError("");
     setSuccess("");
+    setFieldErrors({});
     try {
       const response = await fetch("/api/company/settings", {
         method: "PATCH",
@@ -111,6 +121,18 @@ export function CompanySettingsClient() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const details = Array.isArray(payload?.details) ? payload.details : [];
+        if (details.length > 0) {
+          const nextFieldErrors: Record<string, string> = {};
+          for (const detail of details) {
+            const key = String(detail?.path ?? "").trim();
+            if (!key || nextFieldErrors[key]) continue;
+            nextFieldErrors[key] = String(detail?.message ?? "Invalid value");
+          }
+          setFieldErrors(nextFieldErrors);
+          setError("Please fix the highlighted fields.");
+          return;
+        }
         setError(String(payload?.error || "Failed to save settings."));
         return;
       }
@@ -210,16 +232,24 @@ export function CompanySettingsClient() {
                   onChange={(event) => setSettings((prev) => ({ ...prev, company_name: event.target.value }))}
                   required
                 />
+                {fieldErrors.company_name ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.company_name}</span> : null}
               </label>
 
               <label className="text-sm">
                 <span className="mb-1 block text-gray-600">Timezone</span>
-                <input
+                <select
                   className="w-full rounded-lg border border-gray-300 px-3 py-2"
                   value={settings.timezone}
                   onChange={(event) => setSettings((prev) => ({ ...prev, timezone: event.target.value }))}
-                  placeholder="America/New_York"
-                />
+                >
+                  <option value="">Select timezone</option>
+                  {TIMEZONE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                {fieldErrors.timezone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.timezone}</span> : null}
               </label>
 
               <label className="text-sm">
@@ -239,6 +269,7 @@ export function CompanySettingsClient() {
                   value={settings.email}
                   onChange={(event) => setSettings((prev) => ({ ...prev, email: event.target.value }))}
                 />
+                {fieldErrors.email ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.email}</span> : null}
               </label>
 
               <label className="text-sm sm:col-span-2">
@@ -260,14 +291,16 @@ export function CompanySettingsClient() {
                 />
               </label>
 
-              <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Industry / Trade</span>
-                <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
-                  value={settings.industry}
-                  onChange={(event) => setSettings((prev) => ({ ...prev, industry: event.target.value }))}
-                />
-              </label>
+              {!isOnboarding ? (
+                <label className="text-sm">
+                  <span className="mb-1 block text-gray-600">Industry / Trade</span>
+                  <input
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                    value={settings.industry}
+                    onChange={(event) => setSettings((prev) => ({ ...prev, industry: event.target.value }))}
+                  />
+                </label>
+              ) : null}
 
               <label className="text-sm">
                 <span className="mb-1 block text-gray-600">Employee Count</span>

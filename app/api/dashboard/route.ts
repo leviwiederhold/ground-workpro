@@ -302,7 +302,6 @@ export async function GET(request: Request) {
       String(companyProfile?.phone ?? "").trim() &&
       String(companyProfile?.email ?? "").trim() &&
       String(companyProfile?.address ?? "").trim() &&
-      String(companyProfile?.industry ?? "").trim() &&
       String(companyProfile?.currency ?? "").trim() &&
       String(companyProfile?.date_format ?? "").trim()
     );

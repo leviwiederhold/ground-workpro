@@ -4,6 +4,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
+import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
@@ -145,6 +146,7 @@ export async function GET(request: Request) {
         },
         email: String(row.email ?? ""),
         phone: String(row.phone ?? ""),
+        avatarUrl: "",
         clockedInAt: row.clocked_in_at ? String(row.clocked_in_at) : null,
         certifications: parseCertifications(row.certifications),
       };
@@ -249,6 +251,8 @@ export async function GET(request: Request) {
     const companyMemberEmails = new Set<string>();
     const companyUserIdByEmail = new Map<string, string>();
     const membershipRoleByUserId = new Map<string, string>();
+    const profileDisplayNameByUserId = new Map<string, string>();
+    const profileAvatarByUserId = new Map<string, string>();
     const membershipsResult = await supabase
       .from("memberships")
       .select("user_id, role")
@@ -266,14 +270,35 @@ export async function GET(request: Request) {
       if (memberUserIds.length > 0) {
         const profilesResult = await supabase
           .from("profiles")
-          .select("id, email")
+          .select("id, full_name, display_name, email, avatar_url")
           .in("id", memberUserIds);
-        if (!profilesResult.error) {
-          for (const row of (profilesResult.data ?? []) as Array<Record<string, unknown>>) {
-            const email = String(row.email ?? "").trim().toLowerCase();
-            if (email) companyMemberEmails.add(email);
-            const profileUserId = normalizeId(row.id);
-            if (email && profileUserId) companyUserIdByEmail.set(email, profileUserId);
+        let profileRows: Array<Record<string, unknown>> = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+        if (profilesResult.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
+          const fallbackProfilesWithDisplay = await supabase
+            .from("profiles")
+            .select("id, full_name, display_name, email")
+            .in("id", memberUserIds);
+          profileRows = (fallbackProfilesWithDisplay.data ?? []) as Array<Record<string, unknown>>;
+        }
+        if (profilesResult.error && /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")) {
+          const fallbackProfiles = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", memberUserIds);
+          profileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
+        }
+        for (const row of profileRows) {
+          const email = String(row.email ?? "").trim().toLowerCase();
+          if (email) companyMemberEmails.add(email);
+          const profileUserId = normalizeId(row.id);
+          if (email && profileUserId) companyUserIdByEmail.set(email, profileUserId);
+          if (profileUserId) {
+            const fullName = String(row.full_name ?? "").trim();
+            const displayName = String(row.display_name ?? "").trim();
+            const resolvedDisplayName = fullName || displayName || (email ? email : "");
+            if (resolvedDisplayName) profileDisplayNameByUserId.set(profileUserId, resolvedDisplayName);
+            const avatarUrl = String(row.avatar_url ?? "").trim();
+            if (avatarUrl) profileAvatarByUserId.set(profileUserId, avatarUrl);
           }
         }
       }
@@ -344,7 +369,19 @@ export async function GET(request: Request) {
       );
     }
 
-    // Time entries table is not present in current schema; keep deterministic placeholder.
+    const userIdsForHours = Array.from(
+      new Set(
+        items
+          .map((item) => String(item.userId ?? "").trim() || companyUserIdByEmail.get(String(item.email ?? "").trim().toLowerCase()) || "")
+          .filter(Boolean)
+      )
+    );
+    const timeSummary = await getTimeEntrySummaryByUser({
+      supabase,
+      companyId,
+      userIds: userIdsForHours,
+    });
+
     for (const item of items) {
       const employeeEmail = String(item.email ?? "").trim().toLowerCase();
       const linkedUserId =
@@ -354,6 +391,15 @@ export async function GET(request: Request) {
       const membershipRole = linkedUserId ? membershipRoleByUserId.get(linkedUserId) : null;
       if (membershipRole) {
         item.role = membershipRole;
+      }
+      if (linkedUserId && !item.userId) {
+        item.userId = linkedUserId;
+      }
+      if (!String(item.displayName ?? "").trim() && linkedUserId) {
+        item.displayName = profileDisplayNameByUserId.get(linkedUserId) ?? item.displayName;
+      }
+      if (linkedUserId) {
+        item.avatarUrl = profileAvatarByUserId.get(linkedUserId) ?? "";
       }
       if (item.userId) {
         item.accountStatus = "active";
@@ -378,7 +424,12 @@ export async function GET(request: Request) {
           href: `/jobs/${resolvedJobId}`,
         };
       }
-      item.hoursThisWeek = 0;
+      item.hoursThisWeek = linkedUserId ? Number(timeSummary.weekHoursByUserId.get(linkedUserId) ?? 0) : 0;
+      const activeShiftStart = linkedUserId ? timeSummary.activeShiftStartByUserId.get(linkedUserId) : null;
+      if (activeShiftStart) {
+        item.clockedInAt = activeShiftStart;
+        item.status = "active";
+      }
       if (item.pay.visible) {
         const burdenPct = 0;
         item.pay.loadedHourlyCost = Number((item.pay.hourlyRate * (1 + burdenPct)).toFixed(2));
@@ -401,6 +452,7 @@ export async function GET(request: Request) {
         pay: item.pay,
         email: item.email,
         phone: item.phone,
+        avatarUrl: item.avatarUrl,
         clockedInAt: item.clockedInAt,
         certifications: item.certifications,
       })),

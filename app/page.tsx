@@ -9,6 +9,11 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
 import { ComingSoonOverlay } from '@/app/components/ui/ComingSoonOverlay';
+import {
+  getSensitiveInvitePermissionGrants,
+  isSensitivePermissionModule,
+  SENSITIVE_PERMISSION_WARNING_COPY,
+} from '@/lib/permissions/sensitivity';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -638,9 +643,6 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [comingSoonMessage, setComingSoonMessage] = useState('');
       const [currentRole, setCurrentRole] = useState('executive');
-      const [canSwitchRoleView, setCanSwitchRoleView] = useState(false);
-      const [showRoleSelector, setShowRoleSelector] = useState(false);
-      const [actingRoleSaving, setActingRoleSaving] = useState(false);
       const [serverNavItems, setServerNavItems] = useState([]);
       const [moduleAccess, setModuleAccess] = useState({});
       const [navLoaded, setNavLoaded] = useState(false);
@@ -662,6 +664,21 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         resolvedUserEmail.toLowerCase() !== resolvedUserDisplayName.toLowerCase();
       const resolvedCompanyName = String(currentUser?.company ?? '').trim() || 'My Company';
       const resolvedCompanyLogo = String(currentUser?.companyLogo ?? '').trim();
+      const resolvedUserAvatar = String(currentUser?.avatarUrl ?? '').trim();
+      const headerAvatarSrc = resolvedUserAvatar || resolvedCompanyLogo;
+      const roleBadgeLabel =
+        currentRole === 'executive'
+          ? 'CEO'
+          : currentRole === 'operations'
+            ? 'Operations Manager'
+            : currentRole === 'foreman'
+              ? 'Foreman'
+              : currentRole === 'mechanic'
+                ? 'Mechanic'
+                : currentRole === 'operator'
+                  ? 'Operator'
+                  : 'Team Member';
+      const isCeoRole = currentRole === 'executive';
 
       const navigateFromUserMenu = useCallback((path) => {
         setShowUserMenu(false);
@@ -680,11 +697,11 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [equipmentLoading, setEquipmentLoading] = useState(true);
       const [employees, setEmployees] = useState([]);
       const [employeesLoading, setEmployeesLoading] = useState(true);
+      const [companyMembers, setCompanyMembers] = useState([]);
       const [workOrders, setWorkOrders] = useState([]);
       const [workOrdersLoading, setWorkOrdersLoading] = useState(true);
       const [dailyReports, setDailyReports] = useState([]);
       const [dailyReportsLoading, setDailyReportsLoading] = useState(true);
-      const [timeEntries, setTimeEntries] = useState([]);
       const [scheduleData, setScheduleData] = useState({});
       const [calendarRefreshVersion, setCalendarRefreshVersion] = useState(0);
 
@@ -717,6 +734,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         equipment: false,
         safety: false,
         training: false,
+        companyMembers: false,
       });
 
       const mapServerRoleToUiRole = useCallback((role) => {
@@ -726,15 +744,6 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         if (role === 'mechanic') return 'mechanic';
         if (role === 'operator') return 'operator';
         return 'executive';
-      }, []);
-
-      const mapUiRoleToServerRole = useCallback((role) => {
-        if (role === 'executive') return 'admin';
-        if (role === 'operations') return 'pm';
-        if (role === 'foreman') return 'foreman';
-        if (role === 'mechanic') return 'mechanic';
-        if (role === 'operator' || role === 'field') return 'operator';
-        return 'admin';
       }, []);
 
       const fallbackNavByRole = useCallback((role) => {
@@ -780,7 +789,6 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           }
           const uiRole = mapServerRoleToUiRole(payload?.role);
           setCurrentRole(uiRole);
-          setCanSwitchRoleView(Boolean(payload?.canSwitchRoleView));
           const resolvedItems = Array.isArray(payload?.items) && payload.items.length > 0 ? payload.items : fallbackNavByRole(uiRole);
           setServerNavItems(resolvedItems);
           setModuleAccess(payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {});
@@ -1161,6 +1169,38 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       }, [currentView]);
 
       useEffect(() => {
+        let isMounted = true;
+        const shouldLoad =
+          currentView === 'dashboard' ||
+          currentView === 'team' ||
+          currentView === 'schedule' ||
+          currentView === 'messages';
+        if (!shouldLoad || moduleLoadedRef.current.companyMembers) return () => { isMounted = false; };
+
+        const loadCompanyMembers = async () => {
+          try {
+            const response = await fetch('/api/company-members?excludeSelf=1', { cache: 'no-store' });
+            const payload = await response.json();
+            if (!response.ok) {
+              throw new Error(payload?.error || 'Failed to load company members');
+            }
+            if (isMounted) {
+              setCompanyMembers(Array.isArray(payload?.items) ? payload.items : []);
+              moduleLoadedRef.current.companyMembers = true;
+            }
+          } catch {
+            if (isMounted) setCompanyMembers([]);
+          }
+        };
+
+        loadCompanyMembers();
+
+        return () => {
+          isMounted = false;
+        };
+      }, [currentView]);
+
+      useEffect(() => {
         loadNotifications();
       }, [loadNotifications]);
 
@@ -1501,26 +1541,6 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         setHeaderDateLabel(getUtcDateLabel());
       }, []);
 
-      const handleRoleSwitch = useCallback(async (nextUiRole) => {
-        try {
-          setActingRoleSaving(true);
-          const requestedRole = mapUiRoleToServerRole(nextUiRole);
-          const response = await fetch('/api/rbac/acting-role', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: requestedRole }),
-          });
-          if (!response.ok) return;
-          await loadNav();
-          setCurrentView('dashboard');
-        } catch {
-          // no-op
-        } finally {
-          setActingRoleSaving(false);
-          setShowRoleSelector(false);
-        }
-      }, [loadNav, mapUiRoleToServerRole]);
-
       const navCountsByKey = {
         messages: 3,
         jobs: jobs.filter(j => j.status === 'active').length,
@@ -1766,44 +1786,10 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
-                  {/* Role Selector */}
-                  {canSwitchRoleView && (
-                    <div className="relative hidden md:block">
-                      <button
-                        onClick={() => {
-                          if (!canSwitchRoleView) return;
-                          setShowRoleSelector(!showRoleSelector);
-                        }}
-                        disabled={actingRoleSaving || !canSwitchRoleView}
-                        className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
-                          canSwitchRoleView ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-100 opacity-80 cursor-default'
-                        }`}
-                      >
-                        <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
-                        <span className="text-sm font-medium text-gray-700">{ROLES[currentRole].label}</span>
-                        {canSwitchRoleView && <Icon name="chevron-down" className="text-gray-400 text-xs" />}
-                      </button>
-                      {showRoleSelector && canSwitchRoleView && (
-                        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50">
-                          <div className="px-3 py-2 border-b border-gray-100">
-                            <p className="text-xs font-medium text-gray-500 uppercase">Switch Role View</p>
-                          </div>
-                          {Object.entries(ROLES).map(([key, role]) => (
-                            <button
-                              key={key}
-                              disabled={actingRoleSaving}
-                              onClick={() => { handleRoleSwitch(key); }}
-                              className={`w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors ${currentRole === key ? 'bg-brand-50' : ''}`}
-                            >
-                              <Icon name={role.icon} className={`${role.color} w-5`} />
-                              <span className="text-sm text-gray-700">{role.label}</span>
-                              {currentRole === key && <Icon name="check" className="ml-auto text-brand-500" />}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100">
+                    <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
+                    <span className="text-sm font-medium text-gray-700">{roleBadgeLabel}</span>
+                  </div>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1955,11 +1941,11 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                       onClick={() => setShowUserMenu(!showUserMenu)}
                       className="flex items-center gap-2 hover:bg-gray-100 rounded-lg p-1 sm:pr-2 transition-colors"
                     >
-                      <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center text-white text-sm font-medium">
-                        {resolvedCompanyLogo ? (
+                      <div className="w-8 h-8 bg-brand-500 rounded-full flex items-center justify-center text-white text-sm font-medium overflow-hidden">
+                        {headerAvatarSrc ? (
                           <img
-                            src={resolvedCompanyLogo}
-                            alt={`${resolvedCompanyName} logo`}
+                            src={headerAvatarSrc}
+                            alt={resolvedUserAvatar ? `${resolvedUserDisplayName} avatar` : `${resolvedCompanyName} logo`}
                             className="w-full h-full rounded-full object-cover"
                           />
                         ) : (
@@ -1977,6 +1963,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                             <p className="text-sm text-gray-500 break-all">{resolvedUserEmail}</p>
                           )}
                           <p className="text-xs text-gray-400 mt-1">{resolvedCompanyName}</p>
+                          <span className="inline-flex mt-2 px-2 py-0.5 text-[11px] font-medium rounded-full bg-gray-100 text-gray-700">
+                            {roleBadgeLabel}
+                          </span>
                         </div>
                         <div className="py-1">
                           <button
@@ -1991,18 +1980,22 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                           >
                             <Icon name="gear" className="text-gray-400" /> Account Settings
                           </button>
-                          <button
-                            onClick={() => navigateFromUserMenu('/settings/company')}
-                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                          >
-                            <Icon name="building" className="text-gray-400" /> Company Settings
-                          </button>
-                          <button
-                            onClick={() => navigateFromUserMenu('/settings/billing')}
-                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                          >
-                            <Icon name="credit-card" className="text-gray-400" /> Billing
-                          </button>
+                          {isCeoRole && (
+                            <button
+                              onClick={() => navigateFromUserMenu('/settings/company')}
+                              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <Icon name="building" className="text-gray-400" /> Company Settings
+                            </button>
+                          )}
+                          {isCeoRole && (
+                            <button
+                              onClick={() => navigateFromUserMenu('/settings/billing')}
+                              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                            >
+                              <Icon name="credit-card" className="text-gray-400" /> Billing
+                            </button>
+                          )}
                         </div>
                         <div className="border-t border-gray-100 pt-1">
                           <button
@@ -2042,12 +2035,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
             onClose={() => setShowModal({ type: null })}
-            employees={employees}
+            members={companyMembers}
             currentRole={currentRole}
             initialData={showModal.data}
             onCreated={() => setCalendarRefreshVersion((prev) => prev + 1)}
           />
-          <TimeClockModal isOpen={showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} setTimeEntries={setTimeEntries} />
+          <TimeClockModal isOpen={showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} />
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} employees={employees} workOrders={workOrders} setWorkOrders={setWorkOrders} data={showModal.data} />
@@ -2911,6 +2904,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [pendingInviteLoading, setPendingInviteLoading] = useState(false);
       const [pendingInviteError, setPendingInviteError] = useState('');
       const [permissionModalMode, setPermissionModalMode] = useState('invite-create');
+      const [showSensitiveInviteConfirm, setShowSensitiveInviteConfirm] = useState(false);
       const [inviteForm, setInviteForm] = useState({
         id: '',
         full_name: '',
@@ -2974,6 +2968,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             certifications: Array.isArray(item.certifications) ? item.certifications : [],
             phone: item.phone || '',
             email: item.email || '',
+            avatarUrl: item.avatarUrl || '',
             clockedInAt: item.clockedInAt,
           }));
           setTeamItems(mappedItems);
@@ -3054,6 +3049,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         if (!canManageTeamProfiles) return;
         setEmployeeActionError('');
         setInviteFeedback('');
+        setShowSensitiveInviteConfirm(false);
         setPermissionModalMode('invite-create');
         setInviteForm({ id: '', full_name: '', email: '', role: 'operator', invite_url: '' });
         setPermissionForm({ ...roleTemplateDefaults.operator });
@@ -3204,11 +3200,20 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         [permissionForm]
       );
 
-      const handleSaveInvite = async () => {
-        if (!inviteForm.full_name.trim() || !inviteForm.email.trim() || !inviteForm.role) {
-          setInviteFeedback('Name, email, role, and permissions are required.');
-          return;
-        }
+      const sensitivePermissionGrants = useMemo(
+        () => getSensitiveInvitePermissionGrants({ role: inviteForm.role, permissions: permissionForm }),
+        [inviteForm.role, permissionForm]
+      );
+
+      const sensitiveGrantSummary = useMemo(
+        () =>
+          sensitivePermissionGrants
+            .map((grant) => `${grant.label} (${String(grant.accessLevel).toUpperCase()})`)
+            .join(', '),
+        [sensitivePermissionGrants]
+      );
+
+      const executeSaveInvite = useCallback(async () => {
         setInviteSaveLoading(true);
         setInviteFeedback('');
         try {
@@ -3236,6 +3241,23 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         } finally {
           setInviteSaveLoading(false);
         }
+      }, [inviteForm.email, inviteForm.full_name, inviteForm.id, inviteForm.role, loadPendingInvites, permissionModalMode, permissionsPayload]);
+
+      const handleSaveInvite = async () => {
+        if (!inviteForm.full_name.trim() || !inviteForm.email.trim() || !inviteForm.role) {
+          setInviteFeedback('Name, email, role, and permissions are required.');
+          return;
+        }
+        if (sensitivePermissionGrants.length > 0) {
+          setShowSensitiveInviteConfirm(true);
+          return;
+        }
+        await executeSaveInvite();
+      };
+
+      const handleConfirmSensitiveInvite = async () => {
+        setShowSensitiveInviteConfirm(false);
+        await executeSaveInvite();
       };
 
       const handlePendingInviteAction = async (invite, action) => {
@@ -3250,6 +3272,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             const nextPermissions = { ...roleTemplateDefaults[invite.role || 'operator'] };
             for (const row of invite.permissions || []) nextPermissions[row.module_key] = row.access_level;
             setPermissionForm(nextPermissions);
+            setShowSensitiveInviteConfirm(false);
             setInviteForm({
               id: invite.id,
               full_name: invite.full_name || '',
@@ -3305,6 +3328,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             role,
             invite_url: '',
           });
+          setShowSensitiveInviteConfirm(false);
           setPermissionModalMode('member-edit');
           setShowInviteModal(true);
         } catch (error) {
@@ -3476,8 +3500,16 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                     onClick={() => setSelectedEmployeeId(emp.id)}
                   >
                     <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-medium ${getContactCircleColor(emp.id || emp.name)}`}>
-                        {emp.name.split(' ').map(n => n[0]).join('')}
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-medium overflow-hidden ${getContactCircleColor(emp.id || emp.name)}`}>
+                        {emp.avatarUrl ? (
+                          <img
+                            src={emp.avatarUrl}
+                            alt={emp.name || 'Team member'}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          emp.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+                        )}
                       </div>
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
@@ -3725,6 +3757,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             isOpen={showInviteModal}
             onClose={() => {
               setShowInviteModal(false);
+              setShowSensitiveInviteConfirm(false);
               setPermissionModalMode('invite-create');
             }}
             title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Employee'}
@@ -3780,7 +3813,14 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                 <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
                   {permissionModules.map((module) => (
                     <div key={module.key} className="flex items-center justify-between gap-2 px-3 py-2">
-                      <span className="text-sm text-gray-800">{module.label}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-800">{module.label}</span>
+                        {isSensitivePermissionModule(module.key) && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                            Sensitive
+                          </span>
+                        )}
+                      </div>
                       <select
                         className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
                         value={permissionForm[module.key] || 'none'}
@@ -3799,6 +3839,16 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                     </div>
                   ))}
                 </div>
+                <p className="text-[11px] text-gray-500 mt-2">
+                  Billing is sensitive and follows CEO-level access.
+                </p>
+                {sensitivePermissionGrants.length > 0 && (
+                  <div className="mt-2 border border-amber-200 bg-amber-50 rounded-lg p-2.5">
+                    <p className="text-xs font-medium text-amber-800 mb-1">Sensitive access selected</p>
+                    <p className="text-xs text-amber-800">{SENSITIVE_PERMISSION_WARNING_COPY}</p>
+                    <p className="text-[11px] text-amber-900 mt-1">Selected: {sensitiveGrantSummary}</p>
+                  </div>
+                )}
               </div>
 
               {permissionModalMode === 'member-edit' && inviteForm.role === 'ceo' && (
@@ -3828,6 +3878,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   size="sm"
                   onClick={() => {
                     setShowInviteModal(false);
+                    setShowSensitiveInviteConfirm(false);
                     setPermissionModalMode('invite-create');
                   }}
                 >
@@ -3841,6 +3892,38 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   onClick={permissionModalMode === 'member-edit' ? handleSaveMemberPermissions : handleSaveInvite}
                 >
                   {inviteSaveLoading ? 'Saving...' : permissionModalMode === 'member-edit' ? 'Save Permissions' : 'Save & Generate Link'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={showSensitiveInviteConfirm}
+            onClose={() => setShowSensitiveInviteConfirm(false)}
+            title="Confirm Sensitive Access"
+            size="sm"
+          >
+            <div className="space-y-3">
+              <div className="border border-amber-200 bg-amber-50 rounded-lg p-3">
+                <p className="text-xs text-amber-800">{SENSITIVE_PERMISSION_WARNING_COPY}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Sensitive access being granted</p>
+                <ul className="text-sm text-gray-800 space-y-1">
+                  {sensitivePermissionGrants.map((grant) => (
+                    <li key={`${grant.key}-${grant.accessLevel}`} className="flex items-center justify-between">
+                      <span>{grant.label}</span>
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 uppercase">{grant.accessLevel}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowSensitiveInviteConfirm(false)}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="brand" size="sm" onClick={handleConfirmSensitiveInvite} disabled={inviteSaveLoading}>
+                  {inviteSaveLoading ? 'Saving...' : 'Confirm & Continue'}
                 </Button>
               </div>
             </div>
@@ -10022,7 +10105,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
               key={item.action}
               onClick={() => {
                 onClose();
-                if (['time-clock', 'equipment-checkin', 'photo'].includes(item.action)) {
+                if (['equipment-checkin', 'photo'].includes(item.action)) {
                   onComingSoon(`${item.label} is coming soon.`);
                   return;
                 }
@@ -10053,7 +10136,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       </Modal>
     );
 
-    const CalendarEventModal = ({ isOpen, onClose, employees, currentRole, initialData, onCreated }) => {
+    const CalendarEventModal = ({ isOpen, onClose, members = [], currentRole, initialData, onCreated }) => {
       const parseLocalDateTime = (value) => {
         const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
         if (!match) return null;
@@ -10087,9 +10170,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [endsAt, setEndsAt] = useState(toLocalInputValue(new Date(Date.now() + 60 * 60 * 1000)));
       const [locationText, setLocationText] = useState('');
       const [description, setDescription] = useState('');
-      const [attendeeEmployeeIds, setAttendeeEmployeeIds] = useState([]);
+      const [attendeeUserIds, setAttendeeUserIds] = useState([]);
       const [attendeeSearch, setAttendeeSearch] = useState('');
-      const [favoriteEmployeeIds, setFavoriteEmployeeIds] = useState([]);
+      const [favoriteMemberIds, setFavoriteMemberIds] = useState([]);
       const [externalAttendees, setExternalAttendees] = useState([]);
       const [externalName, setExternalName] = useState('');
       const [externalContact, setExternalContact] = useState('');
@@ -10104,13 +10187,13 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       useEffect(() => {
         if (!isOpen || typeof window === 'undefined') return;
         try {
-          const raw = window.localStorage.getItem('calendar.favoriteEmployeeIds');
+          const raw = window.localStorage.getItem('calendar.favoriteMemberIds');
           const parsed = raw ? JSON.parse(raw) : [];
           if (Array.isArray(parsed)) {
-            setFavoriteEmployeeIds(parsed.map((id) => String(id)));
+            setFavoriteMemberIds(parsed.map((id) => String(id)));
           }
         } catch {
-          setFavoriteEmployeeIds([]);
+          setFavoriteMemberIds([]);
         }
       }, [isOpen]);
 
@@ -10137,7 +10220,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         setEndsAt(toLocalInputValue(new Date(Date.now() + 60 * 60 * 1000)));
         setLocationText('');
         setDescription('');
-        setAttendeeEmployeeIds([]);
+        setAttendeeUserIds([]);
         setAttendeeSearch('');
         setExternalAttendees([]);
         setExternalName('');
@@ -10147,24 +10230,24 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       };
 
       const persistFavorites = (next) => {
-        setFavoriteEmployeeIds(next);
+        setFavoriteMemberIds(next);
         if (typeof window !== 'undefined') {
-          window.localStorage.setItem('calendar.favoriteEmployeeIds', JSON.stringify(next));
+          window.localStorage.setItem('calendar.favoriteMemberIds', JSON.stringify(next));
         }
       };
 
-      const toggleFavoriteEmployee = (employeeId) => {
-        const id = String(employeeId);
-        if (favoriteEmployeeIds.includes(id)) {
-          persistFavorites(favoriteEmployeeIds.filter((item) => item !== id));
+      const toggleFavoriteMember = (memberUserId) => {
+        const id = String(memberUserId);
+        if (favoriteMemberIds.includes(id)) {
+          persistFavorites(favoriteMemberIds.filter((item) => item !== id));
         } else {
-          persistFavorites([id, ...favoriteEmployeeIds]);
+          persistFavorites([id, ...favoriteMemberIds]);
         }
       };
 
-      const toggleAttendeeEmployee = (employeeId) => {
-        const id = String(employeeId);
-        setAttendeeEmployeeIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
+      const toggleAttendeeMember = (memberUserId) => {
+        const id = String(memberUserId);
+        setAttendeeUserIds((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));
       };
 
       const addExternalAttendee = () => {
@@ -10180,17 +10263,24 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         setExternalAttendees((prev) => prev.filter((_, idx) => idx !== index));
       };
 
-      const filteredEmployees = employees.filter((employee) => {
-        const haystack = `${employee.name || ''} ${employee.role || ''}`.toLowerCase();
+      const filteredMembers = members.filter((member) => {
+        const haystack = `${member.displayName || ''} ${member.roleLabel || member.role || ''}`.toLowerCase();
         return haystack.includes(attendeeSearch.trim().toLowerCase());
       });
+      const memberInitials = (member) =>
+        String(member?.displayName || '')
+          .split(' ')
+          .map((part) => part[0])
+          .join('')
+          .slice(0, 2)
+          .toUpperCase() || 'TM';
 
-      const selectedEmployees = attendeeEmployeeIds
-        .map((id) => employees.find((employee) => String(employee.id) === String(id)))
+      const selectedMembers = attendeeUserIds
+        .map((id) => members.find((member) => String(member.userId) === String(id)))
         .filter(Boolean);
 
-      const favoriteEmployees = favoriteEmployeeIds
-        .map((id) => employees.find((employee) => String(employee.id) === String(id)))
+      const favoriteMembers = favoriteMemberIds
+        .map((id) => members.find((member) => String(member.userId) === String(id)))
         .filter(Boolean);
 
       const handleSubmit = async () => {
@@ -10209,9 +10299,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             return;
           }
           const attendees = [
-            ...attendeeEmployeeIds.map((employeeId) => ({
-              attendeeType: 'employee',
-              employeeId: String(employeeId),
+            ...attendeeUserIds.map((memberUserId) => ({
+              attendeeType: 'user',
+              userId: String(memberUserId),
             })),
             ...externalAttendees.map((attendee) => ({
               attendeeType: 'external',
@@ -10340,7 +10430,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   className="text-xs text-brand-600 hover:text-brand-700"
                   onClick={() => {
                     setVisibility('private');
-                    setAttendeeEmployeeIds([]);
+                    setAttendeeUserIds([]);
                     setExternalAttendees([]);
                   }}
                 >
@@ -10348,22 +10438,29 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                 </button>
               </div>
 
-              {favoriteEmployees.length > 0 && (
+              {favoriteMembers.length > 0 && (
                 <div className="mb-2">
                   <p className="text-xs font-medium text-gray-500 mb-1">Favorites</p>
                   <div className="flex flex-wrap gap-1">
-                    {favoriteEmployees.map((employee) => {
-                      const selected = attendeeEmployeeIds.includes(String(employee.id));
+                    {favoriteMembers.map((member) => {
+                      const selected = attendeeUserIds.includes(String(member.userId));
                       return (
                         <button
-                          key={`fav-employee-${employee.id}`}
+                          key={`fav-member-${member.userId}`}
                           type="button"
-                          onClick={() => toggleAttendeeEmployee(employee.id)}
-                          className={`px-2 py-1 text-xs rounded border ${
+                          onClick={() => toggleAttendeeMember(member.userId)}
+                          className={`inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded border ${
                             selected ? 'bg-brand-100 border-brand-300 text-brand-700' : 'bg-white border-gray-300 text-gray-700'
                           }`}
                         >
-                          {employee.name}
+                          <span className="h-4 w-4 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[9px] font-semibold">
+                            {member.avatarUrl ? (
+                              <img src={member.avatarUrl} alt={member.displayName || 'Member'} className="h-full w-full object-cover" />
+                            ) : (
+                              memberInitials(member)
+                            )}
+                          </span>
+                          {member.displayName}
                         </button>
                       );
                     })}
@@ -10375,26 +10472,35 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                 value={attendeeSearch}
                 onChange={(e) => setAttendeeSearch(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                placeholder="Search employees..."
+                placeholder="Search company members..."
               />
 
               <div className="mt-2 max-h-36 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
-                {filteredEmployees.map((employee) => {
-                  const selected = attendeeEmployeeIds.includes(String(employee.id));
-                  const favorite = favoriteEmployeeIds.includes(String(employee.id));
+                {filteredMembers.map((member) => {
+                  const selected = attendeeUserIds.includes(String(member.userId));
+                  const favorite = favoriteMemberIds.includes(String(member.userId));
                   return (
-                    <div key={`attendee-row-${employee.id}`} className="flex items-center justify-between px-3 py-2 text-sm">
+                    <div key={`attendee-row-${member.userId}`} className="flex items-center justify-between px-3 py-2 text-sm">
                       <button
                         type="button"
-                        className={`text-left flex-1 ${selected ? 'text-brand-700 font-medium' : 'text-gray-700'}`}
-                        onClick={() => toggleAttendeeEmployee(employee.id)}
+                        className={`text-left flex items-center gap-2 flex-1 ${selected ? 'text-brand-700 font-medium' : 'text-gray-700'}`}
+                        onClick={() => toggleAttendeeMember(member.userId)}
                       >
-                        {employee.name} <span className="text-xs text-gray-400">{employee.role}</span>
+                        <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold">
+                          {member.avatarUrl ? (
+                            <img src={member.avatarUrl} alt={member.displayName || 'Member'} className="h-full w-full object-cover" />
+                          ) : (
+                            memberInitials(member)
+                          )}
+                        </span>
+                        <span>
+                          {member.displayName} <span className="text-xs text-gray-400">{member.roleLabel || member.role}</span>
+                        </span>
                       </button>
                       <button
                         type="button"
                         className={`ml-2 text-xs ${favorite ? 'text-brand-600' : 'text-gray-400 hover:text-gray-600'}`}
-                        onClick={() => toggleFavoriteEmployee(employee.id)}
+                        onClick={() => toggleFavoriteMember(member.userId)}
                       >
                         {favorite ? 'Favorited' : 'Favorite'}
                       </button>
@@ -10403,12 +10509,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                 })}
               </div>
 
-              {selectedEmployees.length > 0 && (
+              {selectedMembers.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1">
-                  {selectedEmployees.map((employee) => (
-                    <span key={`selected-employee-${employee.id}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-brand-50 text-brand-700 border border-brand-200">
-                      {employee.name}
-                      <button type="button" onClick={() => toggleAttendeeEmployee(employee.id)}>
+                  {selectedMembers.map((member) => (
+                    <span key={`selected-member-${member.userId}`} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-brand-50 text-brand-700 border border-brand-200">
+                      {member.displayName}
+                      <button type="button" onClick={() => toggleAttendeeMember(member.userId)}>
                         <Icon name="xmark" className="text-[10px]" />
                       </button>
                     </span>
@@ -10478,66 +10584,114 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       );
     };
 
-    const TimeClockModal = ({ isOpen, onClose, employees, jobs, setTimeEntries }) => {
-      const [selectedEmployee, setSelectedEmployee] = useState('');
-      const [selectedJob, setSelectedJob] = useState('');
-      const [action, setAction] = useState('in');
-      const [notes, setNotes] = useState('');
+    const TimeClockModal = ({ isOpen, onClose }) => {
+      const [loading, setLoading] = useState(false);
+      const [actionLoading, setActionLoading] = useState(false);
+      const [error, setError] = useState('');
+      const [status, setStatus] = useState('clocked_out');
+      const [activeShiftStartAt, setActiveShiftStartAt] = useState(null);
+      const [todayHours, setTodayHours] = useState(0);
+      const [weekHours, setWeekHours] = useState(0);
 
-      const handleSubmit = () => {
-        if (!selectedEmployee || !selectedJob) return;
-        setTimeEntries(prev => [...prev, {
-          id: Date.now(),
-          employeeId: Number(selectedEmployee),
-          jobId: Number(selectedJob),
-          action,
-          time: new Date().toISOString(),
-          notes,
-        }]);
-        onClose();
+      const loadStatus = useCallback(async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/time-clock', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || 'Failed to load time clock status');
+          }
+          setStatus(String(payload?.item?.status || 'clocked_out'));
+          setActiveShiftStartAt(payload?.item?.activeShiftStartAt || null);
+          setTodayHours(Number(payload?.item?.todayHours || 0));
+          setWeekHours(Number(payload?.item?.weekHours || 0));
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : 'Failed to load time clock status');
+        } finally {
+          setLoading(false);
+        }
+      }, []);
+
+      useEffect(() => {
+        if (!isOpen) return;
+        loadStatus();
+      }, [isOpen, loadStatus]);
+
+      const handleClockIn = async () => {
+        setActionLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/time-clock/clock-in', { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || 'Unable to clock in');
+          }
+          await loadStatus();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : 'Unable to clock in');
+        } finally {
+          setActionLoading(false);
+        }
       };
+
+      const handleClockOut = async () => {
+        setActionLoading(true);
+        setError('');
+        try {
+          const response = await fetch('/api/time-clock/clock-out', { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(payload?.error || 'Unable to clock out');
+          }
+          await loadStatus();
+        } catch (nextError) {
+          setError(nextError instanceof Error ? nextError.message : 'Unable to clock out');
+        } finally {
+          setActionLoading(false);
+        }
+      };
+
+      const statusLabel = status === 'clocked_in' ? 'Clocked In' : 'Clocked Out';
+      const statusColor =
+        status === 'clocked_in'
+          ? 'text-green-700 bg-green-50 border-green-200'
+          : 'text-gray-700 bg-gray-50 border-gray-200';
+      const activeStartLabel = activeShiftStartAt
+        ? new Date(activeShiftStartAt).toLocaleString()
+        : 'Not clocked in';
 
       return (
         <Modal isOpen={isOpen} onClose={onClose} title="Time Clock" size="md">
           <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
-              <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                <option value="">Select Employee</option>
-                {employees.map(emp => <option key={emp.id} value={emp.id}>{emp.name} - {emp.role}</option>)}
-              </select>
+            <div className={`p-3 rounded-lg border ${statusColor}`}>
+              <p className="text-sm font-medium">{statusLabel}</p>
+              <p className="text-xs mt-1">Active shift start: {activeStartLabel}</p>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Job Site</label>
-              <select value={selectedJob} onChange={(e) => setSelectedJob(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                <option value="">Select Job</option>
-                {jobs.filter(j => j.status === 'active').map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2">
-                  <input type="radio" name="action" value="in" checked={action === 'in'} onChange={(e) => setAction(e.target.value)} className="text-brand-500" />
-                  <span>Clock In</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="radio" name="action" value="out" checked={action === 'out'} onChange={(e) => setAction(e.target.value)} className="text-brand-500" />
-                  <span>Clock Out</span>
-                </label>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="border border-gray-200 rounded-lg p-3">
+                <p className="text-xs text-gray-500">Today's Hours</p>
+                <p className="text-2xl font-semibold text-gray-900">{Number(todayHours).toFixed(2)}</p>
+              </div>
+              <div className="border border-gray-200 rounded-lg p-3">
+                <p className="text-xs text-gray-500">This Week's Hours</p>
+                <p className="text-2xl font-semibold text-gray-900">{Number(weekHours).toFixed(2)}</p>
               </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Optional notes..." />
-            </div>
-            <div className="p-3 bg-gray-50 rounded-lg text-sm">
-              <p><strong>Time:</strong> {formatTime(new Date())}</p>
-              <p><strong>Location:</strong> GPS coordinates will be captured</p>
-            </div>
+
+            {loading && <p className="text-sm text-gray-500">Loading time clock status...</p>}
+            {error && <p className="text-sm text-red-600">{error}</p>}
+
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={onClose}>Cancel</Button>
-              <Button variant="brand" onClick={handleSubmit}>Submit</Button>
+              <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
+              <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
+              <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
+                {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
+              </Button>
+              <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
+                {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
+              </Button>
             </div>
           </div>
         </Modal>
@@ -11746,19 +11900,33 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 
 	        let fullName = '';
 	        let displayName = '';
+	        let avatarUrl = '';
 
 	        if (userId) {
 	          const profileWithDisplayName = await supabase
 	            .from('profiles')
-	            .select('full_name, display_name, email')
+	            .select('full_name, display_name, email, avatar_url')
 	            .eq('id', userId)
 	            .maybeSingle();
 
 	          if (!profileWithDisplayName.error) {
 	            fullName = String(profileWithDisplayName.data?.full_name ?? '').trim();
 	            displayName = String(profileWithDisplayName.data?.display_name ?? '').trim();
+	            avatarUrl = String(profileWithDisplayName.data?.avatar_url ?? '').trim();
 	            const profileEmail = String(profileWithDisplayName.data?.email ?? '').trim();
 	            if (!email && profileEmail) email = profileEmail;
+	          } else if (/avatar_url|Could not find the 'avatar_url' column/i.test(profileWithDisplayName.error.message || '')) {
+	            const fallbackProfileWithDisplayName = await supabase
+	              .from('profiles')
+	              .select('full_name, display_name, email')
+	              .eq('id', userId)
+	              .maybeSingle();
+	            if (!fallbackProfileWithDisplayName.error) {
+	              fullName = String(fallbackProfileWithDisplayName.data?.full_name ?? '').trim();
+	              displayName = String(fallbackProfileWithDisplayName.data?.display_name ?? '').trim();
+	              const profileEmail = String(fallbackProfileWithDisplayName.data?.email ?? '').trim();
+	              if (!email && profileEmail) email = profileEmail;
+	            }
 	          } else if (/display_name|Could not find the 'display_name' column/i.test(profileWithDisplayName.error.message || '')) {
 	            const fallbackProfile = await supabase
 	              .from('profiles')
@@ -11821,6 +11989,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	          email,
 	          company: companyName,
 	          companyLogo,
+	          avatarUrl,
 	          fullName,
 	          displayName,
 	        };
@@ -11834,6 +12003,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	          email,
 	          company: String(data?.company ?? '').trim() || 'My Company',
 	          companyLogo: '',
+	          avatarUrl: '',
 	          fullName,
 	          displayName: '',
 	        });
@@ -11848,6 +12018,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	          email,
 	          company: String(data?.company ?? '').trim() || 'My Company',
 	          companyLogo: '',
+	          avatarUrl: '',
 	          fullName,
 	          displayName: '',
 	        });

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AppRole } from '@/lib/nav/config';
+import { getTimeEntrySummaryByUser } from '@/lib/time-clock/summary';
 
 const ACTIVE_JOB_STATUSES = ['active', 'open', 'in_progress'];
 const OPEN_WORK_ORDER_STATUSES = ['open', 'scheduled', 'in-progress', 'in_progress'];
@@ -159,6 +160,15 @@ export async function getStatsForRole({
   const crewOnSite = employeesOnSiteCountResult.error ? 0 : employeesOnSiteCountResult.count ?? 0;
   const safety7d = safetyCountResult.error ? 0 : safetyCountResult.count ?? 0;
   const openWorkOrders = openWorkOrdersCountResult.error ? 0 : openWorkOrdersCountResult.count ?? 0;
+  let operatorHoursToday = 0;
+  if (role === 'operator') {
+    const timeSummary = await getTimeEntrySummaryByUser({
+      supabase,
+      companyId,
+      userIds: [userId],
+    });
+    operatorHoursToday = Number(timeSummary.todayHoursByUserId.get(userId) ?? 0);
+  }
 
   return {
     active_jobs: { value: activeJobs, href: '/jobs?status=active', visible: role === 'admin' || role === 'pm' },
@@ -175,6 +185,6 @@ export async function getStatsForRole({
     maintenance_due_soon: { value: maintenanceDueSoonCount, href: '/maintenance/work-orders?status=open', visible: role === 'mechanic' },
     equipment_down: { value: equipmentDownCount, href: '/fleet?status=out_of_service', visible: role === 'mechanic' },
     parts_low: { value: lowPartsCount, href: '/inventory?filter=low-stock', visible: role === 'mechanic' },
-    hours_today: { value: crewOnSite, href: '/schedule?view=today', visible: role === 'operator' },
+    hours_today: { value: operatorHoursToday, href: '/schedule?view=today', visible: role === 'operator' },
   };
 }

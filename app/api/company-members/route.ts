@@ -1,5 +1,4 @@
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -38,32 +37,40 @@ const pickDisplayName = ({
   return "Team Member";
 };
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    try {
-      await requireModuleAccess("messages", "view");
-    } catch {
-      return forbidden();
-    }
-
     const { supabase, companyId, userId } = await getCompanyId();
     const admin = getSupabaseAdmin();
     const db = admin ?? supabase;
+    const url = new URL(request.url);
+    const excludeSelf = url.searchParams.get("excludeSelf") !== "0";
 
-    let memberships = await db
-      .from("memberships")
-      .select("user_id, role")
-      .eq("company_id", companyId)
-      .neq("user_id", userId)
-      .order("created_at", { ascending: true });
+    let memberships = excludeSelf
+      ? await db
+          .from("memberships")
+          .select("user_id, role")
+          .eq("company_id", companyId)
+          .neq("user_id", userId)
+          .order("created_at", { ascending: true })
+      : await db
+          .from("memberships")
+          .select("user_id, role")
+          .eq("company_id", companyId)
+          .order("created_at", { ascending: true });
 
     if (memberships.error && /created_at|Could not find the 'created_at' column/i.test(memberships.error.message || "")) {
-      memberships = await db
-        .from("memberships")
-        .select("user_id, role")
-        .eq("company_id", companyId)
-        .neq("user_id", userId)
-        .order("user_id", { ascending: true });
+      memberships = excludeSelf
+        ? await db
+            .from("memberships")
+            .select("user_id, role")
+            .eq("company_id", companyId)
+            .neq("user_id", userId)
+            .order("user_id", { ascending: true })
+        : await db
+            .from("memberships")
+            .select("user_id, role")
+            .eq("company_id", companyId)
+            .order("user_id", { ascending: true });
     }
 
     if (memberships.error) return serverError();
@@ -130,61 +137,75 @@ export async function GET() {
         .eq("company_id", companyId)
         .in("user_id", userIds);
     }
-    // Employees lookup is best-effort; if it fails, fall back to profiles-only names.
     const employeeRows = employees.error ? [] : employees.data ?? [];
 
     const nameById = new Map<string, string>();
+    const emailById = new Map<string, string>();
     const avatarById = new Map<string, string>();
     for (const profile of profiles.data ?? []) {
-      const profileId = String(profile.id ?? "").trim();
-      if (!profileId) continue;
+      const key = String(profile.id ?? "").trim();
+      if (!key) continue;
       nameById.set(
-        profileId,
+        key,
         pickDisplayName({
           fullName: profile.full_name,
           displayName: profile.display_name,
           email: profile.email,
         })
       );
+      const email = String(profile.email ?? "").trim();
+      if (email) emailById.set(key, email);
       const avatarUrl = String(profile.avatar_url ?? "").trim();
-      if (avatarUrl) avatarById.set(profileId, avatarUrl);
+      if (avatarUrl) avatarById.set(key, avatarUrl);
     }
     for (const employee of employeeRows) {
       const userIdKey = String(employee.user_id ?? "").trim();
-      if (!userIdKey || nameById.has(userIdKey)) continue;
-      const employeeName = pickDisplayName({
-        fullName: employee.full_name ?? employee.name,
-        displayName: employee.name,
-        email: employee.email,
-      });
-      if (employeeName) {
-        nameById.set(userIdKey, employeeName);
+      if (!userIdKey) continue;
+      if (!nameById.has(userIdKey)) {
+        const employeeName = pickDisplayName({
+          fullName: employee.full_name ?? employee.name,
+          displayName: employee.name,
+          email: employee.email,
+        });
+        if (employeeName) nameById.set(userIdKey, employeeName);
       }
+      const email = String(employee.email ?? "").trim();
+      if (email && !emailById.has(userIdKey)) emailById.set(userIdKey, email);
     }
 
     if (admin) {
-      const missingUserIds = userIds.filter((id) => !nameById.has(id));
+      const missingUserIds = userIds.filter((id) => !emailById.has(id));
       if (missingUserIds.length > 0) {
         const listUsersResult = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
         if (!listUsersResult.error) {
-          const emailById = new Map(
+          const emailByAuthUserId = new Map(
             (listUsersResult.data.users ?? []).map((user) => [String(user.id), String(user.email ?? "").trim()])
           );
           for (const missingUserId of missingUserIds) {
-            const email = emailById.get(missingUserId);
-            if (email) nameById.set(missingUserId, email);
+            const email = emailByAuthUserId.get(missingUserId);
+            if (email) {
+              emailById.set(missingUserId, email);
+              if (!nameById.has(missingUserId)) nameById.set(missingUserId, email);
+            }
           }
         }
       }
     }
 
     return Response.json({
-      items: (memberships.data ?? []).map((row) => ({
-        userId: row.user_id,
-        role: toRoleLabel(row.role),
-        displayName: nameById.get(String(row.user_id ?? "").trim()) || "Team Member",
-        avatarUrl: avatarById.get(String(row.user_id ?? "").trim()) || "",
-      })),
+      items: (memberships.data ?? []).map((row) => {
+        const memberUserId = String(row.user_id ?? "").trim();
+        const role = String(row.role ?? "").trim().toLowerCase();
+        return {
+          userId: memberUserId,
+          role,
+          roleLabel: toRoleLabel(role),
+          displayName: nameById.get(memberUserId) || emailById.get(memberUserId) || "Team Member",
+          email: emailById.get(memberUserId) || "",
+          avatarUrl: avatarById.get(memberUserId) || "",
+          status: "active",
+        };
+      }),
     });
   } catch (error) {
     if (error instanceof TenantResolverError) return tenantError(error);

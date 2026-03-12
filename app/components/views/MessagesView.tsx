@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable @next/next/no-img-element */
 // @ts-nocheck
 'use client';
 
@@ -41,6 +42,14 @@ export function MessagesView({ employees = [], ui }) {
   }, [channels]);
 
   const normalized = (value) => String(value || '').trim().toLowerCase();
+  const initialsForName = useCallback((value) => {
+    return String(value || '')
+      .split(' ')
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase() || 'TM';
+  }, []);
   const formatMessageTime = useCallback((value) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return '';
@@ -106,6 +115,7 @@ export function MessagesView({ employees = [], ui }) {
         subtitle: String(preferredRole),
         userId: explicitUserId || null,
         hasAccount: Boolean(matchedUser || explicitUserId),
+        avatarUrl: String(matchedUser?.avatarUrl ?? employee?.avatarUrl ?? ''),
       });
     }
 
@@ -122,6 +132,7 @@ export function MessagesView({ employees = [], ui }) {
         subtitle: String(user.role || ''),
         userId: String(user.userId),
         hasAccount: true,
+        avatarUrl: String(user.avatarUrl || ''),
       });
     }
 
@@ -135,6 +146,11 @@ export function MessagesView({ employees = [], ui }) {
         resolveBestName({ displayName: user.displayName, email: user.email }),
       ])),
     [availableUsers, resolveBestName]
+  );
+  const userAvatarById = useMemo(
+    () =>
+      new Map((availableUsers || []).map((user) => [String(user.userId), String(user.avatarUrl || '')])),
+    [availableUsers]
   );
   const contactDisplayNameByUserId = useMemo(() => {
     const map = new Map();
@@ -168,7 +184,7 @@ export function MessagesView({ employees = [], ui }) {
   );
 
   const loadUsers = useCallback(async () => {
-    const response = await fetch('/api/messages/users', { cache: 'no-store' });
+    const response = await fetch('/api/company-members?excludeSelf=1', { cache: 'no-store' });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload?.error || 'Failed to load team members');
     setAvailableUsers(payload.items || []);
@@ -631,9 +647,18 @@ export function MessagesView({ employees = [], ui }) {
                     isActiveDirect ? 'bg-brand-50 border border-brand-200' : ''
                   }`}
                 >
-                  <div>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="h-8 w-8 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[11px] font-semibold text-gray-700 shrink-0">
+                      {contact.avatarUrl ? (
+                        <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
+                      ) : (
+                        initialsForName(contact.label)
+                      )}
+                    </span>
+                    <div className="min-w-0">
                     <p className="text-sm text-gray-900 truncate">{contact.label}</p>
                     <p className="text-xs text-gray-500 truncate">{preview}</p>
+                    </div>
                   </div>
                   <span className="text-[10px] text-gray-500">Chat</span>
                 </button>
@@ -646,13 +671,28 @@ export function MessagesView({ employees = [], ui }) {
       {activeChannel ? (
         <div className="flex-1 flex flex-col bg-white">
           <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
-            <div>
+            <div className="flex items-center gap-3 min-w-0">
+              {isDirectChannel(activeChannel) && (
+                <span className="h-9 w-9 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-xs font-semibold text-gray-700 shrink-0">
+                  {userAvatarById.get(String(activeChannel.other_user_id || '')) ? (
+                    <img
+                      src={String(userAvatarById.get(String(activeChannel.other_user_id || '')))}
+                      alt={getChannelDisplayName(activeChannel)}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    initialsForName(getChannelDisplayName(activeChannel))
+                  )}
+                </span>
+              )}
+              <div className="min-w-0">
               <h3 className="font-semibold text-gray-900" data-testid="messages-active-channel">
                 {isDirectChannel(activeChannel)
                   ? getChannelDisplayName(activeChannel)
                   : `# ${activeChannel.name}`}
               </h3>
               <p className="text-xs text-gray-500">{activeChannel.message_count || 0} messages</p>
+              </div>
             </div>
             <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
           </div>
@@ -750,6 +790,13 @@ export function MessagesView({ employees = [], ui }) {
                         )
                       }
                     />
+                    <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-700 shrink-0">
+                      {contact.avatarUrl ? (
+                        <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
+                      ) : (
+                        initialsForName(contact.label)
+                      )}
+                    </span>
                     <span>{contact.label}</span>
                   </label>
                 ))}
@@ -774,7 +821,16 @@ export function MessagesView({ employees = [], ui }) {
             <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
               {members.map((member) => (
                 <div key={member.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2">
-                  <span>{member.displayName} {member.memberRole === 'owner' ? '(owner)' : ''}</span>
+                  <span className="inline-flex items-center gap-2 min-w-0">
+                    <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-700 shrink-0">
+                      {member.avatarUrl ? (
+                        <img src={member.avatarUrl} alt={member.displayName} className="h-full w-full object-cover" />
+                      ) : (
+                        initialsForName(member.displayName)
+                      )}
+                    </span>
+                    <span className="truncate">{member.displayName} {member.memberRole === 'owner' ? '(owner)' : ''}</span>
+                  </span>
                   {member.memberRole !== 'owner' && <Button variant="secondary" size="sm" onClick={() => handleRemoveMember(member.userId)} data-testid={`messages-member-remove-${member.userId}`}>Remove</Button>}
                 </div>
               ))}
@@ -783,6 +839,13 @@ export function MessagesView({ employees = [], ui }) {
                 {availableUsers.map((user) => (
                   <label key={user.userId} className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={selectedAddMembers.includes(user.userId)} onChange={(e) => setSelectedAddMembers((prev) => e.target.checked ? [...prev, user.userId] : prev.filter((id) => id !== user.userId))} />
+                    <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-700 shrink-0">
+                      {user.avatarUrl ? (
+                        <img src={user.avatarUrl} alt={user.displayName} className="h-full w-full object-cover" />
+                      ) : (
+                        initialsForName(user.displayName)
+                      )}
+                    </span>
                     <span>{user.displayName}</span>
                   </label>
                 ))}

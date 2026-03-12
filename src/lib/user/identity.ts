@@ -6,6 +6,10 @@ export type CurrentUserIdentity = {
   fullName: string;
   displayName: string;
   resolvedName: string;
+  avatarUrl: string;
+  phone: string;
+  jobTitle: string;
+  timezone: string;
   companyId: string;
   companyName: string;
 };
@@ -45,17 +49,30 @@ export async function getCurrentUserIdentity(): Promise<CurrentUserIdentity> {
         full_name?: string | null;
         display_name?: string | null;
         email?: string | null;
+        avatar_url?: string | null;
+        phone?: string | null;
+        job_title?: string | null;
+        timezone?: string | null;
       }
     | null = null;
 
   const profileWithDisplayName = await supabase
     .from("profiles")
-    .select("full_name, display_name, email")
+    .select("full_name, display_name, email, avatar_url, phone, job_title, timezone")
     .eq("id", userId)
     .maybeSingle();
 
   if (!profileWithDisplayName.error) {
     profile = profileWithDisplayName.data;
+  } else if (/avatar_url|phone|job_title|timezone|Could not find the '.*' column/i.test(profileWithDisplayName.error.message || "")) {
+    const fallbackProfileWithDisplayName = await supabase
+      .from("profiles")
+      .select("full_name, display_name, email")
+      .eq("id", userId)
+      .maybeSingle();
+    if (!fallbackProfileWithDisplayName.error) {
+      profile = fallbackProfileWithDisplayName.data;
+    }
   } else if (
     /display_name|Could not find the 'display_name' column/i.test(
       profileWithDisplayName.error.message || ""
@@ -74,6 +91,10 @@ export async function getCurrentUserIdentity(): Promise<CurrentUserIdentity> {
   const fullName = String(profile?.full_name ?? "").trim();
   const displayName = String(profile?.display_name ?? "").trim();
   const profileEmail = String(profile?.email ?? "").trim();
+  const avatarUrl = String(profile?.avatar_url ?? "").trim();
+  const phone = String(profile?.phone ?? "").trim();
+  const jobTitle = String(profile?.job_title ?? "").trim();
+  const timezone = String(profile?.timezone ?? "").trim();
   if (!email && profileEmail) email = profileEmail;
 
   const companyResult = await supabase
@@ -90,6 +111,10 @@ export async function getCurrentUserIdentity(): Promise<CurrentUserIdentity> {
     fullName,
     displayName,
     resolvedName: resolveDisplayName({ fullName, displayName, email }),
+    avatarUrl,
+    phone,
+    jobTitle,
+    timezone,
     companyId,
     companyName,
   };

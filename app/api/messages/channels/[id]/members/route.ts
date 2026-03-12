@@ -54,11 +54,34 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     if (participantsResult.error) return serverError(participantsResult.error.message);
 
     const participants = participantsResult.data ?? [];
+    const participantUserIds = participants.map((row) => String(row.user_id));
     const names = await resolveDisplayNames(
       supabase,
       companyId,
-      participants.map((row) => String(row.user_id))
+      participantUserIds
     );
+    const avatarByUserId = new Map<string, string>();
+    if (participantUserIds.length > 0) {
+      const profilesResult = await supabase
+        .from("profiles")
+        .select("id, avatar_url")
+        .in("id", participantUserIds);
+      let profileRows: Array<Record<string, unknown>> = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+      if (profilesResult.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
+        const fallbackProfilesResult = await supabase
+          .from("profiles")
+          .select("id")
+          .in("id", participantUserIds);
+        profileRows = (fallbackProfilesResult.data ?? []) as Array<Record<string, unknown>>;
+      } else if (profilesResult.error) {
+        profileRows = [];
+      }
+      for (const row of profileRows) {
+        const profileId = String((row as { id?: string }).id ?? "").trim();
+        const avatarUrl = String((row as { avatar_url?: string }).avatar_url ?? "").trim();
+        if (profileId && avatarUrl) avatarByUserId.set(profileId, avatarUrl);
+      }
+    }
 
     return Response.json({
       items: participants.map((row, index) => ({
@@ -66,6 +89,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         userId: row.user_id,
         memberRole: index === 0 ? "owner" : "member",
         displayName: names.get(String(row.user_id)) || "Team Member",
+        avatarUrl: avatarByUserId.get(String(row.user_id)) || "",
         createdAt: row.created_at,
       })),
     });

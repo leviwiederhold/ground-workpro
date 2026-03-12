@@ -107,15 +107,31 @@ export async function GET(request: Request) {
       };
     }
 
-    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
+    if (profiles.error && /email|Could not find the 'email' column/i.test(profiles.error.message || "")) {
       const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, email").in("id", userIds)
+        ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
         : { data: [], error: null };
       profiles = {
-        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string; email?: string }) => ({
+        data: (fallbackProfiles.data ?? []).map(
+          (row: { id?: string; full_name?: string; display_name?: string; avatar_url?: string }) => ({
+            id: row.id,
+            full_name: row.full_name,
+            display_name: row.display_name,
+            avatar_url: row.avatar_url,
+          })
+        ),
+        error: fallbackProfiles.error,
+      };
+    }
+
+    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
+      const fallbackProfiles = userIds.length
+        ? await db.from("profiles").select("id, full_name").in("id", userIds)
+        : { data: [], error: null };
+      profiles = {
+        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string }) => ({
           id: row.id,
           full_name: row.full_name,
-          email: row.email,
         })),
         error: fallbackProfiles.error,
       };

@@ -280,10 +280,17 @@ export async function GET(request: Request) {
             .in("id", memberUserIds);
           profileRows = (fallbackProfilesWithDisplay.data ?? []) as Array<Record<string, unknown>>;
         }
+        if (profilesResult.error && /email|Could not find the 'email' column/i.test(profilesResult.error.message || "")) {
+          const fallbackProfilesWithoutEmail = await supabase
+            .from("profiles")
+            .select("id, full_name, display_name, avatar_url")
+            .in("id", memberUserIds);
+          profileRows = (fallbackProfilesWithoutEmail.data ?? []) as Array<Record<string, unknown>>;
+        }
         if (profilesResult.error && /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")) {
           const fallbackProfiles = await supabase
             .from("profiles")
-            .select("id, full_name, email")
+            .select("id, full_name")
             .in("id", memberUserIds);
           profileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
         }

@@ -19,7 +19,6 @@ const isMissingColumnError = (message: string | undefined) =>
 type ProfileRow = {
   full_name?: string | null;
   display_name?: string | null;
-  email?: string | null;
   phone?: string | null;
   job_title?: string | null;
   timezone?: string | null;
@@ -27,7 +26,7 @@ type ProfileRow = {
 };
 
 function normalizeProfile(row: ProfileRow | null | undefined, fallbackEmail: string) {
-  const email = String(row?.email ?? "").trim() || fallbackEmail;
+  const email = fallbackEmail;
   const fullName = String(row?.full_name ?? "").trim();
   const displayName = String(row?.display_name ?? "").trim();
   return {
@@ -45,21 +44,21 @@ function normalizeProfile(row: ProfileRow | null | undefined, fallbackEmail: str
 async function selectProfile(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
   let result = await supabase
     .from("profiles")
-    .select("full_name, display_name, email, phone, job_title, timezone, avatar_url")
+    .select("full_name, display_name, phone, job_title, timezone, avatar_url")
     .eq("id", userId)
     .maybeSingle();
 
   if (result.error && isMissingColumnError(result.error.message)) {
     result = await supabase
       .from("profiles")
-      .select("full_name, display_name, email")
+      .select("full_name, display_name")
       .eq("id", userId)
       .maybeSingle();
   }
   if (result.error && /display_name|Could not find the 'display_name' column/i.test(result.error.message || "")) {
     result = await supabase
       .from("profiles")
-      .select("full_name, email")
+      .select("full_name")
       .eq("id", userId)
       .maybeSingle();
   }
@@ -113,7 +112,6 @@ export async function PATCH(request: Request) {
       id: userId,
       full_name: payload.full_name,
       display_name: payload.display_name || null,
-      email: fallbackEmail || null,
       phone: payload.phone || null,
       job_title: payload.job_title || null,
       timezone: payload.timezone || null,
@@ -123,7 +121,7 @@ export async function PATCH(request: Request) {
     let upsertResult = await supabase
       .from("profiles")
       .upsert(updatePayload, { onConflict: "id" })
-      .select("full_name, display_name, email, phone, job_title, timezone, avatar_url")
+      .select("full_name, display_name, phone, job_title, timezone, avatar_url")
       .eq("id", userId)
       .maybeSingle();
 
@@ -135,11 +133,10 @@ export async function PATCH(request: Request) {
             id: userId,
             full_name: payload.full_name,
             display_name: payload.display_name || null,
-            email: fallbackEmail || null,
           },
           { onConflict: "id" }
         )
-        .select("full_name, display_name, email")
+        .select("full_name, display_name")
         .eq("id", userId)
         .maybeSingle();
     }
@@ -150,11 +147,10 @@ export async function PATCH(request: Request) {
           {
             id: userId,
             full_name: payload.full_name,
-            email: fallbackEmail || null,
           },
           { onConflict: "id" }
         )
-        .select("full_name, email")
+        .select("full_name")
         .eq("id", userId)
         .maybeSingle();
     }

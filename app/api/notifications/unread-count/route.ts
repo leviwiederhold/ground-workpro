@@ -28,11 +28,6 @@ export async function GET() {
       .eq('user_id', userId)
       .eq('is_read', false);
     const result = await query;
-    const fallbackCount = countFallbackUnread({
-      companyId,
-      userId,
-      companyWide: false,
-    });
 
     if (result.error && isMissingNotificationsColumns(result.error.message || '')) {
       const legacyQuery = await supabase
@@ -42,18 +37,23 @@ export async function GET() {
         .eq('user_id', userId)
         .is('read_at', null);
       if (!legacyQuery.error) {
-        return NextResponse.json({ item: { count: (legacyQuery.count ?? 0) + fallbackCount } });
+        return NextResponse.json({ item: { count: legacyQuery.count ?? 0 } });
       }
     }
 
     if (result.error) {
       if (isMissingNotificationsTable(result.error.message)) {
+        const fallbackCount = countFallbackUnread({
+          companyId,
+          userId,
+          companyWide: false,
+        });
         return NextResponse.json({ item: { count: fallbackCount } });
       }
       return NextResponse.json({ error: result.error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ item: { count: (result.count ?? 0) + fallbackCount } });
+    return NextResponse.json({ item: { count: result.count ?? 0 } });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

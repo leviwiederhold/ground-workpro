@@ -82,14 +82,16 @@ export default function NotificationsPage() {
     const response = await fetch("/api/notifications/read-all", { method: "POST" });
     if (!response.ok) return;
     setItems((prev) => prev.map((item) => ({ ...item, is_read: true })));
-  }, [items]);
+    await load();
+  }, [items, load]);
 
   const clearRead = useCallback(async () => {
     if (!items.some((item) => item.is_read)) return;
     const response = await fetch("/api/notifications/clear-read", { method: "POST" });
     if (!response.ok) return;
     setItems((prev) => prev.filter((item) => !item.is_read));
-  }, [items]);
+    await load();
+  }, [items, load]);
 
   const visibleItems = useMemo(
     () => (filter === "unread" ? items.filter((item) => !item.is_read) : items),

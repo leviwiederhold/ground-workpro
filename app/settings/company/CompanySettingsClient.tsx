@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 
 type CompanySettings = {
   company_name: string;
@@ -157,6 +158,9 @@ export function CompanySettingsClient() {
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <Link href="/" className="inline-flex items-center text-sm font-medium text-brand-600 hover:text-brand-700">
+          ← Back to Dashboard
+        </Link>
         <h1 className="text-2xl font-semibold text-gray-900">Company Settings</h1>
         <p className="mt-2 text-sm text-gray-600">
           Configure company profile defaults, branding, and formatting preferences.

@@ -651,6 +651,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const [notifications, setNotifications] = useState([]);
       const [notificationsLoading, setNotificationsLoading] = useState(false);
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+      const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
       const resolvedUserDisplayName = pickDisplayName({
@@ -914,6 +915,17 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         }
       }, []);
 
+      const loadUnreadMessagesCount = useCallback(async () => {
+        try {
+          const response = await fetch('/api/messages/inbox?pageSize=1', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) return;
+          setUnreadMessagesCount(Number(payload?.unread_count ?? 0));
+        } catch {
+          // no-op
+        }
+      }, []);
+
       const applyNotificationState = useCallback((nextItems) => {
         setNotifications(nextItems);
         setUnreadNotificationsCount(nextItems.filter((item) => !item.is_read).length);
@@ -1041,6 +1053,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           applyNotificationState(
             notifications.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? now }))
           );
+          await loadNotifications();
         } catch {
           // no-op
         }
@@ -1053,6 +1066,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           const response = await fetch('/api/notifications/clear-read', { method: 'POST' });
           if (!response.ok) return;
           applyNotificationState(notifications.filter((item) => !item.is_read));
+          await loadNotifications();
         } catch {
           // no-op
         }
@@ -1205,14 +1219,20 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       }, [loadNotifications]);
 
       useEffect(() => {
+        loadUnreadMessagesCount();
+      }, [loadUnreadMessagesCount]);
+
+      useEffect(() => {
         const poll = () => {
           if (typeof document !== 'undefined' && document.hidden) return;
           loadNotifications();
+          loadUnreadMessagesCount();
         };
         const intervalId = setInterval(poll, 30000);
         const onVisibilityChange = () => {
           if (!document.hidden) {
             loadNotifications();
+            loadUnreadMessagesCount();
           }
         };
         if (typeof document !== 'undefined') {
@@ -1224,7 +1244,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             document.removeEventListener('visibilitychange', onVisibilityChange);
           }
         };
-      }, [loadNotifications]);
+      }, [loadNotifications, loadUnreadMessagesCount]);
 
       useEffect(() => {
         const shouldLoad = currentView === 'dashboard' || currentView === 'safety';
@@ -1542,7 +1562,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       }, []);
 
       const navCountsByKey = {
-        messages: 3,
+        messages: unreadMessagesCount,
         jobs: jobs.filter(j => j.status === 'active').length,
         fleet: equipment.length,
         team: employees.length,
@@ -11903,41 +11923,14 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	        let avatarUrl = '';
 
 	        if (userId) {
-	          const profileWithDisplayName = await supabase
-	            .from('profiles')
-	            .select('full_name, display_name, email, avatar_url')
-	            .eq('id', userId)
-	            .maybeSingle();
-
-	          if (!profileWithDisplayName.error) {
-	            fullName = String(profileWithDisplayName.data?.full_name ?? '').trim();
-	            displayName = String(profileWithDisplayName.data?.display_name ?? '').trim();
-	            avatarUrl = String(profileWithDisplayName.data?.avatar_url ?? '').trim();
-	            const profileEmail = String(profileWithDisplayName.data?.email ?? '').trim();
-	            if (!email && profileEmail) email = profileEmail;
-	          } else if (/avatar_url|Could not find the 'avatar_url' column/i.test(profileWithDisplayName.error.message || '')) {
-	            const fallbackProfileWithDisplayName = await supabase
-	              .from('profiles')
-	              .select('full_name, display_name, email')
-	              .eq('id', userId)
-	              .maybeSingle();
-	            if (!fallbackProfileWithDisplayName.error) {
-	              fullName = String(fallbackProfileWithDisplayName.data?.full_name ?? '').trim();
-	              displayName = String(fallbackProfileWithDisplayName.data?.display_name ?? '').trim();
-	              const profileEmail = String(fallbackProfileWithDisplayName.data?.email ?? '').trim();
-	              if (!email && profileEmail) email = profileEmail;
-	            }
-	          } else if (/display_name|Could not find the 'display_name' column/i.test(profileWithDisplayName.error.message || '')) {
-	            const fallbackProfile = await supabase
-	              .from('profiles')
-	              .select('full_name, email')
-	              .eq('id', userId)
-	              .maybeSingle();
-	            if (!fallbackProfile.error) {
-	              fullName = String(fallbackProfile.data?.full_name ?? '').trim();
-	              const profileEmail = String(fallbackProfile.data?.email ?? '').trim();
-	              if (!email && profileEmail) email = profileEmail;
-	            }
+	          const profileResponse = await fetch('/api/profile', { cache: 'no-store' }).catch(() => null);
+	          const profilePayload = profileResponse ? await profileResponse.json().catch(() => ({})) : {};
+	          if (profileResponse?.ok) {
+	            fullName = String(profilePayload?.item?.full_name ?? '').trim();
+	            displayName = String(profilePayload?.item?.display_name ?? '').trim();
+	            avatarUrl = String(profilePayload?.item?.avatar_url ?? '').trim();
+	            const resolvedEmail = String(profilePayload?.item?.email ?? '').trim();
+	            if (!email && resolvedEmail) email = resolvedEmail;
 	          }
 	        }
 

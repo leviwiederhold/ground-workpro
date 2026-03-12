@@ -105,15 +105,14 @@ export async function GET(request: Request) {
       }
     }
 
-    const fallbackRows = listFallbackNotifications({
-      companyId,
-      userId,
-      companyWide: false,
-      limit,
-    });
-
     if (resultError) {
       if (isMissingNotificationsTable(resultError.message)) {
+        const fallbackRows = listFallbackNotifications({
+          companyId,
+          userId,
+          companyWide: false,
+          limit,
+        });
         const items = fallbackRows.map((row) => {
           const payload = (row.payload ?? {}) as Record<string, unknown>;
           const display = formatNotification(row.type, payload);
@@ -167,34 +166,7 @@ export async function GET(request: Request) {
       };
     });
 
-    const fallbackItems = fallbackRows.map((row) => {
-      const payload = (row.payload ?? {}) as Record<string, unknown>;
-      const display = formatNotification(row.type, payload);
-      const isRead = Boolean((row as { is_read?: boolean }).is_read ?? row.read_at);
-      return {
-        id: row.id,
-        userId: row.user_id,
-        type: row.type,
-        notification_type: row.type,
-        title: display.title,
-        message: display.message,
-        body: display.message,
-        link: String(display.link ?? payload.href ?? ''),
-        actor_user_id: null,
-        entity_type: null,
-        entity_id: null,
-        payload,
-        is_read: isRead,
-        read_at: row.read_at,
-        created_at: row.created_at,
-      };
-    });
-
-    const mergedItems = [...items, ...fallbackItems]
-      .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
-      .slice(0, limit);
-
-    return NextResponse.json({ items: mergedItems });
+    return NextResponse.json({ items });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

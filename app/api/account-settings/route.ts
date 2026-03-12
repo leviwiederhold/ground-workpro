@@ -23,7 +23,6 @@ const isMissingColumnError = (message: string | undefined) =>
 type SettingsRow = {
   full_name?: string | null;
   display_name?: string | null;
-  email?: string | null;
   timezone?: string | null;
   appearance_preference?: string | null;
   notification_preferences?: Record<string, unknown> | null;
@@ -40,7 +39,7 @@ function normalizeNotificationPreferences(value: unknown) {
 }
 
 function normalizeSettings(row: SettingsRow | null | undefined, fallbackEmail: string) {
-  const email = String(row?.email ?? "").trim() || fallbackEmail;
+  const email = fallbackEmail;
   const fullName = String(row?.full_name ?? "").trim();
   const displayName = String(row?.display_name ?? "").trim();
   return {
@@ -57,20 +56,20 @@ function normalizeSettings(row: SettingsRow | null | undefined, fallbackEmail: s
 async function selectSettings(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
   let result = await supabase
     .from("profiles")
-    .select("full_name, display_name, email, timezone, appearance_preference, notification_preferences")
+    .select("full_name, display_name, timezone, appearance_preference, notification_preferences")
     .eq("id", userId)
     .maybeSingle();
   if (result.error && isMissingColumnError(result.error.message)) {
     result = await supabase
       .from("profiles")
-      .select("full_name, display_name, email")
+      .select("full_name, display_name")
       .eq("id", userId)
       .maybeSingle();
   }
   if (result.error && /display_name|Could not find the 'display_name' column/i.test(result.error.message || "")) {
     result = await supabase
       .from("profiles")
-      .select("full_name, email")
+      .select("full_name")
       .eq("id", userId)
       .maybeSingle();
   }
@@ -119,7 +118,6 @@ export async function PATCH(request: Request) {
     const payload = parsed.data;
     const updatePayload = {
       id: userId,
-      email: fallbackEmail || null,
       timezone: payload.timezone || null,
       appearance_preference: payload.appearance || "system",
       notification_preferences: payload.notification_preferences || {},
@@ -128,7 +126,7 @@ export async function PATCH(request: Request) {
     let upsertResult = await supabase
       .from("profiles")
       .upsert(updatePayload, { onConflict: "id" })
-      .select("full_name, display_name, email, timezone, appearance_preference, notification_preferences")
+      .select("full_name, display_name, timezone, appearance_preference, notification_preferences")
       .eq("id", userId)
       .maybeSingle();
 
@@ -138,11 +136,10 @@ export async function PATCH(request: Request) {
         .upsert(
           {
             id: userId,
-            email: fallbackEmail || null,
           },
           { onConflict: "id" }
         )
-        .select("full_name, display_name, email")
+        .select("full_name, display_name")
         .eq("id", userId)
         .maybeSingle();
     }
@@ -152,11 +149,10 @@ export async function PATCH(request: Request) {
         .upsert(
           {
             id: userId,
-            email: fallbackEmail || null,
           },
           { onConflict: "id" }
         )
-        .select("full_name, email")
+        .select("full_name")
         .eq("id", userId)
         .maybeSingle();
     }

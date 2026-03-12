@@ -1,11 +1,25 @@
 export type AppearancePreference = "light" | "dark" | "system";
 
 export const APPEARANCE_STORAGE_KEY = "groundwork.appearance";
+const PUBLIC_THEME_PREFIXES = ["/login", "/signup", "/forgot-password", "/proposal/"];
+const PUBLIC_THEME_EXACT_PATHS = new Set(["/features", "/pricing", "/testimonials"]);
 
 export function normalizeAppearancePreference(value: unknown): AppearancePreference {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return "system";
+}
+
+export function isPublicThemePath(pathname: string | null | undefined): boolean {
+  const normalized = String(pathname ?? "").trim() || "/";
+  if (normalized === "/") return false;
+  if (PUBLIC_THEME_EXACT_PATHS.has(normalized)) return true;
+  return PUBLIC_THEME_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+export function hasStoredAuthSessionCookie(cookieValue: string | null | undefined): boolean {
+  const raw = String(cookieValue ?? "");
+  return /(?:^|;\s*)sb-[^=;]+-auth-token=/.test(raw);
 }
 
 export function resolveTheme(preference: AppearancePreference): "light" | "dark" {

@@ -1,17 +1,23 @@
 "use client";
 
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import {
   applyAppearancePreference,
+  hasStoredAuthSessionCookie,
+  isPublicThemePath,
   loadStoredAppearancePreference,
   normalizeAppearancePreference,
   type AppearancePreference,
 } from "@/lib/theme/appearance";
 
 export function ThemeInitializer() {
+  const pathname = usePathname();
+
   useEffect(() => {
     let cancelled = false;
+    const isPublicPath = isPublicThemePath(pathname);
 
     const applyStored = () => {
       const stored = loadStoredAppearancePreference();
@@ -41,6 +47,16 @@ export function ThemeInitializer() {
       }
     };
 
+    if (isPublicPath) {
+      applyAppearancePreference("light");
+      return;
+    }
+
+    if (pathname === "/" && !hasStoredAuthSessionCookie(typeof document !== "undefined" ? document.cookie : "")) {
+      applyAppearancePreference("light");
+      return;
+    }
+
     applyStored();
     void syncFromAccountSettings();
 
@@ -60,7 +76,7 @@ export function ThemeInitializer() {
       media.removeEventListener("change", onSystemChanged);
       window.removeEventListener("appearance:change", onAppearanceChange);
     };
-  }, []);
+  }, [pathname]);
 
   return null;
 }

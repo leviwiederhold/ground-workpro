@@ -299,11 +299,7 @@ export async function GET(request: Request) {
     const companyProfile = companyResult.error ? null : companyResult.data;
     const companySettingsCompleted = Boolean(
       String(companyProfile?.name ?? "").trim() &&
-      String(companyProfile?.phone ?? "").trim() &&
-      String(companyProfile?.email ?? "").trim() &&
-      String(companyProfile?.address ?? "").trim() &&
-      String(companyProfile?.currency ?? "").trim() &&
-      String(companyProfile?.date_format ?? "").trim()
+      String(companyProfile?.timezone ?? "").trim()
     );
     const companyTimezoneConfigured = Boolean(String(companyProfile?.timezone ?? "").trim());
     const companyLogoUploaded = Boolean(String(companyProfile?.company_logo ?? "").trim());

@@ -39,12 +39,14 @@ const defaultSettings: AccountSettingsItem = {
 
 export function AccountSettingsClient() {
   const searchParams = useSearchParams();
-  const backHref = searchParams.get("onboarding") === "1" ? "/setup" : "/";
+  const isOnboarding = searchParams.get("onboarding") === "1";
+  const backHref = isOnboarding ? "/setup" : "/";
   const [settings, setSettings] = useState<AccountSettingsItem>(defaultSettings);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +86,7 @@ export function AccountSettingsClient() {
     setSaving(true);
     setStatus("");
     setError("");
+    setFieldErrors({});
     try {
       const response = await fetch("/api/account-settings", {
         method: "PATCH",
@@ -96,6 +99,18 @@ export function AccountSettingsClient() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.item) {
+        const details = Array.isArray(payload?.details) ? payload.details : [];
+        if (details.length > 0) {
+          const nextFieldErrors: Record<string, string> = {};
+          for (const detail of details) {
+            const key = String(detail?.path ?? "").trim();
+            if (!key || nextFieldErrors[key]) continue;
+            nextFieldErrors[key] = String(detail?.message ?? "Invalid value");
+          }
+          setFieldErrors(nextFieldErrors);
+          setError("Please fix the highlighted fields.");
+          return;
+        }
         throw new Error(payload?.error || "Failed to save account settings");
       }
       setSettings((prev) => ({
@@ -158,16 +173,18 @@ export function AccountSettingsClient() {
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Timezone</span>
               <input
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={`w-full rounded-lg px-3 py-2 ${fieldErrors.timezone ? "border border-red-400 bg-red-50" : "border border-gray-300"}`}
                 value={settings.timezone}
                 onChange={(event) => setSettings((prev) => ({ ...prev, timezone: event.target.value }))}
                 placeholder="America/New_York"
+                aria-invalid={fieldErrors.timezone ? "true" : "false"}
               />
+              {fieldErrors.timezone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.timezone}</span> : null}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Appearance</span>
               <select
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={`w-full rounded-lg px-3 py-2 ${fieldErrors.appearance ? "border border-red-400 bg-red-50" : "border border-gray-300"}`}
                 value={settings.appearance}
                 onChange={(event) =>
                   {
@@ -179,11 +196,13 @@ export function AccountSettingsClient() {
                     setAppearancePreference(nextAppearance);
                   }
                 }
+                aria-invalid={fieldErrors.appearance ? "true" : "false"}
               >
                 <option value="system">System</option>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
               </select>
+              {fieldErrors.appearance ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.appearance}</span> : null}
             </label>
           </div>
 
@@ -240,6 +259,14 @@ export function AccountSettingsClient() {
             >
               {saving ? "Saving..." : "Save Account Settings"}
             </button>
+            {isOnboarding ? (
+              <Link
+                href="/"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Skip for now
+              </Link>
+            ) : null}
           </div>
         </div>
 

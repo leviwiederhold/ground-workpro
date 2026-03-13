@@ -254,11 +254,7 @@ export async function GET() {
     const derivedChecklistCompleted: Record<string, boolean> = {
       complete_company_settings: Boolean(
         String(companyProfile?.name ?? "").trim() &&
-          String(companyProfile?.phone ?? "").trim() &&
-          String(companyProfile?.email ?? "").trim() &&
-          String(companyProfile?.address ?? "").trim() &&
-          String(companyProfile?.currency ?? "").trim() &&
-          String(companyProfile?.date_format ?? "").trim()
+          String(companyProfile?.timezone ?? "").trim()
       ),
       upload_company_logo: Boolean(String(companyProfile?.company_logo ?? "").trim()),
       set_company_timezone: Boolean(String(companyProfile?.timezone ?? "").trim()),

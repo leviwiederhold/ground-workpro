@@ -5,7 +5,7 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 
 const companySettingsSchema = z.object({
-  company_name: z.string().trim().min(1).max(160),
+  company_name: z.string().trim().min(1, "Company name is required.").max(160),
   timezone: z.string().trim().max(120).optional().or(z.literal("")),
   phone: z.string().trim().max(60).optional(),
   email: z.string().trim().email().max(160).optional().or(z.literal("")),

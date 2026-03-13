@@ -65,6 +65,8 @@ export function CompanySettingsClient() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const getFieldClassName = (field: keyof CompanySettings) =>
+    `w-full rounded-lg px-3 py-2 ${fieldErrors[field] ? "border border-red-400 bg-red-50" : "border border-gray-300"}`;
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -114,6 +116,14 @@ export function CompanySettingsClient() {
     setSuccess("");
     setFieldErrors({});
     try {
+      const nextFieldErrors: Record<string, string> = {};
+      if (!settings.company_name.trim()) nextFieldErrors.company_name = "Company name is required.";
+      if (isOnboarding && !settings.timezone.trim()) nextFieldErrors.timezone = "Please select a timezone.";
+      if (Object.keys(nextFieldErrors).length > 0) {
+        setFieldErrors(nextFieldErrors);
+        setError("Please fix the highlighted fields.");
+        return;
+      }
       const response = await fetch("/api/company/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -225,22 +235,24 @@ export function CompanySettingsClient() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Company Name</span>
+                <span className="mb-1 block text-gray-600">Company Name <span className="text-red-500">*</span></span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("company_name")}
                   value={settings.company_name}
                   onChange={(event) => setSettings((prev) => ({ ...prev, company_name: event.target.value }))}
                   required
+                  aria-invalid={fieldErrors.company_name ? "true" : "false"}
                 />
                 {fieldErrors.company_name ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.company_name}</span> : null}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Timezone</span>
+                <span className="mb-1 block text-gray-600">Timezone {isOnboarding ? <span className="text-red-500">*</span> : <span className="text-gray-400">(optional)</span>}</span>
                 <select
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("timezone")}
                   value={settings.timezone}
                   onChange={(event) => setSettings((prev) => ({ ...prev, timezone: event.target.value }))}
+                  aria-invalid={fieldErrors.timezone ? "true" : "false"}
                 >
                   <option value="">Select timezone</option>
                   {TIMEZONE_OPTIONS.map((option) => (
@@ -253,61 +265,70 @@ export function CompanySettingsClient() {
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Phone</span>
+                <span className="mb-1 block text-gray-600">Phone (optional)</span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("phone")}
                   value={settings.phone}
                   onChange={(event) => setSettings((prev) => ({ ...prev, phone: event.target.value }))}
+                  aria-invalid={fieldErrors.phone ? "true" : "false"}
                 />
+                {fieldErrors.phone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.phone}</span> : null}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Email</span>
+                <span className="mb-1 block text-gray-600">Email (optional)</span>
                 <input
                   type="email"
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("email")}
                   value={settings.email}
                   onChange={(event) => setSettings((prev) => ({ ...prev, email: event.target.value }))}
+                  aria-invalid={fieldErrors.email ? "true" : "false"}
                 />
                 {fieldErrors.email ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.email}</span> : null}
               </label>
 
               <label className="text-sm sm:col-span-2">
-                <span className="mb-1 block text-gray-600">Address</span>
+                <span className="mb-1 block text-gray-600">Address (optional)</span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("address")}
                   value={settings.address}
                   onChange={(event) => setSettings((prev) => ({ ...prev, address: event.target.value }))}
+                  aria-invalid={fieldErrors.address ? "true" : "false"}
                 />
+                {fieldErrors.address ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.address}</span> : null}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Website</span>
+                <span className="mb-1 block text-gray-600">Website (optional)</span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("website")}
                   value={settings.website}
                   onChange={(event) => setSettings((prev) => ({ ...prev, website: event.target.value }))}
                   placeholder="https://example.com"
+                  aria-invalid={fieldErrors.website ? "true" : "false"}
                 />
+                {fieldErrors.website ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.website}</span> : null}
               </label>
 
               {!isOnboarding ? (
                 <label className="text-sm">
                   <span className="mb-1 block text-gray-600">Industry / Trade</span>
                   <input
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                    className={getFieldClassName("industry")}
                     value={settings.industry}
                     onChange={(event) => setSettings((prev) => ({ ...prev, industry: event.target.value }))}
+                    aria-invalid={fieldErrors.industry ? "true" : "false"}
                   />
+                  {fieldErrors.industry ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.industry}</span> : null}
                 </label>
               ) : null}
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Employee Count</span>
+                <span className="mb-1 block text-gray-600">Employee Count (optional)</span>
                 <input
                   type="number"
                   min={0}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("employee_count")}
                   value={settings.employee_count ?? ""}
                   onChange={(event) =>
                     setSettings((prev) => ({
@@ -315,37 +336,45 @@ export function CompanySettingsClient() {
                       employee_count: event.target.value === "" ? null : Number(event.target.value),
                     }))
                   }
+                  aria-invalid={fieldErrors.employee_count ? "true" : "false"}
                 />
+                {fieldErrors.employee_count ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.employee_count}</span> : null}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Default Work Hours</span>
+                <span className="mb-1 block text-gray-600">Default Work Hours (optional)</span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("default_work_hours")}
                   value={settings.default_work_hours}
                   onChange={(event) => setSettings((prev) => ({ ...prev, default_work_hours: event.target.value }))}
                   placeholder="7:00 AM - 3:30 PM"
+                  aria-invalid={fieldErrors.default_work_hours ? "true" : "false"}
                 />
+                {fieldErrors.default_work_hours ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.default_work_hours}</span> : null}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Currency</span>
+                <span className="mb-1 block text-gray-600">Currency (optional)</span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 uppercase"
+                  className={getFieldClassName("currency")}
                   value={settings.currency}
                   onChange={(event) => setSettings((prev) => ({ ...prev, currency: event.target.value.toUpperCase() }))}
                   placeholder="USD"
+                  aria-invalid={fieldErrors.currency ? "true" : "false"}
                 />
+                {fieldErrors.currency ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.currency}</span> : null}
               </label>
 
               <label className="text-sm">
-                <span className="mb-1 block text-gray-600">Date Format</span>
+                <span className="mb-1 block text-gray-600">Date Format (optional)</span>
                 <input
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                  className={getFieldClassName("date_format")}
                   value={settings.date_format}
                   onChange={(event) => setSettings((prev) => ({ ...prev, date_format: event.target.value }))}
                   placeholder="MM/DD/YYYY"
+                  aria-invalid={fieldErrors.date_format ? "true" : "false"}
                 />
+                {fieldErrors.date_format ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.date_format}</span> : null}
               </label>
             </div>
 

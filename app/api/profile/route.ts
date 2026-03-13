@@ -5,7 +5,7 @@ import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 
 const profileSchema = z.object({
-  full_name: z.string().trim().min(1).max(160),
+  full_name: z.string().trim().min(1, "Full name is required.").max(160),
   display_name: z.string().trim().max(160).optional().or(z.literal("")),
   phone: z.string().trim().max(60).optional().or(z.literal("")),
   job_title: z.string().trim().max(120).optional().or(z.literal("")),

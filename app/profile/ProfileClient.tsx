@@ -39,7 +39,8 @@ async function toDataUrl(file: File) {
 
 export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite }) {
   const searchParams = useSearchParams();
-  const backHref = searchParams.get("onboarding") === "1" ? "/setup" : "/";
+  const isOnboarding = searchParams.get("onboarding") === "1";
+  const backHref = isOnboarding ? "/setup" : "/";
   const [form, setForm] = useState<ProfileForm>({
     full_name: identity.fullName || "",
     display_name: identity.displayName || "",
@@ -52,6 +53,10 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const getFieldClassName = (field: keyof ProfileForm) =>
+    `w-full rounded-lg px-3 py-2 ${fieldErrors[field] ? "border border-red-400 bg-red-50" : "border border-gray-300"}`;
 
   const resolvedName = useMemo(
     () => {
@@ -85,7 +90,13 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
     setSaving(true);
     setStatus("");
     setError("");
+    setFieldErrors({});
     try {
+      if (!form.full_name.trim()) {
+        setFieldErrors({ full_name: "Full name is required." });
+        setError("Please fix the highlighted fields.");
+        return;
+      }
       const response = await fetch("/api/profile", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -100,6 +111,18 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.item) {
+        const details = Array.isArray(payload?.details) ? payload.details : [];
+        if (details.length > 0) {
+          const nextFieldErrors: Record<string, string> = {};
+          for (const detail of details) {
+            const key = String(detail?.path ?? "").trim();
+            if (!key || nextFieldErrors[key]) continue;
+            nextFieldErrors[key] = String(detail?.message ?? "Invalid value");
+          }
+          setFieldErrors(nextFieldErrors);
+          setError("Please fix the highlighted fields.");
+          return;
+        }
         throw new Error(payload?.error || "Failed to save profile");
       }
       const item = payload.item as ProfileForm;
@@ -173,20 +196,24 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
 
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="block text-sm">
-              <span className="mb-1 block font-medium text-gray-700">Full Name</span>
+              <span className="mb-1 block font-medium text-gray-700">Full Name <span className="text-red-500">*</span></span>
               <input
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={getFieldClassName("full_name")}
                 value={form.full_name}
                 onChange={(event) => setForm((prev) => ({ ...prev, full_name: event.target.value }))}
+                aria-invalid={fieldErrors.full_name ? "true" : "false"}
               />
+              {fieldErrors.full_name ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.full_name}</span> : null}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Display Name (optional)</span>
               <input
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={getFieldClassName("display_name")}
                 value={form.display_name}
                 onChange={(event) => setForm((prev) => ({ ...prev, display_name: event.target.value }))}
+                aria-invalid={fieldErrors.display_name ? "true" : "false"}
               />
+              {fieldErrors.display_name ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.display_name}</span> : null}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Email</span>
@@ -195,27 +222,33 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Phone</span>
               <input
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={getFieldClassName("phone")}
                 value={form.phone}
                 onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
+                aria-invalid={fieldErrors.phone ? "true" : "false"}
               />
+              {fieldErrors.phone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.phone}</span> : null}
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Job Title (optional)</span>
               <input
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={getFieldClassName("job_title")}
                 value={form.job_title}
                 onChange={(event) => setForm((prev) => ({ ...prev, job_title: event.target.value }))}
+                aria-invalid={fieldErrors.job_title ? "true" : "false"}
               />
+              {fieldErrors.job_title ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.job_title}</span> : null}
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block font-medium text-gray-700">Timezone</span>
+              <span className="mb-1 block font-medium text-gray-700">Timezone (optional)</span>
               <input
-                className="w-full rounded-lg border border-gray-300 px-3 py-2"
+                className={getFieldClassName("timezone")}
                 value={form.timezone}
                 onChange={(event) => setForm((prev) => ({ ...prev, timezone: event.target.value }))}
                 placeholder="America/New_York"
+                aria-invalid={fieldErrors.timezone ? "true" : "false"}
               />
+              {fieldErrors.timezone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.timezone}</span> : null}
             </label>
           </div>
 
@@ -226,11 +259,19 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || !form.full_name.trim()}
+              disabled={saving}
               className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? "Saving..." : "Save Profile"}
             </button>
+            {isOnboarding ? (
+              <Link
+                href="/"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Skip for now
+              </Link>
+            ) : null}
             <p className="text-xs text-gray-500">Display fallback: full name, display name, email, Team Member.</p>
           </div>
         </div>

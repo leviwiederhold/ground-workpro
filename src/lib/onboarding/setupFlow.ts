@@ -11,6 +11,7 @@ export type SetupStep = {
   description: string;
   href: string;
   scope: SetupStepScope;
+  required: boolean;
   completed: boolean;
 };
 
@@ -21,6 +22,7 @@ type SetupRole = AppRole;
 type SetupStatus = {
   role: SetupRole;
   required_steps: SetupStep[];
+  optional_steps: SetupStep[];
   is_complete: boolean;
   next_step_href: string | null;
 };
@@ -31,6 +33,7 @@ const PROFILE_STEP: SetupStepDef = {
   description: "Add your personal identity details used throughout the app.",
   href: "/profile?onboarding=1",
   scope: "user",
+  required: false,
 };
 
 const ACCOUNT_STEP: SetupStepDef = {
@@ -39,6 +42,7 @@ const ACCOUNT_STEP: SetupStepDef = {
   description: "Set your user-level preferences such as notifications and timezone.",
   href: "/settings/account?onboarding=1",
   scope: "user",
+  required: false,
 };
 
 const COMPANY_STEP: SetupStepDef = {
@@ -47,6 +51,7 @@ const COMPANY_STEP: SetupStepDef = {
   description: "Configure your company profile defaults and required business details.",
   href: "/settings/company?onboarding=1",
   scope: "company",
+  required: true,
 };
 
 const isMissingOnboardingTable = (message: string | undefined) =>
@@ -56,8 +61,16 @@ const isMissingColumnError = (message: string | undefined) =>
   /column|Could not find the/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
 
 function getRequiredSetupStepDefs(role: SetupRole): SetupStepDef[] {
-  if (role === "admin") return [PROFILE_STEP, ACCOUNT_STEP, COMPANY_STEP];
-  return [PROFILE_STEP, ACCOUNT_STEP];
+  if (role === "admin") return [{ ...COMPANY_STEP, required: true }];
+  return [];
+}
+
+function getOptionalSetupStepDefs(role: SetupRole): SetupStepDef[] {
+  if (role === "admin") return [{ ...PROFILE_STEP, required: false }, { ...ACCOUNT_STEP, required: false }];
+  return [
+    { ...PROFILE_STEP, required: false },
+    { ...ACCOUNT_STEP, required: false },
+  ];
 }
 
 async function resolveRole(
@@ -138,13 +151,7 @@ function isAccountDerivedComplete(profile: Record<string, unknown> | null) {
 
 function isCompanyDerivedComplete(company: Record<string, unknown> | null) {
   if (!company) return false;
-  return (
-    hasTruthy(company.name) &&
-    hasTruthy(company.timezone) &&
-    hasTruthy(company.phone) &&
-    hasTruthy(company.email) &&
-    hasTruthy(company.address)
-  );
+  return hasTruthy(company.name) && hasTruthy(company.timezone);
 }
 
 function isStepCompletedByRecord(
@@ -170,7 +177,8 @@ export async function getSetupStatusForUser(input: {
   const { supabase, companyId, userId, userEmail } = input;
   const role = await resolveRole(supabase, companyId, userId);
   const requiredDefs = getRequiredSetupStepDefs(role);
-  const requiredKeys = requiredDefs.map((step) => step.key);
+  const optionalDefs = getOptionalSetupStepDefs(role);
+  const requiredKeys = [...new Set([...requiredDefs, ...optionalDefs].map((step) => step.key))];
 
   const checklistResult = await supabase
     .from("onboarding_checklist")
@@ -189,7 +197,7 @@ export async function getSetupStatusForUser(input: {
     role === "admin" ? loadCompanyForSetup(supabase, companyId) : Promise.resolve(null),
   ]);
 
-  const required_steps = requiredDefs.map((def) => {
+  const mapStep = (def: SetupStepDef) => {
     const byRecord = isStepCompletedByRecord(
       checklistRows as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
       def.key,
@@ -206,12 +214,16 @@ export async function getSetupStatusForUser(input: {
       ...def,
       completed: byRecord || byDerived,
     };
-  });
+  };
+
+  const required_steps = requiredDefs.map(mapStep);
+  const optional_steps = optionalDefs.map(mapStep);
 
   const firstIncomplete = required_steps.find((step) => !step.completed) ?? null;
   return {
     role,
     required_steps,
+    optional_steps,
     is_complete: !firstIncomplete,
     next_step_href: firstIncomplete?.href ?? null,
   };

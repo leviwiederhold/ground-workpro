@@ -2,7 +2,7 @@
 // @ts-nocheck
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 export function ScheduleView({ equipment, employees, scheduleData, setScheduleData, currentRole, setShowModal, ui }) {
   const { Card, Button, Icon } = ui;
   const [currentWeek, setCurrentWeek] = useState(0);
@@ -41,15 +41,16 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const weekStartKey = asDateKey(weekDates[0]);
   const weekDateKeys = weekDates.map((date) => asDateKey(date));
   const isFieldRole = ['foreman', 'mechanic', 'operator'].includes(currentRole);
+  const employeesRef = useRef(employees);
+  const equipmentRef = useRef(equipment);
 
-  const employeeMap = useMemo(
-    () => new Map(employees.map((employee) => [String(employee.id), employee])),
-    [employees]
-  );
-  const equipmentMap = useMemo(
-    () => new Map(equipment.map((item) => [String(item.id), item])),
-    [equipment]
-  );
+  useEffect(() => {
+    employeesRef.current = employees;
+  }, [employees]);
+
+  useEffect(() => {
+    equipmentRef.current = equipment;
+  }, [equipment]);
 
   const bucketEventsByWeekDate = useCallback((events) => {
     const buckets = {};
@@ -78,7 +79,8 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const loadWeekAssignments = useCallback(async () => {
     try {
       setScheduleLoading(true);
-      setScheduleError('');
+      const employeeMap = new Map((employeesRef.current || []).map((employee) => [String(employee.id), employee]));
+      const equipmentMap = new Map((equipmentRef.current || []).map((item) => [String(item.id), item]));
       if (isFieldRole) {
         const response = await fetch(`/api/schedule/my-week?start=${weekStartKey}`, { cache: 'no-store' });
         const payload = await response.json().catch(() => ({}));
@@ -86,6 +88,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
           setScheduleError(payload?.error || 'Failed to load schedule assignments.');
           return;
         }
+        setScheduleError('');
         setScheduleWarning('');
 
         const nextSchedule = {};
@@ -126,6 +129,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
         setScheduleError(assignmentsPayload?.error || 'Failed to load schedule assignments.');
         return;
       }
+      setScheduleError('');
       setScheduleWarning('');
 
       const nextSchedule = {};
@@ -163,7 +167,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     } finally {
       setScheduleLoading(false);
     }
-  }, [equipmentMap, employeeMap, isFieldRole, setScheduleData, weekStartKey, bucketEventsByWeekDate]);
+  }, [isFieldRole, setScheduleData, weekStartKey, bucketEventsByWeekDate]);
 
   useEffect(() => {
     loadWeekAssignments();
@@ -343,7 +347,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   return (
     <div className="space-y-4">
       {/* Header */}
-      <Card className="p-3 sm:p-4 bg-white/90 backdrop-blur border border-gray-200/80 shadow-sm">
+      <Card className="border border-gray-200/80 bg-white/90 p-3 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-[#090909] sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <Button variant="secondary" size="sm" onClick={() => setCurrentWeek(w => w - 1)}>
@@ -367,17 +371,17 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
 
       <div className="overflow-x-auto">
           <Card
-            className="p-0 min-w-[880px] border border-gray-200/80 shadow-sm"
+            className="min-w-[880px] border border-gray-200/80 p-0 shadow-sm dark:border-zinc-800 dark:bg-[#090909]"
             aria-busy={scheduleLoading || Boolean(movingEventId)}
           >
             {/* Days Header */}
-            <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] border-b border-gray-200 bg-gray-50/70">
-              <div className="border-r border-gray-200" />
+            <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] border-b border-gray-200 bg-gray-50/70 dark:border-zinc-800 dark:bg-[#090909]">
+              <div className="border-r border-gray-200 dark:border-zinc-800" />
               {weekDates.map((date, i) => {
                 const isToday = date.toDateString() === new Date().toDateString();
                 return (
-                  <div key={i} className={`p-3 text-center border-r border-gray-200 last:border-r-0 ${isToday ? 'bg-brand-50/80' : ''}`}>
-                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
+                  <div key={i} className={`border-r border-gray-200 p-3 text-center last:border-r-0 dark:border-zinc-800 ${isToday ? 'bg-brand-50/80 dark:bg-brand-950/30' : ''}`}>
+                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-zinc-500">{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                     <div className={`text-xl font-semibold mt-0.5 ${isToday ? 'text-brand-600' : 'text-gray-900'}`}>{date.getDate()}</div>
                   </div>
                 );
@@ -385,14 +389,14 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
             </div>
 
             <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))]">
-              <div className="relative border-r border-gray-200 bg-gray-50/40" style={{ height: `${timelineHeight}px` }}>
+              <div className="relative border-r border-gray-200 bg-gray-50/40 dark:border-zinc-800 dark:bg-[#050505]" style={{ height: `${timelineHeight}px` }}>
                 <div className="relative" style={{ height: `${timelineHeight}px` }}>
                   {timeGridHours.map((hour) => {
                     const top = (hour - TIME_GRID_START_HOUR) * TIME_SLOT_HEIGHT;
                     return (
                       <div key={`time-label-${hour}`} className="absolute inset-x-0" style={{ top: `${top}px` }}>
                         <div className="h-px bg-transparent" />
-                        <div className="px-2 text-[10px] font-medium leading-none text-gray-500" style={{ transform: 'translateY(-2px)' }}>
+                        <div className="px-2 text-[10px] font-medium leading-none text-gray-500 dark:text-zinc-500" style={{ transform: 'translateY(-2px)' }}>
                           {formatHourLabel(hour)}
                         </div>
                       </div>
@@ -412,7 +416,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                   <div
                     key={i}
                     data-testid={`schedule-day-${dateKey}`}
-                    className="border-r border-gray-200 last:border-r-0 transition-colors bg-white"
+                    className="border-r border-gray-200 bg-white transition-colors last:border-r-0 dark:border-zinc-800 dark:bg-[#050505]"
                   >
                     <div
                       className="relative"
@@ -424,7 +428,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                           <div
                             key={`${dateKey}-hour-line-${hour}`}
                             data-testid={`schedule-time-cell-${dateKey}-${hour}`}
-                            className="absolute inset-x-0 border-t border-gray-100 cursor-pointer hover:bg-brand-50/40"
+                            className="absolute inset-x-0 cursor-pointer border-t border-gray-100 hover:bg-brand-50/40 dark:border-zinc-900 dark:hover:bg-brand-950/20"
                             style={{ top: `${top}px`, height: `${TIME_SLOT_HEIGHT}px` }}
                             onDragOver={(dragEvent) => {
                               dragEvent.preventDefault();
@@ -451,8 +455,8 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                             data-testid={`schedule-time-assignment-${item.id}`}
                             className={`absolute left-2 right-2 z-10 text-[10px] truncate rounded px-2 py-0.5 border ${
                               item.type === 'equipment'
-                                ? 'bg-blue-100/95 text-blue-800 border-blue-300'
-                                : 'bg-emerald-100/95 text-emerald-800 border-emerald-300'
+                                ? 'border-blue-300 bg-blue-100/95 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/60 dark:text-blue-100'
+                                : 'border-emerald-300 bg-emerald-100/95 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/60 dark:text-emerald-100'
                             }`}
                             style={{ top: `${top}px` }}
                             onClick={(clickEvent) => clickEvent.stopPropagation()}
@@ -507,15 +511,15 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
           </Card>
       </div>
 
-      <p className="text-sm text-gray-500">
+      <p className="text-sm text-gray-500 dark:text-zinc-400">
         <Icon name="circle-info" className="mr-1" />
         Click a time slot to open Add Event.
       </p>
       {scheduleWarning && (
-        <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700">{scheduleWarning}</p>
+        <p data-testid="schedule-conflict-warning" className="text-sm text-yellow-700 dark:text-yellow-300">{scheduleWarning}</p>
       )}
       {scheduleError && (
-        <p className="text-sm text-red-600">{scheduleError}</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">{scheduleError}</div>
       )}
     </div>
   );

@@ -580,38 +580,38 @@ export function MessagesView({ employees = [], ui }) {
   };
 
   return (
-    <div className="h-[calc(100dvh-170px)] min-h-[560px] md:min-h-[700px] flex rounded-xl overflow-hidden border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)]">
-      <div className={`w-full md:w-80 bg-white border-r border-gray-200 flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`}>
-        <div className="p-4 border-b border-gray-800 space-y-3">
+    <div className="h-[calc(100dvh-170px)] min-h-[560px] md:min-h-[700px] flex rounded-xl overflow-hidden border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-zinc-800 dark:bg-[#050505] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)]">
+      <div className={`w-full md:w-80 bg-white border-r border-gray-200 dark:border-zinc-800 dark:bg-[#090909] flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`}>
+        <div className="space-y-3 border-b border-gray-200 p-4 dark:border-zinc-800">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900 tracking-wide">Messages</h3>
+            <h3 className="font-semibold tracking-wide text-gray-900 dark:text-zinc-100">Messages</h3>
             <Button variant="secondary" size="sm" onClick={() => setShowNewChannel(true)} data-testid="messages-create-channel-open">
               <Icon name="pen-to-square" />
             </Button>
           </div>
           {newIncomingCount > 0 && (
-            <p className="text-xs text-emerald-700">
+            <p className="text-xs text-emerald-700 dark:text-emerald-300">
               {newIncomingCount} new message{newIncomingCount > 1 ? 's' : ''} received
             </p>
           )}
           <div className="relative">
-            <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs" />
-            <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full pl-8 pr-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500" />
+            <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 dark:text-zinc-500" />
+            <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search" className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-8 pr-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" />
           </div>
-          {channelsError && <p className="text-sm text-red-400 mt-3">{channelsError}</p>}
+          {channelsError && <p className="mt-3 text-sm text-red-500 dark:text-red-300">{channelsError}</p>}
         </div>
         <div className="flex-1 overflow-y-auto">
-          {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-500">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500">No channels yet.</div> : filteredChannels.map((channel) => (
-            <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full text-left px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white' : ''}`} data-testid={`messages-channel-${channel.id}`}>
+          {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">No channels yet.</div> : filteredChannels.map((channel) => (
+            <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-zinc-900 dark:hover:bg-[#131313] ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white dark:bg-brand-600' : ''}`} data-testid={`messages-channel-${channel.id}`}>
               <div className="flex items-center justify-between gap-2">
-                <span className={`font-medium text-sm truncate ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-100'}`}>
+                <span className={`truncate text-sm font-medium ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-900 dark:text-zinc-100'}`}>
                   {isDirectChannel(channel)
                     ? getChannelDisplayName(channel)
                     : `# ${channel.name}`}
                 </span>
-                {(channel.unread_count ?? channel.message_count) > 0 && <span className={`px-1.5 py-0.5 text-xs rounded-full ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700'}`}>{channel.unread_count ?? channel.message_count}</span>}
+                {(channel.unread_count ?? channel.message_count) > 0 && <span className={`rounded-full px-1.5 py-0.5 text-xs ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700 dark:bg-zinc-800 dark:text-zinc-200'}`}>{channel.unread_count ?? channel.message_count}</span>}
               </div>
-              <p className={`text-xs truncate ${activeChannel?.id === channel.id ? 'text-white/85' : 'text-gray-500'}`}>
+              <p className={`truncate text-xs ${activeChannel?.id === channel.id ? 'text-white/85' : 'text-gray-500 dark:text-zinc-400'}`}>
                 {channel.last_message_at ? formatThreadSubtextTime(channel.last_message_at) : (channel.last_message_preview || 'No messages yet')}
               </p>
             </button>
@@ -620,7 +620,7 @@ export function MessagesView({ employees = [], ui }) {
             <button
               type="button"
               onClick={() => setActiveChannel(null)}
-              className="w-full text-left px-4 py-3 border-b border-gray-100 bg-brand-500"
+              className="w-full border-b border-gray-100 bg-brand-500 px-4 py-3 text-left dark:border-zinc-900 dark:bg-brand-600"
               data-testid="messages-channel-pending-direct"
             >
               <div className="flex items-center justify-between gap-2">
@@ -629,8 +629,8 @@ export function MessagesView({ employees = [], ui }) {
               <p className="text-xs truncate text-white/80">No messages yet</p>
             </button>
           )}
-          <div className="px-4 py-3 border-t border-gray-100">
-            <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-2">Team Members</p>
+          <div className="border-t border-gray-100 px-4 py-3 dark:border-zinc-900">
+            <p className="mb-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">Team Members</p>
             <div className="space-y-1 max-h-48 overflow-y-auto">
               {filteredContacts.map((contact) => {
                 const directChannel = contact.userId ? directChannelByUserId.get(String(contact.userId)) : null;
@@ -644,12 +644,12 @@ export function MessagesView({ employees = [], ui }) {
                   key={`contact-${contact.key}`}
                   type="button"
                   onClick={() => startDirectChat(contact)}
-                  className={`w-full text-left px-2 py-2 rounded-lg hover:bg-gray-50 flex items-center justify-between ${
-                    isActiveDirect ? 'bg-brand-50 border border-brand-200' : ''
+                  className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-[#131313] ${
+                    isActiveDirect ? 'border border-brand-200 bg-brand-50 dark:border-brand-900/60 dark:bg-brand-950/30' : ''
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="h-8 w-8 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[11px] font-semibold text-gray-700 shrink-0">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[11px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                       {contact.avatarUrl ? (
                         <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
                       ) : (
@@ -657,11 +657,11 @@ export function MessagesView({ employees = [], ui }) {
                       )}
                     </span>
                     <div className="min-w-0">
-                    <p className="text-sm text-gray-900 truncate">{contact.label}</p>
-                    <p className="text-xs text-gray-500 truncate">{preview}</p>
+                    <p className="truncate text-sm text-gray-900 dark:text-zinc-100">{contact.label}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{preview}</p>
                     </div>
                   </div>
-                  <span className="text-[10px] text-gray-500">Chat</span>
+                  <span className="text-[10px] text-gray-500 dark:text-zinc-500">Chat</span>
                 </button>
               )})}
             </div>
@@ -670,12 +670,12 @@ export function MessagesView({ employees = [], ui }) {
       </div>
 
       {activeChannel ? (
-        <div className="flex-1 flex flex-col bg-white">
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
+        <div className="flex flex-1 flex-col bg-white dark:bg-[#050505]">
+          <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-[#090909] sm:px-6">
             <div className="flex items-center gap-3 min-w-0">
               <button
                 type="button"
-                className="md:hidden rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                className="rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
                 onClick={() => {
                   setActiveChannel(null);
                   setPendingDirectContact(null);
@@ -684,7 +684,7 @@ export function MessagesView({ employees = [], ui }) {
                 Back
               </button>
               {isDirectChannel(activeChannel) && (
-                <span className="h-9 w-9 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-xs font-semibold text-gray-700 shrink-0">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                   {userAvatarById.get(String(activeChannel.other_user_id || '')) ? (
                     <img
                       src={String(userAvatarById.get(String(activeChannel.other_user_id || '')))}
@@ -697,19 +697,19 @@ export function MessagesView({ employees = [], ui }) {
                 </span>
               )}
               <div className="min-w-0">
-              <h3 className="font-semibold text-gray-900" data-testid="messages-active-channel">
+              <h3 className="font-semibold text-gray-900 dark:text-zinc-100" data-testid="messages-active-channel">
                 {isDirectChannel(activeChannel)
                   ? getChannelDisplayName(activeChannel)
                   : `# ${activeChannel.name}`}
               </h3>
-              <p className="text-xs text-gray-500">{activeChannel.message_count || 0} messages</p>
+              <p className="text-xs text-gray-500 dark:text-zinc-400">{activeChannel.message_count || 0} messages</p>
               </div>
             </div>
             <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-3 bg-gray-50/40">
-            {messagesLoading ? <div className="text-sm text-gray-500">Loading messages...</div> : messagesError ? <div className="text-sm text-red-500">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500">No messages yet.</div> : messages.map((msg, index) => {
+          <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50/40 p-4 dark:bg-[#050505] sm:p-6">
+            {messagesLoading ? <div className="text-sm text-gray-500 dark:text-zinc-400">Loading messages...</div> : messagesError ? <div className="text-sm text-red-500 dark:text-red-300">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500 dark:text-zinc-400">No messages yet.</div> : messages.map((msg, index) => {
               const isMine = myUserId && String(msg.sender_user_id || '') === String(myUserId);
               const dayKey = getMessageDayKey(msg.created_at);
               const prevDayKey = index > 0 ? getMessageDayKey(messages[index - 1].created_at) : '';
@@ -718,17 +718,19 @@ export function MessagesView({ employees = [], ui }) {
                 <div key={msg.id}>
                   {showDayDivider && (
                     <div className="flex items-center gap-3 my-3">
-                      <div className="h-px flex-1 bg-gray-200" />
-                      <div className="text-[11px] uppercase tracking-wide text-gray-500">{formatMessageDayLabel(msg.created_at)}</div>
-                      <div className="h-px flex-1 bg-gray-200" />
+                      <div className="h-px flex-1 bg-gray-200 dark:bg-zinc-800" />
+                      <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">{formatMessageDayLabel(msg.created_at)}</div>
+                      <div className="h-px flex-1 bg-gray-200 dark:bg-zinc-800" />
                     </div>
                   )}
                   <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
                     <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
-                      isMine ? 'bg-blue-500 text-white rounded-br-md' : 'bg-gray-200 text-gray-900 rounded-bl-md'
+                      isMine
+                        ? 'rounded-br-md bg-brand-600 text-white dark:bg-brand-500'
+                        : 'rounded-bl-md border border-zinc-800 bg-[#111111] text-zinc-100'
                     }`}>
                       <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
-                      <p className={`text-[10px] mt-1 ${isMine ? 'text-white/80' : 'text-gray-500'}`}>{formatMessageTime(msg.created_at)}</p>
+                      <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
                     </div>
                   </div>
                 </div>
@@ -737,68 +739,68 @@ export function MessagesView({ employees = [], ui }) {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200 bg-white">
+          <div className="border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
             <div className="flex items-end gap-3">
               <div className="flex-1 relative">
-                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
               <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
-            {sendError && <p className="text-xs text-red-500 mt-2">{sendError}</p>}
-            <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
+            {sendError && <p className="mt-2 text-xs text-red-500 dark:text-red-300">{sendError}</p>}
+            <p className="mt-2 text-xs text-gray-500 dark:text-zinc-500">Press Enter to send, Shift + Enter for new line</p>
           </div>
         </div>
       ) : pendingDirectContact ? (
-        <div className="flex-1 flex flex-col bg-white">
-          <div className="px-4 sm:px-6 py-4 border-b border-gray-200 flex items-center justify-between bg-white">
+        <div className="flex flex-1 flex-col bg-white dark:bg-[#050505]">
+          <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-[#090909] sm:px-6">
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                className="md:hidden rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                className="rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
                 onClick={() => setPendingDirectContact(null)}
               >
                 Back
               </button>
               <div>
-              <h3 className="font-semibold text-gray-900">Message {pendingDirectContact.label}</h3>
-              <p className="text-xs text-gray-500">No messages yet</p>
+              <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Message {pendingDirectContact.label}</h3>
+              <p className="text-xs text-gray-500 dark:text-zinc-400">No messages yet</p>
               </div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-gray-50/40">
-            <div className="text-sm text-gray-500">Send the first message to start this chat.</div>
+          <div className="flex-1 overflow-y-auto bg-gray-50/40 p-4 dark:bg-[#050505] sm:p-6">
+            <div className="text-sm text-gray-500 dark:text-zinc-400">Send the first message to start this chat.</div>
           </div>
-          <div className="px-3 sm:px-6 py-3 sm:py-4 border-t border-gray-200 bg-white">
+          <div className="border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
             <div className="flex items-end gap-3">
               <div className="flex-1 relative">
-                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm text-gray-900 placeholder:text-gray-500 resize-none focus:ring-2 focus:ring-brand-500" rows="1" data-testid="messages-input" />
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
               <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
-            {sendError && <p className="text-xs text-red-500 mt-2">{sendError}</p>}
-            <p className="text-xs text-gray-500 mt-2">Press Enter to send, Shift + Enter for new line</p>
+            {sendError && <p className="mt-2 text-xs text-red-500 dark:text-red-300">{sendError}</p>}
+            <p className="mt-2 text-xs text-gray-500 dark:text-zinc-500">Press Enter to send, Shift + Enter for new line</p>
           </div>
         </div>
       ) : (
-        <div className="hidden md:flex flex-1 items-center justify-center bg-white"><div className="text-center"><h3 className="text-lg font-semibold text-gray-900 mb-2">Your Messages</h3></div></div>
+        <div className="hidden flex-1 items-center justify-center bg-white dark:bg-[#050505] md:flex"><div className="text-center"><h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-zinc-100">Your Messages</h3></div></div>
       )}
 
       {showNewChannel && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900">Create Group Chat</h3>
-              <button onClick={() => setShowNewChannel(false)} className="p-1 text-gray-400 hover:text-gray-600"><Icon name="xmark" /></button>
+          <div className="mx-4 w-full max-w-md overflow-hidden rounded-xl bg-white dark:border dark:border-zinc-800 dark:bg-[#090909]">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-zinc-800">
+              <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Create Group Chat</h3>
+              <button onClick={() => setShowNewChannel(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:text-zinc-500 dark:hover:text-zinc-200"><Icon name="xmark" /></button>
             </div>
             <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
-              <label className="block text-sm font-medium text-gray-700">Group Name (optional for direct chat)</label>
-              <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="e.g. field-updates" className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500" data-testid="messages-create-channel-input" />
-              <label className="block text-sm font-medium text-gray-700">Add Members</label>
-              <div className="border border-gray-200 rounded-lg p-2 max-h-48 overflow-y-auto space-y-2" data-testid="messages-create-channel-members">
+              <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Group Name (optional for direct chat)</label>
+              <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="e.g. field-updates" className="w-full rounded-lg border border-gray-200 px-4 py-2 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" data-testid="messages-create-channel-input" />
+              <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Add Members</label>
+              <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#111111]" data-testid="messages-create-channel-members">
                 {contactOptions.map((contact) => (
                   <label key={contact.key} className="flex items-center gap-2 text-sm">
                     <input
@@ -810,7 +812,7 @@ export function MessagesView({ employees = [], ui }) {
                         )
                       }
                     />
-                    <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-700 shrink-0">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                       {contact.avatarUrl ? (
                         <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
                       ) : (
@@ -821,7 +823,7 @@ export function MessagesView({ employees = [], ui }) {
                   </label>
                 ))}
               </div>
-              {createChannelError && <p className="text-sm text-red-600">{createChannelError}</p>}
+              {createChannelError && <p className="text-sm text-red-600 dark:text-red-300">{createChannelError}</p>}
               <div className="flex justify-end gap-2 pt-2">
                 <Button variant="secondary" onClick={() => setShowNewChannel(false)} disabled={createChannelLoading}>Cancel</Button>
                 <Button variant="brand" onClick={handleCreateChannel} disabled={createChannelLoading} data-testid="messages-create-channel-submit">{createChannelLoading ? 'Creating...' : 'Create'}</Button>
@@ -833,16 +835,16 @@ export function MessagesView({ employees = [], ui }) {
 
       {showMembers && activeChannel && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="messages-members-modal">
-          <div className="bg-white rounded-xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900">Members</h3>
-              <button onClick={() => setShowMembers(false)} className="p-1 text-gray-400 hover:text-gray-600"><Icon name="xmark" /></button>
+          <div className="mx-4 w-full max-w-md overflow-hidden rounded-xl bg-white dark:border dark:border-zinc-800 dark:bg-[#090909]">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-zinc-800">
+              <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Members</h3>
+              <button onClick={() => setShowMembers(false)} className="p-1 text-gray-400 hover:text-gray-600 dark:text-zinc-500 dark:hover:text-zinc-200"><Icon name="xmark" /></button>
             </div>
             <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
               {members.map((member) => (
-                <div key={member.id} className="flex items-center justify-between text-sm border-b border-gray-100 pb-2">
+                <div key={member.id} className="flex items-center justify-between border-b border-gray-100 pb-2 text-sm dark:border-zinc-800 dark:text-zinc-200">
                   <span className="inline-flex items-center gap-2 min-w-0">
-                    <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-700 shrink-0">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                       {member.avatarUrl ? (
                         <img src={member.avatarUrl} alt={member.displayName} className="h-full w-full object-cover" />
                       ) : (
@@ -854,12 +856,12 @@ export function MessagesView({ employees = [], ui }) {
                   {member.memberRole !== 'owner' && <Button variant="secondary" size="sm" onClick={() => handleRemoveMember(member.userId)} data-testid={`messages-member-remove-${member.userId}`}>Remove</Button>}
                 </div>
               ))}
-              <label className="block text-sm font-medium text-gray-700">Add Members</label>
-              <div className="border border-gray-200 rounded-lg p-2 max-h-40 overflow-y-auto space-y-2">
+              <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Add Members</label>
+              <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#111111]">
                 {availableUsers.map((user) => (
                   <label key={user.userId} className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={selectedAddMembers.includes(user.userId)} onChange={(e) => setSelectedAddMembers((prev) => e.target.checked ? [...prev, user.userId] : prev.filter((id) => id !== user.userId))} />
-                    <span className="h-6 w-6 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center text-[10px] font-semibold text-gray-700 shrink-0">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                       {user.avatarUrl ? (
                         <img src={user.avatarUrl} alt={user.displayName} className="h-full w-full object-cover" />
                       ) : (
@@ -874,7 +876,7 @@ export function MessagesView({ employees = [], ui }) {
                 <Button variant="secondary" onClick={handleLeave} data-testid="messages-leave-chat">Leave chat</Button>
                 <Button variant="brand" onClick={handleAddMembers} data-testid="messages-add-members">Add selected</Button>
               </div>
-              {membersError && <p className="text-sm text-red-600">{membersError}</p>}
+              {membersError && <p className="text-sm text-red-600 dark:text-red-300">{membersError}</p>}
             </div>
           </div>
         </div>

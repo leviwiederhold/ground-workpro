@@ -433,10 +433,13 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                       <EmptyState>No alerts.</EmptyState>
                     ) : (
                       alertsSection.items.map((alert) => (
-                        <div key={alert.key || alert.type || alert.label} className="flex items-start gap-3 p-2 bg-yellow-50 rounded-lg">
-                          <Icon name="triangle-exclamation" className="text-yellow-600 mt-0.5" />
+                        <div
+                          key={alert.key || alert.type || alert.label}
+                          className="flex items-start gap-3 rounded-lg border border-yellow-200 bg-yellow-50 p-3 dark:border-yellow-900/70 dark:bg-yellow-950/40"
+                        >
+                          <Icon name="triangle-exclamation" className="mt-0.5 text-yellow-600 dark:text-yellow-300" />
                           <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900">{alert.message || alert.label}</p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-yellow-50">{alert.message || alert.label}</p>
                           </div>
                         </div>
                       ))
@@ -600,7 +603,12 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                 <h3 className="font-semibold text-gray-900 mb-4">Alerts</h3>
                 <div className="space-y-2">
                   {alertsSection.items.length === 0 ? <EmptyState>No alerts.</EmptyState> : alertsSection.items.map((alert) => (
-                    <div key={alert.key || alert.type || alert.label} className="p-2 rounded-lg bg-yellow-50 text-sm text-gray-900">{alert.message || alert.label}</div>
+                    <div
+                      key={alert.key || alert.type || alert.label}
+                      className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-gray-900 dark:border-yellow-900/70 dark:bg-yellow-950/40 dark:text-yellow-50"
+                    >
+                      {alert.message || alert.label}
+                    </div>
                   ))}
                 </div>
               </Card>

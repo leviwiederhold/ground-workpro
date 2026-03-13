@@ -42,6 +42,35 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const [financialLoading, setFinancialLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showMobileDetails, setShowMobileDetails] = useState(false);
+  const refreshJobsState = useCallback(async () => {
+    const response = await fetch('/api/jobs', { cache: 'no-store' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Failed to refresh jobs');
+    }
+    const nextJobs = payload?.jobs || payload?.items || [];
+    setJobs(nextJobs);
+    return nextJobs;
+  }, [setJobs]);
+
+  const refreshEquipmentState = useCallback(async () => {
+    const response = await fetch('/api/equipment', { cache: 'no-store' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Failed to refresh equipment');
+    }
+    setEquipment(payload?.equipment || payload?.items || []);
+  }, [setEquipment]);
+
+  const refreshEmployeesState = useCallback(async () => {
+    const response = await fetch('/api/employees', { cache: 'no-store' });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Failed to refresh employees');
+    }
+    setEmployees(payload?.employees || []);
+  }, [setEmployees]);
+
   const syncSelectedJobCounts = useCallback((crewCount, equipmentCount) => {
     if (!selectedJobId) return;
     setJobs((prev) =>
@@ -122,6 +151,11 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         (item) => !jobEquipment.some((assigned) => String(assigned.id) === String(item.id))
       )
     : [];
+  const getAssignedJobName = useCallback((jobId) => {
+    if (jobId === null || jobId === undefined || jobId === '') return '';
+    const match = jobs.find((job) => String(job.id) === String(jobId));
+    return match?.name || 'Another job';
+  }, [jobs]);
 
   useEffect(() => {
     const media = window.matchMedia('(max-width: 1023px)');
@@ -185,6 +219,14 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     setJobEquipment(nextEquipment);
     syncSelectedJobCounts(nextEmployees.length, nextEquipment.length);
   }, [selectedJobId, syncSelectedJobCounts]);
+  const refreshAssignmentState = useCallback(async () => {
+    await Promise.all([
+      refreshSelectedAssignments(),
+      refreshJobsState(),
+      refreshEquipmentState(),
+      refreshEmployeesState(),
+    ]);
+  }, [refreshEmployeesState, refreshEquipmentState, refreshJobsState, refreshSelectedAssignments]);
 
   useEffect(() => {
     let isMounted = true;
@@ -299,7 +341,6 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     setCrewActionLoading(true);
     setCrewActionError('');
     try {
-      const assignedEmployees = [];
       for (const employeeId of employeeToAssign) {
         const response = await fetch(`/api/jobs/${selectedJob.id}/employees`, {
           method: 'POST',
@@ -319,17 +360,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           setCrewActionLoading(false);
           return;
         }
-        assignedEmployees.push(payload.employee);
       }
 
-      setJobEmployees((prev) => [...assignedEmployees, ...prev]);
-      syncSelectedJobCounts(jobEmployees.length + assignedEmployees.length, jobEquipment.length);
-      setEmployees((prev) => {
-        const updatesById = new Map(assignedEmployees.map((employee) => [String(employee.id), employee]));
-        return prev.map((employee) => updatesById.get(String(employee.id)) || employee);
-      });
       setEmployeeToAssign([]);
-      await refreshSelectedAssignments();
+      await refreshAssignmentState();
     } catch {
       setCrewActionError('Failed to assign employee');
     } finally {
@@ -361,14 +395,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         return;
       }
 
-      setJobEmployees((prev) => prev.filter((employee) => String(employee.id) !== String(employeeId)));
-      syncSelectedJobCounts(Math.max(0, jobEmployees.length - 1), jobEquipment.length);
-      setEmployees((prev) =>
-        prev.map((employee) =>
-          String(employee.id) === String(employeeId) ? { ...employee, jobId: null } : employee
-        )
-      );
-      await refreshSelectedAssignments();
+      await refreshAssignmentState();
     } catch {
       setCrewActionError('Failed to remove employee');
     } finally {
@@ -381,7 +408,6 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     setEquipmentActionLoading(true);
     setEquipmentActionError('');
     try {
-      const assignedEquipment = [];
       for (const equipmentId of equipmentToAssign) {
         const response = await fetch(`/api/jobs/${selectedJob.id}/equipment`, {
           method: 'POST',
@@ -401,19 +427,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           setEquipmentActionLoading(false);
           return;
         }
-        assignedEquipment.push(payload.equipment);
       }
 
-      setJobEquipment((prev) => [...assignedEquipment, ...prev]);
-      syncSelectedJobCounts(jobEmployees.length, jobEquipment.length + assignedEquipment.length);
-      setEquipment((prev) => {
-        const updatesById = new Set(assignedEquipment.map((item) => String(item.id)));
-        return prev.map((item) =>
-          updatesById.has(String(item.id)) ? { ...item, jobId: selectedJob.id } : item
-        );
-      });
       setEquipmentToAssign([]);
-      await refreshSelectedAssignments();
+      await refreshAssignmentState();
     } catch {
       setEquipmentActionError('Failed to assign equipment');
     } finally {
@@ -445,16 +462,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         return;
       }
 
-      setJobEquipment((prev) =>
-        prev.filter((item) => String(item.id) !== String(equipmentId))
-      );
-      syncSelectedJobCounts(jobEmployees.length, Math.max(0, jobEquipment.length - 1));
-      setEquipment((prev) =>
-        prev.map((item) =>
-          String(item.id) === String(equipmentId) ? { ...item, jobId: null } : item
-        )
-      );
-      await refreshSelectedAssignments();
+      await refreshAssignmentState();
     } catch {
       setEquipmentActionError('Failed to remove equipment');
     } finally {
@@ -535,6 +543,134 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       setDeleteLoading(false);
     }
   };
+
+  const renderEquipmentAssignmentSection = () => (
+    <div>
+      <p className="text-xs text-gray-500 mb-2">Assigned Equipment ({jobEquipment.length})</p>
+      <div className="mb-2 border border-gray-300 rounded-lg p-2 max-h-40 overflow-y-auto overscroll-contain">
+        {availableEquipment.length > 0 ? (
+          <div className="space-y-1">
+            {availableEquipment.map((item) => {
+              const checked = equipmentToAssign.includes(String(item.id));
+              const assignedElsewhere = item.jobId !== null && String(item.jobId) !== String(selectedJob?.id);
+              return (
+                <label key={item.id} className="flex items-start gap-2 rounded-md px-1 py-1 text-sm cursor-pointer hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      const id = String(item.id);
+                      setEquipmentToAssign((prev) => {
+                        if (e.target.checked) return [...prev, id];
+                        return prev.filter((value) => String(value) !== id);
+                      });
+                    }}
+                    className="mt-1"
+                  />
+                  <span className="min-w-0">
+                    <span className="block font-medium text-gray-900">{item.name}</span>
+                    <span className="block text-xs text-gray-500">
+                      {item.type}
+                      {assignedElsewhere ? ` • Reassign from ${getAssignedJobName(item.jobId)}` : ' • Unassigned'}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">No available equipment</p>
+        )}
+      </div>
+      <div className="flex items-center gap-2 mb-2">
+        <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || equipmentToAssign.length === 0}>
+          {equipmentActionLoading ? 'Updating...' : `Add Selected (${equipmentToAssign.length})`}
+        </Button>
+      </div>
+      <div className="space-y-1">
+        {jobEquipmentLoading ? (
+          <p className="text-sm text-gray-400">Loading equipment...</p>
+        ) : jobEquipment.map(eq => (
+          <div key={eq.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
+            <span className="min-w-0 truncate">{eq.name}</span>
+            <div className="flex items-center gap-2">
+              <Badge variant="success" className="text-xs">Active</Badge>
+              <button
+                type="button"
+                onClick={() => handleUnassignEquipment(eq.id)}
+                className="text-xs text-red-600 hover:text-red-700"
+                disabled={equipmentActionLoading}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+        {!jobEquipmentLoading && jobEquipment.length === 0 && <p className="text-sm text-gray-400">No equipment assigned</p>}
+      </div>
+      {equipmentActionError && <p className="text-sm text-red-600 mt-2">{equipmentActionError}</p>}
+    </div>
+  );
+
+  const renderCrewAssignmentSection = () => (
+    <div>
+      <p className="text-xs text-gray-500 mb-2">Assigned Crew ({jobEmployees.length})</p>
+      <div className="mb-2 border border-gray-300 rounded-lg p-2 max-h-40 overflow-y-auto overscroll-contain">
+        {availableEmployees.length > 0 ? (
+          <div className="space-y-1">
+            {availableEmployees.map((employee) => {
+              const checked = employeeToAssign.includes(String(employee.id));
+              return (
+                <label key={employee.id} className="flex items-center gap-2 text-sm cursor-pointer rounded-md px-1 py-1 hover:bg-gray-50">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      const id = String(employee.id);
+                      setEmployeeToAssign((prev) => {
+                        if (e.target.checked) return [...prev, id];
+                        return prev.filter((value) => String(value) !== id);
+                      });
+                    }}
+                  />
+                  <span>{employee.name} - {employee.role}</span>
+                </label>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-400">No available crew</p>
+        )}
+      </div>
+      <div className="flex items-center gap-2 mb-2">
+        <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || employeeToAssign.length === 0}>
+          {crewActionLoading ? 'Updating...' : `Add Selected (${employeeToAssign.length})`}
+        </Button>
+      </div>
+      <div className="space-y-1">
+        {jobEmployeesLoading ? (
+          <p className="text-sm text-gray-400">Loading crew...</p>
+        ) : jobEmployees.map(emp => (
+          <div key={emp.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
+            <span>{emp.name}</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{emp.role}</span>
+              <button
+                type="button"
+                onClick={() => handleUnassignEmployee(emp.id)}
+                className="text-xs text-red-600 hover:text-red-700"
+                disabled={crewActionLoading}
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+        {!jobEmployeesLoading && jobEmployees.length === 0 && <p className="text-sm text-gray-400">No crew assigned</p>}
+      </div>
+      {crewActionError && <p className="text-sm text-red-600 mt-2">{crewActionError}</p>}
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -740,121 +876,9 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 )}
               </div>
 
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Assigned Equipment ({jobEquipment.length})</p>
-                <div className="mb-2 border border-gray-300 rounded-lg p-2 max-h-32 overflow-y-auto">
-                  {availableEquipment.length > 0 ? (
-                    <div className="space-y-1">
-                      {availableEquipment.map((item) => {
-                        const checked = equipmentToAssign.includes(String(item.id));
-                        return (
-                          <label key={item.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => {
-                                const id = String(item.id);
-                                setEquipmentToAssign((prev) => {
-                                  if (e.target.checked) return [...prev, id];
-                                  return prev.filter((value) => String(value) !== id);
-                                });
-                              }}
-                            />
-                            <span>{item.name} - {item.type}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400">No available equipment</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || equipmentToAssign.length === 0}>
-                    Add Selected ({equipmentToAssign.length})
-                  </Button>
-                </div>
-                <div className="space-y-1">
-                  {jobEquipmentLoading ? (
-                    <p className="text-sm text-gray-400">Loading equipment...</p>
-                  ) : jobEquipment.map(eq => (
-                    <div key={eq.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
-                      <span>{eq.name}</span>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="success" className="text-xs">Active</Badge>
-                        <button
-                          type="button"
-                          onClick={() => handleUnassignEquipment(eq.id)}
-                          className="text-xs text-red-600 hover:text-red-700"
-                          disabled={equipmentActionLoading}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {!jobEquipmentLoading && jobEquipment.length === 0 && <p className="text-sm text-gray-400">No equipment assigned</p>}
-                </div>
-                {equipmentActionError && <p className="text-sm text-red-600 mt-2">{equipmentActionError}</p>}
-              </div>
+              {renderEquipmentAssignmentSection()}
 
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Assigned Crew ({jobEmployees.length})</p>
-                <div className="mb-2 border border-gray-300 rounded-lg p-2 max-h-32 overflow-y-auto">
-                  {availableEmployees.length > 0 ? (
-                    <div className="space-y-1">
-                      {availableEmployees.map((employee) => {
-                        const checked = employeeToAssign.includes(String(employee.id));
-                        return (
-                          <label key={employee.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(e) => {
-                                const id = String(employee.id);
-                                setEmployeeToAssign((prev) => {
-                                  if (e.target.checked) return [...prev, id];
-                                  return prev.filter((value) => String(value) !== id);
-                                });
-                              }}
-                            />
-                            <span>{employee.name} - {employee.role}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400">No available crew</p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || employeeToAssign.length === 0}>
-                    Add Selected ({employeeToAssign.length})
-                  </Button>
-                </div>
-                <div className="space-y-1">
-                  {jobEmployeesLoading ? (
-                    <p className="text-sm text-gray-400">Loading crew...</p>
-                  ) : jobEmployees.map(emp => (
-                    <div key={emp.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
-                      <span>{emp.name}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500">{emp.role}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleUnassignEmployee(emp.id)}
-                          className="text-xs text-red-600 hover:text-red-700"
-                          disabled={crewActionLoading}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {!jobEmployeesLoading && jobEmployees.length === 0 && <p className="text-sm text-gray-400">No crew assigned</p>}
-                </div>
-                {crewActionError && <p className="text-sm text-red-600 mt-2">{crewActionError}</p>}
-              </div>
+              {renderCrewAssignmentSection()}
 
               <AttachmentPanel entityType="job" entityId={selectedJob.id} />
 
@@ -945,6 +969,15 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 <p className="text-xs text-gray-500 mb-1">Notes</p>
                 <textarea value={jobForm.notes} onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" />
               </div>
+              <div>
+                <p className="text-xs text-gray-500 mb-2">Job Record Snapshot</p>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-500">Crew Assigned</span><span className="font-medium">{jobEmployees.length}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Equipment Assigned</span><span className="font-medium">{jobEquipment.length}</span></div>
+                </div>
+              </div>
+              {renderEquipmentAssignmentSection()}
+              {renderCrewAssignmentSection()}
               <AttachmentPanel entityType="job" entityId={selectedJob.id} />
               {jobActionError && <p className="text-sm text-red-600">{jobActionError}</p>}
               <div className="flex items-center gap-2 pt-2">

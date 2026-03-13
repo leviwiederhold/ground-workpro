@@ -1087,9 +1087,9 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           )}
 
           {showBidModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain px-3 py-3 sm:items-center sm:px-4 sm:py-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeBidModal} aria-label="Close bid modal" />
-              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 my-4 w-full max-w-xl p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-gray-900">{editingBidId ? 'Edit Bid' : 'Create Bid'}</h3>
                   <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeBidModal}>
@@ -1234,9 +1234,9 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           )}
 
           {showItemModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain px-3 py-3 sm:items-center sm:px-4 sm:py-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeItemModal} aria-label="Close bid item modal" />
-              <Card className="relative z-10 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 my-4 w-full max-w-lg p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-bold text-gray-900">{editingItemId ? 'Edit Bid Item' : 'Add Bid Item'}</h3>
                   <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeItemModal}>

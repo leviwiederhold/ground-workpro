@@ -23,6 +23,26 @@ const isMissingColumnOrTable = (message: string) =>
   /relation .* does not exist/i.test(message) ||
   /Could not find the table/i.test(message);
 
+async function syncEquipmentJobId(
+  supabase: any,
+  companyId: string,
+  equipmentId: string | number,
+  jobId: string | number | null
+) {
+  const payload = { job_id: jobId };
+  const result = await supabase
+    .from("equipment")
+    .update(payload)
+    .eq("company_id", companyId)
+    .eq("id", equipmentId)
+    .select("id")
+    .limit(1);
+
+  if (result.error && !isMissingColumnOrTable(result.error.message || "")) {
+    throw new Error(result.error.message || "Failed to sync equipment assignment");
+  }
+}
+
 const mapEquipment = (row: any) => ({
   id: row.id,
   name: row.name ?? "",
@@ -76,20 +96,32 @@ export async function GET(
       .eq("company_id", companyId)
       .eq("job_id", jobId);
 
-    if (assignmentsResult.error) {
+    if (assignmentsResult.error && !isMissingColumnOrTable(assignmentsResult.error.message || "")) {
       return NextResponse.json({ error: assignmentsResult.error.message }, { status: 400 });
     }
 
-    const assignments = assignmentsResult.data ?? [];
-    if (assignments.length === 0) {
-      return NextResponse.json({ equipment: [] });
+    const ids = new Set<Array<string | number>[number]>();
+    for (const assignment of assignmentsResult.error ? [] : assignmentsResult.data ?? []) {
+      const normalized = normalizeId((assignment as any).equipment_id);
+      if (normalized !== null) ids.add(normalized);
     }
 
-    const ids = assignments
-      .map((assignment: any) => normalizeId(assignment.equipment_id))
-      .filter((value) => value !== null) as Array<string | number>;
+    const fallbackEquipmentResult = await supabase
+      .from("equipment")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("job_id", jobId);
 
-    if (ids.length === 0) {
+    if (fallbackEquipmentResult.error && !isMissingColumnOrTable(fallbackEquipmentResult.error.message || "")) {
+      return NextResponse.json({ error: fallbackEquipmentResult.error.message }, { status: 400 });
+    }
+
+    for (const row of fallbackEquipmentResult.error ? [] : fallbackEquipmentResult.data ?? []) {
+      const normalized = normalizeId((row as any).id);
+      if (normalized !== null) ids.add(normalized);
+    }
+
+    if (ids.size === 0) {
       return NextResponse.json({ equipment: [] });
     }
 
@@ -97,7 +129,7 @@ export async function GET(
       .from("equipment")
       .select("*")
       .eq("company_id", companyId)
-      .in("id", ids);
+      .in("id", Array.from(ids));
 
     if (equipmentError) {
       return NextResponse.json({ error: equipmentError.message }, { status: 400 });
@@ -165,6 +197,37 @@ export async function POST(
       return NextResponse.json({ error: "Equipment not found" }, { status: 404 });
     }
 
+    const existingAssignmentResult = await supabase
+      .from("job_equipment")
+      .select("job_id, equipment_id")
+      .eq("company_id", companyId)
+      .eq("equipment_id", equipmentId);
+
+    if (existingAssignmentResult.error && !isMissingColumnOrTable(existingAssignmentResult.error.message || "")) {
+      return NextResponse.json({ error: existingAssignmentResult.error.message }, { status: 400 });
+    }
+
+    const existingAssignments = existingAssignmentResult.error ? [] : existingAssignmentResult.data ?? [];
+    const assignedToCurrentJob = existingAssignments.some(
+      (assignment: any) => String(normalizeId(assignment.job_id)) === String(jobId)
+    );
+    if (assignedToCurrentJob) {
+      await syncEquipmentJobId(supabase, companyId, equipmentId, jobId);
+      return NextResponse.json({ equipment: mapEquipment({ ...equipmentRows[0], job_id: jobId }) });
+    }
+
+    if (existingAssignments.length > 0) {
+      const deleteExisting = await supabase
+        .from("job_equipment")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("equipment_id", equipmentId);
+
+      if (deleteExisting.error && !isMissingColumnOrTable(deleteExisting.error.message || "")) {
+        return NextResponse.json({ error: deleteExisting.error.message }, { status: 400 });
+      }
+    }
+
     const insertPayload: Record<string, unknown> = {
       company_id: companyId,
       job_id: jobId,
@@ -175,7 +238,8 @@ export async function POST(
 
     let result = await supabase.from("job_equipment").insert(insertPayload).select("equipment_id").limit(1);
     if (result.error && isMissingColumnOrTable(result.error.message || "")) {
-      return NextResponse.json({ error: result.error.message }, { status: 400 });
+      await syncEquipmentJobId(supabase, companyId, equipmentId, jobId);
+      return NextResponse.json({ equipment: mapEquipment({ ...equipmentRows[0], job_id: jobId }) });
     }
     if (result.error) {
       const message = result.error.message || "";
@@ -199,7 +263,9 @@ export async function POST(
       return NextResponse.json({ error: message || "Failed to assign equipment" }, { status: 400 });
     }
 
-    return NextResponse.json({ equipment: mapEquipment(equipmentRows[0]) });
+    await syncEquipmentJobId(supabase, companyId, equipmentId, jobId);
+
+    return NextResponse.json({ equipment: mapEquipment({ ...equipmentRows[0], job_id: jobId }) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

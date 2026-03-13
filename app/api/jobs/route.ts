@@ -119,6 +119,18 @@ async function getJobAssignmentCounts(
       .eq("company_id", companyId)
       .in("job_id", jobIds),
   ]);
+  const [crewFallbackResult, equipmentFallbackResult] = await Promise.all([
+    supabase
+      .from("employees")
+      .select("id, job_id")
+      .eq("company_id", companyId)
+      .in("job_id", jobIds),
+    supabase
+      .from("equipment")
+      .select("id, job_id")
+      .eq("company_id", companyId)
+      .in("job_id", jobIds),
+  ]);
 
   const counts = new Map<string, { crew: number; equipment: number }>();
   const crewSeen = new Set<string>();
@@ -150,6 +162,38 @@ async function getJobAssignmentCounts(
       current.equipment += 1;
       counts.set(key, current);
     }
+  }
+
+  if (!crewFallbackResult.error) {
+    for (const row of crewFallbackResult.data ?? []) {
+      const key = String((row as any).job_id ?? "");
+      const employeeId = String((row as any).id ?? "");
+      if (!key) continue;
+      const dedupeKey = `${key}:${employeeId}`;
+      if (crewSeen.has(dedupeKey)) continue;
+      crewSeen.add(dedupeKey);
+      const current = counts.get(key) ?? { crew: 0, equipment: 0 };
+      current.crew += 1;
+      counts.set(key, current);
+    }
+  } else if (!isMissingSchemaError(crewFallbackResult.error.message)) {
+    throw new Error(crewFallbackResult.error.message);
+  }
+
+  if (!equipmentFallbackResult.error) {
+    for (const row of equipmentFallbackResult.data ?? []) {
+      const key = String((row as any).job_id ?? "");
+      const equipmentId = String((row as any).id ?? "");
+      if (!key) continue;
+      const dedupeKey = `${key}:${equipmentId}`;
+      if (equipmentSeen.has(dedupeKey)) continue;
+      equipmentSeen.add(dedupeKey);
+      const current = counts.get(key) ?? { crew: 0, equipment: 0 };
+      current.equipment += 1;
+      counts.set(key, current);
+    }
+  } else if (!isMissingSchemaError(equipmentFallbackResult.error.message)) {
+    throw new Error(equipmentFallbackResult.error.message);
   }
 
   return counts;

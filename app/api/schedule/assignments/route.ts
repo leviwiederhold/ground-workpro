@@ -261,26 +261,28 @@ export async function POST(request: Request) {
         createdAt: fallbackAssignment.created_at,
       };
 
-      const fallbackRecipientUserIds = new Set<string>([access.userId]);
+      const fallbackRecipientUserIds = new Set<string>();
       const fallbackEmployeeUserId = (employeeResult.data as { id?: string; user_id?: string } | null)?.user_id;
-      if (fallbackEmployeeUserId) {
+      if (fallbackEmployeeUserId && String(fallbackEmployeeUserId) !== String(access.userId)) {
         fallbackRecipientUserIds.add(String(fallbackEmployeeUserId));
       }
-      await enqueueNotifications({
-        supabase,
-        companyId,
-        userIds: Array.from(fallbackRecipientUserIds),
-        type: "task_assigned",
-        payload: {
-          assignmentId: fallbackAssignment.id,
-          jobId: payload.jobId,
-          jobName: (jobResult.data as { id: string; name?: string }).name ?? "Job",
-          date: payload.date,
-          href: `/jobs/${payload.jobId}`,
-          employeeId: payload.employeeId ?? null,
-          equipmentId: payload.equipmentId ?? null,
-        },
-      });
+      if (fallbackRecipientUserIds.size > 0) {
+        await enqueueNotifications({
+          supabase,
+          companyId,
+          userIds: Array.from(fallbackRecipientUserIds),
+          type: "task_assigned",
+          payload: {
+            assignmentId: fallbackAssignment.id,
+            jobId: payload.jobId,
+            jobName: (jobResult.data as { id: string; name?: string }).name ?? "Job",
+            date: payload.date,
+            href: `/jobs/${payload.jobId}`,
+            employeeId: payload.employeeId ?? null,
+            equipmentId: payload.equipmentId ?? null,
+          },
+        });
+      }
 
       return NextResponse.json(warnings.length > 0 ? { item: fallbackItem, warnings } : { item: fallbackItem });
     }
@@ -289,27 +291,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: insertResult.error?.message ?? "Failed to create assignment" }, { status: 400 });
     }
 
-    const recipientUserIds = new Set<string>([access.userId]);
+    const recipientUserIds = new Set<string>();
     const employeeUserId = (employeeResult.data as { id?: string; user_id?: string } | null)?.user_id;
-    if (employeeUserId) {
+    if (employeeUserId && String(employeeUserId) !== String(access.userId)) {
       recipientUserIds.add(String(employeeUserId));
     }
 
-    await enqueueNotifications({
-      supabase,
-      companyId,
-      userIds: Array.from(recipientUserIds),
-      type: "task_assigned",
-      payload: {
-        assignmentId: insertResult.data.id,
-        jobId: payload.jobId,
-        jobName: (jobResult.data as { id: string; name?: string }).name ?? "Job",
-        date: payload.date,
-        href: `/jobs/${payload.jobId}`,
-        employeeId: payload.employeeId ?? null,
-        equipmentId: payload.equipmentId ?? null,
-      },
-    });
+    if (recipientUserIds.size > 0) {
+      await enqueueNotifications({
+        supabase,
+        companyId,
+        userIds: Array.from(recipientUserIds),
+        type: "task_assigned",
+        payload: {
+          assignmentId: insertResult.data.id,
+          jobId: payload.jobId,
+          jobName: (jobResult.data as { id: string; name?: string }).name ?? "Job",
+          date: payload.date,
+          href: `/jobs/${payload.jobId}`,
+          employeeId: payload.employeeId ?? null,
+          equipmentId: payload.equipmentId ?? null,
+        },
+      });
+    }
 
     const item = mapAssignment(insertResult.data as unknown as Record<string, unknown>);
     createFallbackAssignment({

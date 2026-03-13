@@ -339,39 +339,41 @@ export async function POST(request: Request) {
     }
 
     const recipientUserIds = Array.from(
-      new Set([
-        access.userId,
-        ...normalizedAttendees
+      new Set(
+        normalizedAttendees
           .filter((attendee: EventAttendee) => attendee.attendeeType === "user" && attendee.userId)
-          .map((attendee: EventAttendee) => String(attendee.userId)),
-      ])
+          .map((attendee: EventAttendee) => String(attendee.userId))
+          .filter((userId) => userId && userId !== access.userId)
+      )
     );
 
-    await enqueueNotifications({
-      supabase,
-      companyId,
-      userIds: recipientUserIds,
-      type: "calendar_invite",
-      payload: {
+    if (recipientUserIds.length > 0) {
+      await enqueueNotifications({
+        supabase,
+        companyId,
+        userIds: recipientUserIds,
+        type: "calendar_invite",
+        payload: {
+          eventId: insertEventResult.data.id,
+          title: payload.title,
+          eventTitle: payload.title,
+          startsAt: payload.startsAt,
+          endsAt: payload.endsAt,
+          visibility: payload.visibility,
+          href: `/schedule`,
+        },
+      });
+      await enqueueUpcomingEventReminder({
+        supabase,
+        companyId,
+        userIds: recipientUserIds,
         eventId: insertEventResult.data.id,
-        title: payload.title,
         eventTitle: payload.title,
         startsAt: payload.startsAt,
         endsAt: payload.endsAt,
-        visibility: payload.visibility,
-        href: `/schedule`,
-      },
-    });
-    await enqueueUpcomingEventReminder({
-      supabase,
-      companyId,
-      userIds: recipientUserIds,
-      eventId: insertEventResult.data.id,
-      eventTitle: payload.title,
-      startsAt: payload.startsAt,
-      endsAt: payload.endsAt,
-      actorUserId: access.userId,
-    });
+        actorUserId: access.userId,
+      });
+    }
 
     const item = mapEvent(insertEventResult.data, insertedAttendees);
     return NextResponse.json(warnings.length > 0 ? { item, warnings } : { item });

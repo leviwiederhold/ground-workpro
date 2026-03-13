@@ -296,7 +296,6 @@ export async function PATCH(
     const updatePayload: Record<string, unknown> = {};
     if (payload.title !== undefined) {
       updatePayload.title = payload.title;
-      updatePayload.project_name = payload.title;
     }
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.job_id !== undefined) updatePayload.job_id = normalizeId(payload.job_id);

@@ -9,6 +9,12 @@ const normalizeId = (id: unknown): string | number | null => {
   return String(id);
 };
 
+const isMissingColumnOrTable = (message: string) =>
+  /column .* does not exist/i.test(message) ||
+  /Could not find the '.*' column/i.test(message) ||
+  /relation .* does not exist/i.test(message) ||
+  /Could not find the table/i.test(message);
+
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string; equipmentId: string }> }
@@ -22,7 +28,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Invalid job or equipment id" }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    const deleteJoinResult = await supabase
       .from("job_equipment")
       .delete()
       .eq("company_id", companyId)
@@ -30,11 +36,26 @@ export async function DELETE(
       .eq("equipment_id", normalizedEquipmentId)
       .select("equipment_id");
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (deleteJoinResult.error && !isMissingColumnOrTable(deleteJoinResult.error.message || "")) {
+      return NextResponse.json({ error: deleteJoinResult.error.message }, { status: 400 });
     }
 
-    if (!data || data.length === 0) {
+    const clearEquipmentFallback = await supabase
+      .from("equipment")
+      .update({ job_id: null })
+      .eq("company_id", companyId)
+      .eq("id", normalizedEquipmentId)
+      .eq("job_id", jobId)
+      .select("id")
+      .limit(1);
+
+    if (clearEquipmentFallback.error && !isMissingColumnOrTable(clearEquipmentFallback.error.message || "")) {
+      return NextResponse.json({ error: clearEquipmentFallback.error.message }, { status: 400 });
+    }
+
+    const deletedRows = deleteJoinResult.error ? [] : deleteJoinResult.data ?? [];
+    const clearedRows = clearEquipmentFallback.error ? [] : clearEquipmentFallback.data ?? [];
+    if (deletedRows.length === 0 && clearedRows.length === 0) {
       return NextResponse.json({ error: "Assignment not found" }, { status: 404 });
     }
 

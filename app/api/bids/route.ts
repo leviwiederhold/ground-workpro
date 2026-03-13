@@ -307,7 +307,6 @@ export async function POST(request: Request) {
       company_id: companyId,
       created_by: userId,
       title: payload.title,
-      project_name: payload.title,
       client: payload.client ?? "",
       bid_date: normalizedBidDate,
       probability: normalizedProbability,

@@ -24,7 +24,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "training", label: "Training", href: "/training", iconKey: "chalkboard-user" },
   { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
   { key: "integrations", label: "Integrations", href: "/integrations", iconKey: "plug" },
-  { key: "settings", label: "Settings", href: "/settings", iconKey: "gear" },
   { key: "subscribe", label: "Subscribe", href: "/subscribe", iconKey: "credit-card" },
   { key: "audit", label: "Audit", href: "/audit", iconKey: "clipboard-list" },
 ];
@@ -43,7 +42,6 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "finance",
     "reports",
     "integrations",
-    "settings",
     "subscribe",
     "audit",
     "documents",
@@ -62,7 +60,6 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "messages",
     "reports",
     "finance",
-    "settings",
     "documents",
     "team",
     "training",

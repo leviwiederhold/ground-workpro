@@ -47,6 +47,56 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
   return 'Team Member';
 };
 
+const WorkspaceLoadingScreen = () => (
+  <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 transition-colors dark:bg-[#050505] dark:text-gray-100">
+    <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-md items-center justify-center">
+      <div className="w-full overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-xl shadow-black/5 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40">
+        <div className="relative overflow-hidden bg-gradient-to-br from-brand-500 via-brand-600 to-sky-600 px-6 pb-16 pt-8 text-white">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.22),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.18),transparent_34%)]" />
+          <div className="relative flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/16 ring-1 ring-white/25 backdrop-blur">
+              <i className="fa-solid fa-mountain text-lg" aria-hidden="true" />
+            </div>
+            <div>
+              <p className="font-dozer text-xl tracking-[0.16em]">GROUNDWORK</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.45em] text-white/75">Pro</p>
+            </div>
+          </div>
+          <div className="relative mt-8 space-y-3">
+            <div className="flex items-center gap-3 text-sm text-white/90">
+              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
+              Preparing your workspace...
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-white/20">
+              <div className="h-full w-1/2 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-white/90" />
+            </div>
+          </div>
+        </div>
+        <div className="space-y-4 px-6 py-6">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 animate-pulse rounded-2xl bg-brand-50 dark:bg-brand-500/10" />
+            <div className="flex-1 space-y-2">
+              <div className="h-3 w-24 animate-pulse rounded-full bg-gray-200 dark:bg-zinc-800" />
+              <div className="h-3 w-40 animate-pulse rounded-full bg-gray-100 dark:bg-zinc-900" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div
+                key={index}
+                className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/80"
+              >
+                <div className="h-3 w-14 animate-pulse rounded-full bg-gray-200 dark:bg-zinc-800" />
+                <div className="mt-3 h-6 w-12 animate-pulse rounded-full bg-gray-300/80 dark:bg-zinc-700" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+);
+
 
     // ============================================
     // MOCK DATA - Would come from API in production
@@ -327,17 +377,17 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       if (!isOpen) return null;
       const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-[95vw]' };
       return (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
+        <div className="fixed inset-0 z-50 overflow-y-auto overscroll-contain">
           <div className="fixed inset-0 bg-black/50" onClick={onClose}></div>
-          <div className="flex min-h-full items-end md:items-center justify-center p-0 md:p-4">
-            <div className={`relative bg-white rounded-t-xl md:rounded-xl shadow-2xl ${sizes[size]} w-full max-h-[92vh] md:max-h-[90vh] overflow-hidden`}>
+          <div className="flex min-h-full items-end justify-center p-0 sm:items-center sm:p-4">
+            <div className={`relative my-3 bg-white rounded-t-xl sm:rounded-xl shadow-2xl ${sizes[size]} w-full max-h-[calc(100dvh-1.5rem)] sm:max-h-[90vh] overflow-hidden`}>
               <div className="flex items-center justify-between p-4 border-b border-gray-200">
                 <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
                 <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
                   <Icon name="xmark" className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
-              <div className="overflow-y-auto max-h-[calc(90vh-80px)] p-4">
+              <div className="overflow-y-auto overscroll-contain max-h-[calc(100dvh-6.5rem)] p-4 sm:max-h-[calc(90vh-80px)]">
                 {children}
               </div>
             </div>
@@ -765,13 +815,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
           finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
           integrations: { key: 'integrations', label: 'Integrations', iconKey: 'plug' },
-          settings: { key: 'settings', label: 'Settings', iconKey: 'gear' },
           subscribe: { key: 'subscribe', label: 'Subscribe', iconKey: 'credit-card' },
           audit: { key: 'audit', label: 'Audit', iconKey: 'clipboard-list' },
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'integrations', 'settings', 'subscribe', 'audit', 'documents', 'team', 'training', 'schedule'],
-          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'settings', 'documents', 'team', 'training', 'schedule'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'integrations', 'subscribe', 'audit', 'documents', 'team', 'training', 'schedule'],
+          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
           operator: ['dashboard', 'messages', 'schedule', 'safety'],
@@ -894,19 +943,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
       const loadNotifications = useCallback(async () => {
         try {
           setNotificationsLoading(true);
-          const [listResponse, countResponse] = await Promise.all([
-            fetch('/api/notifications?limit=30', { cache: 'no-store' }),
-            fetch('/api/notifications/unread-count', { cache: 'no-store' }),
-          ]);
+          const listResponse = await fetch('/api/notifications?limit=30', { cache: 'no-store' });
           const payload = await listResponse.json();
-          const countPayload = await countResponse.json().catch(() => ({}));
           if (!listResponse.ok) throw new Error(payload?.error || 'Failed to load notifications');
-          setNotifications(payload.items || []);
-          if (countResponse.ok) {
-            setUnreadNotificationsCount(Number(countPayload?.item?.count ?? 0));
-          } else {
-            setUnreadNotificationsCount((payload.items || []).filter((item) => !item.is_read).length);
-          }
+          const nextItems = payload.items || [];
+          setNotifications(nextItems);
+          setUnreadNotificationsCount(nextItems.filter((item) => !item.is_read).length);
         } catch {
           setNotifications([]);
           setUnreadNotificationsCount(0);
@@ -1838,7 +1880,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                       )}
                     </button>
                     {showNotifications && (
-                      <div className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden">
+                      <div className="absolute left-1/2 top-full z-50 mt-2 w-[min(24rem,calc(100vw-1rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl sm:left-auto sm:right-0 sm:w-96 sm:translate-x-0">
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                           <h3 className="font-semibold text-gray-900">Notifications</h3>
                           <div className="flex items-center gap-3">
@@ -1858,7 +1900,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                             </button>
                           </div>
                         </div>
-                        <div className="px-3 py-2 border-b border-gray-100 bg-white flex items-center gap-2">
+                        <div className="px-3 py-2 border-b border-gray-100 bg-white flex flex-wrap items-center gap-2">
                           <button
                             className={`px-2 py-1 text-xs rounded ${notificationFilter === 'all' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
                             onClick={() => setNotificationFilter('all')}
@@ -1872,7 +1914,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                             Unread
                           </button>
                         </div>
-                        <div className="max-h-96 overflow-y-auto">
+                        <div className="max-h-[min(70vh,26rem)] overflow-y-auto overscroll-contain">
                           {notificationsLoading ? (
                             <div className="px-4 py-3 text-sm text-gray-500">Loading notifications...</div>
                           ) : notificationItems.length === 0 ? (
@@ -6948,21 +6990,21 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             <StatCard icon="play-circle" label="Total Watch Time" value={`${totalWatchTime} min`} color="blue" />
           </StatGrid>
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-4">
               <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm">
                 <option value="all">All Categories</option>
                 {categories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-            <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => {
+            <div className="grid grid-cols-2 gap-2 sm:flex">
+              <Button variant="secondary" size="sm" className="justify-center px-3" onClick={() => {
                 setAssignForm((prev) => ({ ...prev, courseId: selectedVideo ? String(selectedVideo.id) : '' }));
                 setShowAssignModal(true);
               }}>
                 <Icon name="user-plus" className="mr-2" />Assign Training
               </Button>
-              <Button variant="brand" onClick={() => setShowCourseModal(true)}><Icon name="plus" className="mr-2" />Add Course</Button>
+              <Button variant="brand" size="sm" className="justify-center px-3" onClick={() => setShowCourseModal(true)}><Icon name="plus" className="mr-2" />Add Course</Button>
             </div>
           </div>
 
@@ -7098,9 +7140,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           {saveError ? <InlineError>{saveError}</InlineError> : null}
 
           {showAssignModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-3 sm:items-center sm:p-4">
               <button className="absolute inset-0 bg-black/40" onClick={() => setShowAssignModal(false)} aria-label="Close assign training modal" />
-              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 my-4 w-full max-w-xl p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Assign Training</h3>
                   <button className="text-gray-500 hover:text-gray-700" onClick={() => setShowAssignModal(false)}>
@@ -7174,9 +7216,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           )}
 
           {showCourseModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-3 sm:items-center sm:p-4">
               <button className="absolute inset-0 bg-black/40" onClick={() => setShowCourseModal(false)} aria-label="Close add course modal" />
-              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 my-4 w-full max-w-xl p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">Add Course</h3>
                   <button className="text-gray-500 hover:text-gray-700" onClick={() => setShowCourseModal(false)}>
@@ -7805,9 +7847,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             <StatCard icon="tags" label="Categories" value={categories.length} color="green" />
           </StatGrid>
 
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <SearchInput value={search} onChange={setSearch} placeholder="Search vendors..." />
-            <Button variant="brand" onClick={openCreateModal}><Icon name="plus" className="mr-2" />Add Vendor</Button>
+            <Button variant="brand" size="sm" className="justify-center px-3 sm:w-auto" onClick={openCreateModal}><Icon name="plus" className="mr-2" />Add Vendor</Button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -8124,9 +8166,9 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
           </div>
 
           {showVendorModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-3 sm:items-center sm:p-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close vendor modal" />
-              <Card className="relative z-10 w-full max-w-xl p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 my-4 w-full max-w-xl p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold text-gray-900">{editingVendorId ? 'Edit Vendor' : 'Add Vendor'}</h3>
                   <button className="text-gray-500 hover:text-gray-700" onClick={closeModal}>
@@ -8465,26 +8507,32 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 
       return (
         <div className="space-y-6">
-          <Card className="p-6 bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center">
-                  <Icon name="plug" className="text-3xl" />
+          <Card className="overflow-hidden border-0 bg-gradient-to-br from-slate-900 via-blue-900 to-blue-700 p-5 text-white shadow-lg shadow-blue-900/20 sm:p-6">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-4">
+                <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/15 backdrop-blur">
+                  <Icon name="building-columns" className="text-2xl" />
                 </div>
-                <div>
-                  <h3 className="text-xl font-bold">Accounting Integration</h3>
-                  <p className="text-blue-100">Not configured yet</p>
+                <div className="space-y-2">
+                  <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-100">
+                    <Icon name="sparkles" className="text-[10px]" />
+                    Finance Sync
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold">Accounting Integration</h3>
+                    <p className="max-w-xl text-sm text-blue-100 sm:text-base">Connect your accounting stack to keep job costs, vendor spend, and reconciliations aligned without leaving Groundwork Pro.</p>
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
-                  className="px-6 py-3 bg-white/20 text-white font-semibold rounded-lg opacity-60 cursor-not-allowed flex items-center gap-2"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-white/12 px-4 py-3 text-sm font-semibold text-white opacity-70 ring-1 ring-white/15 transition-colors"
                   disabled
                 >
                   <Icon name="link" /> Connect QuickBooks
                 </button>
                 <button
-                  className="px-6 py-3 bg-white/20 text-white font-semibold rounded-lg opacity-60 cursor-not-allowed flex items-center gap-2"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-white/12 px-4 py-3 text-sm font-semibold text-white opacity-70 ring-1 ring-white/15 transition-colors"
                   disabled
                 >
                   <Icon name="rotate" /> Sync Now
@@ -11303,6 +11351,12 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
         ],
       };
 
+      const fieldVisualCards = [
+        { title: 'Live Fleet', subtitle: 'Track heavy equipment from yard to jobsite.', icon: 'truck-field' },
+        { title: 'Crew Coordination', subtitle: 'Keep office and field aligned in one view.', icon: 'helmet-safety' },
+        { title: 'Job Costing', subtitle: 'Watch margin drift before it becomes a problem.', icon: 'chart-line' },
+      ];
+
       const features = [
         { icon: 'grid-2', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
         { icon: 'truck-field', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
@@ -11474,12 +11528,25 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
             {/* Background Image */}
             <div className="absolute inset-0 z-0">
               {IMAGES.hero !== 'YOUR_HERO_IMAGE_URL' ? (
-                <img src={IMAGES.hero} alt="Excavator at work" className="w-full h-full object-cover" />
+                <img src={IMAGES.hero} alt="Excavator at work" className="h-full w-full object-cover object-center sm:object-[center_35%]" />
               ) : (
-                <div className="w-full h-full bg-gradient-to-br from-brand-100 to-brand-200 flex items-center justify-center">
-                  <div className="text-center text-brand-400">
-                    <Icon name="image" className="text-6xl mb-2" />
-                    <p className="text-sm font-medium">Hero Image - Update IMAGES.hero</p>
+                <div className="h-full w-full bg-[radial-gradient(circle_at_top_right,_rgba(14,116,144,0.18),transparent_32%),linear-gradient(135deg,#eef6ff_0%,#dbeafe_42%,#f8fafc_100%)]">
+                  <div className="mx-auto flex h-full max-w-7xl items-center px-6 py-20">
+                    <div className="grid w-full gap-4 md:max-w-xl">
+                      {fieldVisualCards.map((card) => (
+                        <div key={card.title} className="rounded-2xl border border-white/60 bg-white/72 p-4 shadow-lg shadow-slate-200/60 backdrop-blur">
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-brand-500/20">
+                              <Icon name={card.icon} className="text-lg" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold uppercase tracking-[0.22em] text-brand-700">{card.title}</p>
+                              <p className="mt-1 text-sm text-slate-600">{card.subtitle}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -11680,7 +11747,7 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                 <h2 className="text-3xl font-bold text-gray-900 mb-4">Built for the Field</h2>
                 <p className="text-lg text-gray-600">From excavators to dozers, track every piece of equipment in your fleet.</p>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
                 {[
                   { alt: 'Volvo excavator on mound', placeholder: 'GALLERY 1' },
                   { alt: 'Aerial trenching', placeholder: 'GALLERY 2' },
@@ -11691,22 +11758,25 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
                   { alt: 'Dozer on pile', placeholder: 'GALLERY 7' },
                   { alt: 'Dozer in woods', placeholder: 'GALLERY 8' },
                 ].map((img, i) => (
-                  <div key={i} className={`overflow-hidden rounded-xl ${i === 0 || i === 5 ? 'md:col-span-2 md:row-span-2' : ''}`}>
+                  <div key={i} className={`group overflow-hidden rounded-xl ${i === 0 || i === 5 ? 'md:col-span-2 md:row-span-2' : ''}`}>
                     {IMAGES.gallery[i] && !IMAGES.gallery[i].includes('YOUR_') ? (
                       <img
                         src={IMAGES.gallery[i]}
                         alt={img.alt}
-                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-500"
-                        style={{ minHeight: i === 0 || i === 5 ? '400px' : '190px' }}
+                        className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
+                        style={{ minHeight: i === 0 || i === 5 ? '260px' : '150px' }}
                       />
                     ) : (
                       <div
-                        className="w-full h-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center"
-                        style={{ minHeight: i === 0 || i === 5 ? '400px' : '190px' }}
+                        className="flex h-full w-full items-end bg-[linear-gradient(160deg,#dbeafe_0%,#e2e8f0_45%,#cbd5e1_100%)] p-3 sm:p-4"
+                        style={{ minHeight: i === 0 || i === 5 ? '260px' : '150px' }}
                       >
-                        <div className="text-center text-gray-500">
-                          <Icon name="image" className="text-3xl mb-1" />
-                          <p className="text-xs font-medium">{img.placeholder}</p>
+                        <div className="w-full rounded-2xl border border-white/60 bg-white/70 p-3 text-slate-700 shadow-lg backdrop-blur">
+                          <div className="mb-8 flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-500 text-white">
+                            <Icon name={['truck-field', 'calendar-week', 'briefcase', 'users', 'warehouse', 'helmet-safety', 'chart-line', 'shield-heart'][i]} className="text-sm" />
+                          </div>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-brand-700">{img.placeholder}</p>
+                          <p className="mt-1 text-sm font-medium text-slate-800">{img.alt}</p>
                         </div>
                       </div>
                     )}
@@ -12037,68 +12107,72 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
 	      const [currentUser, setCurrentUser] = useState(null);
 	      const [setupChecked, setSetupChecked] = useState(false);
+	      const [setupRefreshing, setSetupRefreshing] = useState(false);
+	      const setupCheckInFlightRef = useRef(false);
 	      const hydrateCurrentUser = useCallback(async (sessionUser) => {
 	        const supabase = supabaseBrowser();
 	        const userId = String(sessionUser?.id ?? '');
 	        let email = String(sessionUser?.email ?? '').trim();
 
-	        let fullName = '';
-	        let displayName = '';
-	        let avatarUrl = '';
+	        const [profilePayload, membership] = await Promise.all([
+	          userId
+	            ? fetch('/api/profile', { cache: 'no-store' })
+	                .then(async (response) => (response.ok ? response.json().catch(() => ({})) : {}))
+	                .catch(() => ({}))
+	            : Promise.resolve({}),
+	          userId
+	            ? (async () => {
+	                let membershipResult = await supabase
+	                  .from('memberships')
+	                  .select('company_id')
+	                  .eq('user_id', userId)
+	                  .order('created_at', { ascending: false })
+	                  .limit(1)
+	                  .maybeSingle();
 
-	        if (userId) {
-	          const profileResponse = await fetch('/api/profile', { cache: 'no-store' }).catch(() => null);
-	          const profilePayload = profileResponse ? await profileResponse.json().catch(() => ({})) : {};
-	          if (profileResponse?.ok) {
-	            fullName = String(profilePayload?.item?.full_name ?? '').trim();
-	            displayName = String(profilePayload?.item?.display_name ?? '').trim();
-	            avatarUrl = String(profilePayload?.item?.avatar_url ?? '').trim();
-	            const resolvedEmail = String(profilePayload?.item?.email ?? '').trim();
-	            if (!email && resolvedEmail) email = resolvedEmail;
-	          }
-	        }
+	                if (membershipResult.error && /created_at|Could not find the 'created_at' column/i.test(membershipResult.error.message || '')) {
+	                  membershipResult = await supabase
+	                    .from('memberships')
+	                    .select('company_id')
+	                    .eq('user_id', userId)
+	                    .order('company_id', { ascending: true })
+	                    .limit(1)
+	                    .maybeSingle();
+	                }
+
+	                return membershipResult;
+	              })()
+	            : Promise.resolve({ data: null, error: null }),
+	        ]);
+
+	        const profileItem = profilePayload?.item || {};
+	        const fullName = String(profileItem?.full_name ?? '').trim();
+	        const displayName = String(profileItem?.display_name ?? '').trim();
+	        const avatarUrl = String(profileItem?.avatar_url ?? '').trim();
+	        const resolvedEmail = String(profileItem?.email ?? '').trim();
+	        if (!email && resolvedEmail) email = resolvedEmail;
 
 	        let companyName = 'My Company';
 	        let companyLogo = '';
-	        if (userId) {
-	          let membership = await supabase
-	            .from('memberships')
-	            .select('company_id')
-	            .eq('user_id', userId)
-	            .order('created_at', { ascending: false })
-	            .limit(1)
+	        const companyId = String(membership?.data?.company_id ?? '').trim();
+	        if (companyId) {
+	          let company = await supabase
+	            .from('companies')
+	            .select('name, company_logo')
+	            .eq('id', companyId)
 	            .maybeSingle();
 
-	          if (membership.error && /created_at|Could not find the 'created_at' column/i.test(membership.error.message || '')) {
-	            membership = await supabase
-	              .from('memberships')
-	              .select('company_id')
-	              .eq('user_id', userId)
-	              .order('company_id', { ascending: true })
-	              .limit(1)
-	              .maybeSingle();
-	          }
-
-	          const companyId = String(membership.data?.company_id ?? '').trim();
-	          if (companyId) {
-	            let company = await supabase
+	          if (company.error && /company_logo|Could not find the 'company_logo' column/i.test(company.error.message || '')) {
+	            company = await supabase
 	              .from('companies')
-	              .select('name, company_logo')
+	              .select('name')
 	              .eq('id', companyId)
 	              .maybeSingle();
-
-	            if (company.error && /company_logo|Could not find the 'company_logo' column/i.test(company.error.message || '')) {
-	              company = await supabase
-	                .from('companies')
-	                .select('name')
-	                .eq('id', companyId)
-	                .maybeSingle();
-	            }
-
-	            const resolvedCompany = String(company.data?.name ?? '').trim();
-	            if (resolvedCompany) companyName = resolvedCompany;
-	            companyLogo = String(company.data?.company_logo ?? '').trim();
 	          }
+
+	          const resolvedCompany = String(company.data?.name ?? '').trim();
+	          if (resolvedCompany) companyName = resolvedCompany;
+	          companyLogo = String(company.data?.company_logo ?? '').trim();
 	        }
 
 	        return {
@@ -12111,6 +12185,38 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	          displayName,
 	        };
 	      }, []);
+
+	      const verifySetup = useCallback(async () => {
+	        if (!isAuthenticated || setupCheckInFlightRef.current) {
+	          if (!isAuthenticated) setSetupChecked(true);
+	          return;
+	        }
+
+	        setupCheckInFlightRef.current = true;
+	        setSetupRefreshing(true);
+	        setSetupChecked(false);
+
+	        try {
+	          const controller = new AbortController();
+	          const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+	          const response = await fetch('/api/onboarding/setup-status', {
+	            cache: 'no-store',
+	            signal: controller.signal,
+	          }).finally(() => window.clearTimeout(timeoutId));
+	          const payload = await response.json().catch(() => ({}));
+	          const isComplete = Boolean(payload?.item?.is_complete);
+	          if (!isComplete && typeof window !== 'undefined' && window.location.pathname !== '/setup') {
+	            window.location.replace('/setup');
+	            return;
+	          }
+	        } catch {
+	          // Allow the app shell to recover even if setup status check fails or hangs.
+	        } finally {
+	          setupCheckInFlightRef.current = false;
+	          setSetupRefreshing(false);
+	          setSetupChecked(true);
+	        }
+	      }, [isAuthenticated]);
 
 	      const handleLogin = (data) => {
 	        const email = String(data?.email ?? '').trim();
@@ -12188,51 +12294,43 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 	      }, [hydrateCurrentUser]);
 
       useEffect(() => {
-        let cancelled = false;
+        if (!isAuthenticated) {
+          setSetupChecked(true);
+          return;
+        }
+        void verifySetup();
+      }, [isAuthenticated, verifySetup]);
 
-        const verifySetup = async () => {
-          if (!isAuthenticated) {
-            setSetupChecked(true);
-            return;
-          }
+      useEffect(() => {
+        if (!isAuthenticated) return undefined;
 
-          try {
-            const response = await fetch('/api/onboarding/setup-status', { cache: 'no-store' });
-            const payload = await response.json().catch(() => ({}));
-            const isComplete = Boolean(payload?.item?.is_complete);
-            if (!isComplete) {
-              if (typeof window !== 'undefined' && window.location.pathname !== '/setup') {
-                window.location.replace('/setup');
-                return;
-              }
-            }
-          } catch {
-            // no-op
-          } finally {
-            if (!cancelled) setSetupChecked(true);
+        const refreshOnReturn = () => {
+          if (document.visibilityState === 'visible') {
+            void verifySetup();
           }
         };
 
-        setSetupChecked(false);
-        void verifySetup();
+        const refreshOnPageShow = () => {
+          void verifySetup();
+        };
+
+        window.addEventListener('focus', refreshOnReturn);
+        window.addEventListener('pageshow', refreshOnPageShow);
+        document.addEventListener('visibilitychange', refreshOnReturn);
 
         return () => {
-          cancelled = true;
+          window.removeEventListener('focus', refreshOnReturn);
+          window.removeEventListener('pageshow', refreshOnPageShow);
+          document.removeEventListener('visibilitychange', refreshOnReturn);
         };
-      }, [isAuthenticated]);
+      }, [isAuthenticated, verifySetup]);
 
       if (!isAuthenticated) {
         return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;
       }
 
-      if (!setupChecked) {
-        return (
-          <main className="min-h-screen bg-gray-50 p-6">
-            <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-              <p className="text-sm text-gray-600">Preparing your workspace...</p>
-            </div>
-          </main>
-        );
+      if (!setupChecked || setupRefreshing) {
+        return <WorkspaceLoadingScreen />;
       }
 
       return <App currentUser={currentUser} onLogout={handleLogout} />;

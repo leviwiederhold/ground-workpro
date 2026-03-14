@@ -119,9 +119,11 @@ export async function PATCH(
 ) {
   try {
     let actorRole: string;
+    let actorUserId = "";
     try {
       const actor = await requireModuleAccess("team_management", "edit");
       actorRole = actor.role;
+      actorUserId = String(actor.userId || "").trim();
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -148,7 +150,10 @@ export async function PATCH(
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    if (!actorUserId) {
+      actorUserId = String(userId || "").trim();
+    }
     const employeeId = normalizeId(id);
     const existingEmployeeResult = await supabase
       .from("employees")
@@ -247,7 +252,19 @@ export async function PATCH(
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const updatedEmployee = data;
+    let updatedEmployee = data;
+    if (!updatedEmployee) {
+      const refreshedEmployeeResult = await supabase
+        .from("employees")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("id", employeeId)
+        .maybeSingle();
+      if (refreshedEmployeeResult.error) {
+        return NextResponse.json({ error: refreshedEmployeeResult.error.message }, { status: 400 });
+      }
+      updatedEmployee = refreshedEmployeeResult.data;
+    }
     const oldJobId = existingEmployee.job_id == null ? null : String(existingEmployee.job_id);
     const requestedJobId =
       payload.jobId !== undefined
@@ -298,6 +315,7 @@ export async function PATCH(
             job_id: requestedJobId,
             employee_id: employeeId,
             date: today,
+            created_by: actorUserId || null,
             notes: "Auto-added from Team assignment",
           });
         if (scheduleInsertResult.error && !/relation .* does not exist|Could not find the table|duplicate key|unique/i.test(scheduleInsertResult.error.message || "")) {

@@ -113,7 +113,6 @@ async function finalizeRecalcBidTotal(
     total: revenue,
     amount: revenue,
     total_amount: revenue,
-    revenue,
     profit,
     margin,
   };

@@ -70,7 +70,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    const actorUserId = String(access.userId || userId || "").trim();
+    if (!actorUserId) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
     const payload = parsedBody.data;
 
     if ((payload.startsAt && !payload.endsAt) || (!payload.startsAt && payload.endsAt)) {
@@ -203,7 +207,7 @@ export async function POST(request: Request) {
         starts_at: payload.startsAt ?? null,
         ends_at: payload.endsAt ?? null,
         notes: payload.notes ?? "",
-        created_by: access.userId,
+        created_by: actorUserId,
       })
       .select("id, job_id, date, employee_id, equipment_id, starts_at, ends_at, notes, created_by, created_at")
       .single();
@@ -246,7 +250,7 @@ export async function POST(request: Request) {
         starts_at: payload.startsAt ?? null,
         ends_at: payload.endsAt ?? null,
         notes: payload.notes ?? "",
-        created_by: access.userId,
+        created_by: actorUserId,
       });
       const fallbackItem = {
         id: fallbackAssignment.id,
@@ -257,13 +261,13 @@ export async function POST(request: Request) {
         startsAt: payload.startsAt ?? null,
         endsAt: payload.endsAt ?? null,
         notes: payload.notes ?? "",
-        createdBy: access.userId,
+        createdBy: actorUserId,
         createdAt: fallbackAssignment.created_at,
       };
 
       const fallbackRecipientUserIds = new Set<string>();
       const fallbackEmployeeUserId = (employeeResult.data as { id?: string; user_id?: string } | null)?.user_id;
-      if (fallbackEmployeeUserId && String(fallbackEmployeeUserId) !== String(access.userId)) {
+      if (fallbackEmployeeUserId && String(fallbackEmployeeUserId) !== actorUserId) {
         fallbackRecipientUserIds.add(String(fallbackEmployeeUserId));
       }
       if (fallbackRecipientUserIds.size > 0) {
@@ -293,7 +297,7 @@ export async function POST(request: Request) {
 
     const recipientUserIds = new Set<string>();
     const employeeUserId = (employeeResult.data as { id?: string; user_id?: string } | null)?.user_id;
-    if (employeeUserId && String(employeeUserId) !== String(access.userId)) {
+    if (employeeUserId && String(employeeUserId) !== actorUserId) {
       recipientUserIds.add(String(employeeUserId));
     }
 
@@ -325,7 +329,7 @@ export async function POST(request: Request) {
       starts_at: payload.startsAt ?? null,
       ends_at: payload.endsAt ?? null,
       notes: payload.notes ?? "",
-      created_by: access.userId,
+      created_by: actorUserId,
     });
     return NextResponse.json(warnings.length > 0 ? { item, warnings } : { item });
   } catch (error) {

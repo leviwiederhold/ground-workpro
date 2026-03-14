@@ -1,12 +1,38 @@
-import * as Sentry from "@sentry/nextjs";
+const sentryEnabled =
+  process.env.SENTRY_ENABLED === "true" &&
+  Boolean(process.env.SENTRY_DSN);
+
+const loadSentry = async () => {
+  if (!sentryEnabled) return null;
+  return Function('return import("@sentry/nextjs")')() as Promise<typeof import("@sentry/nextjs")>;
+};
 
 export async function register() {
+  if (!sentryEnabled) return;
+
+  const Sentry = await loadSentry();
+  if (!Sentry) return;
+
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    await import("./sentry.server.config");
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV,
+      tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0),
+      sendDefaultPii: false,
+    });
   }
   if (process.env.NEXT_RUNTIME === "edge") {
-    await import("./sentry.edge.config");
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV,
+      tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || 0),
+      sendDefaultPii: false,
+    });
   }
 }
 
-export const onRequestError = Sentry.captureRequestError;
+export async function onRequestError(...args: Parameters<typeof import("@sentry/nextjs").captureRequestError>) {
+  const Sentry = await loadSentry();
+  if (!Sentry) return;
+  return Sentry.captureRequestError(...args);
+}

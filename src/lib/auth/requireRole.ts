@@ -1,6 +1,5 @@
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
-import * as Sentry from "@sentry/nextjs";
 import {
   applyPermissionOverrideFromCookie,
   hasModuleAccess,
@@ -35,8 +34,6 @@ export async function requireRole(allowed: Role[]): Promise<{
   if (!role || !hasRole(role, allowed)) {
     throw new ForbiddenError();
   }
-
-  Sentry.setTag("role", role);
 
   return { userId, companyId, role };
 }
@@ -73,8 +70,5 @@ export async function requireModuleAccess(
   if (!hasModuleAccess(effectivePermissions, moduleKey, required)) {
     throw new ForbiddenError();
   }
-
-  Sentry.setTag("role", role);
-  Sentry.setTag("module", moduleKey);
   return { userId, companyId, role };
 }

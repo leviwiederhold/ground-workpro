@@ -1,4 +1,3 @@
-import * as Sentry from "@sentry/nextjs";
 import { logServer } from "@/lib/observability/serverLog";
 
 export type ApiErrorContext = {
@@ -26,11 +25,15 @@ export function captureApiError(error: unknown, context: ApiErrorContext = {}) {
     ...context,
   });
 
-  Sentry.withScope((scope) => {
-    Object.entries(tags).forEach(([key, value]) => scope.setTag(key, value));
-    if (context.status) scope.setTag("status", String(context.status));
-    if (context.code) scope.setTag("code", context.code);
-    if (context.details !== undefined) scope.setExtra("details", context.details);
-    Sentry.captureException(err);
-  });
+  void (async () => {
+    if (process.env.SENTRY_ENABLED !== "true" || !process.env.SENTRY_DSN) return;
+    const Sentry = (await Function('return import("@sentry/nextjs")')()) as typeof import("@sentry/nextjs");
+    Sentry.withScope((scope) => {
+      Object.entries(tags).forEach(([key, value]) => scope.setTag(key, value));
+      if (context.status) scope.setTag("status", String(context.status));
+      if (context.code) scope.setTag("code", context.code);
+      if (context.details !== undefined) scope.setExtra("details", context.details);
+      Sentry.captureException(err);
+    });
+  })();
 }

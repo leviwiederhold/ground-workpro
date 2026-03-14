@@ -150,7 +150,7 @@ const mapBid = (row: any) => ({
         ? parsedNotes.meta.probability
         : null;
     const probability = dbProbability === 0 && notesProbability !== null ? notesProbability : dbProbability;
-    const revenue = normalizeNumber(row.revenue ?? row.total ?? row.total_amount ?? row.amount ?? 0);
+    const revenue = normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? row.revenue ?? 0);
     const actualJobCost = normalizeNumber(row.actual_job_cost ?? row.subtotal ?? row.sub_total ?? 0);
     const profit = normalizeNumber(row.profit, revenue - actualJobCost);
     const margin = normalizeNumber(row.margin, revenue > 0 ? profit / revenue : 0);
@@ -313,7 +313,6 @@ export async function POST(request: Request) {
       notes: notesWithMeta,
       job_id: normalizeId(payload.job_id),
       actual_job_cost: financials.actualJobCost,
-      revenue: financials.revenue,
       profit: financials.profit,
       margin: financials.margin,
       subtotal: financials.actualJobCost,

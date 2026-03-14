@@ -157,7 +157,7 @@ const mapBid = (row: any) => ({
         ? parsedNotes.meta.probability
         : null;
     const probability = dbProbability === 0 && notesProbability !== null ? notesProbability : dbProbability;
-    const revenue = normalizeNumber(row.revenue ?? row.total ?? row.total_amount ?? row.amount ?? 0);
+    const revenue = normalizeNumber(row.total ?? row.total_amount ?? row.amount ?? row.revenue ?? 0);
     const actualJobCost = normalizeNumber(row.actual_job_cost ?? row.subtotal ?? row.sub_total ?? 0);
     const profit = normalizeNumber(row.profit, revenue - actualJobCost);
     const margin = normalizeNumber(row.margin, revenue > 0 ? profit / revenue : 0);
@@ -308,7 +308,6 @@ export async function PATCH(
     }
     if (resolvedRevenueInput !== undefined) {
       const normalizedRevenue = normalizeNumber(resolvedRevenueInput);
-      updatePayload.revenue = normalizedRevenue;
       updatePayload.total = normalizedRevenue;
       updatePayload.amount = normalizedRevenue;
       updatePayload.total_amount = normalizedRevenue;
@@ -361,7 +360,7 @@ export async function PATCH(
 
     const { data: beforeBid } = await supabase
       .from("bids")
-      .select("id, stage, status, review_ready_at, review_approved_at, notes, client, client_name, customer, customer_name, bid_date, bidDate, biddate, probability, win_probability, actual_job_cost, subtotal, revenue, total, total_amount, amount")
+      .select("id, stage, status, review_ready_at, review_approved_at, notes, client, client_name, customer, customer_name, bid_date, bidDate, biddate, probability, win_probability, actual_job_cost, subtotal, total, total_amount, amount")
       .eq("company_id", companyId)
       .eq("id", bidId)
       .maybeSingle();
@@ -397,10 +396,9 @@ export async function PATCH(
     const resolvedRevenue =
       resolvedRevenueInput !== undefined
         ? normalizeNumber(resolvedRevenueInput)
-        : normalizeNumber(beforeBid?.revenue ?? beforeBid?.total ?? beforeBid?.total_amount ?? beforeBid?.amount ?? 0);
+        : normalizeNumber(beforeBid?.total ?? beforeBid?.total_amount ?? beforeBid?.amount ?? 0);
     const financials = toBidFinancials(resolvedActualJobCost, resolvedRevenue);
     updatePayload.actual_job_cost = financials.actualJobCost;
-    updatePayload.revenue = financials.revenue;
     updatePayload.profit = financials.profit;
     updatePayload.margin = financials.margin;
     updatePayload.subtotal = financials.actualJobCost;

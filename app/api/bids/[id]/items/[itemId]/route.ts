@@ -94,7 +94,6 @@ async function recalcBidTotal(supabase: any, companyId: string, bidId: string | 
     total: revenue,
     amount: revenue,
     total_amount: revenue,
-    revenue,
     profit,
     margin,
   };

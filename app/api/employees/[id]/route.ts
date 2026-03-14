@@ -244,52 +244,87 @@ export async function PATCH(
 
     const updatedEmployee = data;
     const oldJobId = existingEmployee.job_id == null ? null : String(existingEmployee.job_id);
-    const newJobId = updatedEmployee?.job_id == null ? null : String(updatedEmployee.job_id);
-    if (newJobId && newJobId !== oldJobId) {
-      const today = new Date().toISOString().slice(0, 10);
-      const existingSchedule = await supabase
-        .from("schedule_assignments")
-        .select("id")
+    const requestedJobId =
+      payload.jobId !== undefined
+        ? payload.jobId === "" || payload.jobId === null
+          ? null
+          : String(payload.jobId)
+        : updatedEmployee?.job_id == null
+          ? null
+          : String(updatedEmployee.job_id);
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (payload.jobId !== undefined) {
+      const deleteJoinAssignments = await supabase
+        .from("job_employees")
+        .delete()
         .eq("company_id", companyId)
-        .eq("job_id", updatedEmployee.job_id)
-        .eq("employee_id", employeeId)
-        .eq("date", today)
-        .limit(1);
-      if (!existingSchedule.error && (existingSchedule.data ?? []).length === 0) {
-        await supabase
+        .eq("employee_id", employeeId);
+      if (deleteJoinAssignments.error && !/relation .* does not exist|Could not find the table/i.test(deleteJoinAssignments.error.message || "")) {
+        return NextResponse.json({ error: deleteJoinAssignments.error.message }, { status: 400 });
+      }
+
+      const deleteTodayAssignments = await supabase
         .from("schedule_assignments")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("employee_id", employeeId)
+        .eq("date", today);
+      if (deleteTodayAssignments.error && !/relation .* does not exist|Could not find the table/i.test(deleteTodayAssignments.error.message || "")) {
+        return NextResponse.json({ error: deleteTodayAssignments.error.message }, { status: 400 });
+      }
+
+      if (requestedJobId) {
+        const joinInsertResult = await supabase
+          .from("job_employees")
           .insert({
             company_id: companyId,
-            job_id: updatedEmployee.job_id,
+            job_id: requestedJobId,
+            employee_id: employeeId,
+          });
+        if (joinInsertResult.error && !/relation .* does not exist|Could not find the table|duplicate key|unique/i.test(joinInsertResult.error.message || "")) {
+          return NextResponse.json({ error: joinInsertResult.error.message }, { status: 400 });
+        }
+
+        const scheduleInsertResult = await supabase
+          .from("schedule_assignments")
+          .insert({
+            company_id: companyId,
+            job_id: requestedJobId,
             employee_id: employeeId,
             date: today,
             notes: "Auto-added from Team assignment",
           });
-      }
+        if (scheduleInsertResult.error && !/relation .* does not exist|Could not find the table|duplicate key|unique/i.test(scheduleInsertResult.error.message || "")) {
+          return NextResponse.json({ error: scheduleInsertResult.error.message }, { status: 400 });
+        }
 
-      const jobResult = await supabase
-        .from("jobs")
-        .select("id, name")
-        .eq("company_id", companyId)
-        .eq("id", updatedEmployee.job_id)
-        .maybeSingle();
-      const linkedUserId = String(updatedEmployee?.user_id ?? "").trim();
-      if (linkedUserId) {
-        try {
-          await enqueueNotifications({
-            supabase,
-            companyId,
-            userIds: [linkedUserId],
-            type: "job_assigned",
-            payload: {
-              jobId: String(updatedEmployee.job_id),
-              jobName: String(jobResult.data?.name ?? "Assigned Job"),
-              date: today,
-              href: "/schedule",
-            },
-          });
-        } catch {
-          // no-op: assignment save should not fail on notification issue
+        if (requestedJobId !== oldJobId) {
+          const jobResult = await supabase
+            .from("jobs")
+            .select("id, name")
+            .eq("company_id", companyId)
+            .eq("id", requestedJobId)
+            .maybeSingle();
+          const linkedUserId = String(updatedEmployee?.user_id ?? "").trim();
+          if (linkedUserId) {
+            try {
+              await enqueueNotifications({
+                supabase,
+                companyId,
+                userIds: [linkedUserId],
+                type: "job_assigned",
+                payload: {
+                  jobId: String(requestedJobId),
+                  jobName: String(jobResult.data?.name ?? "Assigned Job"),
+                  date: today,
+                  href: "/schedule",
+                },
+              });
+            } catch {
+              // no-op: assignment save should not fail on notification issue
+            }
+          }
         }
       }
     }
@@ -309,7 +344,16 @@ export async function PATCH(
       }
     }
 
-    return NextResponse.json({ employee: mapEmployee(updatedEmployee) });
+    return NextResponse.json({
+      employee: mapEmployee(
+        payload.jobId !== undefined
+          ? {
+              ...updatedEmployee,
+              job_id: requestedJobId,
+            }
+          : updatedEmployee
+      ),
+    });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

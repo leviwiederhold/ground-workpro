@@ -1880,7 +1880,7 @@ const WorkspaceLoadingScreen = () => (
                       )}
                     </button>
                     {showNotifications && (
-                      <div className="absolute left-1/2 top-full z-50 mt-2 w-[min(24rem,calc(100vw-1rem))] -translate-x-1/2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl sm:left-auto sm:right-0 sm:w-96 sm:translate-x-0">
+                      <div className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl sm:w-96">
                         <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                           <h3 className="font-semibold text-gray-900">Notifications</h3>
                           <div className="flex items-center gap-3">

@@ -40,19 +40,24 @@ const parseCertifications = (value: unknown) => {
   return [];
 };
 
-const mapEmployee = (row: any) => ({
-  id: row.id,
-  name: row.name ?? row.full_name ?? "",
-  role: String(row.role ?? "operator").trim().toLowerCase(),
-  user_id: row.user_id ?? null,
-  phone: row.phone ?? "",
-  email: row.email ?? "",
-  hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate ?? 0),
-  certifications: parseCertifications(row.certifications),
-  jobId: normalizeId(row.job_id ?? row.jobId),
-  status: row.status ?? "off",
-  clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
-});
+const mapEmployee = (row: any) => {
+  const id = row?.id;
+  if (id === null || id === undefined || id === "") return null;
+
+  return {
+    id,
+    name: row.name ?? row.full_name ?? "",
+    role: String(row.role ?? "operator").trim().toLowerCase(),
+    user_id: row.user_id ?? null,
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate ?? 0),
+    certifications: parseCertifications(row.certifications),
+    jobId: normalizeId(row.job_id ?? row.jobId),
+    status: row.status ?? "off",
+    clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
+  };
+};
 
 const isStatusCheckError = (message: string | undefined) =>
   /employees_status_check|violates check constraint .*status/i.test(message ?? "");
@@ -118,7 +123,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const employees = (data ?? []).map(mapEmployee);
+    const employees = (data ?? []).map(mapEmployee).filter(Boolean);
     return NextResponse.json({ employees, ...getPaginationMeta(count ?? employees.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
@@ -210,7 +215,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ employee: mapEmployee(data) });
+    const employee = mapEmployee(data);
+    if (!employee) {
+      return NextResponse.json({ error: "Employee create returned no row" }, { status: 500 });
+    }
+
+    return NextResponse.json({ employee });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

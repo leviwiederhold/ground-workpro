@@ -5,6 +5,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
+
+const hasRecordId = (value) => {
+  const id = value?.id;
+  return id !== null && id !== undefined && String(id).trim() !== '';
+};
+
+const hasUserId = (value) => {
+  const userId = value?.userId;
+  return userId !== null && userId !== undefined && String(userId).trim() !== '';
+};
+
 export function MessagesView({ employees = [], ui }) {
   const { Button, Icon } = ui;
   const [activeChannel, setActiveChannel] = useState(null);
@@ -36,6 +47,10 @@ export function MessagesView({ employees = [], ui }) {
   const messagesEndRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
+  const safeEmployees = useMemo(
+    () => (Array.isArray(employees) ? employees.filter(hasRecordId) : []),
+    [employees]
+  );
 
   useEffect(() => {
     channelsRef.current = channels;
@@ -98,7 +113,7 @@ export function MessagesView({ employees = [], ui }) {
     const userById = new Map((availableUsers || []).map((user) => [String(user.userId), user]));
     const options = [];
 
-    for (const employee of employees || []) {
+    for (const employee of safeEmployees) {
       const explicitUserId = employee?.user_id ? String(employee.user_id) : null;
       if (explicitUserId && myUserId && explicitUserId === myUserId) continue;
       const matchedUser = explicitUserId ? userById.get(explicitUserId) : null;
@@ -137,7 +152,7 @@ export function MessagesView({ employees = [], ui }) {
     }
 
     return options.sort((a, b) => a.label.localeCompare(b.label));
-  }, [availableUsers, employees, myUserId, resolveBestName]);
+  }, [availableUsers, myUserId, resolveBestName, safeEmployees]);
 
   const userDisplayNameById = useMemo(
     () =>
@@ -187,7 +202,7 @@ export function MessagesView({ employees = [], ui }) {
     const response = await fetch('/api/company-members?excludeSelf=1', { cache: 'no-store' });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload?.error || 'Failed to load team members');
-    setAvailableUsers(payload.items || []);
+    setAvailableUsers(Array.isArray(payload?.items) ? payload.items.filter(hasUserId) : []);
   }, []);
 
   const loadChannels = useCallback(async (silent = false) => {
@@ -197,7 +212,7 @@ export function MessagesView({ employees = [], ui }) {
       const response = await fetch('/api/messages/inbox', { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Failed to load channels');
-      const nextChannels = payload.items || [];
+      const nextChannels = Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : [];
       setChannels(nextChannels);
       setActiveChannel((prev) => {
         if (!prev) return null;
@@ -237,7 +252,7 @@ export function MessagesView({ employees = [], ui }) {
       const response = await fetch(`/api/messages/threads/${channelId}/messages`, { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Failed to load messages');
-      setMessages(payload.items || []);
+      setMessages(Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : []);
       await markThreadRead(channelId);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load messages';
@@ -263,7 +278,7 @@ export function MessagesView({ employees = [], ui }) {
       const response = await fetch(`/api/messages/channels/${channelId}/members`, { cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Failed to load members');
-      setMembers(payload.items || []);
+      setMembers(Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : []);
     } catch (error) {
       setMembers([]);
       setMembersError(error instanceof Error ? error.message : 'Failed to load members');

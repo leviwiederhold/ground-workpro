@@ -166,9 +166,6 @@ export async function GET(request: Request) {
         return item.role === queryInput.role || normalized === queryInput.role;
       });
     }
-    if (queryInput.status !== "all") {
-      items = items.filter((item) => item.status === queryInput.status);
-    }
 
     const employeeIds = items.map((item) => item.id);
     if (employeeIds.length === 0) {
@@ -430,6 +427,7 @@ export async function GET(request: Request) {
           jobName: jobNameById.get(resolvedJobId) ?? "Job",
           href: `/jobs/${resolvedJobId}`,
         };
+        item.status = "active";
       }
       item.hoursThisWeek = linkedUserId ? Number(timeSummary.weekHoursByUserId.get(linkedUserId) ?? 0) : 0;
       const activeShiftStart = linkedUserId ? timeSummary.activeShiftStartByUserId.get(linkedUserId) : null;
@@ -444,6 +442,10 @@ export async function GET(request: Request) {
         item.pay.hourlyRate = 0;
         item.pay.loadedHourlyCost = 0;
       }
+    }
+
+    if (queryInput.status !== "all") {
+      items = items.filter((item) => item.status === queryInput.status);
     }
 
     return NextResponse.json({

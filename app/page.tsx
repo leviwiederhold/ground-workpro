@@ -47,6 +47,11 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
   return 'Team Member';
 };
 
+const hasRecordId = (value) => {
+  const id = value?.id;
+  return id !== null && id !== undefined && String(id).trim() !== '';
+};
+
 const WorkspaceLoadingScreen = () => (
   <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 transition-colors dark:bg-[#050505] dark:text-gray-100">
     <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-md items-center justify-center">
@@ -946,7 +951,7 @@ const WorkspaceLoadingScreen = () => (
           const listResponse = await fetch('/api/notifications?limit=30', { cache: 'no-store' });
           const payload = await listResponse.json();
           if (!listResponse.ok) throw new Error(payload?.error || 'Failed to load notifications');
-          const nextItems = payload.items || [];
+          const nextItems = Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : [];
           setNotifications(nextItems);
           setUnreadNotificationsCount(nextItems.filter((item) => !item.is_read).length);
         } catch {
@@ -1464,7 +1469,7 @@ const WorkspaceLoadingScreen = () => (
               throw new Error(payload?.error || 'Failed to load employees');
             }
             if (isMounted) {
-              setEmployees(payload.employees || []);
+              setEmployees(Array.isArray(payload?.employees) ? payload.employees.filter(hasRecordId) : []);
               moduleLoadedRef.current.employees = true;
             }
           } catch {
@@ -1880,121 +1885,144 @@ const WorkspaceLoadingScreen = () => (
                       )}
                     </button>
                     {showNotifications && (
-                      <div className="absolute right-0 top-full z-50 mt-2 w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl sm:w-96">
-                        <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between bg-gray-50">
-                          <h3 className="font-semibold text-gray-900">Notifications</h3>
-                          <div className="flex items-center gap-3">
-                            <button
-                              className="text-xs text-brand-600 hover:text-brand-700 font-medium disabled:opacity-60"
-                              onClick={handleMarkAllNotificationsRead}
-                              disabled={!notifications.some((item) => !item.is_read)}
-                            >
-                              Mark all read
-                            </button>
-                            <button
-                              className="text-xs text-gray-600 hover:text-gray-800 font-medium disabled:opacity-60"
-                              onClick={handleClearReadNotifications}
-                              disabled={!notifications.some((item) => item.is_read)}
-                            >
-                              Clear read
-                            </button>
+                      <>
+                        <button
+                          type="button"
+                          aria-label="Close notifications"
+                          className="fixed inset-0 z-40 bg-black/20 sm:hidden"
+                          onClick={() => setShowNotifications(false)}
+                        />
+                        <div className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+5rem)] z-50 w-[calc(100vw-24px)] max-w-none overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl shadow-black/15 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-1rem)] sm:rounded-2xl sm:shadow-xl">
+                          <div className="border-b border-gray-100 bg-gray-50 px-4 py-4 sm:px-4 sm:py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <h3 className="font-semibold text-gray-900">Notifications</h3>
+                                <p className="mt-1 text-xs text-gray-500 sm:hidden">{unreadNotificationsCount} unread</p>
+                              </div>
+                              <button
+                                type="button"
+                                aria-label="Close notifications"
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 text-gray-500 sm:hidden"
+                                onClick={() => setShowNotifications(false)}
+                              >
+                                <Icon name="xmark" />
+                              </button>
+                            </div>
+                            <div className="mt-3 flex flex-wrap items-center gap-2 sm:mt-2 sm:gap-3">
+                              <button
+                                className="min-h-10 rounded-full bg-white px-3 text-xs font-medium text-brand-600 ring-1 ring-brand-200 hover:text-brand-700 disabled:opacity-60 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0 sm:ring-0"
+                                onClick={handleMarkAllNotificationsRead}
+                                disabled={!notifications.some((item) => !item.is_read)}
+                              >
+                                Mark all read
+                              </button>
+                              <button
+                                className="min-h-10 rounded-full bg-white px-3 text-xs font-medium text-gray-600 ring-1 ring-gray-200 hover:text-gray-800 disabled:opacity-60 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0 sm:ring-0"
+                                onClick={handleClearReadNotifications}
+                                disabled={!notifications.some((item) => item.is_read)}
+                              >
+                                Clear read
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                        <div className="px-3 py-2 border-b border-gray-100 bg-white flex flex-wrap items-center gap-2">
-                          <button
-                            className={`px-2 py-1 text-xs rounded ${notificationFilter === 'all' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                            onClick={() => setNotificationFilter('all')}
-                          >
-                            All
-                          </button>
-                          <button
-                            className={`px-2 py-1 text-xs rounded ${notificationFilter === 'unread' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
-                            onClick={() => setNotificationFilter('unread')}
-                          >
-                            Unread
-                          </button>
-                        </div>
-                        <div className="max-h-[min(70vh,26rem)] overflow-y-auto overscroll-contain">
-                          {notificationsLoading ? (
-                            <div className="px-4 py-3 text-sm text-gray-500">Loading notifications...</div>
-                          ) : notificationItems.length === 0 ? (
-                            <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
-                          ) : (
-                            notificationItems.map((notification) => {
-                              const visual = notificationVisuals[notification.notification_type] || notificationVisuals.default;
-                              return (
-                                <div key={notification.id} className={`px-4 py-3 border-b border-gray-100 hover:bg-gray-50 ${!notification.is_read ? 'bg-brand-50/30' : ''}`}>
-                                  <div className="flex gap-3">
-                                    <div className={`w-10 h-10 rounded-full ${visual.containerClass} flex items-center justify-center flex-shrink-0`}>
-                                      <Icon name={visual.icon} className={visual.iconClass} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <div className="flex items-center gap-2">
-                                        <p className="font-medium text-gray-900 text-sm">{notification.title}</p>
-                                        {!notification.is_read && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
+                          <div className="border-b border-gray-100 bg-white px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                className={`min-h-9 rounded-full px-3 text-xs font-medium ${notificationFilter === 'all' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                                onClick={() => setNotificationFilter('all')}
+                              >
+                                All
+                              </button>
+                              <button
+                                className={`min-h-9 rounded-full px-3 text-xs font-medium ${notificationFilter === 'unread' ? 'bg-brand-100 text-brand-700' : 'text-gray-600 hover:bg-gray-100'}`}
+                                onClick={() => setNotificationFilter('unread')}
+                              >
+                                Unread
+                              </button>
+                            </div>
+                          </div>
+                          <div className="max-h-[min(68vh,32rem)] overflow-y-auto overscroll-contain sm:max-h-[min(70vh,26rem)]">
+                            {notificationsLoading ? (
+                              <div className="px-4 py-3 text-sm text-gray-500">Loading notifications...</div>
+                            ) : notificationItems.length === 0 ? (
+                              <div className="px-4 py-3 text-sm text-gray-500">No notifications</div>
+                            ) : (
+                              notificationItems.map((notification) => {
+                                const visual = notificationVisuals[notification.notification_type] || notificationVisuals.default;
+                                return (
+                                  <div key={notification.id} className={`border-b border-gray-100 px-4 py-4 hover:bg-gray-50 ${!notification.is_read ? 'bg-brand-50/30' : ''}`}>
+                                    <div className="flex gap-3">
+                                      <div className={`w-10 h-10 rounded-full ${visual.containerClass} flex items-center justify-center flex-shrink-0`}>
+                                        <Icon name={visual.icon} className={visual.iconClass} />
                                       </div>
-                                      {notification.actorName && (
-                                        <p className="text-xs text-gray-500">{notification.actorName}</p>
-                                      )}
-                                      <p className="text-sm text-gray-600">{notification.message}</p>
-                                      <div className="mt-1 flex items-center justify-between gap-3">
-                                        <p className="text-xs text-gray-400">{formatNotificationTime(notification.created_at)}</p>
-                                        <div className="flex items-center gap-3">
-                                          {notification.notification_type === 'calendar_invite' &&
-                                            !notification.is_read &&
-                                            notification?.payload?.eventId && (
-                                              <>
-                                                <button
-                                                  className="text-xs text-emerald-700 hover:text-emerald-800 font-medium"
-                                                  onClick={() => handleRespondToEventInvite(notification, 'accepted')}
-                                                >
-                                                  Accept
-                                                </button>
-                                                <button
-                                                  className="text-xs text-red-600 hover:text-red-700 font-medium"
-                                                  onClick={() => handleRespondToEventInvite(notification, 'declined')}
-                                                >
-                                                  Decline
-                                                </button>
-                                              </>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <p className="font-medium text-gray-900 text-sm">{notification.title}</p>
+                                          {!notification.is_read && <span className="w-2 h-2 bg-brand-500 rounded-full"></span>}
+                                        </div>
+                                        {notification.actorName && (
+                                          <p className="text-xs text-gray-500">{notification.actorName}</p>
+                                        )}
+                                        <p className="text-sm text-gray-600">{notification.message}</p>
+                                        <div className="mt-2 flex flex-col gap-2 sm:mt-1 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                                          <p className="text-xs text-gray-400">{formatNotificationTime(notification.created_at)}</p>
+                                          <div className="flex flex-wrap items-center gap-3">
+                                            {notification.notification_type === 'calendar_invite' &&
+                                              !notification.is_read &&
+                                              notification?.payload?.eventId && (
+                                                <>
+                                                  <button
+                                                    className="min-h-9 rounded-full bg-emerald-50 px-3 text-xs font-medium text-emerald-700 hover:text-emerald-800 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
+                                                    onClick={() => handleRespondToEventInvite(notification, 'accepted')}
+                                                  >
+                                                    Accept
+                                                  </button>
+                                                  <button
+                                                    className="min-h-9 rounded-full bg-red-50 px-3 text-xs font-medium text-red-600 hover:text-red-700 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
+                                                    onClick={() => handleRespondToEventInvite(notification, 'declined')}
+                                                  >
+                                                    Decline
+                                                  </button>
+                                                </>
+                                              )}
+                                            {(notification?.link || notification?.payload?.href) && (
+                                              <button
+                                                className="min-h-9 rounded-full bg-gray-100 px-3 text-xs font-medium text-gray-600 hover:text-gray-800 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
+                                                onClick={() => handleOpenNotification(notification)}
+                                              >
+                                                Open
+                                              </button>
                                             )}
-                                          {(notification?.link || notification?.payload?.href) && (
-                                            <button
-                                              className="text-xs text-gray-600 hover:text-gray-800 font-medium"
-                                              onClick={() => handleOpenNotification(notification)}
-                                            >
-                                              Open
-                                            </button>
-                                          )}
-                                          {!notification.is_read && (
-                                            <button
-                                              className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                                              onClick={() => handleMarkNotificationRead(notification.id)}
-                                            >
-                                              Mark read
-                                            </button>
-                                          )}
+                                            {!notification.is_read && (
+                                              <button
+                                                className="min-h-9 rounded-full bg-brand-50 px-3 text-xs font-medium text-brand-600 hover:text-brand-700 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
+                                                onClick={() => handleMarkNotificationRead(notification.id)}
+                                              >
+                                                Mark read
+                                              </button>
+                                            )}
+                                          </div>
                                         </div>
                                       </div>
                                     </div>
                                   </div>
-                                </div>
-                              );
-                            })
-                          )}
+                                );
+                              })
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between border-t border-gray-100 bg-gray-50 px-4 py-3">
+                            <p className="text-xs text-gray-500">
+                              {unreadNotificationsCount} unread
+                            </p>
+                            <button
+                              className="min-h-9 rounded-full px-3 text-xs font-medium text-brand-600 hover:text-brand-700"
+                              onClick={handleViewAllNotifications}
+                            >
+                              View all notifications
+                            </button>
+                          </div>
                         </div>
-                        <div className="px-4 py-2 border-t border-gray-100 bg-gray-50 flex items-center justify-between">
-                          <p className="text-xs text-gray-500">
-                            {unreadNotificationsCount} unread
-                          </p>
-                          <button
-                            className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-                            onClick={handleViewAllNotifications}
-                          >
-                            View all notifications
-                          </button>
-                        </div>
-                      </div>
+                      </>
                     )}
                   </div>
                   {/* User Menu */}
@@ -2579,7 +2607,7 @@ const WorkspaceLoadingScreen = () => (
           {/* Filters & Actions */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">
-              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
+              <div className="flex overflow-x-auto rounded-xl bg-gray-100 p-1 dark:bg-[#111111] dark:ring-1 dark:ring-zinc-800">
                 {['all', 'assigned', 'idle', 'maintenance'].map(status => (
                   <button
                     key={status}
@@ -3020,11 +3048,12 @@ const WorkspaceLoadingScreen = () => (
       const [permissionForm, setPermissionForm] = useState({ ...roleTemplateDefaults.operator });
       const [isMobileTeam, setIsMobileTeam] = useState(false);
       const [showTeamDetails, setShowTeamDetails] = useState(false);
+      const isTeamMemberOnSite = (employee) => employee.status === 'active' || Boolean(employee.assignedToday);
 
       const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
-        if (filter === 'on-site') return emp.status === 'active';
-        if (filter === 'off') return emp.status === 'inactive';
+        if (filter === 'on-site') return isTeamMemberOnSite(emp);
+        if (filter === 'off') return !isTeamMemberOnSite(emp);
         return emp.role.toLowerCase().includes(filter.toLowerCase());
       });
 
@@ -3041,7 +3070,7 @@ const WorkspaceLoadingScreen = () => (
 
       const stats = {
         total: teamItems.length,
-        onSite: teamItems.filter(e => e.status === 'active').length,
+        onSite: teamItems.filter(isTeamMemberOnSite).length,
         roles: [...new Set(teamItems.map(e => e.role))],
       };
 
@@ -3127,7 +3156,7 @@ const WorkspaceLoadingScreen = () => (
           if (!response.ok) {
             throw new Error(payload?.error || 'Failed to refresh employees');
           }
-          setEmployees(Array.isArray(payload?.employees) ? payload.employees : []);
+          setEmployees(Array.isArray(payload?.employees) ? payload.employees.filter(hasRecordId) : []);
         } catch (error) {
           setEmployeeActionError(error instanceof Error ? error.message : 'Failed to refresh employees');
         }
@@ -3552,7 +3581,7 @@ const WorkspaceLoadingScreen = () => (
           {/* Filters */}
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4 min-w-0">
-              <div className="flex bg-gray-100 rounded-lg p-1 overflow-x-auto">
+              <div className="flex overflow-x-auto rounded-xl bg-gray-100 p-1 dark:bg-[#111111] dark:ring-1 dark:ring-zinc-800">
                 {['all', 'on-site', 'off'].map(status => (
                   <button
                     key={status}
@@ -4286,8 +4315,10 @@ const WorkspaceLoadingScreen = () => (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}
-                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
-                      filter === f ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap ${
+                      filter === f
+                        ? 'bg-white text-gray-900 shadow dark:bg-[#050505] dark:text-zinc-100 dark:shadow-black/20'
+                        : 'text-gray-600 hover:text-gray-900 dark:text-zinc-400 dark:hover:text-zinc-100'
                     }`}
                   >
                     {f.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
@@ -4314,32 +4345,40 @@ const WorkspaceLoadingScreen = () => (
                 return (
                   <Card
                     key={wo.id}
-                    className={`p-4 cursor-pointer transition-all ${selectedWOId === wo.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
+                    className={`cursor-pointer p-4 transition-all dark:border-zinc-800 dark:bg-[#090909] ${selectedWOId === wo.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md dark:hover:bg-[#101010]'}`}
                     onClick={() => {
                       setSelectedWOId(wo.id);
                       if (isMobileMaintenance) setShowMaintenanceDetails(true);
                     }}
                   >
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-lg ${
-                          wo.type === 'repair' ? 'bg-red-100' : wo.type === 'preventive' ? 'bg-blue-100' : 'bg-yellow-100'
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <div className={`rounded-xl p-2.5 ${
+                          wo.type === 'repair'
+                            ? 'bg-red-100 dark:bg-red-950/40'
+                            : wo.type === 'preventive'
+                              ? 'bg-slate-100 dark:bg-[#111111]'
+                              : 'bg-yellow-100 dark:bg-yellow-950/30'
                         }`}>
                           <Icon name={wo.type === 'repair' ? 'screwdriver-wrench' : wo.type === 'preventive' ? 'calendar-check' : 'clipboard-check'} className={`${
-                            wo.type === 'repair' ? 'text-red-600' : wo.type === 'preventive' ? 'text-blue-600' : 'text-yellow-600'
+                            wo.type === 'repair'
+                              ? 'text-red-600 dark:text-red-300'
+                              : wo.type === 'preventive'
+                                ? 'text-slate-700 dark:text-zinc-200'
+                                : 'text-yellow-600 dark:text-yellow-300'
                           }`} />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <h4 className="font-medium text-gray-900">{wo.title}</h4>
+                            <h4 className="font-medium text-gray-900 dark:text-zinc-100">{wo.title}</h4>
                             <Icon name="circle" className={`text-xs ${getPriorityColor(wo.priority)}`} />
                           </div>
-                          <p className="text-sm text-gray-500">{eq?.name}</p>
+                          <p className="text-sm text-gray-500 dark:text-zinc-400">{eq?.name}</p>
                         </div>
                       </div>
                       <Badge className={getStatusColor(getWoDisplayStatus(wo.status))}>{getWoDisplayStatus(wo.status)}</Badge>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-gray-500 mt-3">
+                    <div className="mt-3 flex flex-col gap-2 text-xs text-gray-500 dark:text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
                       <span><Icon name="user" className="mr-1" />{tech?.name || 'Unassigned'}</span>
                       <span><Icon name="calendar" className="mr-1" />Due {formatDate(wo.dueDate)}</span>
                     </div>
@@ -4349,24 +4388,24 @@ const WorkspaceLoadingScreen = () => (
 
               {/* Upcoming PM Section */}
               <div className="pt-6">
-                <h3 className="font-semibold text-gray-900 mb-3">Upcoming Preventive Maintenance</h3>
-                <Card className="p-0 overflow-hidden">
+                <h3 className="mb-3 font-semibold text-gray-900 dark:text-zinc-100">Upcoming Preventive Maintenance</h3>
+                <Card className="hidden overflow-hidden p-0 dark:border-zinc-800 dark:bg-[#090909] md:block">
                   <table className="w-full">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-gray-50 dark:bg-[#050505]">
                       <tr>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Equipment</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Current Hours</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Service Due</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Hours Until</th>
-                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Action</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-zinc-400">Equipment</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-zinc-400">Current Hours</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-zinc-400">Service Due</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-zinc-400">Hours Until</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 dark:text-zinc-400">Action</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
                       {upcomingPM.map(eq => (
-                        <tr key={eq.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm font-medium">{eq.name}</td>
-                          <td className="px-4 py-3 text-sm">{eq.hours.toLocaleString()}</td>
-                          <td className="px-4 py-3 text-sm">{eq.nextService.toLocaleString()}</td>
+                        <tr key={eq.id} className="hover:bg-gray-50 dark:hover:bg-[#101010]">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900 dark:text-zinc-100">{eq.name}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-zinc-300">{eq.hours.toLocaleString()}</td>
+                          <td className="px-4 py-3 text-sm text-gray-700 dark:text-zinc-300">{eq.nextService.toLocaleString()}</td>
                           <td className="px-4 py-3">
                             <Badge variant={(eq.nextService - eq.hours) < 100 ? 'danger' : 'warning'}>
                               {eq.nextService - eq.hours} hrs
@@ -4382,6 +4421,32 @@ const WorkspaceLoadingScreen = () => (
                     </tbody>
                   </table>
                 </Card>
+                <div className="space-y-3 md:hidden">
+                  {upcomingPM.map(eq => (
+                    <Card key={eq.id} className="p-4 dark:border-zinc-800 dark:bg-[#090909]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-zinc-100">{eq.name}</p>
+                          <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
+                            {eq.hours.toLocaleString()} current hrs · service at {eq.nextService.toLocaleString()}
+                          </p>
+                        </div>
+                        <Badge variant={(eq.nextService - eq.hours) < 100 ? 'danger' : 'warning'}>
+                          {eq.nextService - eq.hours} hrs
+                        </Badge>
+                      </div>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="mt-4 w-full dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200 dark:hover:bg-[#111111]"
+                        onClick={() => setShowModal({ type: 'work-order', data: { equipmentId: eq.id, type: 'preventive' } })}
+                        disabled={!canEditMaintenance}
+                      >
+                        Schedule PM
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -4396,18 +4461,18 @@ const WorkspaceLoadingScreen = () => (
                   onClick={() => setShowMaintenanceDetails(false)}
                 />
               )}
-              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4'}>
+              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto rounded-2xl p-4 dark:border-zinc-800 dark:bg-[#090909]` : 'h-fit sticky top-4 p-4 dark:border-zinc-800 dark:bg-[#090909]'}>
                 <div className="flex items-start justify-between mb-4">
                   <div>
-                    <Badge className={`mb-2 ${wo => wo.type === 'repair' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800'}`}>
+                    <Badge className={`mb-2 ${selectedWO.type === 'repair' ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-slate-100 text-slate-800 dark:bg-[#111111] dark:text-zinc-200'}`}>
                       {selectedWO.type}
                     </Badge>
-                    <h3 className="font-semibold text-gray-900">{selectedWO.title}</h3>
+                    <h3 className="font-semibold text-gray-900 dark:text-zinc-100">{selectedWO.title}</h3>
                   </div>
                   {isMobileMaintenance && (
                     <button
                       type="button"
-                      className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700 mr-2"
+                      className="mr-2 rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700 dark:border-zinc-700 dark:text-zinc-200"
                       onClick={() => setShowMaintenanceDetails(false)}
                     >
                       Close
@@ -4418,22 +4483,22 @@ const WorkspaceLoadingScreen = () => (
 
                 <div className="space-y-4">
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Equipment</p>
-                    <p className="text-sm font-medium">{selectedEquipment?.name}</p>
+                    <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Equipment</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{selectedEquipment?.name}</p>
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Description</p>
-                    <p className="text-sm text-gray-700">{selectedWO.description}</p>
+                    <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Description</p>
+                    <p className="text-sm text-gray-700 dark:text-zinc-300">{selectedWO.description}</p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">Priority</p>
+                      <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Priority</p>
                       <select
                         value={woPriority}
                         onChange={(e) => setWoPriority(e.target.value)}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                         disabled={!canEditMaintenance}
                       >
                         <option value="low">low</option>
@@ -4442,17 +4507,17 @@ const WorkspaceLoadingScreen = () => (
                       </select>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">Due Date</p>
-                      <p className="text-sm font-medium">{formatDate(selectedWO.dueDate)}</p>
+                      <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Due Date</p>
+                      <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{formatDate(selectedWO.dueDate)}</p>
                     </div>
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Status</p>
+                    <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Status</p>
                     <select
                       value={woStatus}
                       onChange={(e) => setWoStatus(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                       disabled={!canEditMaintenance}
                     >
                       <option value="scheduled">scheduled</option>
@@ -4462,21 +4527,21 @@ const WorkspaceLoadingScreen = () => (
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Assigned To</p>
-                    <p className="text-sm font-medium">{assignee?.name || 'Unassigned'}</p>
+                    <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Assigned To</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{assignee?.name || 'Unassigned'}</p>
                   </div>
 
                   {selectedWO.parts.length > 0 && (
-                    <div className="pt-4 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 mb-2">Parts Required</p>
+                    <div className="border-t border-gray-200 pt-4 dark:border-zinc-800">
+                      <p className="mb-2 text-xs text-gray-500 dark:text-zinc-500">Parts Required</p>
                       <div className="space-y-2">
                         {selectedWO.parts.map((part, i) => (
-                          <div key={i} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
+                          <div key={i} className="flex items-center justify-between rounded-xl bg-gray-50 p-2 text-sm dark:bg-[#050505] dark:text-zinc-200">
                             <span>{part.name} x{part.qty}</span>
                             <span className="font-medium">{formatCurrency(part.cost * part.qty)}</span>
                           </div>
                         ))}
-                        <div className="flex items-center justify-between text-sm font-medium pt-2 border-t">
+                        <div className="flex items-center justify-between border-t border-gray-200 pt-2 text-sm font-medium dark:border-zinc-800 dark:text-zinc-100">
                           <span>Total Parts</span>
                           <span>{formatCurrency(selectedWO.parts.reduce((sum, p) => sum + (p.cost * p.qty), 0))}</span>
                         </div>
@@ -4484,9 +4549,9 @@ const WorkspaceLoadingScreen = () => (
                     </div>
                   )}
 
-                  <div className="pt-4 border-t border-gray-200">
-                    <p className="text-xs text-gray-500 mb-1">Est. Labor Hours</p>
-                    <p className="text-sm font-medium">{selectedWO.laborHours} hours</p>
+                  <div className="border-t border-gray-200 pt-4 dark:border-zinc-800">
+                    <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Est. Labor Hours</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{selectedWO.laborHours} hours</p>
                   </div>
 
                   <AttachmentPanel entityType="work_order" entityId={selectedWO.id} />
@@ -4507,8 +4572,8 @@ const WorkspaceLoadingScreen = () => (
               </Card>
               </>
             ) : (
-              !isMobileMaintenance ? <Card className="p-8 text-center text-gray-500">
-                <Icon name="wrench" className="text-4xl mb-2 text-gray-300" />
+              !isMobileMaintenance ? <Card className="p-8 text-center text-gray-500 dark:border-zinc-800 dark:bg-[#090909] dark:text-zinc-400">
+                <Icon name="wrench" className="mb-2 text-4xl text-gray-300 dark:text-zinc-700" />
                 <p>Select a work order to view details</p>
               </Card> : null
             )}
@@ -6034,11 +6099,11 @@ const WorkspaceLoadingScreen = () => (
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Recent Safety Logs */}
-            <Card className="p-0 overflow-hidden">
-              <div className="p-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-900">Recent Safety Logs</h3>
+            <Card className="overflow-hidden p-0 dark:border-zinc-800 dark:bg-[#090909]">
+              <div className="border-b border-gray-200 p-4 dark:border-zinc-800">
+                <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Recent Safety Logs</h3>
               </div>
-              <div className="divide-y divide-gray-100">
+              <div className="divide-y divide-gray-100 dark:divide-zinc-800">
                 {safetyLogsLoading ? (
                   <LoadingBlock testId="safety-loading">Loading safety logs...</LoadingBlock>
                 ) : safetyLogsError ? (
@@ -6049,18 +6114,20 @@ const WorkspaceLoadingScreen = () => (
                   const severity = severityVisuals[log.severity] || severityVisuals.medium;
                   const isDeleting = String(deleteLoadingId) === String(log.id);
                   return (
-                    <div key={log.id} className="p-4 hover:bg-gray-50" data-testid={`safety-log-row-${log.id}`}>
+                    <div key={log.id} className="p-4 hover:bg-gray-50 dark:hover:bg-[#101010]" data-testid={`safety-log-row-${log.id}`}>
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-start gap-3 min-w-0">
-                          <div className={`p-2 rounded-lg ${severity.iconBg}`}>
+                          <div className={`rounded-lg p-2 ${severity.iconBg} ${
+                            log.severity === 'high' ? 'dark:bg-red-950/40' : log.severity === 'medium' ? 'dark:bg-yellow-950/30' : 'dark:bg-green-950/30'
+                          }`}>
                             <Icon name={severity.icon} className={severity.iconColor} />
                           </div>
                           <div className="min-w-0">
-                            <p className="font-medium text-gray-900 break-words">{log.summary}</p>
-                            <p className="text-sm text-gray-500">{severity.label} Severity</p>
+                            <p className="break-words font-medium text-gray-900 dark:text-zinc-100">{log.summary}</p>
+                            <p className="text-sm text-gray-500 dark:text-zinc-400">{severity.label} Severity</p>
                           </div>
                         </div>
-                        <div className="text-right text-sm text-gray-500 shrink-0">
+                        <div className="shrink-0 text-right text-sm text-gray-500 dark:text-zinc-400">
                           <p>{formatDate(log.occurred_on)}</p>
                           <button
                             type="button"
@@ -6077,20 +6144,20 @@ const WorkspaceLoadingScreen = () => (
                     </div>
                   );
                 })}
-                {deleteError && <p className="px-4 py-2 text-sm text-red-600">{deleteError}</p>}
+                {deleteError && <p className="px-4 py-2 text-sm text-red-600 dark:text-red-300">{deleteError}</p>}
               </div>
             </Card>
 
             {/* Certification Alerts + Operations */}
-            <Card className="p-0 overflow-hidden">
-              <div className="p-4 border-b border-gray-200">
-                <h3 className="font-semibold text-gray-900">Safety Operations</h3>
+            <Card className="overflow-hidden p-0 dark:border-zinc-800 dark:bg-[#090909]">
+              <div className="border-b border-gray-200 p-4 dark:border-zinc-800">
+                <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Safety Operations</h3>
               </div>
-              <div className="divide-y divide-gray-100">
+              <div className="divide-y divide-gray-100 dark:divide-zinc-800">
                 <div className="p-4 space-y-2">
-                  <p className="text-sm font-medium text-gray-900">New Corrective Action</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">New Corrective Action</p>
                   <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                     value={newAction.safety_log_id}
                     onChange={(event) => setNewAction((prev) => ({ ...prev, safety_log_id: event.target.value }))}
                   >
@@ -6100,14 +6167,14 @@ const WorkspaceLoadingScreen = () => (
                     ))}
                   </select>
                   <input
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     placeholder="Action title"
                     value={newAction.title}
                     onChange={(event) => setNewAction((prev) => ({ ...prev, title: event.target.value }))}
                   />
                   <div className="grid grid-cols-2 gap-2">
                     <select
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                       value={newAction.owner_employee_id}
                       onChange={(event) => setNewAction((prev) => ({ ...prev, owner_employee_id: event.target.value }))}
                     >
@@ -6118,7 +6185,7 @@ const WorkspaceLoadingScreen = () => (
                     </select>
                     <input
                       type="date"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                       value={newAction.due_date}
                       onChange={(event) => setNewAction((prev) => ({ ...prev, due_date: event.target.value }))}
                     />
@@ -6126,20 +6193,20 @@ const WorkspaceLoadingScreen = () => (
                   <Button variant="secondary" size="sm" onClick={handleCreateAction} disabled={!canEditSafety || submitLoading}>
                     <Icon name="plus" className="mr-2" />Add Action
                   </Button>
-                  {actionsError && <p className="text-sm text-red-600">{actionsError}</p>}
+                  {actionsError && <p className="text-sm text-red-600 dark:text-red-300">{actionsError}</p>}
                 </div>
 
                 <div className="p-4 space-y-2">
-                  <p className="text-sm font-medium text-gray-900">Open Actions</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">Open Actions</p>
                   {actionsLoading ? (
-                    <p className="text-sm text-gray-500">Loading actions...</p>
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">Loading actions...</p>
                   ) : actions.length === 0 ? (
-                    <p className="text-sm text-gray-500">No actions yet.</p>
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">No actions yet.</p>
                   ) : actions.slice(0, 5).map((action) => (
-                    <div key={action.id} className="flex items-center justify-between gap-2 border border-gray-200 rounded-lg p-2">
+                    <div key={action.id} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#050505]">
                       <div className="min-w-0">
-                        <p className="text-sm font-medium text-gray-900 truncate">{action.title}</p>
-                        <p className="text-xs text-gray-500">{action.status} {action.due_date ? `· due ${formatDate(action.due_date)}` : ''}</p>
+                        <p className="truncate text-sm font-medium text-gray-900 dark:text-zinc-100">{action.title}</p>
+                        <p className="text-xs text-gray-500 dark:text-zinc-400">{action.status} {action.due_date ? `· due ${formatDate(action.due_date)}` : ''}</p>
                       </div>
                       {action.status !== 'closed' ? (
                         <Button variant="secondary" size="sm" onClick={() => handleCloseAction(action.id)} disabled={!canEditSafety}>Close</Button>
@@ -6151,29 +6218,29 @@ const WorkspaceLoadingScreen = () => (
                 </div>
 
                 <div className="p-4 space-y-2">
-                  <p className="text-sm font-medium text-gray-900">New Toolbox Talk</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">New Toolbox Talk</p>
                   <input
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     placeholder="Topic"
                     value={newTalk.topic}
                     onChange={(event) => setNewTalk((prev) => ({ ...prev, topic: event.target.value }))}
                   />
                   <input
                     type="date"
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                     value={newTalk.occurred_on}
                     onChange={(event) => setNewTalk((prev) => ({ ...prev, occurred_on: event.target.value }))}
                   />
                   <textarea
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     rows={2}
                     placeholder="Summary"
                     value={newTalk.summary}
                     onChange={(event) => setNewTalk((prev) => ({ ...prev, summary: event.target.value }))}
                   />
-                  <div className="max-h-28 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1">
+                  <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#050505]">
                     {employees.map((employee) => (
-                      <label key={employee.id} className="flex items-center gap-2 text-sm">
+                      <label key={employee.id} className="flex items-center gap-2 text-sm dark:text-zinc-200">
                         <input
                           type="checkbox"
                           checked={newTalk.attendee_employee_ids.includes(String(employee.id))}
@@ -6194,42 +6261,42 @@ const WorkspaceLoadingScreen = () => (
                   <Button variant="secondary" size="sm" onClick={handleCreateToolboxTalk} disabled={!canEditSafety || submitLoading}>
                     <Icon name="plus" className="mr-2" />Add Talk
                   </Button>
-                  {toolboxError && <p className="text-sm text-red-600">{toolboxError}</p>}
+                  {toolboxError && <p className="text-sm text-red-600 dark:text-red-300">{toolboxError}</p>}
                 </div>
 
                 <div className="p-4 space-y-2">
-                  <p className="text-sm font-medium text-gray-900">Recent Toolbox Talks</p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">Recent Toolbox Talks</p>
                   {toolboxLoading ? (
-                    <p className="text-sm text-gray-500">Loading toolbox talks...</p>
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">Loading toolbox talks...</p>
                   ) : toolboxTalks.length === 0 ? (
-                    <p className="text-sm text-gray-500">No toolbox talks yet.</p>
+                    <p className="text-sm text-gray-500 dark:text-zinc-400">No toolbox talks yet.</p>
                   ) : toolboxTalks.slice(0, 5).map((talk) => (
-                    <div key={talk.id} className="border border-gray-200 rounded-lg p-2">
-                      <p className="text-sm font-medium text-gray-900">{talk.topic}</p>
-                      <p className="text-xs text-gray-500">{formatDate(talk.occurred_on)} · {Number(talk.attendees_count || 0)} attendees</p>
+                    <div key={talk.id} className="rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#050505]">
+                      <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{talk.topic}</p>
+                      <p className="text-xs text-gray-500 dark:text-zinc-400">{formatDate(talk.occurred_on)} · {Number(talk.attendees_count || 0)} attendees</p>
                     </div>
                   ))}
                 </div>
 
                 {expiringCerts.map((cert, i) => (
-                  <div key={i} className={`p-4 ${cert.daysLeft < 0 ? 'bg-red-50' : cert.daysLeft < 30 ? 'bg-yellow-50' : ''}`}>
+                  <div key={i} className={`p-4 ${cert.daysLeft < 0 ? 'bg-red-50 dark:bg-red-950/25' : cert.daysLeft < 30 ? 'bg-yellow-50 dark:bg-yellow-950/20' : ''}`}>
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-medium text-gray-900">{cert.employeeName}</p>
-                        <p className="text-sm text-gray-500">{cert.name}</p>
+                        <p className="font-medium text-gray-900 dark:text-zinc-100">{cert.employeeName}</p>
+                        <p className="text-sm text-gray-500 dark:text-zinc-400">{cert.name}</p>
                       </div>
                       <div className="text-right">
                         <Badge variant={cert.daysLeft < 0 ? 'danger' : cert.daysLeft < 30 ? 'warning' : 'info'}>
                           {cert.daysLeft < 0 ? 'Expired' : `${cert.daysLeft} days left`}
                         </Badge>
-                        <p className="text-xs text-gray-500 mt-1">{formatDate(cert.expires)}</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">{formatDate(cert.expires)}</p>
                       </div>
                     </div>
                   </div>
                 ))}
                 {expiringCerts.length === 0 && (
-                  <div className="p-8 text-center text-gray-500">
-                    <Icon name="circle-check" className="text-3xl text-green-500 mb-2" />
+                  <div className="p-8 text-center text-gray-500 dark:text-zinc-400">
+                    <Icon name="circle-check" className="mb-2 text-3xl text-green-500 dark:text-green-400" />
                     <p>All certifications are current!</p>
                   </div>
                 )}
@@ -6522,7 +6589,7 @@ const WorkspaceLoadingScreen = () => (
 
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 min-w-0">
-              <select value={filter} onChange={(e) => setFilter(e.target.value)} className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full sm:w-auto">
+              <select value={filter} onChange={(e) => setFilter(e.target.value)} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm sm:w-auto dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100">
                 <option value="all">All Categories</option>
                 {categories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
@@ -6537,8 +6604,8 @@ const WorkspaceLoadingScreen = () => (
           </div>
 
           {lowStock.length > 0 && (
-            <Card className="p-4 bg-red-50 border-red-200">
-              <h4 className="font-medium text-red-800 mb-2"><Icon name="triangle-exclamation" className="mr-2" />Low Stock Alert</h4>
+            <Card className="border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/20">
+              <h4 className="mb-2 font-medium text-red-800 dark:text-red-200"><Icon name="triangle-exclamation" className="mr-2" />Low Stock Alert</h4>
               <div className="flex flex-wrap gap-2">
                 {lowStock.map(item => (
                   <Badge key={item.id} variant="danger">{item.name}: {item.qtyOnHand} {item.unit} remaining</Badge>
@@ -6547,50 +6614,51 @@ const WorkspaceLoadingScreen = () => (
             </Card>
           )}
 
-          <Card className="p-0 overflow-hidden">
+          <Card className="overflow-hidden p-0 dark:border-zinc-800 dark:bg-[#090909]">
+            <div className="hidden overflow-x-auto md:block">
             <table className="w-full">
-              <thead className="bg-gray-50">
+              <thead className="bg-gray-50 dark:bg-[#050505]">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">On Hand</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Reserved</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Available</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Reorder</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Last Unit Cost</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Job</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Item</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Category</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">On Hand</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Reserved</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Available</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Reorder</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Last Unit Cost</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Location</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Job</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
                 {inventoryLoading ? (
                   <tr>
-                    <td className="px-4 py-4 text-sm text-gray-500" colSpan={10}>Loading inventory...</td>
+                    <td className="px-4 py-4 text-sm text-gray-500 dark:text-zinc-400" colSpan={10}>Loading inventory...</td>
                   </tr>
                 ) : filteredInventory.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-4 text-sm text-gray-500" colSpan={10}>No inventory items yet.</td>
+                    <td className="px-4 py-4 text-sm text-gray-500 dark:text-zinc-400" colSpan={10}>No inventory items yet.</td>
                   </tr>
                 ) : filteredInventory.map(item => {
                   const job = jobs.find(j => j.id === item.jobId);
                   const isLow = item.qtyOnHand <= item.reorderPoint;
                   return (
-                    <tr key={item.id} className={`hover:bg-gray-50 ${isLow ? 'bg-red-50' : ''} ${selectedItemId === item.id ? 'ring-1 ring-brand-300' : ''}`} onClick={() => setSelectedItemId(item.id)}>
+                    <tr key={item.id} className={`hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''} ${selectedItemId === item.id ? 'ring-1 ring-brand-300' : ''}`} onClick={() => setSelectedItemId(item.id)}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {isLow && <Icon name="triangle-exclamation" className="text-red-500" />}
-                          <span className="font-medium text-gray-900">{item.name}</span>
+                          <span className="font-medium text-gray-900 dark:text-zinc-100">{item.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{item.category}</td>
-                      <td className="px-4 py-3 text-sm text-right font-medium">{item.qtyOnHand} {item.unit}</td>
-                      <td className="px-4 py-3 text-sm text-right text-gray-500">{item.qtyReserved} {item.unit}</td>
-                      <td className="px-4 py-3 text-sm text-right font-medium text-green-600">{item.qtyOnHand - item.qtyReserved} {item.unit}</td>
-                      <td className="px-4 py-3 text-sm text-right">{item.reorderPoint} {item.unit}</td>
-                      <td className="px-4 py-3 text-sm text-right">{formatCurrency(item.lastUnitCost ?? item.unitCost)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{item.location}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600">{job?.name || 'General'}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-zinc-300">{item.category}</td>
+                      <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-zinc-100">{item.qtyOnHand} {item.unit}</td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-500 dark:text-zinc-400">{item.qtyReserved} {item.unit}</td>
+                      <td className="px-4 py-3 text-right text-sm font-medium text-green-600 dark:text-green-400">{item.qtyOnHand - item.qtyReserved} {item.unit}</td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-700 dark:text-zinc-300">{item.reorderPoint} {item.unit}</td>
+                      <td className="px-4 py-3 text-right text-sm text-gray-700 dark:text-zinc-300">{formatCurrency(item.lastUnitCost ?? item.unitCost)}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-zinc-300">{item.location}</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-zinc-300">{job?.name || 'General'}</td>
                       <td className="px-4 py-3 text-right">
                         <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'receive'); }}><Icon name="plus" /></Button>
                         <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'issue'); }}><Icon name="arrow-up-right-from-square" /></Button>
@@ -6611,50 +6679,96 @@ const WorkspaceLoadingScreen = () => (
                 })}
               </tbody>
             </table>
+            </div>
+            <div className="space-y-3 p-3 md:hidden">
+              {inventoryLoading ? (
+                <p className="px-1 py-3 text-sm text-gray-500 dark:text-zinc-400">Loading inventory...</p>
+              ) : filteredInventory.length === 0 ? (
+                <p className="px-1 py-3 text-sm text-gray-500 dark:text-zinc-400">No inventory items yet.</p>
+              ) : filteredInventory.map((item) => {
+                const job = jobs.find(j => j.id === item.jobId);
+                const isLow = item.qtyOnHand <= item.reorderPoint;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`w-full rounded-2xl border p-4 text-left shadow-sm transition ${selectedItemId === item.id ? 'border-brand-300 ring-1 ring-brand-300' : 'border-gray-200 dark:border-zinc-800'} ${isLow ? 'bg-red-50 dark:bg-red-950/20' : 'bg-white dark:bg-[#090909]'}`}
+                    onClick={() => setSelectedItemId(item.id)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          {isLow && <Icon name="triangle-exclamation" className="text-red-500" />}
+                          <p className="font-medium text-gray-900 dark:text-zinc-100">{item.name}</p>
+                        </div>
+                        <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">{item.category} · {job?.name || 'General'}</p>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-zinc-500">{item.location || 'No location set'}</p>
+                      </div>
+                      <Badge variant={isLow ? 'danger' : 'info'}>{item.qtyOnHand - item.qtyReserved} avail</Badge>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[#050505]">
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">On Hand</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyOnHand} {item.unit}</p>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[#050505]">
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">Reserved</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyReserved} {item.unit}</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2">
+                      <Button variant="secondary" size="sm" className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'receive'); }}>Receive</Button>
+                      <Button variant="secondary" size="sm" className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'issue'); }}>Issue</Button>
+                      <Button variant="secondary" size="sm" className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={(event) => { event.stopPropagation(); openEditModal(item); }}>Edit</Button>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </Card>
 
           {selectedItem && (
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="font-semibold text-gray-900">Ledger · {selectedItem.name}</h4>
+            <Card className="p-4 dark:border-zinc-800 dark:bg-[#090909]">
+              <div className="mb-2 flex items-center justify-between">
+                <h4 className="font-semibold text-gray-900 dark:text-zinc-100">Ledger · {selectedItem.name}</h4>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                 <div>
-                  <p className="text-xs text-gray-500">On Hand</p>
-                  <p className="text-sm font-semibold">{selectedItem.qtyOnHand} {selectedItem.unit}</p>
+                  <p className="text-xs text-gray-500 dark:text-zinc-500">On Hand</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.qtyOnHand} {selectedItem.unit}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Reserved</p>
-                  <p className="text-sm font-semibold">{selectedItem.qtyReserved} {selectedItem.unit}</p>
+                  <p className="text-xs text-gray-500 dark:text-zinc-500">Reserved</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.qtyReserved} {selectedItem.unit}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Available</p>
-                  <p className="text-sm font-semibold">{(selectedItem.qtyOnHand - selectedItem.qtyReserved)} {selectedItem.unit}</p>
+                  <p className="text-xs text-gray-500 dark:text-zinc-500">Available</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{(selectedItem.qtyOnHand - selectedItem.qtyReserved)} {selectedItem.unit}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Reorder Point</p>
-                  <p className="text-sm font-semibold">{selectedItem.reorderPoint} {selectedItem.unit}</p>
+                  <p className="text-xs text-gray-500 dark:text-zinc-500">Reorder Point</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.reorderPoint} {selectedItem.unit}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Last Unit Cost</p>
-                  <p className="text-sm font-semibold">{formatCurrency(selectedItem.lastUnitCost ?? selectedItem.unitCost)}</p>
+                  <p className="text-xs text-gray-500 dark:text-zinc-500">Last Unit Cost</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{formatCurrency(selectedItem.lastUnitCost ?? selectedItem.unitCost)}</p>
                 </div>
               </div>
               {ledgerLoading ? (
-                <p className="text-sm text-gray-500">Loading ledger...</p>
+                <p className="text-sm text-gray-500 dark:text-zinc-400">Loading ledger...</p>
               ) : ledgerItems.length === 0 ? (
-                <p className="text-sm text-gray-500">No transactions yet.</p>
+                <p className="text-sm text-gray-500 dark:text-zinc-400">No transactions yet.</p>
               ) : (
                 <div className="space-y-2">
                   {ledgerItems.map((entry) => (
-                    <div key={entry.id} className="border border-gray-200 rounded-lg p-2 text-sm flex items-center justify-between gap-2">
+                    <div key={entry.id} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-zinc-800 dark:bg-[#050505]">
                       <div>
-                        <p className="font-medium text-gray-900">{String(entry.type || '').toUpperCase()}</p>
-                        <p className="text-xs text-gray-500">{formatDate(entry.createdAt)}</p>
+                        <p className="font-medium text-gray-900 dark:text-zinc-100">{String(entry.type || '').toUpperCase()}</p>
+                        <p className="text-xs text-gray-500 dark:text-zinc-400">{formatDate(entry.createdAt)}</p>
                       </div>
                       <div className="text-right">
-                        <p className="font-medium">{entry.qty}</p>
-                        <p className="text-xs text-gray-500">{formatCurrency(entry.unitCost || 0)}</p>
+                        <p className="font-medium text-gray-900 dark:text-zinc-100">{entry.qty}</p>
+                        <p className="text-xs text-gray-500 dark:text-zinc-400">{formatCurrency(entry.unitCost || 0)}</p>
                       </div>
                     </div>
                   ))}
@@ -6666,10 +6780,10 @@ const WorkspaceLoadingScreen = () => (
           {showAddModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close inventory modal" />
-              <Card className="relative z-10 w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6 dark:border-zinc-800 dark:bg-[#090909]">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">{editingId ? 'Edit Item' : 'Add Item'}</h3>
-                  <button className="text-gray-500 hover:text-gray-700" onClick={closeModal}>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">{editingId ? 'Edit Item' : 'Add Item'}</h3>
+                  <button className="text-gray-500 hover:text-gray-700 dark:text-zinc-400 dark:hover:text-zinc-200" onClick={closeModal}>
                     <Icon name="xmark" />
                   </button>
                 </div>
@@ -6677,39 +6791,39 @@ const WorkspaceLoadingScreen = () => (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="md:col-span-2">
                     <p className="text-xs text-gray-500 mb-1">Name</p>
-                    <input type="text" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="text" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Category</p>
-                    <input type="text" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="text" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Unit</p>
-                    <input type="text" value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="text" value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">On Hand</p>
-                    <input type="number" value={itemForm.qtyOnHand} onChange={(e) => setItemForm({ ...itemForm, qtyOnHand: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" value={itemForm.qtyOnHand} onChange={(e) => setItemForm({ ...itemForm, qtyOnHand: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Reserved</p>
-                    <input type="number" value={itemForm.qtyReserved} onChange={(e) => setItemForm({ ...itemForm, qtyReserved: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" value={itemForm.qtyReserved} onChange={(e) => setItemForm({ ...itemForm, qtyReserved: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Reorder Point</p>
-                    <input type="number" value={itemForm.reorderPoint} onChange={(e) => setItemForm({ ...itemForm, reorderPoint: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" value={itemForm.reorderPoint} onChange={(e) => setItemForm({ ...itemForm, reorderPoint: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Unit Cost</p>
-                    <input type="number" step="0.01" value={itemForm.unitCost} onChange={(e) => setItemForm({ ...itemForm, unitCost: Number(e.target.value) })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" step="0.01" value={itemForm.unitCost} onChange={(e) => setItemForm({ ...itemForm, unitCost: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Location</p>
-                    <input type="text" value={itemForm.location} onChange={(e) => setItemForm({ ...itemForm, location: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="text" value={itemForm.location} onChange={(e) => setItemForm({ ...itemForm, location: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Job</p>
-                    <select value={itemForm.jobId} onChange={(e) => setItemForm({ ...itemForm, jobId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <select value={itemForm.jobId} onChange={(e) => setItemForm({ ...itemForm, jobId: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
                       <option value="">General</option>
                       {jobs.map(job => (
                         <option key={job.id} value={job.id}>{job.name}</option>
@@ -6718,7 +6832,7 @@ const WorkspaceLoadingScreen = () => (
                   </div>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Status</p>
-                    <select value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                    <select value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
                       <option value="active">active</option>
                       <option value="low_stock">low_stock</option>
                       <option value="out_of_stock">out_of_stock</option>
@@ -6727,7 +6841,7 @@ const WorkspaceLoadingScreen = () => (
                   </div>
                 </div>
 
-                {formError && <p className="text-sm text-red-600 mt-4">{formError}</p>}
+                {formError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{formError}</p>}
 
                 <div className="flex justify-end gap-2 mt-6">
                   <Button variant="secondary" onClick={closeModal}>Cancel</Button>
@@ -6743,28 +6857,28 @@ const WorkspaceLoadingScreen = () => (
           {showTxnModal && selectedItem && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeTxnModal} aria-label="Close inventory transaction modal" />
-              <Card className="relative z-10 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
+              <Card className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto p-6 dark:border-zinc-800 dark:bg-[#090909]">
                 <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">{txnType.charAt(0).toUpperCase() + txnType.slice(1)} · {selectedItem.name}</h3>
-                  <button className="text-gray-500 hover:text-gray-700" onClick={closeTxnModal}>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">{txnType.charAt(0).toUpperCase() + txnType.slice(1)} · {selectedItem.name}</h3>
+                  <button className="text-gray-500 hover:text-gray-700 dark:text-zinc-400 dark:hover:text-zinc-200" onClick={closeTxnModal}>
                     <Icon name="xmark" />
                   </button>
                 </div>
                 <div className="space-y-3">
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Quantity</p>
-                    <input type="number" min="0" step="0.01" value={txnForm.qty} onChange={(e) => setTxnForm((prev) => ({ ...prev, qty: Number(e.target.value) }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                    <input type="number" min="0" step="0.01" value={txnForm.qty} onChange={(e) => setTxnForm((prev) => ({ ...prev, qty: Number(e.target.value) }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   {(txnType === 'receive' || txnType === 'adjust') && (
                     <div>
                       <p className="text-xs text-gray-500 mb-1">Unit Cost</p>
-                      <input type="number" min="0" step="0.01" value={txnForm.unit_cost} onChange={(e) => setTxnForm((prev) => ({ ...prev, unit_cost: Number(e.target.value) }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      <input type="number" min="0" step="0.01" value={txnForm.unit_cost} onChange={(e) => setTxnForm((prev) => ({ ...prev, unit_cost: Number(e.target.value) }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                     </div>
                   )}
                   {txnType === 'issue' && (
                     <div>
                       <p className="text-xs text-gray-500 mb-1">Issue to Job (optional)</p>
-                      <select value={txnForm.job_id} onChange={(e) => setTxnForm((prev) => ({ ...prev, job_id: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                      <select value={txnForm.job_id} onChange={(e) => setTxnForm((prev) => ({ ...prev, job_id: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
                         <option value="">No job</option>
                         {jobs.map((job) => (
                           <option key={job.id} value={job.id}>{job.name}</option>
@@ -6775,21 +6889,21 @@ const WorkspaceLoadingScreen = () => (
                   {(txnType === 'issue' || txnType === 'transfer') && (
                     <div>
                       <p className="text-xs text-gray-500 mb-1">From Location</p>
-                      <input type="text" value={txnForm.from_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, from_location: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      <input type="text" value={txnForm.from_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, from_location: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                     </div>
                   )}
                   {(txnType === 'receive' || txnType === 'transfer') && (
                     <div>
                       <p className="text-xs text-gray-500 mb-1">To Location</p>
-                      <input type="text" value={txnForm.to_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, to_location: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                      <input type="text" value={txnForm.to_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, to_location: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                     </div>
                   )}
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Notes</p>
-                    <textarea value={txnForm.notes} onChange={(e) => setTxnForm((prev) => ({ ...prev, notes: e.target.value }))} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-20" />
+                    <textarea value={txnForm.notes} onChange={(e) => setTxnForm((prev) => ({ ...prev, notes: e.target.value }))} className="h-20 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                 </div>
-                {txnError && <p className="text-sm text-red-600 mt-4">{txnError}</p>}
+                {txnError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{txnError}</p>}
                 <div className="flex justify-end gap-2 mt-6">
                   <Button variant="secondary" onClick={closeTxnModal}>Cancel</Button>
                   <Button variant="brand" onClick={handleTxnSubmit} disabled={txnLoading}>

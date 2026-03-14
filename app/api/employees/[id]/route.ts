@@ -47,19 +47,24 @@ const parseCertifications = (value: unknown) => {
   return [];
 };
 
-const mapEmployee = (row: any) => ({
-  id: row.id,
-  name: row.name ?? row.full_name ?? "",
-  role: String(row.role ?? "operator").trim().toLowerCase(),
-  user_id: row.user_id ?? null,
-  phone: row.phone ?? "",
-  email: row.email ?? "",
-  hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate ?? 0),
-  certifications: parseCertifications(row.certifications),
-  jobId: row.job_id === null || row.job_id === undefined ? null : /^\d+$/.test(String(row.job_id)) ? Number(row.job_id) : row.job_id,
-  status: row.status ?? "off",
-  clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
-});
+const mapEmployee = (row: any) => {
+  const id = row?.id;
+  if (id === null || id === undefined || id === "") return null;
+
+  return {
+    id,
+    name: row.name ?? row.full_name ?? "",
+    role: String(row.role ?? "operator").trim().toLowerCase(),
+    user_id: row.user_id ?? null,
+    phone: row.phone ?? "",
+    email: row.email ?? "",
+    hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate ?? 0),
+    certifications: parseCertifications(row.certifications),
+    jobId: row.job_id === null || row.job_id === undefined ? null : /^\d+$/.test(String(row.job_id)) ? Number(row.job_id) : row.job_id,
+    status: row.status ?? "off",
+    clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
+  };
+};
 
 const isStatusCheckError = (message: string | undefined) =>
   /employees_status_check|violates check constraint .*status/i.test(message ?? "");
@@ -344,16 +349,19 @@ export async function PATCH(
       }
     }
 
-    return NextResponse.json({
-      employee: mapEmployee(
-        payload.jobId !== undefined
-          ? {
-              ...updatedEmployee,
-              job_id: requestedJobId,
-            }
-          : updatedEmployee
-      ),
-    });
+    const employee = mapEmployee(
+      payload.jobId !== undefined
+        ? {
+            ...(updatedEmployee ?? {}),
+            job_id: requestedJobId,
+          }
+        : updatedEmployee
+    );
+    if (!employee) {
+      return NextResponse.json({ error: "Employee update returned no row" }, { status: 500 });
+    }
+
+    return NextResponse.json({ employee });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

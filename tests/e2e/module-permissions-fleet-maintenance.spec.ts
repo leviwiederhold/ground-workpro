@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { getE2ECreds } from "./helpers";
 
 const applyModuleAccess = async (
   page: Page,
@@ -11,11 +12,7 @@ const applyModuleAccess = async (
 };
 
 test("module permissions enforce fleet and maintenance edit mutations", async ({ page }) => {
-  const email = process.env.E2E_EMAIL;
-  const password = process.env.E2E_PASSWORD;
-  if (!email || !password) {
-    test.skip(true, "E2E_EMAIL and E2E_PASSWORD are required");
-  }
+  const { email, password } = getE2ECreds();
 
   const login = await page.request.post("/api/test/login", {
     data: { email, password },

@@ -6,6 +6,8 @@ import {
   listCompanyMembershipRoles,
 } from "@/lib/auth/ceoGuard";
 
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
+
 export class TenantResolverError extends Error {
   status: number;
 
@@ -97,8 +99,12 @@ export async function getCompanyId() {
           const hasCeoMembership = existingCompanyMemberships.some((row) =>
             isCeoMembershipRole(row.role)
           );
-          const safeMembershipRole = hasCeoMembership ? membershipRole : "ceo";
-          const safeEmployeeRole = safeMembershipRole === "ceo" ? "admin" : safeMembershipRole;
+          const safeMembershipRole = hasCeoMembership
+            ? membershipRole
+            : COMPANY_OWNER_MEMBERSHIP_ROLE;
+          const safeEmployeeRole = safeMembershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE
+            ? "admin"
+            : safeMembershipRole;
 
           const membershipInsert = await client.from("memberships").insert({
             company_id: inviteEmployee.data.company_id,

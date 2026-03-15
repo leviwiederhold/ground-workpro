@@ -39,7 +39,7 @@ export async function getEffectiveRole(): Promise<AppRole | null> {
 
   const cookieStore = await cookies();
   const e2eRole =
-    process.env.NODE_ENV !== "production"
+    process.env.NODE_ENV !== "production" || process.env.E2E === "true"
       ? normalizeAppRole(cookieStore.get("e2e_role")?.value)
       : null;
   if (e2eRole) return e2eRole;

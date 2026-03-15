@@ -74,7 +74,7 @@ export async function GET() {
   try {
     const cookieStore = await cookies();
     const e2eRole =
-      process.env.NODE_ENV !== "production"
+      process.env.NODE_ENV !== "production" || process.env.E2E === "true"
         ? normalizeAppRole(cookieStore.get("e2e_role")?.value)
         : null;
     const actingRole = normalizeAppRole(cookieStore.get(ACTING_ROLE_COOKIE)?.value);
@@ -86,7 +86,7 @@ export async function GET() {
       userId: context.userId,
       role,
     });
-    if (process.env.NODE_ENV !== "production") {
+    if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
       modulePermissions = applyPermissionOverrideFromCookie(
         modulePermissions,
         cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value

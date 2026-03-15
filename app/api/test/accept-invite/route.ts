@@ -7,6 +7,8 @@ import {
   listCompanyMembershipRoles,
 } from "@/lib/auth/ceoGuard";
 
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
+
 const bodySchema = z.object({
   token: z.string().min(20),
   email: z.string().email(),
@@ -50,7 +52,7 @@ const parseMissingColumn = (message: string | undefined): string | null => {
 };
 
 export async function POST(request: Request) {
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === "production" && process.env.E2E !== "true") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -169,11 +171,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
   }
 
+  const membershipRole = role === "ceo" ? COMPANY_OWNER_MEMBERSHIP_ROLE : role;
   const membershipInsert = await admin.from("memberships").upsert(
     {
       company_id: invitation.company_id,
       user_id: userId,
-      role,
+      role: membershipRole,
     },
     { onConflict: "company_id,user_id" }
   );
@@ -186,7 +189,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
   }
 
-  const employeeRole = role === "ceo" ? "admin" : role;
+  const employeeRole = membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole;
 
   const profileName = email;
   let employeeId = String(invitation.employee_id ?? "").trim();

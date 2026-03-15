@@ -1,9 +1,9 @@
 import { test } from '@playwright/test';
+import { E2E_BASE_URL, getE2ECreds } from './helpers';
 
 test('prod live latency + error sweep', async ({ page }) => {
-  const base = process.env.E2E_BASE_URL!;
-  const email = process.env.E2E_EMAIL!;
-  const password = process.env.E2E_PASSWORD!;
+  const base = process.env.E2E_BASE_URL || E2E_BASE_URL;
+  const { email, password } = getE2ECreds();
 
   const issues: Array<Record<string, unknown>> = [];
   const slow: Array<Record<string, unknown>> = [];

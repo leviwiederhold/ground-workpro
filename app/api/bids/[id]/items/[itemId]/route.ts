@@ -86,16 +86,9 @@ async function recalcBidTotal(supabase: any, companyId: string, bidId: string | 
   const summary = calcBid(pricingSettings ?? null, itemsResult.data ?? []);
   const revenue = summary.revenue;
   const actualJobCost = summary.subtotalCost;
-  const profit = revenue - actualJobCost;
-  const margin = revenue > 0 ? profit / revenue : 0;
   const updatePayload: Record<string, unknown> = {
     subtotal: actualJobCost,
-    actual_job_cost: actualJobCost,
     total: revenue,
-    amount: revenue,
-    total_amount: revenue,
-    profit,
-    margin,
   };
 
   let lastResult: any = null;

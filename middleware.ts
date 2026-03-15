@@ -109,7 +109,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const guardedModule = guardedPage?.module ?? guardedApi?.module ?? null;
 
   if (guardedModule) {
-      const cookieRole = process.env.NODE_ENV !== "production" ? request.cookies.get("e2e_role")?.value : null;
+      const cookieRole =
+        process.env.NODE_ENV !== "production" || process.env.E2E === "true"
+          ? request.cookies.get("e2e_role")?.value
+          : null;
       let resolvedRole = normalizeAppRole(cookieRole);
       let companyId: string | null = null;
       const userId: string | null = authData?.user?.id ?? null;
@@ -157,7 +160,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         userId,
         role: resolvedRole,
       });
-      if (process.env.NODE_ENV !== "production") {
+      if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
         permissions = applyPermissionOverrideFromCookie(
           permissions,
           request.cookies.get(TEST_MODULE_ACCESS_COOKIE)?.value

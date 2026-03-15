@@ -3,6 +3,8 @@ import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
 import { ensureCompanyHasAtLeastOneCeoMembership } from "@/lib/auth/ceoGuard";
 
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
+
 export async function POST(request: Request) {
   const rateLimited = enforceRateLimit(request, {
     keyPrefix: "auth-bootstrap",
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
       } catch {
         await supabase
           .from("memberships")
-          .update({ role: "ceo" })
+          .update({ role: COMPANY_OWNER_MEMBERSHIP_ROLE })
           .eq("company_id", existingCompanyId)
           .eq("user_id", user.id);
       }
@@ -65,11 +67,12 @@ export async function POST(request: Request) {
     return errorResponse(companyError.message, 400);
   }
 
-  // 3) Create membership as CEO for company creator
+  // The memberships table stores company owners as "admin"; app role normalization
+  // still treats admin as the top-level CEO/executive role.
   const { error: membershipError } = await supabase.from("memberships").insert({
     company_id: company.id,
     user_id: user.id,
-    role: "ceo",
+    role: COMPANY_OWNER_MEMBERSHIP_ROLE,
   });
 
   if (membershipError) {

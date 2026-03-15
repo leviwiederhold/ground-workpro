@@ -195,7 +195,7 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
   const currentPayload = { ...payload };
   let lastResult: any = null;
 
-  for (let i = 0; i < 8; i += 1) {
+  for (let i = 0; i < 20; i += 1) {
     const result = await supabase.from("bids").insert(currentPayload).select("*").single();
     lastResult = result;
     const message = result.error?.message || "";
@@ -307,18 +307,10 @@ export async function POST(request: Request) {
       company_id: companyId,
       created_by: userId,
       title: payload.title,
-      client: payload.client ?? "",
-      bid_date: normalizedBidDate,
-      probability: normalizedProbability,
       notes: notesWithMeta,
       job_id: normalizeId(payload.job_id),
-      actual_job_cost: financials.actualJobCost,
-      profit: financials.profit,
-      margin: financials.margin,
       subtotal: financials.actualJobCost,
       total: financials.revenue,
-      amount: financials.revenue,
-      total_amount: financials.revenue,
       stage: payload.stage ?? "estimating",
       owner_user_id: payload.owner_user_id ?? userId,
       due_date: payload.due_date ?? null,

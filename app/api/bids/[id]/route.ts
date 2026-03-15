@@ -303,37 +303,22 @@ export async function PATCH(
       payload.actual_job_cost ?? payload.actualJobCost;
     const resolvedRevenueInput = payload.revenue;
     if (resolvedActualJobCostInput !== undefined) {
-      updatePayload.actual_job_cost = normalizeNumber(resolvedActualJobCostInput);
       updatePayload.subtotal = normalizeNumber(resolvedActualJobCostInput);
     }
     if (resolvedRevenueInput !== undefined) {
       const normalizedRevenue = normalizeNumber(resolvedRevenueInput);
       updatePayload.total = normalizedRevenue;
-      updatePayload.amount = normalizedRevenue;
-      updatePayload.total_amount = normalizedRevenue;
     }
     const resolvedClientInput =
       payload.client ??
       payload.client_name ??
       payload.customer ??
       payload.customer_name;
-    if (resolvedClientInput !== undefined) {
-      updatePayload.client = resolvedClientInput;
-    }
     const resolvedBidDateInput =
       payload.bid_date ??
       payload.bidDate ??
       payload.biddate;
-    if (resolvedBidDateInput !== undefined) {
-      const normalizedBidDate = normalizeDate(resolvedBidDateInput, null);
-      updatePayload.bid_date = normalizedBidDate;
-    }
-    const resolvedProbabilityInput =
-      payload.probability ?? payload.win_probability;
-    if (resolvedProbabilityInput !== undefined) {
-      const normalizedProbability = normalizeNumber(resolvedProbabilityInput);
-      updatePayload.probability = normalizedProbability;
-    }
+    const resolvedProbabilityInput = payload.probability ?? payload.win_probability;
     if (payload.notes !== undefined) updatePayload.notes = payload.notes;
     if (payload.stage !== undefined) updatePayload.stage = payload.stage;
     if (payload.owner_user_id !== undefined) {
@@ -360,7 +345,7 @@ export async function PATCH(
 
     const { data: beforeBid } = await supabase
       .from("bids")
-      .select("id, stage, status, review_ready_at, review_approved_at, notes, client, client_name, customer, customer_name, bid_date, bidDate, biddate, probability, win_probability, actual_job_cost, subtotal, total, total_amount, amount")
+      .select("id, stage, status, review_ready_at, review_approved_at, notes, subtotal, total")
       .eq("company_id", companyId)
       .eq("id", bidId)
       .maybeSingle();
@@ -369,15 +354,15 @@ export async function PATCH(
     const resolvedClient =
       resolvedClientInput !== undefined
         ? (resolvedClientInput ?? "")
-        : (beforeBid?.client ?? beforeBid?.client_name ?? beforeBid?.customer ?? beforeBid?.customer_name ?? beforeParsedNotes.meta.client ?? "");
+        : (beforeParsedNotes.meta.client ?? "");
     const resolvedBidDate =
       resolvedBidDateInput !== undefined
         ? normalizeDate(resolvedBidDateInput, null)
-        : (beforeBid?.bid_date ?? beforeBid?.bidDate ?? beforeBid?.biddate ?? beforeParsedNotes.meta.bid_date ?? null);
+        : (beforeParsedNotes.meta.bid_date ?? null);
     const resolvedProbability =
       resolvedProbabilityInput !== undefined
         ? normalizeNumber(resolvedProbabilityInput)
-        : normalizeNumber(beforeBid?.probability ?? beforeBid?.win_probability ?? beforeParsedNotes.meta.probability ?? 0);
+        : normalizeNumber(beforeParsedNotes.meta.probability ?? 0);
     const resolvedStage =
       payload.stage !== undefined
         ? payload.stage
@@ -392,19 +377,14 @@ export async function PATCH(
     const resolvedActualJobCost =
       resolvedActualJobCostInput !== undefined
         ? normalizeNumber(resolvedActualJobCostInput)
-        : normalizeNumber(beforeBid?.actual_job_cost ?? beforeBid?.subtotal ?? 0);
+        : normalizeNumber(beforeBid?.subtotal ?? 0);
     const resolvedRevenue =
       resolvedRevenueInput !== undefined
         ? normalizeNumber(resolvedRevenueInput)
-        : normalizeNumber(beforeBid?.total ?? beforeBid?.total_amount ?? beforeBid?.amount ?? 0);
+        : normalizeNumber(beforeBid?.total ?? 0);
     const financials = toBidFinancials(resolvedActualJobCost, resolvedRevenue);
-    updatePayload.actual_job_cost = financials.actualJobCost;
-    updatePayload.profit = financials.profit;
-    updatePayload.margin = financials.margin;
     updatePayload.subtotal = financials.actualJobCost;
     updatePayload.total = financials.revenue;
-    updatePayload.amount = financials.revenue;
-    updatePayload.total_amount = financials.revenue;
 
     const { error } = await updateWithVariants(supabase, companyId, bidId, updatePayload);
 

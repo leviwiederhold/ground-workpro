@@ -13,6 +13,23 @@ const bodySchema = z.object({
   job_name: z.string().min(1).optional(),
 });
 
+type JobNotesMeta = {
+  client?: string;
+  source_bid_id?: string;
+};
+
+const JOB_META_PREFIX = "\n<!--GW_META:";
+const JOB_META_SUFFIX = "-->";
+
+function buildJobNotes(plainNotes: string, meta: JobNotesMeta): string {
+  const compactMeta: JobNotesMeta = {};
+  if (meta.client) compactMeta.client = meta.client;
+  if (meta.source_bid_id) compactMeta.source_bid_id = meta.source_bid_id;
+  const base = plainNotes.trimEnd();
+  if (Object.keys(compactMeta).length === 0) return base;
+  return `${base}${JOB_META_PREFIX}${JSON.stringify(compactMeta)}${JOB_META_SUFFIX}`;
+}
+
 async function insertJobWithColumnFallback(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   payload: Record<string, unknown>
@@ -23,7 +40,7 @@ async function insertJobWithColumnFallback(
     const result = await supabase
       .from("jobs")
       .insert(insertPayload)
-      .select("id, name, status, source_bid_id")
+      .select("id, name, status, notes")
       .single();
     if (!result.error) return result;
 
@@ -37,7 +54,7 @@ async function insertJobWithColumnFallback(
   return supabase
     .from("jobs")
     .insert(insertPayload)
-    .select("id, name, status, source_bid_id")
+    .select("id, name, status, notes")
     .single();
 }
 
@@ -79,7 +96,7 @@ export async function POST(
     if (bid.converted_job_id) {
       const existingJobResult = await supabase
         .from("jobs")
-        .select("id, name, status, source_bid_id")
+        .select("id, name, status, notes")
         .eq("company_id", companyId)
         .eq("id", bid.converted_job_id)
         .maybeSingle();
@@ -90,21 +107,23 @@ export async function POST(
 
     const now = new Date().toISOString();
     const jobName = parsedBody.data.job_name || bid.title || bid.project_name || "Converted Job";
-    const notes = [
+    const rawNotes = [
       `Converted from bid ${bid.id}`,
       bid.client ? `Client: ${bid.client}` : "",
       bid.bid_date ? `Bid Date: ${bid.bid_date}` : "",
       bid.notes ? `Bid Notes: ${bid.notes}` : "",
     ].filter(Boolean).join("\n");
+    const notes = buildJobNotes(rawNotes, {
+      client: typeof bid.client === "string" ? bid.client : undefined,
+      source_bid_id: String(bidId),
+    });
 
     const baseInsertPayload = {
       company_id: companyId,
       name: jobName,
       status: "in_progress",
       notes,
-      client: bid.client ?? "",
       created_by: userId,
-      source_bid_id: bidId,
     };
 
     const jobInsert = await insertJobWithColumnFallback(supabase, baseInsertPayload);
@@ -115,7 +134,6 @@ export async function POST(
         name: jobName,
         status: "in_progress",
         notes,
-        source_bid_id: bidId,
       });
       if (fallbackInsert.error || !fallbackInsert.data) {
         return NextResponse.json({ error: fallbackInsert.error?.message || "Failed to create job" }, { status: 400 });

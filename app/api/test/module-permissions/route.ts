@@ -22,7 +22,7 @@ const toValidationError = (issues: z.ZodIssue[]) => ({
 });
 
 export async function POST(request: Request) {
-  if (process.env.NODE_ENV === "production") {
+  if (process.env.NODE_ENV === "production" && process.env.E2E !== "true") {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

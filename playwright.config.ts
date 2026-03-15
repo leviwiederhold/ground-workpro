@@ -35,7 +35,7 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: 'pnpm dev --port 3001',
+        command: 'pnpm exec next start --port 3001',
         port: 3001,
         reuseExistingServer: false,
         timeout: 120_000,

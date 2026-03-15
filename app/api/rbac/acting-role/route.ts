@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {
+  ACTING_ROLE_COOKIE,
+  clampActingRole,
   resolveRealRole,
 } from "@/lib/auth/effectiveRole";
 
@@ -31,8 +33,14 @@ export async function POST(request: Request) {
     if (!realRole) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    // Acting-role switching is intentionally disabled for this app experience.
-    return NextResponse.json({ error: "Role switching is disabled." }, { status: 403 });
+
+    const effectiveRole = clampActingRole(realRole, parsed.data.role);
+    const response = NextResponse.json({ item: { role: effectiveRole }, success: true });
+    response.cookies.set(ACTING_ROLE_COOKIE, effectiveRole, { path: "/", sameSite: "lax" });
+    if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+      response.cookies.set("e2e_role", effectiveRole, { path: "/", sameSite: "lax" });
+    }
+    return response;
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

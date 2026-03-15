@@ -2,18 +2,31 @@ import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { attachFailFast } from './helpers/attachFailFast';
 
 export const E2E_BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:3000';
+export const DEFAULT_E2E_EMAIL = 'e2e.local@groundwork.test';
+export const DEFAULT_E2E_PASSWORD = 'GroundWorkE2E!123';
 
 export function getE2ECreds() {
-  const email = process.env.E2E_EMAIL;
-  const password = process.env.E2E_PASSWORD;
+  const email = process.env.E2E_EMAIL?.trim() || DEFAULT_E2E_EMAIL;
+  const password = process.env.E2E_PASSWORD?.trim() || DEFAULT_E2E_PASSWORD;
 
-  if (!email || !password || email === '...' || password === '...') {
+  if (email === '...' || password === '...') {
     throw new Error(
       'Invalid E2E_EMAIL or E2E_PASSWORD. Use real login credentials (not "...") before running e2e tests.'
     );
   }
 
   return { email, password };
+}
+
+async function ensureBootstrap(page: Page) {
+  const bootstrapResponse = await page.request.post('/api/bootstrap', {
+    timeout: 30_000,
+  });
+  const bootstrapStatus = bootstrapResponse.status();
+  if (![200, 400].includes(bootstrapStatus)) {
+    const body = await bootstrapResponse.text();
+    throw new Error(`E2E bootstrap failed: ${body}`);
+  }
 }
 
 export async function loginViaUI(page: Page) {
@@ -28,7 +41,8 @@ export async function loginViaUI(page: Page) {
       timeout: 30_000,
     });
     if (apiLogin.ok()) {
-      await page.goto('/login');
+      await ensureBootstrap(page);
+      await page.goto('/');
       if (!page.url().includes('/login')) return;
     }
   } catch {
@@ -72,6 +86,8 @@ export async function loginViaUI(page: Page) {
       { timeout: 30_000, message: 'E2E login failed: app did not complete auth flow.' }
     )
     .toBe(true);
+
+  await ensureBootstrap(page);
 }
 
 type JobCostingSeed = {

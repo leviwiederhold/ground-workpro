@@ -42,6 +42,7 @@ type JobNotesMeta = {
   client?: string;
   start_date?: string;
   target_end_date?: string;
+  source_bid_id?: string;
 };
 
 const JOB_META_PREFIX = "\n<!--GW_META:";
@@ -69,6 +70,7 @@ function buildJobNotes(plainNotes: string, meta: JobNotesMeta): string {
   if (meta.client) compactMeta.client = meta.client;
   if (meta.start_date) compactMeta.start_date = meta.start_date;
   if (meta.target_end_date) compactMeta.target_end_date = meta.target_end_date;
+  if (meta.source_bid_id) compactMeta.source_bid_id = meta.source_bid_id;
   const base = plainNotes?.trimEnd() ?? "";
   if (Object.keys(compactMeta).length === 0) return base;
   return `${base}${JOB_META_PREFIX}${JSON.stringify(compactMeta)}${JOB_META_SUFFIX}`;
@@ -94,8 +96,8 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
-  source_bid_id: row.source_bid_id ?? null,
-  sourceBidId: row.source_bid_id ?? null,
+  source_bid_id: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
+  sourceBidId: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   };
 };
 

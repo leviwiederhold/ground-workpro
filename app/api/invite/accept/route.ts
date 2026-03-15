@@ -8,6 +8,8 @@ import {
   listCompanyMembershipRoles,
 } from "@/lib/auth/ceoGuard";
 
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
+
 const bodySchema = z.object({
   role: z.string().optional(),
   email: z.string().email().optional(),
@@ -92,7 +94,7 @@ export async function POST(request: Request) {
         } catch {
           await client
             .from("memberships")
-            .update({ role: "ceo" })
+            .update({ role: COMPANY_OWNER_MEMBERSHIP_ROLE })
             .eq("company_id", existingCompanyId)
             .eq("user_id", userId);
         }
@@ -186,13 +188,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
     }
 
+    const membershipRole = resolvedRole === "ceo" ? COMPANY_OWNER_MEMBERSHIP_ROLE : resolvedRole;
     const upsertMembership = await client
       .from("memberships")
       .upsert(
         {
           company_id: invitationData.company_id,
           user_id: userId,
-          role: resolvedRole,
+          role: membershipRole,
         },
         { onConflict: "company_id,user_id" }
       );
@@ -227,7 +230,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const employeeRole = resolvedRole === "ceo" ? "admin" : resolvedRole;
+    const employeeRole = membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole;
     const inviteEmail = tokenEmail || email;
     let employeeId = String(invitationData.employee_id ?? "").trim();
 

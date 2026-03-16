@@ -1,4 +1,5 @@
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
+import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 
 export type CurrentUserIdentity = {
   userId: string;
@@ -87,7 +88,7 @@ export async function getCurrentUserIdentity(): Promise<CurrentUserIdentity> {
     }
   }
 
-  const fullName = String(profile?.full_name ?? "").trim();
+  const fullName = sanitizeProfileFullName(profile?.full_name, email);
   const displayName = String(profile?.display_name ?? "").trim();
   const avatarUrl = String(profile?.avatar_url ?? "").trim();
   const phone = String(profile?.phone ?? "").trim();

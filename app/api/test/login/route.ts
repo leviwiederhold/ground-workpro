@@ -51,7 +51,6 @@ async function ensureDevUser(email: string, password: string) {
 
   const profileUpsert = await admin.from("profiles").upsert({
     id: userId,
-    full_name: normalizedEmail,
   });
   if (profileUpsert.error && !/duplicate key|unique/i.test(profileUpsert.error.message || "")) {
     throw new Error(profileUpsert.error.message);

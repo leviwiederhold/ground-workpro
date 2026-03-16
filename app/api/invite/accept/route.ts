@@ -263,7 +263,6 @@ export async function POST(request: Request) {
     const profileName = String(
       authData.user.user_metadata?.full_name ??
         authData.user.user_metadata?.name ??
-        authData.user.email ??
         ""
     ).trim();
     if (profileName) {

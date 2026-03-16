@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { normalizeTimezoneOption, PROFILE_TIMEZONE_OPTIONS } from "@/lib/user/profileFields";
 import {
   normalizeAppearancePreference,
   setAppearancePreference,
@@ -62,6 +63,7 @@ export function AccountSettingsClient() {
         setSettings({
           ...defaultSettings,
           ...payload.item,
+          timezone: normalizeTimezoneOption(payload.item.timezone),
           appearance: normalizeAppearancePreference(payload.item.appearance),
           notification_preferences: {
             ...defaultSettings.notification_preferences,
@@ -92,7 +94,7 @@ export function AccountSettingsClient() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          timezone: settings.timezone.trim(),
+          timezone: normalizeTimezoneOption(settings.timezone),
           appearance: settings.appearance,
           notification_preferences: settings.notification_preferences,
         }),
@@ -116,6 +118,7 @@ export function AccountSettingsClient() {
       setSettings((prev) => ({
         ...prev,
         ...payload.item,
+        timezone: normalizeTimezoneOption(payload.item.timezone ?? prev.timezone),
         appearance: normalizeAppearancePreference(payload.item.appearance ?? prev.appearance),
         notification_preferences: {
           ...defaultSettings.notification_preferences,
@@ -172,13 +175,19 @@ export function AccountSettingsClient() {
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Timezone</span>
-              <input
+              <select
                 className={`w-full rounded-lg px-3 py-2 ${fieldErrors.timezone ? "border border-red-400 bg-red-50" : "border border-gray-300"}`}
-                value={settings.timezone}
-                onChange={(event) => setSettings((prev) => ({ ...prev, timezone: event.target.value }))}
-                placeholder="America/New_York"
+                value={normalizeTimezoneOption(settings.timezone)}
+                onChange={(event) => setSettings((prev) => ({ ...prev, timezone: normalizeTimezoneOption(event.target.value) }))}
                 aria-invalid={fieldErrors.timezone ? "true" : "false"}
-              />
+              >
+                <option value="">Select timezone</option>
+                {PROFILE_TIMEZONE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               {fieldErrors.timezone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.timezone}</span> : null}
             </label>
             <label className="block text-sm">

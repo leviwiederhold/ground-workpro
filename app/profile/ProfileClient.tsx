@@ -4,6 +4,13 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import {
+  extractUsPhoneDigits,
+  formatUsPhoneInput,
+  normalizeTimezoneOption,
+  PROFILE_TIMEZONE_OPTIONS,
+  sanitizeProfileFullName,
+} from "@/lib/user/profileFields";
 
 type CurrentUserIdentityLite = {
   fullName: string;
@@ -42,12 +49,12 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
   const isOnboarding = searchParams.get("onboarding") === "1";
   const backHref = isOnboarding ? "/setup" : "/";
   const [form, setForm] = useState<ProfileForm>({
-    full_name: identity.fullName || "",
+    full_name: sanitizeProfileFullName(identity.fullName, identity.email),
     display_name: identity.displayName || "",
     email: identity.email || "",
-    phone: identity.phone || "",
+    phone: formatUsPhoneInput(identity.phone || ""),
     job_title: identity.jobTitle || "",
-    timezone: identity.timezone || "",
+    timezone: normalizeTimezoneOption(identity.timezone || ""),
     avatar_url: identity.avatarUrl || "",
   });
   const [saving, setSaving] = useState(false);
@@ -103,9 +110,9 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
         body: JSON.stringify({
           full_name: form.full_name.trim(),
           display_name: form.display_name.trim(),
-          phone: form.phone.trim(),
+          phone: extractUsPhoneDigits(form.phone),
           job_title: form.job_title.trim(),
-          timezone: form.timezone.trim(),
+          timezone: normalizeTimezoneOption(form.timezone),
           avatar_url: form.avatar_url.trim(),
         }),
       });
@@ -128,13 +135,27 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
       const item = payload.item as ProfileForm;
       setForm((prev) => ({
         ...prev,
-        full_name: String(item.full_name ?? "").trim(),
-        display_name: String(item.display_name ?? "").trim(),
-        email: String(item.email ?? prev.email ?? "").trim(),
-        phone: String(item.phone ?? "").trim(),
-        job_title: String(item.job_title ?? "").trim(),
-        timezone: String(item.timezone ?? "").trim(),
-        avatar_url: String(item.avatar_url ?? "").trim(),
+        full_name: Object.prototype.hasOwnProperty.call(item, "full_name")
+          ? sanitizeProfileFullName(item.full_name, item.email ?? prev.email)
+          : prev.full_name,
+        display_name: Object.prototype.hasOwnProperty.call(item, "display_name")
+          ? String(item.display_name ?? "").trim()
+          : prev.display_name,
+        email: Object.prototype.hasOwnProperty.call(item, "email")
+          ? String(item.email ?? prev.email ?? "").trim()
+          : prev.email,
+        phone: Object.prototype.hasOwnProperty.call(item, "phone")
+          ? formatUsPhoneInput(item.phone)
+          : prev.phone,
+        job_title: Object.prototype.hasOwnProperty.call(item, "job_title")
+          ? String(item.job_title ?? "").trim()
+          : prev.job_title,
+        timezone: Object.prototype.hasOwnProperty.call(item, "timezone")
+          ? normalizeTimezoneOption(item.timezone)
+          : prev.timezone,
+        avatar_url: Object.prototype.hasOwnProperty.call(item, "avatar_url")
+          ? String(item.avatar_url ?? "").trim()
+          : prev.avatar_url,
       }));
       setStatus("Profile saved.");
     } catch (saveError) {
@@ -224,7 +245,10 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
               <input
                 className={getFieldClassName("phone")}
                 value={form.phone}
-                onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
+                onChange={(event) => setForm((prev) => ({ ...prev, phone: formatUsPhoneInput(event.target.value) }))}
+                inputMode="tel"
+                maxLength={14}
+                placeholder="(555) 123-4567"
                 aria-invalid={fieldErrors.phone ? "true" : "false"}
               />
               {fieldErrors.phone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.phone}</span> : null}
@@ -241,13 +265,19 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
             </label>
             <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Timezone (optional)</span>
-              <input
+              <select
                 className={getFieldClassName("timezone")}
                 value={form.timezone}
-                onChange={(event) => setForm((prev) => ({ ...prev, timezone: event.target.value }))}
-                placeholder="America/New_York"
+                onChange={(event) => setForm((prev) => ({ ...prev, timezone: normalizeTimezoneOption(event.target.value) }))}
                 aria-invalid={fieldErrors.timezone ? "true" : "false"}
-              />
+              >
+                <option value="">Select timezone</option>
+                {PROFILE_TIMEZONE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
               {fieldErrors.timezone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.timezone}</span> : null}
             </label>
           </div>

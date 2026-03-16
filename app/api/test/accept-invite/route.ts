@@ -192,7 +192,7 @@ export async function POST(request: Request) {
 
   const employeeRole = membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole;
 
-  const profileName = email;
+  const profileName = "";
   let employeeId = String(invitation.employee_id ?? "").trim();
   if (!employeeId) {
     const employeeByEmail = await admin

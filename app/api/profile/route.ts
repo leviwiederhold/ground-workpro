@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import {
+  normalizePhoneForStorage,
+  normalizeTimezoneOption,
+  sanitizeProfileFullName,
+} from "@/lib/user/profileFields";
 import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 
 const profileSchema = z.object({
   full_name: z.string().trim().min(1, "Full name is required.").max(160),
   display_name: z.string().trim().max(160).optional().or(z.literal("")),
-  phone: z.string().trim().max(60).optional().or(z.literal("")),
+  phone: z.string().trim().max(32).optional().or(z.literal("")),
   job_title: z.string().trim().max(120).optional().or(z.literal("")),
   timezone: z.string().trim().max(120).optional().or(z.literal("")),
   avatar_url: z.string().trim().max(2_000_000).optional().or(z.literal("")),
@@ -28,7 +33,7 @@ type ProfileRow = {
 
 function normalizeProfile(row: ProfileRow | null | undefined, fallbackEmail: string) {
   const email = fallbackEmail;
-  const fullName = String(row?.full_name ?? "").trim();
+  const fullName = sanitizeProfileFullName(row?.full_name, email);
   const displayName = String(row?.display_name ?? "").trim();
   return {
     full_name: fullName,
@@ -41,6 +46,15 @@ function normalizeProfile(row: ProfileRow | null | undefined, fallbackEmail: str
     resolved_name: resolveDisplayName({ fullName, displayName, email }),
   };
 }
+
+const parseMissingColumn = (message: string | undefined) => {
+  if (!message) return null;
+  const quoted = message.match(/Could not find the '([^']+)' column/i);
+  if (quoted?.[1]) return quoted[1];
+  const relation = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
+  if (relation?.[1]) return relation[1];
+  return null;
+};
 
 async function selectProfile(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
   let result = await supabase
@@ -164,7 +178,13 @@ export async function PATCH(request: Request) {
     const authUser = await supabase.auth.getUser();
     const fallbackEmail = String(authUser.data?.user?.email ?? userEmail ?? "").trim();
 
-    const payload = parsed.data;
+    const payload = {
+      ...parsed.data,
+      full_name: sanitizeProfileFullName(parsed.data.full_name, fallbackEmail),
+      phone: normalizePhoneForStorage(parsed.data.phone),
+      timezone: normalizeTimezoneOption(parsed.data.timezone),
+      avatar_url: String(parsed.data.avatar_url ?? "").trim(),
+    };
     const updatePayload = {
       id: userId,
       full_name: payload.full_name,
@@ -175,43 +195,32 @@ export async function PATCH(request: Request) {
       avatar_url: payload.avatar_url || null,
     };
 
-    let upsertResult = await supabase
-      .from("profiles")
-      .upsert({ ...updatePayload, email: fallbackEmail || null }, { onConflict: "id" })
-      .select("full_name, display_name, phone, job_title, timezone, avatar_url")
-      .eq("id", userId)
-      .maybeSingle();
+    const upsertPayload: Record<string, unknown> = {
+      ...updatePayload,
+      email: fallbackEmail || null,
+    };
 
-    if (upsertResult.error && isMissingColumnError(upsertResult.error.message)) {
-      upsertResult = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: userId,
-            full_name: payload.full_name,
-            display_name: payload.display_name || null,
-          },
-          { onConflict: "id" }
-        )
-        .select("full_name, display_name")
-        .eq("id", userId)
-        .maybeSingle();
-    }
-    if (upsertResult.error && /display_name|Could not find the 'display_name' column/i.test(upsertResult.error.message || "")) {
-      upsertResult = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: userId,
-            full_name: payload.full_name,
-          },
-          { onConflict: "id" }
-        )
-        .select("full_name")
-        .eq("id", userId)
-        .maybeSingle();
+    let upsertError: { message?: string } | null = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const upsertResult = await supabase.from("profiles").upsert(upsertPayload, { onConflict: "id" });
+      if (!upsertResult.error) {
+        upsertError = null;
+        break;
+      }
+      const missingColumn = parseMissingColumn(upsertResult.error.message);
+      if (!missingColumn || !(missingColumn in upsertPayload)) {
+        upsertError = upsertResult.error;
+        break;
+      }
+      delete upsertPayload[missingColumn];
+      upsertError = upsertResult.error;
     }
 
+    if (upsertError) {
+      return NextResponse.json({ error: upsertError.message }, { status: 400 });
+    }
+
+    const upsertResult = await selectProfile(supabase, userId);
     if (upsertResult.error) {
       return NextResponse.json({ error: upsertResult.error.message }, { status: 400 });
     }
@@ -227,7 +236,16 @@ export async function PATCH(request: Request) {
     });
 
     return NextResponse.json({
-      item: normalizeProfile(upsertResult.data as ProfileRow, fallbackEmail),
+      item: {
+        ...normalizeProfile(upsertResult.data as ProfileRow, fallbackEmail),
+        phone: payload.phone,
+        job_title: payload.job_title || String((upsertResult.data as ProfileRow)?.job_title ?? "").trim(),
+        timezone: payload.timezone,
+        avatar_url:
+          Object.prototype.hasOwnProperty.call(upsertResult.data ?? {}, "avatar_url")
+            ? String((upsertResult.data as ProfileRow)?.avatar_url ?? "").trim()
+            : payload.avatar_url,
+      },
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {

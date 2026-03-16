@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { normalizeTimezoneOption } from "@/lib/user/profileFields";
 import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 
@@ -116,7 +117,10 @@ export async function PATCH(request: Request) {
 
     const authUser = await supabase.auth.getUser();
     const fallbackEmail = String(authUser.data?.user?.email ?? userEmail ?? "").trim();
-    const payload = parsed.data;
+    const payload = {
+      ...parsed.data,
+      timezone: normalizeTimezoneOption(parsed.data.timezone),
+    };
     const updatePayload = {
       id: userId,
       timezone: payload.timezone || null,

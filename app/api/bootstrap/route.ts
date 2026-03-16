@@ -128,7 +128,6 @@ export async function POST(request: Request) {
   // 1) Ensure profile exists
   await supabase.from("profiles").upsert({
     id: user.id,
-    full_name: user.email,
   });
 
   // 2) Create company

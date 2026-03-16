@@ -5,8 +5,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
-export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui }) {
+export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
+  const canEditJobs = String(moduleAccess?.jobs || 'none') === 'edit';
   const currency = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -83,6 +84,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   }, [selectedJobId, setJobs]);
 
   const handleCreateJob = async () => {
+    if (!canEditJobs) return;
     try {
       const baseCount = jobs.length + 1;
       const response = await fetch('/api/jobs', {
@@ -337,6 +339,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   }, [selectedJob]);
 
   const handleAssignEmployee = async () => {
+    if (!canEditJobs) return;
     if (!selectedJob || employeeToAssign.length === 0) return;
     setCrewActionLoading(true);
     setCrewActionError('');
@@ -372,6 +375,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   };
 
   const handleUnassignEmployee = async (employeeId) => {
+    if (!canEditJobs) return;
     if (!selectedJob) return;
     const confirmed = confirmDestructiveAction('this crew assignment');
     if (!confirmed) return;
@@ -404,6 +408,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   };
 
   const handleAssignEquipment = async () => {
+    if (!canEditJobs) return;
     if (!selectedJob || equipmentToAssign.length === 0) return;
     setEquipmentActionLoading(true);
     setEquipmentActionError('');
@@ -439,6 +444,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   };
 
   const handleUnassignEquipment = async (equipmentId) => {
+    if (!canEditJobs) return;
     if (!selectedJob) return;
     const confirmed = confirmDestructiveAction('this equipment assignment');
     if (!confirmed) return;
@@ -471,6 +477,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   };
 
   const handleSaveJob = async () => {
+    if (!canEditJobs) return;
     if (!selectedJob) return;
     setSaveLoading(true);
     setJobActionError('');
@@ -517,6 +524,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   };
 
   const handleDeleteJob = async () => {
+    if (!canEditJobs) return;
     if (!selectedJob) return;
     const confirmed = confirmDestructiveAction('this job');
     if (!confirmed) return;
@@ -558,6 +566,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   <input
                     type="checkbox"
                     checked={checked}
+                    disabled={!canEditJobs}
                     onChange={(e) => {
                       const id = String(item.id);
                       setEquipmentToAssign((prev) => {
@@ -583,7 +592,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         )}
       </div>
       <div className="flex items-center gap-2 mb-2">
-        <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={equipmentActionLoading || equipmentToAssign.length === 0}>
+        <Button variant="secondary" size="sm" onClick={handleAssignEquipment} disabled={!canEditJobs || equipmentActionLoading || equipmentToAssign.length === 0}>
           {equipmentActionLoading ? 'Updating...' : `Add Selected (${equipmentToAssign.length})`}
         </Button>
       </div>
@@ -599,7 +608,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 type="button"
                 onClick={() => handleUnassignEquipment(eq.id)}
                 className="text-xs text-red-600 hover:text-red-700"
-                disabled={equipmentActionLoading}
+                disabled={!canEditJobs || equipmentActionLoading}
               >
                 Remove
               </button>
@@ -625,6 +634,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   <input
                     type="checkbox"
                     checked={checked}
+                    disabled={!canEditJobs}
                     onChange={(e) => {
                       const id = String(employee.id);
                       setEmployeeToAssign((prev) => {
@@ -643,7 +653,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         )}
       </div>
       <div className="flex items-center gap-2 mb-2">
-        <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={crewActionLoading || employeeToAssign.length === 0}>
+        <Button variant="secondary" size="sm" onClick={handleAssignEmployee} disabled={!canEditJobs || crewActionLoading || employeeToAssign.length === 0}>
           {crewActionLoading ? 'Updating...' : `Add Selected (${employeeToAssign.length})`}
         </Button>
       </div>
@@ -659,7 +669,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 type="button"
                 onClick={() => handleUnassignEmployee(emp.id)}
                 className="text-xs text-red-600 hover:text-red-700"
-                disabled={crewActionLoading}
+                disabled={!canEditJobs || crewActionLoading}
               >
                 Remove
               </button>
@@ -698,6 +708,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           variant="brand"
           className="w-full sm:w-auto whitespace-nowrap"
           onClick={handleCreateJob}
+          disabled={!canEditJobs}
           data-testid="jobs-create"
         >
           <Icon name="plus" className="mr-2" /> New Job
@@ -780,6 +791,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   value={jobForm.name}
                   onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  disabled={!canEditJobs}
                 />
               </div>
 
@@ -789,6 +801,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   value={jobForm.status}
                   onChange={(e) => setJobForm({ ...jobForm, status: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  disabled={!canEditJobs}
                 >
                   <option value="active">active</option>
                   <option value="completed">completed</option>
@@ -802,6 +815,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   value={jobForm.client}
                   onChange={(e) => setJobForm({ ...jobForm, client: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  disabled={!canEditJobs}
                 />
               </div>
 
@@ -812,6 +826,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   value={jobForm.site_address}
                   onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  disabled={!canEditJobs}
                 />
               </div>
 
@@ -823,6 +838,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                     value={jobForm.start_date}
                     onChange={(e) => setJobForm({ ...jobForm, start_date: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditJobs}
                   />
                 </div>
                 <div>
@@ -832,6 +848,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                     value={jobForm.target_end_date}
                     onChange={(e) => setJobForm({ ...jobForm, target_end_date: e.target.value })}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditJobs}
                   />
                 </div>
               </div>
@@ -842,6 +859,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   value={jobForm.notes}
                   onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24"
+                  disabled={!canEditJobs}
                 />
               </div>
 
@@ -891,7 +909,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   variant="brand"
                   size="sm"
                   onClick={handleSaveJob}
-                  disabled={saveLoading || deleteLoading}
+                  disabled={!canEditJobs || saveLoading || deleteLoading}
                   data-testid="jobs-save"
                 >
                   {saveLoading ? 'Saving...' : 'Save'}
@@ -900,7 +918,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   variant="danger"
                   size="sm"
                   onClick={handleDeleteJob}
-                  disabled={saveLoading || deleteLoading}
+                  disabled={!canEditJobs || saveLoading || deleteLoading}
                   data-testid="jobs-delete"
                 >
                   {deleteLoading ? 'Deleting...' : 'Delete'}
@@ -938,36 +956,36 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
             <div className="space-y-4">
               <div>
                 <p className="text-xs text-gray-500 mb-1">Name</p>
-                <input type="text" value={jobForm.name} onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="text" value={jobForm.name} onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Status</p>
-                <select value={jobForm.status} onChange={(e) => setJobForm({ ...jobForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <select value={jobForm.status} onChange={(e) => setJobForm({ ...jobForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs}>
                   <option value="active">active</option>
                   <option value="completed">completed</option>
                 </select>
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Client</p>
-                <input type="text" value={jobForm.client} onChange={(e) => setJobForm({ ...jobForm, client: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="text" value={jobForm.client} onChange={(e) => setJobForm({ ...jobForm, client: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Address</p>
-                <input type="text" value={jobForm.site_address} onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="text" value={jobForm.site_address} onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
                   <p className="text-xs text-gray-500 mb-1">Start Date</p>
-                  <input type="date" value={jobForm.start_date} onChange={(e) => setJobForm({ ...jobForm, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  <input type="date" value={jobForm.start_date} onChange={(e) => setJobForm({ ...jobForm, start_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 mb-1">Target End Date</p>
-                  <input type="date" value={jobForm.target_end_date} onChange={(e) => setJobForm({ ...jobForm, target_end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                  <input type="date" value={jobForm.target_end_date} onChange={(e) => setJobForm({ ...jobForm, target_end_date: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
                 </div>
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Notes</p>
-                <textarea value={jobForm.notes} onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" />
+                <textarea value={jobForm.notes} onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" disabled={!canEditJobs} />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-2">Job Record Snapshot</p>
@@ -981,10 +999,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
               <AttachmentPanel entityType="job" entityId={selectedJob.id} />
               {jobActionError && <p className="text-sm text-red-600">{jobActionError}</p>}
               <div className="flex items-center gap-2 pt-2">
-                <Button variant="brand" size="sm" onClick={handleSaveJob} disabled={saveLoading || deleteLoading} data-testid="jobs-save-mobile">
+                <Button variant="brand" size="sm" onClick={handleSaveJob} disabled={!canEditJobs || saveLoading || deleteLoading} data-testid="jobs-save-mobile">
                   {saveLoading ? 'Saving...' : 'Save'}
                 </Button>
-                <Button variant="danger" size="sm" onClick={handleDeleteJob} disabled={saveLoading || deleteLoading} data-testid="jobs-delete-mobile">
+                <Button variant="danger" size="sm" onClick={handleDeleteJob} disabled={!canEditJobs || saveLoading || deleteLoading} data-testid="jobs-delete-mobile">
                   {deleteLoading ? 'Deleting...' : 'Delete'}
                 </Button>
               </div>

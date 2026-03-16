@@ -5,7 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
-import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import { resolveMembershipRole } from "@/lib/jobs/roleScope";
 
 const persistedJobStatusSchema = z.enum([
   "draft",
@@ -324,11 +324,6 @@ export async function GET(request: Request) {
     if (!role || !effectiveRole) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, effectiveRole);
-    if (scopedJobIds && scopedJobIds.length === 0) {
-      return NextResponse.json({ items: [], jobs: [], nextCursor: null });
-    }
-
     let query = supabase
       .from("jobs")
       .select("*")
@@ -340,11 +335,6 @@ export async function GET(request: Request) {
       .from("jobs")
       .select("id", { count: "exact", head: true })
       .eq("company_id", companyId);
-
-    if (scopedJobIds) {
-      query = query.in("id", scopedJobIds);
-      countQuery = countQuery.in("id", scopedJobIds);
-    }
 
     const statusFilters = resolveStatusFilters(queryInput.status);
     if (statusFilters) {
@@ -375,9 +365,6 @@ export async function GET(request: Request) {
         .eq("company_id", companyId)
         .order("id", { ascending: false });
 
-      if (scopedJobIds) {
-        fallbackQuery = fallbackQuery.in("id", scopedJobIds);
-      }
       if (statusFilters) {
         fallbackQuery = fallbackQuery.in("status", statusFilters);
       }

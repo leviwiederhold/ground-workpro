@@ -212,11 +212,6 @@ export async function GET(
     }
 
     const normalizedId = normalizeId(id);
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
-    if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const { data, error } = await supabase
       .from("jobs")
       .select("*")

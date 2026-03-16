@@ -17,6 +17,18 @@ const bodySchema = z.object({
   token: z.string().min(20).optional(),
 });
 
+type PendingInvitationRow = {
+  id: string;
+  company_id: string;
+  employee_id?: string | null;
+  role?: string | null;
+  email?: string | null;
+  accepted_at?: string | null;
+  accepted_user_id?: string | null;
+  expires_at?: string | null;
+  invited_by?: string | null;
+};
+
 const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" | "fieldstaff" => {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw.includes("ceo")) return "ceo";
@@ -132,10 +144,10 @@ export async function POST(request: Request) {
 
     const pendingInvitation = await client
       .from("pending_invitations")
-      .select("id, company_id, employee_id, role, email, accepted_at, accepted_user_id, expires_at")
+      .select("id, company_id, employee_id, role, email, accepted_at, accepted_user_id, expires_at, invited_by")
       .eq("invite_token", inviteToken)
       .limit(1)
-      .maybeSingle();
+      .maybeSingle<PendingInvitationRow>();
     if (pendingInvitation.error) {
       return NextResponse.json({ error: pendingInvitation.error.message }, { status: 400 });
     }
@@ -161,6 +173,7 @@ export async function POST(request: Request) {
           used_at: pendingInvitation.data.accepted_at,
           expires_at: pendingInvitation.data.expires_at,
           pending_id: pendingInvitation.data.id,
+          invited_by: pendingInvitation.data.invited_by,
         }
       : legacyInvitation?.data
         ? {
@@ -169,9 +182,10 @@ export async function POST(request: Request) {
             role: legacyInvitation.data.role,
             email: legacyInvitation.data.email,
             used_at: legacyInvitation.data.used_at,
-            expires_at: legacyInvitation.data.expires_at,
-            pending_id: null,
-          }
+          expires_at: legacyInvitation.data.expires_at,
+          pending_id: null,
+          invited_by: null,
+        }
         : null;
 
     if (!invitationData) {
@@ -401,6 +415,7 @@ export async function POST(request: Request) {
             user_id: userId,
             module_key: row.module_key,
             access_level: row.access_level,
+            created_by: invitationData.invited_by || userId,
           }))
         );
         if (userPermissionInsert.error) {

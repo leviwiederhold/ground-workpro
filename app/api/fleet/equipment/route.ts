@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { requireModuleAccess } from "@/lib/auth/requireRole";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
@@ -59,14 +59,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
+    await requireModuleAccess("fleet", "view");
     const { supabase, companyId } = await getCompanyId();
-    const effectiveRole = await getEffectiveRole();
-    if (!effectiveRole || effectiveRole === "operator") {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    if (!["admin", "pm", "foreman", "mechanic"].includes(effectiveRole)) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
 
     const parsedQuery = querySchema.safeParse({
       q: new URL(request.url).searchParams.get("q") ?? undefined,

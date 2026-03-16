@@ -25,6 +25,17 @@ type InviteRow = {
   expires_at: string | null;
 };
 
+type PendingInviteRow = {
+  id: string;
+  company_id: string;
+  employee_id?: string | null;
+  email?: string | null;
+  role?: string | null;
+  accepted_at?: string | null;
+  expires_at?: string | null;
+  invited_by?: string | null;
+};
+
 const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" | "fieldstaff" => {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw.includes("ceo")) return "ceo";
@@ -73,9 +84,9 @@ export async function POST(request: Request) {
 
   const pendingInvite = await admin
     .from("pending_invitations")
-    .select("id, company_id, employee_id, email, role, accepted_at, expires_at")
+    .select("id, company_id, employee_id, email, role, accepted_at, expires_at, invited_by")
     .eq("invite_token", token)
-    .maybeSingle();
+    .maybeSingle<PendingInviteRow>();
   if (pendingInvite.error) {
     return NextResponse.json({ error: pendingInvite.error.message }, { status: 400 });
   }
@@ -100,6 +111,7 @@ export async function POST(request: Request) {
         used_at: pendingInvite.data.accepted_at,
         expires_at: pendingInvite.data.expires_at,
         pending_id: pendingInvite.data.id,
+        invited_by: pendingInvite.data.invited_by,
       }
     : inviteResult?.data
       ? {
@@ -110,6 +122,7 @@ export async function POST(request: Request) {
           used_at: inviteResult.data.used_at,
           expires_at: inviteResult.data.expires_at,
           pending_id: null,
+          invited_by: null,
         }
       : null;
 
@@ -122,7 +135,7 @@ export async function POST(request: Request) {
   if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ error: "Invite expired" }, { status: 410 });
   }
-  if (invitation.email.trim().toLowerCase() !== email) {
+  if (String(invitation.email ?? "").trim().toLowerCase() !== email) {
     return NextResponse.json({ error: "Invite email does not match" }, { status: 403 });
   }
 
@@ -301,6 +314,7 @@ export async function POST(request: Request) {
           user_id: userId,
           module_key: row.module_key,
           access_level: row.access_level,
+          created_by: invitation.invited_by || userId,
         }))
       );
       if (insertPermissions.error) {

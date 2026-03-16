@@ -18,10 +18,6 @@ const profileSchema = z.object({
   avatar_url: z.string().trim().max(2_000_000).optional().or(z.literal("")),
 });
 
-const isMissingColumnError = (message: string | undefined) =>
-  /column|Could not find the/i.test(String(message || "")) &&
-  /does not exist|not find/i.test(String(message || ""));
-
 type ProfileRow = {
   full_name?: string | null;
   display_name?: string | null;
@@ -57,27 +53,29 @@ const parseMissingColumn = (message: string | undefined) => {
 };
 
 async function selectProfile(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
-  let result = await supabase
-    .from("profiles")
-    .select("full_name, display_name, phone, job_title, timezone, avatar_url")
-    .eq("id", userId)
-    .maybeSingle();
+  const selectColumns = ["full_name", "display_name", "phone", "job_title", "timezone", "avatar_url"];
+  let lastResult = null;
 
-  if (result.error && isMissingColumnError(result.error.message)) {
-    result = await supabase
+  for (let attempt = 0; attempt < selectColumns.length; attempt += 1) {
+    const result = await supabase
       .from("profiles")
-      .select("full_name, display_name")
+      .select(selectColumns.join(", "))
       .eq("id", userId)
       .maybeSingle();
+    if (!result.error) return result;
+
+    lastResult = result;
+    const missingColumn = parseMissingColumn(result.error.message);
+    if (!missingColumn || !selectColumns.includes(missingColumn)) {
+      return result;
+    }
+    selectColumns.splice(selectColumns.indexOf(missingColumn), 1);
   }
-  if (result.error && /display_name|Could not find the 'display_name' column/i.test(result.error.message || "")) {
-    result = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", userId)
-      .maybeSingle();
+
+  if (lastResult) {
+    return lastResult;
   }
-  return result;
+  return supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
 }
 
 async function syncEmployeeProfile(

@@ -5,6 +5,16 @@ import { ensureCompanyHasAtLeastOneCeoMembership } from "@/lib/auth/ceoGuard";
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
+const normalizeMembershipRole = (value: unknown) => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "operator";
+  if (raw.includes("ceo") || raw.includes("admin") || raw.includes("executive")) return COMPANY_OWNER_MEMBERSHIP_ROLE;
+  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
+  if (raw.includes("foreman")) return "foreman";
+  if (raw.includes("mechanic")) return "mechanic";
+  return "operator";
+};
+
 export async function POST(request: Request) {
   const rateLimited = enforceRateLimit(request, {
     keyPrefix: "auth-bootstrap",
@@ -22,6 +32,7 @@ export async function POST(request: Request) {
   }
 
   const user = userData.user;
+  const userEmail = String(user.email ?? "").trim().toLowerCase();
 
   // Idempotent: if user already has membership, do not create duplicate company.
   const { data: existingMemberships, error: existingMembershipError } = await supabase
@@ -48,6 +59,70 @@ export async function POST(request: Request) {
       }
     }
     return Response.json({ success: true, company_id: existingMemberships?.[0]?.company_id ?? null });
+  }
+
+  if (userEmail) {
+    let linkedEmployee = await supabase
+      .from("employees")
+      .select("id, company_id, role")
+      .ilike("email", userEmail)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (linkedEmployee.error && /created_at|Could not find the 'created_at' column/i.test(linkedEmployee.error.message || "")) {
+      linkedEmployee = await supabase
+        .from("employees")
+        .select("id, company_id, role")
+        .ilike("email", userEmail)
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+    }
+
+    if (linkedEmployee.error) {
+      return errorResponse(linkedEmployee.error.message, 400);
+    }
+
+    if (linkedEmployee.data?.company_id) {
+      const membershipRole = normalizeMembershipRole(linkedEmployee.data.role);
+      const { error: membershipUpsertError } = await supabase.from("memberships").upsert(
+        {
+          company_id: linkedEmployee.data.company_id,
+          user_id: user.id,
+          role: membershipRole,
+        },
+        { onConflict: "company_id,user_id" }
+      );
+      if (membershipUpsertError) {
+        return errorResponse(membershipUpsertError.message, 400);
+      }
+
+      await supabase
+        .from("employees")
+        .update({ user_id: user.id, role: membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole })
+        .eq("id", linkedEmployee.data.id)
+        .eq("company_id", linkedEmployee.data.company_id);
+
+      try {
+        await ensureCompanyHasAtLeastOneCeoMembership(supabase, String(linkedEmployee.data.company_id));
+      } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : "Failed to enforce CEO role", 400);
+      }
+
+      return Response.json({ success: true, company_id: linkedEmployee.data.company_id });
+    }
+
+    const pendingInvite = await supabase
+      .from("pending_invitations")
+      .select("id")
+      .ilike("email", userEmail)
+      .is("accepted_at", null)
+      .limit(1)
+      .maybeSingle();
+    if (!pendingInvite.error && pendingInvite.data?.id) {
+      return errorResponse("Pending invite must be accepted before creating a new company", 409);
+    }
   }
 
   // 1) Ensure profile exists

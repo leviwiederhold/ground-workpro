@@ -68,9 +68,10 @@ export async function GET() {
 
     if (memberships.error) return serverError();
 
+    const membershipRows = memberships.data ?? [];
     const userIds = Array.from(
       new Set(
-        (memberships.data ?? [])
+        membershipRows
           .map((row) => String(row.user_id ?? "").trim())
           .filter(Boolean)
       )
@@ -132,22 +133,31 @@ export async function GET() {
 
     if (profiles.error) return serverError();
 
-    let employees: { data: Array<{ user_id: string; name?: string; full_name?: string; email?: string }> | null; error: { message?: string } | null } = userIds.length
+    let employees: {
+      data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; status?: string | null }> | null;
+      error: { message?: string } | null;
+    } = userIds.length
       ? await db
           .from("employees")
-          .select("user_id, name, full_name, email")
+          .select("user_id, name, full_name, email, status")
           .eq("company_id", companyId)
           .in("user_id", userIds)
       : { data: [], error: null };
     if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
       employees = await db
         .from("employees")
-        .select("user_id, full_name")
+        .select("user_id, full_name, status")
         .eq("company_id", companyId)
         .in("user_id", userIds);
     }
     // Employees lookup is best-effort; if it fails, fall back to profiles-only names.
     const employeeRows = employees.error ? [] : employees.data ?? [];
+    const inactiveUserIds = new Set(
+      employeeRows
+        .filter((row) => ["inactive", "deleted", "archived"].includes(String(row.status ?? "").trim().toLowerCase()))
+        .map((row) => String(row.user_id ?? "").trim())
+        .filter(Boolean)
+    );
 
     const nameById = new Map<string, string>();
     const avatarById = new Map<string, string>();
@@ -195,7 +205,9 @@ export async function GET() {
     }
 
     return Response.json({
-      items: (memberships.data ?? []).map((row) => ({
+      items: membershipRows
+        .filter((row) => !inactiveUserIds.has(String(row.user_id ?? "").trim()))
+        .map((row) => ({
         userId: row.user_id,
         role: toRoleLabel(row.role),
         displayName: nameById.get(String(row.user_id ?? "").trim()) || "Team Member",

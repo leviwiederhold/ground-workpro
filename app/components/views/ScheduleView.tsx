@@ -2,7 +2,7 @@
 // @ts-nocheck
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 export function ScheduleView({ equipment, employees, scheduleData, setScheduleData, currentRole, setShowModal, ui }) {
   const { Card, Button, Icon } = ui;
   const [currentWeek, setCurrentWeek] = useState(0);
@@ -37,12 +37,13 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
-  const weekDates = getWeekDates(currentWeek);
+  const weekDates = useMemo(() => getWeekDates(currentWeek), [currentWeek]);
   const weekStartKey = asDateKey(weekDates[0]);
-  const weekDateKeys = weekDates.map((date) => asDateKey(date));
+  const weekDateKeys = useMemo(() => weekDates.map((date) => asDateKey(date)), [weekDates]);
   const isFieldRole = ['foreman', 'mechanic', 'operator'].includes(currentRole);
   const employeesRef = useRef(employees);
   const equipmentRef = useRef(equipment);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     employeesRef.current = employees;
@@ -77,18 +78,21 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   }, [weekDateKeys]);
 
   const loadWeekAssignments = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     try {
       setScheduleLoading(true);
+      setScheduleError('');
       const employeeMap = new Map((employeesRef.current || []).map((employee) => [String(employee.id), employee]));
       const equipmentMap = new Map((equipmentRef.current || []).map((item) => [String(item.id), item]));
       if (isFieldRole) {
         const response = await fetch(`/api/schedule/my-week?start=${weekStartKey}`, { cache: 'no-store' });
         const payload = await response.json().catch(() => ({}));
+        if (requestId !== requestIdRef.current) return;
         if (!response.ok) {
           setScheduleError(payload?.error || 'Failed to load schedule assignments.');
           return;
         }
-        setScheduleError('');
         setScheduleWarning('');
 
         const nextSchedule = {};
@@ -124,12 +128,12 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
 
       const assignmentsPayload = await assignmentsResponse.json().catch(() => ({}));
       const eventsPayload = await eventsResponse.json().catch(() => ({}));
+      if (requestId !== requestIdRef.current) return;
 
       if (!assignmentsResponse.ok) {
         setScheduleError(assignmentsPayload?.error || 'Failed to load schedule assignments.');
         return;
       }
-      setScheduleError('');
       setScheduleWarning('');
 
       const nextSchedule = {};
@@ -163,9 +167,13 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
 
       setEventsByDate(bucketEventsByWeekDate(eventsPayload?.items || []));
     } catch {
-      setScheduleError('Failed to load schedule assignments.');
+      if (requestId === requestIdRef.current) {
+        setScheduleError('Failed to load schedule assignments.');
+      }
     } finally {
-      setScheduleLoading(false);
+      if (requestId === requestIdRef.current) {
+        setScheduleLoading(false);
+      }
     }
   }, [isFieldRole, setScheduleData, weekStartKey, bucketEventsByWeekDate]);
 

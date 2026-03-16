@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import {
   applyAppearancePreference,
+  FORCE_PUBLIC_THEME_SESSION_KEY,
   hasStoredAuthSessionCookie,
   isPublicThemePath,
   loadStoredAppearancePreference,
@@ -18,6 +19,8 @@ export function ThemeInitializer() {
   useEffect(() => {
     let cancelled = false;
     const isPublicPath = isPublicThemePath(pathname);
+    const forcePublicTheme =
+      typeof window !== "undefined" && window.sessionStorage.getItem(FORCE_PUBLIC_THEME_SESSION_KEY) === "1";
 
     const applyStored = () => {
       const stored = loadStoredAppearancePreference();
@@ -52,9 +55,13 @@ export function ThemeInitializer() {
       return;
     }
 
-    if (pathname === "/" && !hasStoredAuthSessionCookie(typeof document !== "undefined" ? document.cookie : "")) {
+    if (pathname === "/" && (forcePublicTheme || !hasStoredAuthSessionCookie(typeof document !== "undefined" ? document.cookie : ""))) {
       applyAppearancePreference("light");
       return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem(FORCE_PUBLIC_THEME_SESSION_KEY);
     }
 
     applyStored();

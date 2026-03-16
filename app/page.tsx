@@ -14,6 +14,7 @@ import {
   isSensitivePermissionModule,
   SENSITIVE_PERMISSION_WARNING_COPY,
 } from '@/lib/permissions/sensitivity';
+import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -50,6 +51,27 @@ const pickDisplayName = ({ fullName, displayName, email }) => {
 const hasRecordId = (value) => {
   const id = value?.id;
   return id !== null && id !== undefined && String(id).trim() !== '';
+};
+
+const NAV_CACHE_KEY = 'groundwork.nav-cache';
+
+const loadCachedNavState = () => {
+  if (typeof window === 'undefined') {
+    return { role: 'executive', items: [], moduleAccess: {}, loaded: false };
+  }
+  try {
+    const raw = window.localStorage.getItem(NAV_CACHE_KEY);
+    if (!raw) return { role: 'executive', items: [], moduleAccess: {}, loaded: false };
+    const parsed = JSON.parse(raw);
+    return {
+      role: typeof parsed?.role === 'string' ? parsed.role : 'executive',
+      items: Array.isArray(parsed?.items) ? parsed.items : [],
+      moduleAccess: parsed?.moduleAccess && typeof parsed.moduleAccess === 'object' ? parsed.moduleAccess : {},
+      loaded: Array.isArray(parsed?.items) && parsed.items.length > 0,
+    };
+  } catch {
+    return { role: 'executive', items: [], moduleAccess: {}, loaded: false };
+  }
 };
 
 const WorkspaceLoadingScreen = () => (
@@ -688,6 +710,7 @@ const WorkspaceLoadingScreen = () => (
     };
 
     const App = ({ currentUser, onLogout }) => {
+      const cachedNavState = useMemo(() => loadCachedNavState(), []);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
         return window.localStorage.getItem('app.currentView') || 'dashboard';
@@ -697,10 +720,10 @@ const WorkspaceLoadingScreen = () => (
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [comingSoonMessage, setComingSoonMessage] = useState('');
-      const [currentRole, setCurrentRole] = useState('executive');
-      const [serverNavItems, setServerNavItems] = useState([]);
-      const [moduleAccess, setModuleAccess] = useState({});
-      const [navLoaded, setNavLoaded] = useState(false);
+      const [currentRole, setCurrentRole] = useState(cachedNavState.role);
+      const [serverNavItems, setServerNavItems] = useState(cachedNavState.items);
+      const [moduleAccess, setModuleAccess] = useState(cachedNavState.moduleAccess);
+      const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
       const [notifications, setNotifications] = useState([]);
@@ -846,7 +869,18 @@ const WorkspaceLoadingScreen = () => (
           setCurrentRole(uiRole);
           const resolvedItems = Array.isArray(payload?.items) && payload.items.length > 0 ? payload.items : fallbackNavByRole(uiRole);
           setServerNavItems(resolvedItems);
-          setModuleAccess(payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {});
+          const resolvedModuleAccess = payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {};
+          setModuleAccess(resolvedModuleAccess);
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(
+              NAV_CACHE_KEY,
+              JSON.stringify({
+                role: uiRole,
+                items: resolvedItems,
+                moduleAccess: resolvedModuleAccess,
+              })
+            );
+          }
         } catch {
           setServerNavItems(fallbackNavByRole(currentRole));
           setModuleAccess({});
@@ -1157,7 +1191,7 @@ const WorkspaceLoadingScreen = () => (
       }, [setCurrentView]);
 
       const handleRespondToEventInvite = useCallback(async (notification, responseStatus) => {
-        const eventId = String(notification?.payload?.eventId || '').trim();
+        const eventId = String(notification?.payload?.eventId || notification?.entity_id || '').trim();
         if (!eventId) return;
         try {
           const response = await fetch(`/api/calendar/events/${eventId}/respond`, {
@@ -1969,7 +2003,7 @@ const WorkspaceLoadingScreen = () => (
                                           <div className="flex flex-wrap items-center gap-3">
                                             {notification.notification_type === 'calendar_invite' &&
                                               !notification.is_read &&
-                                              notification?.payload?.eventId && (
+                                              String(notification?.payload?.eventId || notification?.entity_id || '').trim() && (
                                                 <>
                                                   <button
                                                     className="min-h-9 rounded-full bg-emerald-50 px-3 text-xs font-medium text-emerald-700 hover:text-emerald-800 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
@@ -3388,6 +3422,8 @@ const WorkspaceLoadingScreen = () => (
           setInviteForm((prev) => ({ ...prev, id: payload?.item?.id || prev.id, invite_url: payload?.item?.invite_url || '' }));
           await loadPendingInvites();
           setInviteFeedback('Invite saved.');
+          setShowSensitiveInviteConfirm(false);
+          setShowInviteModal(false);
         } catch (error) {
           setInviteFeedback(error instanceof Error ? error.message : 'Failed to save invite');
         } finally {
@@ -3937,34 +3973,49 @@ const WorkspaceLoadingScreen = () => (
             title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Employee'}
             size="md"
           >
-            <div className="space-y-4">
+            <div className="space-y-5 text-gray-900 dark:text-zinc-100">
+              <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-4 shadow-sm dark:border-zinc-800 dark:bg-gradient-to-br dark:from-[#0d0d0f] dark:to-[#141418]">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 ring-1 ring-brand-100 dark:bg-brand-500/10 dark:text-brand-300 dark:ring-brand-500/20">
+                    <Icon name={permissionModalMode === 'member-edit' ? 'shield-halved' : 'user-plus'} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">
+                      {permissionModalMode === 'member-edit' ? 'Company access controls' : 'Invite a teammate with the right access'}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-zinc-400">
+                      Set role and module permissions before sending access to the workspace.
+                    </p>
+                  </div>
+                </div>
+              </div>
               {permissionModalMode !== 'member-edit' && (
-                <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Full Name</label>
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Full Name</label>
                     <input
                       type="text"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
                       value={inviteForm.full_name}
                       onChange={(event) => setInviteForm((prev) => ({ ...prev, full_name: event.target.value }))}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">Email</label>
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Email</label>
                     <input
                       type="email"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
                       value={inviteForm.email}
                       onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))}
                     />
                   </div>
-                </>
+                </div>
               )}
 
               <div>
-                <label className="block text-xs text-gray-500 mb-1">Role</label>
+                <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Role</label>
                 <select
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
                   value={inviteForm.role}
                   disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'ceo'}
                   onChange={(event) => {
@@ -3983,20 +4034,23 @@ const WorkspaceLoadingScreen = () => (
               </div>
 
               <div>
-                <label className="block text-xs text-gray-500 mb-2">Module Permissions</label>
-                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Module Permissions</label>
+                  <span className="text-[11px] text-gray-500 dark:text-zinc-400">Readable on mobile and desktop</span>
+                </div>
+                <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#090909]">
                   {permissionModules.map((module) => (
-                    <div key={module.key} className="flex items-center justify-between gap-2 px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-800">{module.label}</span>
+                    <div key={module.key} className="grid grid-cols-1 gap-3 border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-zinc-800 sm:grid-cols-[minmax(0,1fr)_128px] sm:items-center">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="text-sm font-medium text-gray-800 dark:text-zinc-200">{module.label}</span>
                         {isSensitivePermissionModule(module.key) && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
                             Sensitive
                           </span>
                         )}
                       </div>
                       <select
-                        className="border border-gray-300 rounded-lg px-2 py-1 text-sm"
+                        className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                         value={permissionForm[module.key] || 'none'}
                         disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'ceo'}
                         onChange={(event) =>
@@ -4013,14 +4067,14 @@ const WorkspaceLoadingScreen = () => (
                     </div>
                   ))}
                 </div>
-                <p className="text-[11px] text-gray-500 mt-2">
+                <p className="mt-2 text-[11px] text-gray-500 dark:text-zinc-400">
                   Billing is sensitive and follows CEO-level access.
                 </p>
                 {sensitivePermissionGrants.length > 0 && (
-                  <div className="mt-2 border border-amber-200 bg-amber-50 rounded-lg p-2.5">
-                    <p className="text-xs font-medium text-amber-800 mb-1">Sensitive access selected</p>
-                    <p className="text-xs text-amber-800">{SENSITIVE_PERMISSION_WARNING_COPY}</p>
-                    <p className="text-[11px] text-amber-900 mt-1">Selected: {sensitiveGrantSummary}</p>
+                  <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/25">
+                    <p className="mb-1 text-xs font-medium text-amber-800 dark:text-amber-200">Sensitive access selected</p>
+                    <p className="text-xs text-amber-800 dark:text-amber-200">{SENSITIVE_PERMISSION_WARNING_COPY}</p>
+                    <p className="mt-1 text-[11px] text-amber-900 dark:text-amber-100">Selected: {sensitiveGrantSummary}</p>
                   </div>
                 )}
               </div>
@@ -4030,8 +4084,8 @@ const WorkspaceLoadingScreen = () => (
               )}
 
               {permissionModalMode !== 'member-edit' && inviteForm.invite_url && (
-                <div className="border border-green-200 bg-green-50 rounded-lg p-3">
-                  <p className="text-xs text-green-700 mb-2">Invite link generated</p>
+                <div className="rounded-xl border border-green-200 bg-green-50 p-3 dark:border-green-900/40 dark:bg-green-950/20">
+                  <p className="mb-2 text-xs font-medium text-green-700 dark:text-green-200">Invite link generated</p>
                   <div className="flex gap-2">
                     <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
                       <Icon name="link" className="mr-1" /> Copy Link
@@ -4043,9 +4097,9 @@ const WorkspaceLoadingScreen = () => (
                 </div>
               )}
 
-              {inviteFeedback && <p className="text-xs text-gray-600">{inviteFeedback}</p>}
+              {inviteFeedback && <p className="text-xs text-gray-600 dark:text-zinc-300">{inviteFeedback}</p>}
 
-              <div className="flex justify-end gap-2 pt-1">
+              <div className="flex justify-end gap-2 border-t border-gray-200 pt-3 dark:border-zinc-800">
                 <Button
                   type="button"
                   variant="secondary"
@@ -12365,10 +12419,20 @@ const WorkspaceLoadingScreen = () => (
 	      };
 
       const handleLogout = async () => {
-        await supabaseBrowser().auth.signOut();
+        try {
+          if (typeof window !== 'undefined') {
+            window.sessionStorage.setItem(FORCE_PUBLIC_THEME_SESSION_KEY, '1');
+            window.localStorage.removeItem('app.currentView');
+          }
+          applyAppearancePreference('light');
+          await fetch('/api/logout', { method: 'POST' }).catch(() => null);
+        } finally {
+          await supabaseBrowser().auth.signOut().catch(() => null);
+        }
         setIsAuthenticated(false);
         setCurrentUser(null);
         setSetupChecked(true);
+        window.location.replace('/');
       };
 
       useEffect(() => {

@@ -22,12 +22,44 @@ export async function POST() {
     const { supabase, companyId, userId } = await getCompanyId();
     const now = new Date().toISOString();
 
+    const unreadLookup = await supabase
+      .from('notifications')
+      .select('id, is_read, read_at')
+      .eq('company_id', companyId)
+      .eq('user_id', userId);
+
+    if (unreadLookup.error) {
+      if (isMissingNotificationsTable(unreadLookup.error.message)) {
+        const updated = markAllFallbackNotificationsRead({
+          companyId,
+          userId,
+          companyWide: false,
+        });
+        return NextResponse.json({ item: { updated } });
+      }
+      return NextResponse.json({ error: unreadLookup.error.message }, { status: 400 });
+    }
+
+    const unreadIds = (unreadLookup.data ?? [])
+      .filter((row) => !(Boolean(row.is_read) || Boolean(row.read_at)))
+      .map((row) => String(row.id ?? '').trim())
+      .filter(Boolean);
+
+    if (unreadIds.length === 0) {
+      const updated = markAllFallbackNotificationsRead({
+        companyId,
+        userId,
+        companyWide: false,
+      });
+      return NextResponse.json({ item: { updated } });
+    }
+
     const result = await supabase
       .from('notifications')
       .update({ is_read: true, read_at: now })
       .eq('company_id', companyId)
       .eq('user_id', userId)
-      .eq('is_read', false)
+      .in('id', unreadIds)
       .select('id');
 
     if (result.error && isMissingNotificationsColumns(result.error.message || '')) {
@@ -39,7 +71,12 @@ export async function POST() {
         .is('read_at', null)
         .select('id');
       if (!legacy.error) {
-        return NextResponse.json({ item: { updated: (legacy.data ?? []).length } });
+        const fallbackUpdated = markAllFallbackNotificationsRead({
+          companyId,
+          userId,
+          companyWide: false,
+        });
+        return NextResponse.json({ item: { updated: (legacy.data ?? []).length + fallbackUpdated } });
       }
     }
 
@@ -55,7 +92,12 @@ export async function POST() {
       return NextResponse.json({ error: result.error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ item: { updated: (result.data ?? []).length } });
+    const fallbackUpdated = markAllFallbackNotificationsRead({
+      companyId,
+      userId,
+      companyWide: false,
+    });
+    return NextResponse.json({ item: { updated: (result.data ?? []).length + fallbackUpdated } });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

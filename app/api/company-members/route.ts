@@ -75,9 +75,10 @@ export async function GET(request: Request) {
 
     if (memberships.error) return serverError();
 
+    const membershipRows = memberships.data ?? [];
     const userIds = Array.from(
       new Set(
-        (memberships.data ?? [])
+        membershipRows
           .map((row) => String(row.user_id ?? "").trim())
           .filter(Boolean)
       )
@@ -139,21 +140,30 @@ export async function GET(request: Request) {
 
     if (profiles.error) return serverError();
 
-    let employees: { data: Array<{ user_id: string; name?: string; full_name?: string; email?: string }> | null; error: { message?: string } | null } = userIds.length
+    let employees: {
+      data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; status?: string | null }> | null;
+      error: { message?: string } | null;
+    } = userIds.length
       ? await db
           .from("employees")
-          .select("user_id, name, full_name, email")
+          .select("user_id, name, full_name, email, status")
           .eq("company_id", companyId)
           .in("user_id", userIds)
       : { data: [], error: null };
     if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
       employees = await db
         .from("employees")
-        .select("user_id, full_name")
+        .select("user_id, full_name, status")
         .eq("company_id", companyId)
         .in("user_id", userIds);
     }
     const employeeRows = employees.error ? [] : employees.data ?? [];
+    const inactiveUserIds = new Set(
+      employeeRows
+        .filter((row) => ["inactive", "deleted", "archived"].includes(String(row.status ?? "").trim().toLowerCase()))
+        .map((row) => String(row.user_id ?? "").trim())
+        .filter(Boolean)
+    );
 
     const nameById = new Map<string, string>();
     const emailById = new Map<string, string>();
@@ -209,7 +219,9 @@ export async function GET(request: Request) {
     }
 
     return Response.json({
-      items: (memberships.data ?? []).map((row) => {
+      items: membershipRows
+        .filter((row) => !inactiveUserIds.has(String(row.user_id ?? "").trim()))
+        .map((row) => {
         const memberUserId = String(row.user_id ?? "").trim();
         const role = String(row.role ?? "").trim().toLowerCase();
         return {

@@ -1,6 +1,7 @@
 export type AppearancePreference = "light" | "dark" | "system";
 
 export const APPEARANCE_STORAGE_KEY = "groundwork.appearance";
+export const FORCE_PUBLIC_THEME_SESSION_KEY = "groundwork.force-public-theme";
 const PUBLIC_THEME_PREFIXES = ["/login", "/signup", "/forgot-password", "/proposal/"];
 const PUBLIC_THEME_EXACT_PATHS = new Set(["/features", "/pricing", "/testimonials"]);
 

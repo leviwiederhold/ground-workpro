@@ -52,6 +52,32 @@ const parseMissingColumn = (message: string | undefined): string | null => {
   return null;
 };
 
+const isDisposableBootstrapCompany = async (
+  client: NonNullable<ReturnType<typeof getSupabaseAdmin>> | Awaited<ReturnType<typeof supabaseServer>>,
+  companyId: string,
+  userId: string
+) => {
+  const memberships = await client
+    .from("memberships")
+    .select("user_id")
+    .eq("company_id", companyId);
+  if (memberships.error) return false;
+  const membershipUserIds = (memberships.data ?? [])
+    .map((row) => String(row.user_id ?? "").trim())
+    .filter(Boolean);
+  if (membershipUserIds.length !== 1 || membershipUserIds[0] !== userId) return false;
+
+  const company = await client
+    .from("companies")
+    .select("name")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (company.error) return false;
+
+  const companyName = String(company.data?.name ?? "").trim().toLowerCase();
+  return companyName === "my first company";
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json().catch(() => ({}));
@@ -162,11 +188,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invite email does not match signed-in user" }, { status: 403 });
     }
 
-    if (
-      existingMembership.data?.company_id &&
-      String(existingMembership.data.company_id) !== String(invitationData.company_id)
-    ) {
-      return NextResponse.json({ error: "User already belongs to another company" }, { status: 409 });
+    if (existingMembership.data?.company_id) {
+      const existingCompanyId = String(existingMembership.data.company_id);
+      const invitedCompanyId = String(invitationData.company_id);
+      if (existingCompanyId !== invitedCompanyId) {
+        const disposableBootstrapCompany = await isDisposableBootstrapCompany(client, existingCompanyId, userId);
+        if (!disposableBootstrapCompany) {
+          return NextResponse.json({ error: "User already belongs to another company" }, { status: 409 });
+        }
+
+        const detachMembership = await client
+          .from("memberships")
+          .delete()
+          .eq("company_id", existingCompanyId)
+          .eq("user_id", userId);
+        if (detachMembership.error) {
+          return NextResponse.json({ error: detachMembership.error.message }, { status: 400 });
+        }
+
+        await client
+          .from("module_permissions")
+          .delete()
+          .eq("company_id", existingCompanyId)
+          .eq("user_id", userId);
+      }
     }
 
     const resolvedRole = normalizeRole(invitationData.role);

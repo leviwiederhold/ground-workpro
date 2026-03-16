@@ -21,12 +21,44 @@ export async function POST() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
 
+    const currentRows = await supabase
+      .from("notifications")
+      .select("id, is_read, read_at")
+      .eq("company_id", companyId)
+      .eq("user_id", userId);
+
+    if (currentRows.error) {
+      if (isMissingNotificationsTable(currentRows.error.message)) {
+        const fallbackDeleted = clearFallbackReadNotifications({
+          companyId,
+          userId,
+          companyWide: false,
+        });
+        return NextResponse.json({ item: { deleted: fallbackDeleted } });
+      }
+      return NextResponse.json({ error: currentRows.error.message }, { status: 400 });
+    }
+
+    const readIds = (currentRows.data ?? [])
+      .filter((row) => Boolean(row.is_read) || Boolean(row.read_at))
+      .map((row) => String(row.id ?? "").trim())
+      .filter(Boolean);
+
+    if (readIds.length === 0) {
+      const fallbackDeleted = clearFallbackReadNotifications({
+        companyId,
+        userId,
+        companyWide: false,
+      });
+      return NextResponse.json({ item: { deleted: fallbackDeleted } });
+    }
+
     const result = await supabase
       .from("notifications")
       .delete()
       .eq("company_id", companyId)
       .eq("user_id", userId)
-      .eq("is_read", true)
+      .in("id", readIds)
       .select("id");
 
     if (result.error && isMissingNotificationsColumns(result.error.message || "")) {

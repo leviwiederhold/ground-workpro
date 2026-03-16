@@ -402,15 +402,50 @@ export async function DELETE(
 
     const { id } = await params;
     const { supabase, companyId } = await getCompanyId();
+    const employeeId = normalizeId(id);
+
+    const employeeResult = await supabase
+      .from("employees")
+      .select("id, user_id, email")
+      .eq("company_id", companyId)
+      .eq("id", employeeId)
+      .maybeSingle();
+    if (employeeResult.error) {
+      return NextResponse.json({ error: employeeResult.error.message }, { status: 400 });
+    }
+    if (!employeeResult.data) {
+      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+    }
+    const linkedUserId = String(employeeResult.data.user_id ?? "").trim();
 
     const { error } = await supabase
       .from("employees")
       .delete()
       .eq("company_id", companyId)
-      .eq("id", normalizeId(id));
+      .eq("id", employeeId);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+
+    if (linkedUserId) {
+      const membershipDelete = await supabase
+        .from("memberships")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("user_id", linkedUserId);
+      if (membershipDelete.error) {
+        return NextResponse.json({ error: membershipDelete.error.message }, { status: 400 });
+      }
+
+      const permissionsDelete = await supabase
+        .from("module_permissions")
+        .delete()
+        .eq("company_id", companyId)
+        .eq("user_id", linkedUserId);
+      if (permissionsDelete.error && !/column .*user_id.* does not exist|Could not find the 'user_id' column/i.test(permissionsDelete.error.message || "")) {
+        return NextResponse.json({ error: permissionsDelete.error.message }, { status: 400 });
+      }
     }
 
     return NextResponse.json({ success: true });

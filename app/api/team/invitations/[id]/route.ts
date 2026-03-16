@@ -57,7 +57,7 @@ const buildOrigin = (request: Request) => {
 const invitationRoleToAppRole = (role: z.infer<typeof invitationRoleSchema>) => {
   if (role === "ceo") return "admin";
   if (role === "manager") return "pm";
-  if (role === "fieldstaff") return "operator";
+  if (role === "fieldstaff") return "fieldstaff";
   return role;
 };
 

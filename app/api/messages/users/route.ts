@@ -10,6 +10,7 @@ function toRoleLabel(role: unknown) {
   if (normalized === "pm") return "Operations Manager";
   if (normalized === "foreman") return "Foreman";
   if (normalized === "mechanic") return "Mechanic";
+  if (normalized === "fieldstaff" || normalized === "field_staff" || normalized === "field staff") return "Field Staff";
   if (normalized === "operator") return "Operator";
   return normalized || "Member";
 }

@@ -29,8 +29,14 @@ const normalizeRoleValue = (value: unknown) => {
   if (!raw) return "";
   if (raw === "executive" || raw === "ceo") return "admin";
   if (raw === "project manager" || raw === "manager") return "pm";
+  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
   if (raw === "laborer") return "operator";
   return raw;
+};
+
+const normalizeMembershipRoleValue = (value: unknown) => {
+  const normalized = normalizeRoleValue(value);
+  return normalized === "fieldstaff" ? "operator" : normalized;
 };
 
 const parseCertifications = (value: unknown) => {
@@ -355,14 +361,14 @@ export async function PATCH(
     if (payload.role !== undefined && updatedEmployee?.user_id) {
       const membershipResult = await supabase
         .from("memberships")
-        .update({ role: normalizeRoleValue(payload.role) })
+        .update({ role: normalizeMembershipRoleValue(payload.role) })
         .eq("company_id", companyId)
         .eq("user_id", updatedEmployee.user_id);
       if (membershipResult.error) {
         await supabase.from("memberships").insert({
           company_id: companyId,
           user_id: updatedEmployee.user_id,
-          role: normalizeRoleValue(payload.role),
+          role: normalizeMembershipRoleValue(payload.role),
         });
       }
     }

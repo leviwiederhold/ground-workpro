@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseServer } from "@/lib/supabase/server";
-import { NAV_ITEMS, normalizeAppRole, toNavItems, type AppRole } from "@/lib/nav/config";
+import { NAV_ITEMS, normalizeAppRole, toNavItems, type AppRole, type DisplayAppRole } from "@/lib/nav/config";
 import {
   applyPermissionOverrideFromCookie,
   hasModuleAccess,
@@ -47,6 +47,7 @@ async function resolveContext() {
   return {
     supabase,
     userId,
+    userEmail: String(userResult.data.user.email ?? "").trim().toLowerCase(),
     companyId: String(membershipResult.data.company_id),
     realRole: normalizeAppRole(membershipResult.data.role) ?? "operator",
   };
@@ -102,9 +103,25 @@ export async function GET() {
       return roleNavKeys.has(item.key);
     });
 
+    let displayRole: DisplayAppRole = role;
+    const employeeRoleResult = await context.supabase
+      .from("employees")
+      .select("role")
+      .eq("company_id", context.companyId)
+      .eq("user_id", context.userId)
+      .limit(1)
+      .maybeSingle();
+    if (!employeeRoleResult.error) {
+      const rawEmployeeRole = String(employeeRoleResult.data?.role ?? "").trim().toLowerCase();
+      if (rawEmployeeRole.includes("fieldstaff") || rawEmployeeRole.includes("field_staff") || rawEmployeeRole.includes("field staff")) {
+        displayRole = "fieldstaff";
+      }
+    }
+
     return NextResponse.json({
       items: filteredItems,
       role,
+      displayRole,
       realRole: context.realRole,
       canSwitchRoleView: false,
       moduleAccess: modulePermissions,

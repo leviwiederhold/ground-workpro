@@ -43,6 +43,10 @@ const permissionsToRows = (permissions: ModulePermissionMap) =>
   }));
 
 const toTemplateRole = (role: string) => {
+  const raw = String(role ?? "").trim().toLowerCase();
+  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) {
+    return "fieldstaff" as const;
+  }
   const normalized = normalizeAppRole(role) ?? "operator";
   if (normalized === "admin") return "ceo" as const;
   if (normalized === "pm") return "manager" as const;

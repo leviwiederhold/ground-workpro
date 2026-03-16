@@ -57,20 +57,21 @@ const NAV_CACHE_KEY = 'groundwork.nav-cache';
 
 const loadCachedNavState = () => {
   if (typeof window === 'undefined') {
-    return { role: 'executive', items: [], moduleAccess: {}, loaded: false };
+    return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
   }
   try {
     const raw = window.localStorage.getItem(NAV_CACHE_KEY);
-    if (!raw) return { role: 'executive', items: [], moduleAccess: {}, loaded: false };
+    if (!raw) return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
     const parsed = JSON.parse(raw);
     return {
       role: typeof parsed?.role === 'string' ? parsed.role : 'executive',
+      displayRole: typeof parsed?.displayRole === 'string' ? parsed.displayRole : typeof parsed?.role === 'string' ? parsed.role : 'executive',
       items: Array.isArray(parsed?.items) ? parsed.items : [],
       moduleAccess: parsed?.moduleAccess && typeof parsed.moduleAccess === 'object' ? parsed.moduleAccess : {},
       loaded: Array.isArray(parsed?.items) && parsed.items.length > 0,
     };
   } catch {
-    return { role: 'executive', items: [], moduleAccess: {}, loaded: false };
+    return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
   }
 };
 
@@ -721,6 +722,7 @@ const WorkspaceLoadingScreen = () => (
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [comingSoonMessage, setComingSoonMessage] = useState('');
       const [currentRole, setCurrentRole] = useState(cachedNavState.role);
+      const [currentRoleDisplay, setCurrentRoleDisplay] = useState(cachedNavState.displayRole || cachedNavState.role);
       const [serverNavItems, setServerNavItems] = useState(cachedNavState.items);
       const [moduleAccess, setModuleAccess] = useState(cachedNavState.moduleAccess);
       const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
@@ -746,15 +748,17 @@ const WorkspaceLoadingScreen = () => (
       const resolvedUserAvatar = String(currentUser?.avatarUrl ?? '').trim();
       const headerAvatarSrc = resolvedUserAvatar || resolvedCompanyLogo;
       const roleBadgeLabel =
-        currentRole === 'executive'
+        currentRoleDisplay === 'executive'
           ? 'CEO'
-          : currentRole === 'operations'
+          : currentRoleDisplay === 'operations'
             ? 'Operations Manager'
-            : currentRole === 'foreman'
+            : currentRoleDisplay === 'foreman'
               ? 'Foreman'
-              : currentRole === 'mechanic'
+              : currentRoleDisplay === 'mechanic'
                 ? 'Mechanic'
-                : currentRole === 'operator'
+                : currentRoleDisplay === 'field'
+                  ? 'Field Staff'
+                  : currentRoleDisplay === 'operator'
                   ? 'Operator'
                   : 'Team Member';
       const isCeoRole = currentRole === 'executive';
@@ -821,6 +825,7 @@ const WorkspaceLoadingScreen = () => (
         if (role === 'pm') return 'operations';
         if (role === 'foreman') return 'foreman';
         if (role === 'mechanic') return 'mechanic';
+        if (role === 'fieldstaff') return 'field';
         if (role === 'operator') return 'operator';
         return 'executive';
       }, []);
@@ -852,6 +857,7 @@ const WorkspaceLoadingScreen = () => (
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
           operator: ['dashboard', 'messages', 'schedule', 'safety'],
+          field: ['dashboard', 'messages', 'schedule', 'safety'],
         };
         return (byRole[String(role || 'executive')] || byRole.executive).map((key) => navLibrary[key]).filter(Boolean);
       }, []);
@@ -863,10 +869,13 @@ const WorkspaceLoadingScreen = () => (
           if (!response.ok) {
             setServerNavItems(fallbackNavByRole(currentRole));
             setModuleAccess({});
+            setCurrentRoleDisplay(currentRole);
             return;
           }
           const uiRole = mapServerRoleToUiRole(payload?.role);
+          const uiDisplayRole = mapServerRoleToUiRole(payload?.displayRole || payload?.role);
           setCurrentRole(uiRole);
+          setCurrentRoleDisplay(uiDisplayRole);
           const resolvedItems = Array.isArray(payload?.items) && payload.items.length > 0 ? payload.items : fallbackNavByRole(uiRole);
           setServerNavItems(resolvedItems);
           const resolvedModuleAccess = payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {};
@@ -876,6 +885,7 @@ const WorkspaceLoadingScreen = () => (
               NAV_CACHE_KEY,
               JSON.stringify({
                 role: uiRole,
+                displayRole: uiDisplayRole,
                 items: resolvedItems,
                 moduleAccess: resolvedModuleAccess,
               })
@@ -884,6 +894,7 @@ const WorkspaceLoadingScreen = () => (
         } catch {
           setServerNavItems(fallbackNavByRole(currentRole));
           setModuleAccess({});
+          setCurrentRoleDisplay(currentRole);
         } finally {
           setNavLoaded(true);
         }
@@ -3419,8 +3430,28 @@ const WorkspaceLoadingScreen = () => (
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload?.error || 'Failed to save invite');
-          setInviteForm((prev) => ({ ...prev, id: payload?.item?.id || prev.id, invite_url: payload?.item?.invite_url || '' }));
+          const generatedInviteUrl = String(payload?.item?.invite_url || '');
+          setInviteForm((prev) => ({ ...prev, id: payload?.item?.id || prev.id, invite_url: generatedInviteUrl || prev.invite_url || '' }));
           await loadPendingInvites();
+          if (permissionModalMode === 'member-edit') {
+            setInviteFeedback('Permissions updated.');
+            setShowSensitiveInviteConfirm(false);
+            setShowInviteModal(false);
+            return;
+          }
+          if (generatedInviteUrl) {
+            try {
+              await copyText(generatedInviteUrl);
+              setInviteFeedback('Invite link generated and copied to clipboard.');
+              setShowSensitiveInviteConfirm(false);
+              setShowInviteModal(false);
+              return;
+            } catch {
+              setInviteFeedback('Invite link generated. Clipboard access failed, use Copy Link below.');
+              setShowSensitiveInviteConfirm(false);
+              return;
+            }
+          }
           setInviteFeedback('Invite saved.');
           setShowSensitiveInviteConfirm(false);
           setShowInviteModal(false);
@@ -3808,6 +3839,7 @@ const WorkspaceLoadingScreen = () => (
                       <option value="foreman">Foreman</option>
                       <option value="mechanic">Mechanic</option>
                       <option value="operator">Operator</option>
+                      <option value="fieldstaff">Field Staff</option>
                       <option value="operator">Laborer</option>
                     </select>
                     {isSelectedEmployeeCeo && (

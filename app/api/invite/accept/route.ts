@@ -17,14 +17,15 @@ const bodySchema = z.object({
   token: z.string().min(20).optional(),
 });
 
-const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" => {
+const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" | "fieldstaff" => {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw.includes("ceo")) return "ceo";
   if (raw.includes("admin") || raw.includes("executive")) return "admin";
   if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
   if (raw.includes("foreman")) return "foreman";
   if (raw.includes("mechanic")) return "mechanic";
-  if (raw.includes("laborer") || raw.includes("labourer") || raw.includes("field")) return "operator";
+  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
+  if (raw.includes("laborer") || raw.includes("labourer")) return "operator";
   return "operator";
 };
 
@@ -233,7 +234,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
     }
 
-    const membershipRole = resolvedRole === "ceo" ? COMPANY_OWNER_MEMBERSHIP_ROLE : resolvedRole;
+    const membershipRole =
+      resolvedRole === "ceo"
+        ? COMPANY_OWNER_MEMBERSHIP_ROLE
+        : resolvedRole === "fieldstaff"
+          ? "operator"
+          : resolvedRole;
     const upsertMembership = await client
       .from("memberships")
       .upsert(
@@ -275,7 +281,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const employeeRole = membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole;
+    const employeeRole = resolvedRole === "ceo" ? "admin" : resolvedRole;
     const inviteEmail = tokenEmail || email;
     let employeeId = String(invitationData.employee_id ?? "").trim();
 

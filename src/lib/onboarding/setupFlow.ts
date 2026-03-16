@@ -62,13 +62,12 @@ const isMissingColumnError = (message: string | undefined) =>
 
 function getRequiredSetupStepDefs(role: SetupRole): SetupStepDef[] {
   if (role === "admin") return [{ ...COMPANY_STEP, required: true }];
-  return [];
+  return [{ ...PROFILE_STEP, required: true }];
 }
 
 function getOptionalSetupStepDefs(role: SetupRole): SetupStepDef[] {
   if (role === "admin") return [{ ...PROFILE_STEP, required: false }, { ...ACCOUNT_STEP, required: false }];
   return [
-    { ...PROFILE_STEP, required: false },
     { ...ACCOUNT_STEP, required: false },
   ];
 }

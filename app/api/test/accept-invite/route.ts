@@ -25,13 +25,14 @@ type InviteRow = {
   expires_at: string | null;
 };
 
-const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" => {
+const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" | "fieldstaff" => {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw.includes("ceo")) return "ceo";
   if (raw.includes("admin") || raw.includes("executive")) return "admin";
   if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
   if (raw.includes("foreman")) return "foreman";
   if (raw.includes("mechanic")) return "mechanic";
+  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
   return "operator";
 };
 

@@ -8,6 +8,80 @@ import {
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
+const normalizeMembershipRole = (value: unknown) => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "operator";
+  if (raw.includes("admin") || raw.includes("executive") || raw.includes("ceo")) return COMPANY_OWNER_MEMBERSHIP_ROLE;
+  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
+  if (raw.includes("foreman")) return "foreman";
+  if (raw.includes("mechanic")) return "mechanic";
+  return "operator";
+};
+
+const normalizeEmployeeRole = (value: unknown) => {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (!raw) return "operator";
+  if (raw.includes("admin") || raw.includes("executive") || raw.includes("ceo")) return "admin";
+  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
+  if (raw.includes("foreman")) return "foreman";
+  if (raw.includes("mechanic")) return "mechanic";
+  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
+  return "operator";
+};
+
+async function resolveAcceptedInviteContext(
+  client: NonNullable<ReturnType<typeof getSupabaseAdmin>> | Awaited<ReturnType<typeof supabaseServer>>,
+  userId: string,
+  email: string
+) {
+  let pendingInvite = await client
+    .from("pending_invitations")
+    .select("company_id, employee_id, role, accepted_at")
+    .eq("accepted_user_id", userId)
+    .not("accepted_at", "is", null)
+    .order("accepted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (pendingInvite.error && /accepted_at|accepted_user_id|created_at|Could not find the '.*' column/i.test(pendingInvite.error.message || "")) {
+    pendingInvite = await client
+      .from("pending_invitations")
+      .select("company_id, employee_id, role")
+      .ilike("email", email)
+      .not("accepted_at", "is", null)
+      .order("id", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  }
+
+  if (!pendingInvite.error && pendingInvite.data?.company_id) {
+    return {
+      companyId: String(pendingInvite.data.company_id),
+      employeeId: String(pendingInvite.data.employee_id ?? "").trim() || null,
+      role: normalizeEmployeeRole(pendingInvite.data.role),
+    };
+  }
+
+  const legacyInvite = await client
+    .from("invite_tokens")
+    .select("company_id, employee_id, role, used_at")
+    .ilike("email", email)
+    .not("used_at", "is", null)
+    .order("used_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!legacyInvite.error && legacyInvite.data?.company_id) {
+    return {
+      companyId: String(legacyInvite.data.company_id),
+      employeeId: String(legacyInvite.data.employee_id ?? "").trim() || null,
+      role: normalizeEmployeeRole(legacyInvite.data.role),
+    };
+  }
+
+  return null;
+}
+
 export class TenantResolverError extends Error {
   status: number;
 
@@ -60,37 +134,69 @@ export async function getCompanyId() {
     if (email) {
       const admin = getSupabaseAdmin();
       const client = admin ?? supabase;
-      let inviteEmployee = await client
-        .from("employees")
-        .select("id, company_id, role")
-        .eq("email", email)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const acceptedInvite = await resolveAcceptedInviteContext(client, userData.user.id, email);
 
-      if (inviteEmployee.error && /created_at/i.test(inviteEmployee.error.message || "")) {
-        inviteEmployee = await client
+      let inviteEmployee:
+        | {
+            error: { message?: string } | null;
+            data: { id?: string | null; company_id?: string | null; role?: string | null; user_id?: string | null } | null;
+          }
+        = { error: null, data: null };
+
+      if (acceptedInvite?.employeeId) {
+        const employeeByAcceptedInvite = await client
           .from("employees")
-          .select("id, company_id, role")
-          .eq("email", email)
-          .order("id", { ascending: false })
-          .limit(1)
+          .select("id, company_id, role, user_id")
+          .eq("company_id", acceptedInvite.companyId)
+          .eq("id", acceptedInvite.employeeId)
           .maybeSingle();
+        inviteEmployee = {
+          error: employeeByAcceptedInvite.error,
+          data: employeeByAcceptedInvite.data,
+        };
+      }
+
+      if (!inviteEmployee.data) {
+        let employeeRows = await client
+          .from("employees")
+          .select("id, company_id, role, user_id, email")
+          .ilike("email", email)
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (employeeRows.error && /created_at/i.test(employeeRows.error.message || "")) {
+          employeeRows = await client
+            .from("employees")
+            .select("id, company_id, role, user_id, email")
+            .ilike("email", email)
+            .order("id", { ascending: false })
+            .limit(20);
+        }
+
+        if (!employeeRows.error) {
+          const rows = (employeeRows.data ?? []) as Array<{
+            id?: string | null;
+            company_id?: string | null;
+            role?: string | null;
+            user_id?: string | null;
+          }>;
+          const prioritizedRow =
+            rows.find((row) => String(row.user_id ?? "").trim() === String(userData.user.id)) ??
+            (acceptedInvite
+              ? rows.find((row) => String(row.company_id ?? "").trim() === acceptedInvite.companyId)
+              : null) ??
+            rows[0] ??
+            null;
+          inviteEmployee = { error: null, data: prioritizedRow };
+        } else {
+          inviteEmployee = { error: employeeRows.error, data: null };
+        }
       }
 
       if (!inviteEmployee.error && inviteEmployee.data?.company_id) {
         try {
-          const roleRaw = String(inviteEmployee.data.role ?? "").toLowerCase();
-          const membershipRole =
-            roleRaw.includes("admin") || roleRaw.includes("executive") || roleRaw.includes("ceo")
-              ? "admin"
-              : roleRaw === "pm" || roleRaw.includes("operations") || roleRaw.includes("projectmanager")
-                ? "pm"
-                : roleRaw.includes("foreman")
-                  ? "foreman"
-                  : roleRaw.includes("mechanic")
-                    ? "mechanic"
-                    : "operator";
+          const membershipRole = normalizeMembershipRole(acceptedInvite?.role ?? inviteEmployee.data.role);
+          const employeeRole = normalizeEmployeeRole(acceptedInvite?.role ?? inviteEmployee.data.role);
 
           const existingCompanyMemberships = await listCompanyMembershipRoles(
             client,
@@ -102,15 +208,16 @@ export async function getCompanyId() {
           const safeMembershipRole = hasCeoMembership
             ? membershipRole
             : COMPANY_OWNER_MEMBERSHIP_ROLE;
-          const safeEmployeeRole = safeMembershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE
-            ? "admin"
-            : safeMembershipRole;
+          const safeEmployeeRole = safeMembershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : employeeRole;
 
-          const membershipInsert = await client.from("memberships").insert({
-            company_id: inviteEmployee.data.company_id,
-            user_id: userData.user.id,
-            role: safeMembershipRole,
-          });
+          const membershipInsert = await client.from("memberships").upsert(
+            {
+              company_id: inviteEmployee.data.company_id,
+              user_id: userData.user.id,
+              role: safeMembershipRole,
+            },
+            { onConflict: "company_id,user_id" }
+          );
 
           if (
             membershipInsert.error &&

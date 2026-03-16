@@ -1,4 +1,5 @@
 export type AppRole = "admin" | "pm" | "foreman" | "mechanic" | "operator";
+export type DisplayAppRole = AppRole | "fieldstaff";
 
 export type NavItem = {
   key: string;

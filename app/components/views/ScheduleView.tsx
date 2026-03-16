@@ -40,7 +40,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const weekDates = useMemo(() => getWeekDates(currentWeek), [currentWeek]);
   const weekStartKey = asDateKey(weekDates[0]);
   const weekDateKeys = useMemo(() => weekDates.map((date) => asDateKey(date)), [weekDates]);
-  const isFieldRole = ['foreman', 'mechanic', 'operator'].includes(currentRole);
+  const isFieldRole = ['foreman', 'mechanic', 'operator', 'field'].includes(currentRole);
   const employeesRef = useRef(employees);
   const equipmentRef = useRef(equipment);
   const requestIdRef = useRef(0);

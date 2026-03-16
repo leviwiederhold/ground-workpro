@@ -66,6 +66,62 @@ async function selectProfile(supabase: Awaited<ReturnType<typeof getCompanyId>>[
   return result;
 }
 
+async function syncEmployeeProfile(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  companyId: string,
+  userId: string,
+  fallbackEmail: string,
+  payload: z.infer<typeof profileSchema>
+) {
+  const employeeByUserId = await supabase
+    .from("employees")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+
+  let employeeId = String(employeeByUserId.data?.id ?? "").trim();
+  if (!employeeId && fallbackEmail) {
+    const employeeByEmail = await supabase
+      .from("employees")
+      .select("id")
+      .eq("company_id", companyId)
+      .ilike("email", fallbackEmail)
+      .limit(1)
+      .maybeSingle();
+    if (!employeeByEmail.error && employeeByEmail.data?.id) {
+      employeeId = String(employeeByEmail.data.id);
+    }
+  }
+
+  if (!employeeId) return;
+
+  const updatePayload: Record<string, unknown> = {
+    user_id: userId,
+    name: payload.full_name,
+    full_name: payload.full_name,
+    email: fallbackEmail || undefined,
+    phone: payload.phone || null,
+  };
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const result = await supabase
+      .from("employees")
+      .update(updatePayload)
+      .eq("company_id", companyId)
+      .eq("id", employeeId);
+    if (!result.error) return;
+
+    const missingColumn =
+      result.error.message?.match(/Could not find the '([^']+)' column/i)?.[1] ??
+      result.error.message?.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i)?.[1] ??
+      null;
+    if (!missingColumn || !(missingColumn in updatePayload)) return;
+    delete updatePayload[missingColumn];
+  }
+}
+
 export async function GET() {
   try {
     const { supabase, userId, userEmail } = await getCompanyId();
@@ -121,7 +177,7 @@ export async function PATCH(request: Request) {
 
     let upsertResult = await supabase
       .from("profiles")
-      .upsert(updatePayload, { onConflict: "id" })
+      .upsert({ ...updatePayload, email: fallbackEmail || null }, { onConflict: "id" })
       .select("full_name, display_name, phone, job_title, timezone, avatar_url")
       .eq("id", userId)
       .maybeSingle();
@@ -159,6 +215,8 @@ export async function PATCH(request: Request) {
     if (upsertResult.error) {
       return NextResponse.json({ error: upsertResult.error.message }, { status: 400 });
     }
+
+    await syncEmployeeProfile(supabase, companyId, userId, fallbackEmail, payload);
 
     await markSetupStepCompleted({
       supabase,

@@ -9,7 +9,7 @@ import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
   status: z.enum(["all", "active", "inactive"]).optional().default("all"),
-  role: z.enum(["all", "admin", "pm", "foreman", "mechanic", "operator"]).optional().default("all"),
+  role: z.enum(["all", "admin", "pm", "foreman", "mechanic", "operator", "fieldstaff"]).optional().default("all"),
   limit: z.coerce.number().int().min(1).max(50).optional().default(25),
 });
 
@@ -26,6 +26,7 @@ const mapEmployeeStatus = (value: unknown): "active" | "inactive" => {
 const mapRoleForOutput = (rawRole: unknown): string => {
   const raw = String(rawRole ?? "").trim();
   if (!raw) return "operator";
+  if (/fieldstaff|field_staff|field staff/i.test(raw)) return "fieldstaff";
   const normalized = normalizeAppRole(raw);
   if (normalized) return normalized;
   return raw.toLowerCase();

@@ -31,9 +31,8 @@ export async function selectProfileColumns<T extends Record<string, unknown> = P
   columns: string[]
 ) {
   const selectColumns = [...columns];
-  let lastResult: { data: T | null; error: { message?: string } | null } | null = null;
 
-  for (let attempt = 0; attempt < selectColumns.length; attempt += 1) {
+  while (selectColumns.length > 0) {
     const result = await supabase
       .from("profiles")
       .select(selectColumns.join(", "))
@@ -41,7 +40,6 @@ export async function selectProfileColumns<T extends Record<string, unknown> = P
       .maybeSingle<T>();
     if (!result.error) return result;
 
-    lastResult = result;
     const missingColumn = parseMissingColumn(result.error.message);
     if (!missingColumn || !selectColumns.includes(missingColumn)) {
       return result;
@@ -49,8 +47,7 @@ export async function selectProfileColumns<T extends Record<string, unknown> = P
     selectColumns.splice(selectColumns.indexOf(missingColumn), 1);
   }
 
-  if (lastResult) return lastResult;
-  return supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle<T>();
+  return supabase.from("profiles").select("id").eq("id", userId).maybeSingle<T>();
 }
 
 export async function upsertProfileColumns<T extends Record<string, unknown> = ProfileRecord>(params: {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
 import { getSetupStatusForUser } from "@/lib/onboarding/setupFlow";
+import { SetupActionsClient } from "./SetupActionsClient";
 
 export default async function SetupPage() {
   let item: Awaited<ReturnType<typeof getSetupStatusForUser>>;
@@ -106,19 +107,7 @@ export default async function SetupPage() {
             </div>
           ) : null}
 
-          <div className="mt-6 flex flex-wrap items-center gap-3">
-            {item.is_complete ? (
-              <Link href="/" className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
-                Continue to App
-              </Link>
-            ) : null}
-            <Link href="/setup" className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
-              Refresh Status
-            </Link>
-            <span className="text-xs text-gray-500">
-              Skipped items stay visible later in your checklist and reminders.
-            </span>
-          </div>
+          <SetupActionsClient canSkipOptionalSteps={item.required_complete && item.optional_steps.some((step) => !step.completed)} />
         </section>
       </div>
     </main>

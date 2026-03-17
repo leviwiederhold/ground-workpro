@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {
   ONBOARDING_DISMISSED_KEY,
@@ -9,6 +10,17 @@ import type { AppRole } from "@/lib/nav/config";
 import { getStatsForRole } from "@/lib/stats/getStats";
 import { getDashboardWeather } from "@/lib/weather/dashboardWeather";
 import { listFallbackChecklistRows } from "@/lib/onboarding/fallbackStore";
+import {
+  applyPermissionOverrideFromCookie,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
+import {
+  loadProfileForSetup,
+  isAccountDerivedComplete,
+  isCompanyDerivedComplete,
+  isProfileDerivedComplete,
+} from "@/lib/onboarding/setupFlow";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +49,7 @@ type DashboardSummary = {
         label: string;
         description: string;
         view: string;
+        href: string;
         scope: "company" | "user";
         completed: boolean;
       }>;
@@ -89,6 +102,19 @@ export async function GET() {
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const cookieStore = await cookies();
+    let modulePermissions = await resolveUserModulePermissions({
+      supabase,
+      companyId,
+      userId,
+      role,
+    });
+    if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+      modulePermissions = applyPermissionOverrideFromCookie(
+        modulePermissions,
+        cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value
+      );
+    }
 
     const activeJobsQuery = supabase
       .from("jobs")
@@ -113,6 +139,10 @@ export async function GET() {
       .select("id", { count: "exact", head: true })
       .eq("company_id", companyId)
       .eq("status", "clocked-in");
+    const employeesCountQuery = supabase
+      .from("employees")
+      .select("id", { count: "exact", head: true })
+      .eq("company_id", companyId);
 
     const now = new Date();
     const sevenDaysAgo = new Date(now);
@@ -164,6 +194,14 @@ export async function GET() {
       onboardingResult,
       inventoryLowPartsResult,
       companyResult,
+      employeesCountResult,
+      profile,
+      integrationsCountResult,
+      totalBidsCountResult,
+      sentBidsCountResult,
+      purchaseOrdersCountResult,
+      dailyReportsByUserCountResult,
+      safetyLogsByUserCountResult,
     ] = await Promise.all([
       activeJobsQuery,
       activeJobsCountQuery,
@@ -175,6 +213,18 @@ export async function GET() {
       onboardingQuery,
       inventoryLowPartsCountQuery,
       companyQuery,
+      employeesCountQuery,
+      loadProfileForSetup(supabase, userId),
+      supabase.from("integration_connections").select("id", { count: "exact", head: true }).eq("company_id", companyId),
+      supabase.from("bids").select("id", { count: "exact", head: true }).eq("company_id", companyId),
+      supabase
+        .from("bids")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .in("status", ["sent", "accepted", "approved", "won"]),
+      supabase.from("purchase_orders").select("id", { count: "exact", head: true }).eq("company_id", companyId),
+      supabase.from("daily_reports").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("submitted_by", userId),
+      supabase.from("safety_logs").select("id", { count: "exact", head: true }).eq("company_id", companyId).eq("created_by", userId),
     ]);
 
     if (activeJobsResult.error) throw new Error(activeJobsResult.error.message);
@@ -249,30 +299,33 @@ export async function GET() {
       completedMap.set(key, { completed_at: row.completed_at });
     }
     const onboardingDismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
-    const roleChecklistItems = getOnboardingChecklistItemsForRole(role);
+    const roleChecklistItems = getOnboardingChecklistItemsForRole(role, { permissions: modulePermissions });
     const companyProfile = companyResult.error ? null : companyResult.data;
     const derivedChecklistCompleted: Record<string, boolean> = {
-      complete_company_settings: Boolean(
-        String(companyProfile?.name ?? "").trim() &&
-          String(companyProfile?.timezone ?? "").trim()
-      ),
+      complete_company_settings: isCompanyDerivedComplete(companyProfile),
       upload_company_logo: Boolean(String(companyProfile?.company_logo ?? "").trim()),
       set_company_timezone: Boolean(String(companyProfile?.timezone ?? "").trim()),
-      invite_teammate: false,
-      configure_permissions: false,
-      connect_integrations: false,
-      finish_profile: false,
+      invite_teammate: (employeesCountResult.error ? 0 : employeesCountResult.count ?? 0) > 1,
+      configure_permissions: (employeesCountResult.error ? 0 : employeesCountResult.count ?? 0) > 1,
+      connect_integrations: (integrationsCountResult.error ? 0 : integrationsCountResult.count ?? 0) > 0,
+      finish_profile: isProfileDerivedComplete(profile, ""),
+      complete_account_settings: isAccountDerivedComplete(profile),
       create_first_job: activeJobsCount > 0,
-      create_first_bid: false,
-      send_first_proposal: false,
+      create_first_bid: (totalBidsCountResult.error ? 0 : totalBidsCountResult.count ?? 0) > 0,
+      send_first_proposal: (sentBidsCountResult.error ? 0 : sentBidsCountResult.count ?? 0) > 0,
       add_first_equipment: equipmentRows.length > 0,
-      create_first_po: false,
+      create_first_po: (purchaseOrdersCountResult.error ? 0 : purchaseOrdersCountResult.count ?? 0) > 0,
+      submit_first_daily_report: (dailyReportsByUserCountResult.error ? 0 : dailyReportsByUserCountResult.count ?? 0) > 0,
+      submit_first_safety_log: (safetyLogsByUserCountResult.error ? 0 : safetyLogsByUserCountResult.count ?? 0) > 0,
+      upload_first_photo: false,
+      close_first_work_order: false,
     };
     const checklistItems = roleChecklistItems.map((item) => ({
       key: item.key,
       label: item.label,
       description: item.description,
       view: item.view,
+      href: item.href,
       scope: item.scope,
       completed: Boolean(
         completedMap.get(`${item.key}::${item.scope === "company" ? "__company__" : userId}`)?.completed_at

@@ -15,6 +15,7 @@ import {
   SENSITIVE_PERMISSION_WARNING_COPY,
 } from '@/lib/permissions/sensitivity';
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
+import { navigateNotificationHref } from '@/lib/notifications/navigation';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -1114,22 +1115,18 @@ const WorkspaceLoadingScreen = () => (
       }, []);
 
       const handleMarkNotificationRead = async (notificationId) => {
-        const notification = notifications.find((item) => String(item.id) === String(notificationId));
-        if (!notification) return;
-        const rawId = String(notification.id).startsWith('n:') ? String(notification.id).slice(2) : String(notification.id);
+        const rawId = String(notificationId).startsWith('n:') ? String(notificationId).slice(2) : String(notificationId);
         try {
           const response = await fetch(`/api/notifications/${rawId}/read`, { method: 'POST' });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) return;
-          setNotifications((prev) => {
-            const next = prev.map((item) =>
+          applyNotificationState(
+            notifications.map((item) =>
               String(item.id) === String(notificationId)
-                ? { ...item, is_read: true, read_at: payload?.item?.readAt ?? item.read_at }
+                ? { ...item, is_read: true, read_at: payload?.item?.readAt ?? payload?.item?.read_at ?? item.read_at }
                 : item
-            );
-            setUnreadNotificationsCount(next.filter((item) => !item.is_read).length);
-            return next;
-          });
+            )
+          );
         } catch {
           // no-op
         }
@@ -1164,6 +1161,19 @@ const WorkspaceLoadingScreen = () => (
         }
       };
 
+      const handleDeleteNotification = async (notificationId) => {
+        const rawId = String(notificationId).startsWith('n:') ? String(notificationId).slice(2) : String(notificationId);
+        try {
+          const response = await fetch(`/api/notifications/${rawId}`, { method: 'DELETE' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) return;
+          applyNotificationState(notifications.filter((item) => String(item.id) !== String(notificationId)));
+          await loadNotifications();
+        } catch {
+          // no-op
+        }
+      };
+
       const handleViewAllNotifications = () => {
         setShowNotifications(false);
         window.location.assign('/notifications');
@@ -1179,27 +1189,15 @@ const WorkspaceLoadingScreen = () => (
       const handleOpenNotification = useCallback(async (notification) => {
         const href = String(notification?.link || notification?.payload?.href || '').trim();
         if (!href) return;
-        const routeMap = {
-          '/jobs': 'jobs',
-          '/maintenance': 'maintenance',
-          '/safety': 'safety',
-          '/messages': 'messages',
-          '/inventory': 'inventory',
-          '/schedule': 'schedule',
-          '/fleet': 'fleet',
-          '/team': 'team',
-          '/reports': 'reports',
-          '/vendors': 'vendors',
-          '/bids': 'bids',
-          '/documents': 'documents',
-        };
-        const [path] = href.split('?');
-        setCurrentView(routeMap[path] || 'dashboard');
-        setShowNotifications(false);
         if (!notification.is_read) {
           await handleMarkNotificationRead(notification.id);
         }
-      }, [setCurrentView]);
+        navigateNotificationHref({
+          href,
+          setCurrentView,
+          closeOverlay: () => setShowNotifications(false),
+        });
+      }, [setCurrentView, handleMarkNotificationRead]);
 
       const handleRespondToEventInvite = useCallback(async (notification, responseStatus) => {
         const eventId = String(notification?.payload?.eventId || notification?.entity_id || '').trim();
@@ -1212,8 +1210,8 @@ const WorkspaceLoadingScreen = () => (
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) return;
-          setNotifications((prev) =>
-            prev.map((item) =>
+          applyNotificationState(
+            notifications.map((item) =>
               String(item.id) === String(notification.id)
                 ? {
                     ...item,
@@ -1232,7 +1230,7 @@ const WorkspaceLoadingScreen = () => (
         } catch {
           // no-op
         }
-      }, [loadNotifications]);
+      }, [loadNotifications, applyNotificationState]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1994,8 +1992,21 @@ const WorkspaceLoadingScreen = () => (
                             ) : (
                               notificationItems.map((notification) => {
                                 const visual = notificationVisuals[notification.notification_type] || notificationVisuals.default;
+                                const hasOpenAction = Boolean(notification?.link || notification?.payload?.href);
                                 return (
-                                  <div key={notification.id} className={`border-b border-gray-100 px-4 py-4 hover:bg-gray-50 ${!notification.is_read ? 'bg-brand-50/30' : ''}`}>
+                                  <div
+                                    key={notification.id}
+                                    className={`border-b border-gray-100 px-4 py-4 hover:bg-gray-50 ${!notification.is_read ? 'bg-brand-50/30' : ''} ${hasOpenAction ? 'cursor-pointer' : ''}`}
+                                    role={hasOpenAction ? 'button' : undefined}
+                                    tabIndex={hasOpenAction ? 0 : undefined}
+                                    onClick={hasOpenAction ? () => handleOpenNotification(notification) : undefined}
+                                    onKeyDown={hasOpenAction ? (event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault();
+                                        handleOpenNotification(notification);
+                                      }
+                                    } : undefined}
+                                  >
                                     <div className="flex gap-3">
                                       <div className={`w-10 h-10 rounded-full ${visual.containerClass} flex items-center justify-center flex-shrink-0`}>
                                         <Icon name={visual.icon} className={visual.iconClass} />
@@ -2018,22 +2029,31 @@ const WorkspaceLoadingScreen = () => (
                                                 <>
                                                   <button
                                                     className="min-h-9 rounded-full bg-emerald-50 px-3 text-xs font-medium text-emerald-700 hover:text-emerald-800 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
-                                                    onClick={() => handleRespondToEventInvite(notification, 'accepted')}
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      handleRespondToEventInvite(notification, 'accepted');
+                                                    }}
                                                   >
                                                     Accept
                                                   </button>
                                                   <button
                                                     className="min-h-9 rounded-full bg-red-50 px-3 text-xs font-medium text-red-600 hover:text-red-700 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
-                                                    onClick={() => handleRespondToEventInvite(notification, 'declined')}
+                                                    onClick={(event) => {
+                                                      event.stopPropagation();
+                                                      handleRespondToEventInvite(notification, 'declined');
+                                                    }}
                                                   >
                                                     Decline
                                                   </button>
                                                 </>
                                               )}
-                                            {(notification?.link || notification?.payload?.href) && (
+                                            {hasOpenAction && (
                                               <button
                                                 className="min-h-9 rounded-full bg-gray-100 px-3 text-xs font-medium text-gray-600 hover:text-gray-800 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
-                                                onClick={() => handleOpenNotification(notification)}
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  handleOpenNotification(notification);
+                                                }}
                                               >
                                                 Open
                                               </button>
@@ -2041,11 +2061,23 @@ const WorkspaceLoadingScreen = () => (
                                             {!notification.is_read && (
                                               <button
                                                 className="min-h-9 rounded-full bg-brand-50 px-3 text-xs font-medium text-brand-600 hover:text-brand-700 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
-                                                onClick={() => handleMarkNotificationRead(notification.id)}
+                                                onClick={(event) => {
+                                                  event.stopPropagation();
+                                                  handleMarkNotificationRead(notification.id);
+                                                }}
                                               >
                                                 Mark read
                                               </button>
                                             )}
+                                            <button
+                                              className="min-h-9 rounded-full bg-gray-100 px-3 text-xs font-medium text-gray-600 hover:text-gray-800 sm:min-h-0 sm:rounded-none sm:bg-transparent sm:px-0"
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleDeleteNotification(notification.id);
+                                              }}
+                                            >
+                                              Remove
+                                            </button>
                                           </div>
                                         </div>
                                       </div>

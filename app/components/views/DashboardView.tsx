@@ -84,6 +84,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                 label: entry.label,
                 description: entry.description ?? '',
                 view: entry.view ?? 'dashboard',
+                href: entry.href ?? '',
                 completed: Boolean(entry.completed),
               }))
             : []
@@ -184,6 +185,46 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   };
 
   const goToChecklistItem = (item) => {
+    const href = String(item?.href || '').trim();
+    if (href) {
+      const modalMap = {
+        'daily-report': { type: 'daily-report' },
+        'time-clock': { type: 'time-clock' },
+        'equipment-checkin': { type: 'equipment-checkin' },
+        'calendar-event': { type: 'calendar-event' },
+        'work-order': { type: 'work-order' },
+        safety: { type: 'safety' },
+      };
+      if (modalMap[href]) {
+        setShowModal(modalMap[href]);
+        return;
+      }
+      if (href.startsWith('/')) {
+        const [path] = href.split('?');
+        const routeMap = {
+          '/jobs': 'jobs',
+          '/bids': 'bids',
+          '/fleet': 'fleet',
+          '/vendors': 'vendors',
+          '/reports': 'reports',
+          '/safety': 'safety',
+          '/maintenance': 'maintenance',
+          '/documents': 'documents',
+          '/team': 'team',
+          '/schedule': 'schedule',
+          '/messages': 'messages',
+          '/inventory': 'inventory',
+          '/finance': 'finance',
+          '/integrations': 'integrations',
+        };
+        if (routeMap[path]) {
+          setCurrentView(routeMap[path]);
+          return;
+        }
+        window.location.assign(href);
+        return;
+      }
+    }
     const view = String(item?.view || '').toLowerCase();
     const viewMap = {
       dashboard: 'dashboard',

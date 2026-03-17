@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   extractUsPhoneDigits,
   formatUsPhoneInput,
@@ -27,7 +27,6 @@ const ALLOWED_AVATAR_TYPES = new Set(["image/png", "image/jpeg", "image/jpg", "i
 
 type ProfileForm = {
   full_name: string;
-  display_name: string;
   email: string;
   phone: string;
   job_title: string;
@@ -45,12 +44,12 @@ async function toDataUrl(file: File) {
 }
 
 export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite }) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const isOnboarding = searchParams.get("onboarding") === "1";
   const backHref = isOnboarding ? "/setup" : "/";
   const [form, setForm] = useState<ProfileForm>({
     full_name: sanitizeProfileFullName(identity.fullName, identity.email),
-    display_name: identity.displayName || "",
     email: identity.email || "",
     phone: formatUsPhoneInput(identity.phone || ""),
     job_title: identity.jobTitle || "",
@@ -69,13 +68,11 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
     () => {
       const fullName = String(form.full_name ?? "").trim();
       if (fullName) return fullName;
-      const displayName = String(form.display_name ?? "").trim();
-      if (displayName) return displayName;
       const email = String(form.email ?? "").trim();
       if (email) return email;
       return "Team Member";
     },
-    [form.display_name, form.email, form.full_name]
+    [form.email, form.full_name]
   );
 
   const handleAvatarUpload = async (file: File | null) => {
@@ -109,7 +106,6 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           full_name: form.full_name.trim(),
-          display_name: form.display_name.trim(),
           phone: extractUsPhoneDigits(form.phone),
           job_title: form.job_title.trim(),
           timezone: normalizeTimezoneOption(form.timezone),
@@ -138,9 +134,6 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
         full_name: Object.prototype.hasOwnProperty.call(item, "full_name")
           ? sanitizeProfileFullName(item.full_name, item.email ?? prev.email)
           : prev.full_name,
-        display_name: Object.prototype.hasOwnProperty.call(item, "display_name")
-          ? String(item.display_name ?? "").trim()
-          : prev.display_name,
         email: Object.prototype.hasOwnProperty.call(item, "email")
           ? String(item.email ?? prev.email ?? "").trim()
           : prev.email,
@@ -157,6 +150,11 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
           ? String(item.avatar_url ?? "").trim()
           : prev.avatar_url,
       }));
+      if (isOnboarding) {
+        router.push("/setup");
+        router.refresh();
+        return;
+      }
       setStatus("Profile saved.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Failed to save profile");
@@ -227,16 +225,6 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
               {fieldErrors.full_name ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.full_name}</span> : null}
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block font-medium text-gray-700">Display Name (optional)</span>
-              <input
-                className={getFieldClassName("display_name")}
-                value={form.display_name}
-                onChange={(event) => setForm((prev) => ({ ...prev, display_name: event.target.value }))}
-                aria-invalid={fieldErrors.display_name ? "true" : "false"}
-              />
-              {fieldErrors.display_name ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.display_name}</span> : null}
-            </label>
-            <label className="block text-sm">
               <span className="mb-1 block font-medium text-gray-700">Email</span>
               <input className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2" value={form.email} disabled />
             </label>
@@ -296,7 +284,7 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
             </button>
             {isOnboarding ? (
               <Link
-                href="/"
+                href="/setup"
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Skip for now

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
@@ -8,6 +9,17 @@ import {
   getOnboardingChecklistItemsForRole,
 } from "@/lib/onboarding/checklist";
 import { getDashboardWeather } from "@/lib/weather/dashboardWeather";
+import {
+  applyPermissionOverrideFromCookie,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
+import {
+  loadProfileForSetup,
+  isAccountDerivedComplete,
+  isCompanyDerivedComplete,
+  isProfileDerivedComplete,
+} from "@/lib/onboarding/setupFlow";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +93,19 @@ export async function GET(request: Request) {
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const cookieStore = await cookies();
+    let modulePermissions = await resolveUserModulePermissions({
+      supabase,
+      companyId,
+      userId,
+      role,
+    });
+    if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+      modulePermissions = applyPermissionOverrideFromCookie(
+        modulePermissions,
+        cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value
+      );
+    }
 
     const now = new Date();
     const dateKey = now.toISOString().slice(0, 10);
@@ -124,6 +149,10 @@ export async function GET(request: Request) {
       sentOrWonBidsCountResult,
       purchaseOrdersCountResult,
       companyResult,
+      profile,
+      integrationsCountResult,
+      dailyReportsByUserCountResult,
+      safetyLogsByUserCountResult,
     ] = await Promise.all([
       supabase
         .from("jobs")
@@ -210,6 +239,21 @@ export async function GET(request: Request) {
         .select("id,name,timezone,phone,email,address,website,industry,employee_count,default_work_hours,currency,date_format,company_logo")
         .eq("id", companyId)
         .maybeSingle(),
+      loadProfileForSetup(supabase, userId),
+      supabase
+        .from("integration_connections")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId),
+      supabase
+        .from("daily_reports")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("submitted_by", userId),
+      supabase
+        .from("safety_logs")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("created_by", userId),
     ]);
 
     if (
@@ -297,10 +341,6 @@ export async function GET(request: Request) {
     const sentOrWonBidsCount = sentOrWonBidsCountResult.error ? 0 : sentOrWonBidsCountResult.count ?? 0;
     const purchaseOrdersCount = purchaseOrdersCountResult.error ? 0 : purchaseOrdersCountResult.count ?? 0;
     const companyProfile = companyResult.error ? null : companyResult.data;
-    const companySettingsCompleted = Boolean(
-      String(companyProfile?.name ?? "").trim() &&
-      String(companyProfile?.timezone ?? "").trim()
-    );
     const companyTimezoneConfigured = Boolean(String(companyProfile?.timezone ?? "").trim());
     const companyLogoUploaded = Boolean(String(companyProfile?.company_logo ?? "").trim());
     const monthRevenue = monthBids.reduce((sum, bid) => {
@@ -330,28 +370,25 @@ export async function GET(request: Request) {
       completedMap.set(key, { completed_at: row.completed_at });
     }
     const onboardingDismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
-    const roleChecklistItems = getOnboardingChecklistItemsForRole(role);
-    const authUser = authUserResult.error ? null : authUserResult.data?.user ?? null;
-    const profileNameCompleted = Boolean(
-      String(
-        authUser?.user_metadata?.full_name ??
-          authUser?.user_metadata?.name ??
-          ""
-      ).trim()
-    );
+    const roleChecklistItems = getOnboardingChecklistItemsForRole(role, { permissions: modulePermissions });
     const derivedChecklistCompleted: Record<string, boolean> = {
-      complete_company_settings: companySettingsCompleted,
+      complete_company_settings: isCompanyDerivedComplete(companyProfile),
       upload_company_logo: companyLogoUploaded,
       set_company_timezone: companyTimezoneConfigured,
       invite_teammate: employeeRows.length > 1,
       configure_permissions: employeeRows.length > 1,
-      connect_integrations: false,
-      finish_profile: profileNameCompleted,
+      connect_integrations: (integrationsCountResult.error ? 0 : integrationsCountResult.count ?? 0) > 0,
+      finish_profile: isProfileDerivedComplete(profile, normalizeEmail(authUserResult.data?.user?.email)),
+      complete_account_settings: isAccountDerivedComplete(profile),
       create_first_job: activeJobsCount > 0,
       create_first_bid: totalBidsCount > 0,
       send_first_proposal: sentOrWonBidsCount > 0,
       add_first_equipment: equipmentRows.length > 0,
       create_first_po: purchaseOrdersCount > 0,
+      submit_first_daily_report: (dailyReportsByUserCountResult.error ? 0 : dailyReportsByUserCountResult.count ?? 0) > 0,
+      submit_first_safety_log: (safetyLogsByUserCountResult.error ? 0 : safetyLogsByUserCountResult.count ?? 0) > 0,
+      upload_first_photo: false,
+      close_first_work_order: false,
     };
 
     const checklistItems = roleChecklistItems.map((item) => {
@@ -363,6 +400,7 @@ export async function GET(request: Request) {
         label: item.label,
         description: item.description,
         view: item.view,
+        href: item.href,
         scope: item.scope,
         completed: persistedCompleted || Boolean(derivedChecklistCompleted[item.key]),
       };

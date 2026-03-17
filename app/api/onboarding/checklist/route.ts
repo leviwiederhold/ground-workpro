@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
 import {
   ONBOARDING_DISMISSED_KEY,
   getOnboardingChecklistItemsForRole,
-  type OnboardingChecklistRole,
 } from "@/lib/onboarding/checklist";
-import { normalizeAppRole } from "@/lib/nav/config";
+import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 import { listFallbackChecklistRows } from "@/lib/onboarding/fallbackStore";
+import {
+  applyPermissionOverrideFromCookie,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +37,7 @@ async function resolveChecklistRole(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
   userId: string
-): Promise<OnboardingChecklistRole> {
+): Promise<AppRole> {
   const { data, error } = await supabase
     .from("memberships")
     .select("role")
@@ -56,6 +61,19 @@ export async function GET() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
     const role = await resolveChecklistRole(supabase, companyId, userId);
+    const cookieStore = await cookies();
+    let modulePermissions = await resolveUserModulePermissions({
+      supabase,
+      companyId,
+      userId,
+      role,
+    });
+    if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+      modulePermissions = applyPermissionOverrideFromCookie(
+        modulePermissions,
+        cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value
+      );
+    }
 
     const { data, error } = await supabase
       .from("onboarding_checklist")
@@ -73,7 +91,7 @@ export async function GET() {
       rows.map((row) => [`${row.key}::${row.user_id ?? "__company__"}`, row])
     );
     const dismissed = Boolean(completedMap.get(`${ONBOARDING_DISMISSED_KEY}::${userId}`)?.completed_at);
-    const checklistItems = getOnboardingChecklistItemsForRole(role);
+    const checklistItems = getOnboardingChecklistItemsForRole(role, { permissions: modulePermissions });
 
     const items = checklistItems.map((item) => {
       const mapKey = `${item.key}::${item.scope === "company" ? "__company__" : userId}`;
@@ -84,6 +102,7 @@ export async function GET() {
         scope: item.scope,
         description: item.description,
         view: item.view,
+        href: item.href,
         completed: Boolean(completion?.completed_at),
         completed_at: completion?.completed_at ?? null,
         completed_by: completion?.completed_by ?? null,

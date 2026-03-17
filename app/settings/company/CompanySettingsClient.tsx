@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 type CompanySettings = {
   company_name: string;
@@ -55,6 +55,7 @@ const initialsFromName = (name: string) => {
 };
 
 export function CompanySettingsClient() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const isOnboarding = searchParams.get("onboarding") === "1";
   const backHref = isOnboarding ? "/setup" : "/";
@@ -155,6 +156,11 @@ export function CompanySettingsClient() {
             ? null
             : Number(item.employee_count),
       }));
+      if (isOnboarding) {
+        router.push("/setup");
+        router.refresh();
+        return;
+      }
       setSuccess("Company settings saved.");
     } catch {
       setError("Failed to save settings.");

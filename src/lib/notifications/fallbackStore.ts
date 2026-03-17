@@ -155,3 +155,20 @@ export function clearFallbackReadNotifications(input: {
   writeStore(store);
   return deleted;
 }
+
+export function deleteFallbackNotification(input: {
+  companyId: string;
+  userId: string;
+  notificationId: string;
+  companyWide: boolean;
+}) {
+  const store = readStore();
+  const before = store.notifications.length;
+  store.notifications = store.notifications.filter((row) => {
+    if (!matchesScope(row, input)) return true;
+    return String(row.id) !== String(input.notificationId);
+  });
+  const deleted = before !== store.notifications.length;
+  writeStore(store);
+  return deleted;
+}

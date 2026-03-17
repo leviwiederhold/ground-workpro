@@ -1,13 +1,18 @@
 import { z } from "zod";
+import { cookies } from "next/headers";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import {
   getOnboardingChecklistItemsForRole,
-  type OnboardingChecklistRole,
 } from "@/lib/onboarding/checklist";
-import { normalizeAppRole } from "@/lib/nav/config";
+import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 import { upsertFallbackChecklistRow } from "@/lib/onboarding/fallbackStore";
+import {
+  applyPermissionOverrideFromCookie,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +47,7 @@ async function resolveChecklistRole(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
   userId: string
-): Promise<OnboardingChecklistRole> {
+): Promise<AppRole> {
   const { data, error } = await supabase
     .from("memberships")
     .select("role")
@@ -72,7 +77,20 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const role = await resolveChecklistRole(supabase, companyId, userId);
-    const roleItems = getOnboardingChecklistItemsForRole(role);
+    const cookieStore = await cookies();
+    let modulePermissions = await resolveUserModulePermissions({
+      supabase,
+      companyId,
+      userId,
+      role,
+    });
+    if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+      modulePermissions = applyPermissionOverrideFromCookie(
+        modulePermissions,
+        cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value
+      );
+    }
+    const roleItems = getOnboardingChecklistItemsForRole(role, { permissions: modulePermissions });
     const roleItemsMap = new Map(roleItems.map((item) => [item.key, item]));
     const key = parsedBody.data.key as (typeof roleItems)[number]["key"];
     const itemDef = roleItemsMap.get(key);
@@ -112,6 +130,7 @@ export async function POST(request: Request) {
         label: itemDef?.label ?? fallback.key,
         description: itemDef?.description ?? "",
         view: itemDef?.view ?? "dashboard",
+        href: itemDef?.href ?? "/",
         completed: Boolean(fallback.completed_at),
         completed_at: fallback.completed_at,
         completed_by: fallback.completed_by,
@@ -147,6 +166,7 @@ export async function POST(request: Request) {
       label: itemDef?.label ?? data.key,
       description: itemDef?.description ?? "",
       view: itemDef?.view ?? "dashboard",
+      href: itemDef?.href ?? "/",
       completed: Boolean(data.completed_at),
       completed_at: data.completed_at,
       completed_by: data.completed_by,

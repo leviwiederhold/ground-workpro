@@ -4,6 +4,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { normalizeTimezoneOption } from "@/lib/user/profileFields";
 import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
+import { selectProfileColumns, upsertProfileColumns, type ProfileRecord } from "@/lib/user/profileRecord";
 
 const accountSettingsSchema = z.object({
   timezone: z.string().trim().max(120).optional().or(z.literal("")),
@@ -18,17 +19,7 @@ const accountSettingsSchema = z.object({
     .optional(),
 });
 
-const isMissingColumnError = (message: string | undefined) =>
-  /column|Could not find the/i.test(String(message || "")) &&
-  /does not exist|not find/i.test(String(message || ""));
-
-type SettingsRow = {
-  full_name?: string | null;
-  display_name?: string | null;
-  timezone?: string | null;
-  appearance_preference?: string | null;
-  notification_preferences?: Record<string, unknown> | null;
-};
+type SettingsRow = ProfileRecord;
 
 function normalizeNotificationPreferences(value: unknown) {
   const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -43,12 +34,11 @@ function normalizeNotificationPreferences(value: unknown) {
 function normalizeSettings(row: SettingsRow | null | undefined, fallbackEmail: string) {
   const email = fallbackEmail;
   const fullName = String(row?.full_name ?? "").trim();
-  const displayName = String(row?.display_name ?? "").trim();
   return {
     email,
-    display_name: displayName,
+    display_name: "",
     full_name: fullName,
-    resolved_name: resolveDisplayName({ fullName, displayName, email }),
+    resolved_name: resolveDisplayName({ fullName, email }),
     timezone: String(row?.timezone ?? "").trim(),
     appearance: String(row?.appearance_preference ?? "").trim() || "system",
     notification_preferences: normalizeNotificationPreferences(row?.notification_preferences),
@@ -56,26 +46,12 @@ function normalizeSettings(row: SettingsRow | null | undefined, fallbackEmail: s
 }
 
 async function selectSettings(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
-  let result = await supabase
-    .from("profiles")
-    .select("full_name, display_name, timezone, appearance_preference, notification_preferences")
-    .eq("id", userId)
-    .maybeSingle();
-  if (result.error && isMissingColumnError(result.error.message)) {
-    result = await supabase
-      .from("profiles")
-      .select("full_name, display_name")
-      .eq("id", userId)
-      .maybeSingle();
-  }
-  if (result.error && /display_name|Could not find the 'display_name' column/i.test(result.error.message || "")) {
-    result = await supabase
-      .from("profiles")
-      .select("full_name")
-      .eq("id", userId)
-      .maybeSingle();
-  }
-  return result;
+  return await selectProfileColumns(supabase, userId, [
+    "full_name",
+    "timezone",
+    "appearance_preference",
+    "notification_preferences",
+  ]);
 }
 
 export async function GET() {
@@ -128,39 +104,12 @@ export async function PATCH(request: Request) {
       notification_preferences: payload.notification_preferences || {},
     };
 
-    let upsertResult = await supabase
-      .from("profiles")
-      .upsert(updatePayload, { onConflict: "id" })
-      .select("full_name, display_name, timezone, appearance_preference, notification_preferences")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (upsertResult.error && isMissingColumnError(upsertResult.error.message)) {
-      upsertResult = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: userId,
-          },
-          { onConflict: "id" }
-        )
-        .select("full_name, display_name")
-        .eq("id", userId)
-        .maybeSingle();
-    }
-    if (upsertResult.error && /display_name|Could not find the 'display_name' column/i.test(upsertResult.error.message || "")) {
-      upsertResult = await supabase
-        .from("profiles")
-        .upsert(
-          {
-            id: userId,
-          },
-          { onConflict: "id" }
-        )
-        .select("full_name")
-        .eq("id", userId)
-        .maybeSingle();
-    }
+    const upsertResult = await upsertProfileColumns({
+      supabase,
+      userId,
+      payload: updatePayload,
+      selectColumns: ["full_name", "timezone", "appearance_preference", "notification_preferences"],
+    });
     if (upsertResult.error) {
       return NextResponse.json({ error: upsertResult.error.message }, { status: 400 });
     }

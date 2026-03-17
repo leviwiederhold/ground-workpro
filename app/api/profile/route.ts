@@ -8,74 +8,29 @@ import {
 } from "@/lib/user/profileFields";
 import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
+import { selectProfileColumns, upsertProfileColumns, type ProfileRecord } from "@/lib/user/profileRecord";
 
 const profileSchema = z.object({
   full_name: z.string().trim().min(1, "Full name is required.").max(160),
-  display_name: z.string().trim().max(160).optional().or(z.literal("")),
   phone: z.string().trim().max(32).optional().or(z.literal("")),
   job_title: z.string().trim().max(120).optional().or(z.literal("")),
   timezone: z.string().trim().max(120).optional().or(z.literal("")),
   avatar_url: z.string().trim().max(2_000_000).optional().or(z.literal("")),
 });
 
-type ProfileRow = {
-  full_name?: string | null;
-  display_name?: string | null;
-  phone?: string | null;
-  job_title?: string | null;
-  timezone?: string | null;
-  avatar_url?: string | null;
-};
-
-function normalizeProfile(row: ProfileRow | null | undefined, fallbackEmail: string) {
+function normalizeProfile(row: ProfileRecord | null | undefined, fallbackEmail: string) {
   const email = fallbackEmail;
   const fullName = sanitizeProfileFullName(row?.full_name, email);
-  const displayName = String(row?.display_name ?? "").trim();
   return {
     full_name: fullName,
-    display_name: displayName,
+    display_name: "",
     email,
     phone: String(row?.phone ?? "").trim(),
     job_title: String(row?.job_title ?? "").trim(),
     timezone: String(row?.timezone ?? "").trim(),
     avatar_url: String(row?.avatar_url ?? "").trim(),
-    resolved_name: resolveDisplayName({ fullName, displayName, email }),
+    resolved_name: resolveDisplayName({ fullName, email }),
   };
-}
-
-const parseMissingColumn = (message: string | undefined) => {
-  if (!message) return null;
-  const quoted = message.match(/Could not find the '([^']+)' column/i);
-  if (quoted?.[1]) return quoted[1];
-  const relation = message.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
-  if (relation?.[1]) return relation[1];
-  return null;
-};
-
-async function selectProfile(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
-  const selectColumns = ["full_name", "display_name", "phone", "job_title", "timezone", "avatar_url"];
-  let lastResult = null;
-
-  for (let attempt = 0; attempt < selectColumns.length; attempt += 1) {
-    const result = await supabase
-      .from("profiles")
-      .select(selectColumns.join(", "))
-      .eq("id", userId)
-      .maybeSingle();
-    if (!result.error) return result;
-
-    lastResult = result;
-    const missingColumn = parseMissingColumn(result.error.message);
-    if (!missingColumn || !selectColumns.includes(missingColumn)) {
-      return result;
-    }
-    selectColumns.splice(selectColumns.indexOf(missingColumn), 1);
-  }
-
-  if (lastResult) {
-    return lastResult;
-  }
-  return supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
 }
 
 async function syncEmployeeProfile(
@@ -139,12 +94,12 @@ export async function GET() {
     const { supabase, userId, userEmail } = await getCompanyId();
     const authUser = await supabase.auth.getUser();
     const fallbackEmail = String(authUser.data?.user?.email ?? userEmail ?? "").trim();
-    const profileResult = await selectProfile(supabase, userId);
+    const profileResult = await selectProfileColumns(supabase, userId, ["full_name", "phone", "job_title", "timezone", "avatar_url"]);
     if (profileResult.error) {
       return NextResponse.json({ error: profileResult.error.message }, { status: 400 });
     }
     return NextResponse.json({
-      item: normalizeProfile(profileResult.data as ProfileRow, fallbackEmail),
+      item: normalizeProfile(profileResult.data as ProfileRecord, fallbackEmail),
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {
@@ -183,42 +138,21 @@ export async function PATCH(request: Request) {
       timezone: normalizeTimezoneOption(parsed.data.timezone),
       avatar_url: String(parsed.data.avatar_url ?? "").trim(),
     };
-    const updatePayload = {
+    const upsertPayload: Record<string, unknown> = {
       id: userId,
       full_name: payload.full_name,
-      display_name: payload.display_name || null,
       phone: payload.phone || null,
       job_title: payload.job_title || null,
       timezone: payload.timezone || null,
       avatar_url: payload.avatar_url || null,
-    };
-
-    const upsertPayload: Record<string, unknown> = {
-      ...updatePayload,
       email: fallbackEmail || null,
     };
-
-    let upsertError: { message?: string } | null = null;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const upsertResult = await supabase.from("profiles").upsert(upsertPayload, { onConflict: "id" });
-      if (!upsertResult.error) {
-        upsertError = null;
-        break;
-      }
-      const missingColumn = parseMissingColumn(upsertResult.error.message);
-      if (!missingColumn || !(missingColumn in upsertPayload)) {
-        upsertError = upsertResult.error;
-        break;
-      }
-      delete upsertPayload[missingColumn];
-      upsertError = upsertResult.error;
-    }
-
-    if (upsertError) {
-      return NextResponse.json({ error: upsertError.message }, { status: 400 });
-    }
-
-    const upsertResult = await selectProfile(supabase, userId);
+    const upsertResult = await upsertProfileColumns({
+      supabase,
+      userId,
+      payload: upsertPayload,
+      selectColumns: ["full_name", "phone", "job_title", "timezone", "avatar_url"],
+    });
     if (upsertResult.error) {
       return NextResponse.json({ error: upsertResult.error.message }, { status: 400 });
     }
@@ -235,13 +169,13 @@ export async function PATCH(request: Request) {
 
     return NextResponse.json({
       item: {
-        ...normalizeProfile(upsertResult.data as ProfileRow, fallbackEmail),
+        ...normalizeProfile(upsertResult.data as ProfileRecord, fallbackEmail),
         phone: payload.phone,
-        job_title: payload.job_title || String((upsertResult.data as ProfileRow)?.job_title ?? "").trim(),
+        job_title: payload.job_title || String((upsertResult.data as ProfileRecord)?.job_title ?? "").trim(),
         timezone: payload.timezone,
         avatar_url:
           Object.prototype.hasOwnProperty.call(upsertResult.data ?? {}, "avatar_url")
-            ? String((upsertResult.data as ProfileRow)?.avatar_url ?? "").trim()
+            ? String((upsertResult.data as ProfileRecord)?.avatar_url ?? "").trim()
             : payload.avatar_url,
       },
     });

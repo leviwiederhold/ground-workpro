@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { normalizeTimezoneOption, PROFILE_TIMEZONE_OPTIONS } from "@/lib/user/profileFields";
 import {
@@ -13,7 +13,6 @@ import {
 type AccountSettingsItem = {
   email: string;
   full_name: string;
-  display_name: string;
   timezone: string;
   appearance: "system" | "light" | "dark";
   notification_preferences: {
@@ -27,7 +26,6 @@ type AccountSettingsItem = {
 const defaultSettings: AccountSettingsItem = {
   email: "",
   full_name: "",
-  display_name: "",
   timezone: "",
   appearance: "system",
   notification_preferences: {
@@ -39,6 +37,7 @@ const defaultSettings: AccountSettingsItem = {
 };
 
 export function AccountSettingsClient() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const isOnboarding = searchParams.get("onboarding") === "1";
   const backHref = isOnboarding ? "/setup" : "/";
@@ -126,6 +125,11 @@ export function AccountSettingsClient() {
         },
       }));
       setAppearancePreference(normalizeAppearancePreference(payload.item.appearance ?? settings.appearance));
+      if (isOnboarding) {
+        router.push("/setup");
+        router.refresh();
+        return;
+      }
       setStatus("Account settings saved.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Failed to save account settings");
@@ -270,7 +274,7 @@ export function AccountSettingsClient() {
             </button>
             {isOnboarding ? (
               <Link
-                href="/"
+                href="/setup"
                 className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Skip for now

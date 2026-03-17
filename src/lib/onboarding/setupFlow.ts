@@ -1,9 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 import { upsertFallbackChecklistRow } from "@/lib/onboarding/fallbackStore";
+import { isMissingColumnError, selectProfileColumns } from "@/lib/user/profileRecord";
 
 export type SetupStepKey = "finish_profile" | "complete_account_settings" | "complete_company_settings";
 export type SetupStepScope = "user" | "company";
+export const SETUP_OPTIONAL_STEPS_SKIPPED_KEY = "__setup_optional_steps_skipped__";
 
 export type SetupStep = {
   key: SetupStepKey;
@@ -23,8 +25,12 @@ type SetupStatus = {
   role: SetupRole;
   required_steps: SetupStep[];
   optional_steps: SetupStep[];
+  required_complete: boolean;
+  optional_complete: boolean;
+  optional_steps_skipped: boolean;
   is_complete: boolean;
   next_step_href: string | null;
+  next_optional_step_href: string | null;
 };
 
 const PROFILE_STEP: SetupStepDef = {
@@ -57,9 +63,6 @@ const COMPANY_STEP: SetupStepDef = {
 const isMissingOnboardingTable = (message: string | undefined) =>
   /onboarding_checklist/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
 
-const isMissingColumnError = (message: string | undefined) =>
-  /column|Could not find the/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
-
 function getRequiredSetupStepDefs(role: SetupRole): SetupStepDef[] {
   if (role === "admin") return [{ ...COMPANY_STEP, required: true }];
   return [{ ...PROFILE_STEP, required: true }];
@@ -88,23 +91,17 @@ async function resolveRole(
   return normalized ?? "operator";
 }
 
-async function loadProfileForSetup(supabase: SupabaseClient, userId: string) {
-  let profile = await supabase
-    .from("profiles")
-    .select("full_name,display_name,phone,job_title,timezone,avatar_url,appearance_preference,notification_preferences")
-    .eq("id", userId)
-    .maybeSingle();
-  if (profile.error && isMissingColumnError(profile.error.message)) {
-    profile = await supabase
-      .from("profiles")
-      .select("full_name,display_name,phone,job_title,timezone,avatar_url")
-      .eq("id", userId)
-      .maybeSingle();
-  }
-  if (profile.error && /display_name|Could not find the 'display_name' column/i.test(profile.error.message || "")) {
-    profile = await supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle();
-  }
-  return profile.data ?? null;
+export async function loadProfileForSetup(supabase: SupabaseClient, userId: string) {
+  const profile = await selectProfileColumns(supabase, userId, [
+    "full_name",
+    "phone",
+    "job_title",
+    "timezone",
+    "avatar_url",
+    "appearance_preference",
+    "notification_preferences",
+  ]);
+  return profile.error ? null : profile.data ?? null;
 }
 
 async function loadCompanyForSetup(supabase: SupabaseClient, companyId: string) {
@@ -123,22 +120,20 @@ function hasTruthy(value: unknown) {
   return String(value ?? "").trim().length > 0;
 }
 
-function isProfileDerivedComplete(profile: Record<string, unknown> | null, fallbackEmail: string) {
+export function isProfileDerivedComplete(profile: Record<string, unknown> | null, fallbackEmail: string) {
   const email = String(fallbackEmail || "").trim().toLowerCase();
   const fullName = String(profile?.full_name ?? "").trim();
-  const displayName = String(profile?.display_name ?? "").trim();
   const phone = String(profile?.phone ?? "").trim();
   const jobTitle = String(profile?.job_title ?? "").trim();
   const avatar = String(profile?.avatar_url ?? "").trim();
   const timezone = String(profile?.timezone ?? "").trim();
 
-  if (displayName) return true;
   if (phone || jobTitle || avatar || timezone) return true;
   if (!fullName) return false;
   return fullName.toLowerCase() !== email;
 }
 
-function isAccountDerivedComplete(profile: Record<string, unknown> | null) {
+export function isAccountDerivedComplete(profile: Record<string, unknown> | null) {
   const timezone = String(profile?.timezone ?? "").trim();
   const appearance = String(profile?.appearance_preference ?? "").trim();
   const notificationPrefs =
@@ -148,7 +143,7 @@ function isAccountDerivedComplete(profile: Record<string, unknown> | null) {
   return Boolean(timezone || appearance || (notificationPrefs && Object.keys(notificationPrefs).length > 0));
 }
 
-function isCompanyDerivedComplete(company: Record<string, unknown> | null) {
+export function isCompanyDerivedComplete(company: Record<string, unknown> | null) {
   if (!company) return false;
   return hasTruthy(company.name) && hasTruthy(company.timezone);
 }
@@ -165,6 +160,16 @@ function isStepCompletedByRecord(
     return String(entry.user_id ?? "") === userId;
   });
   return Boolean(row?.completed_at);
+}
+
+function hasOptionalStepsSkippedRecord(
+  checklistRows: Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
+  userId: string
+) {
+  return checklistRows.some((entry) => {
+    if (String(entry.key ?? "") !== SETUP_OPTIONAL_STEPS_SKIPPED_KEY) return false;
+    return String(entry.user_id ?? "") === userId && Boolean(entry.completed_at);
+  });
 }
 
 export async function getSetupStatusForUser(input: {
@@ -219,12 +224,23 @@ export async function getSetupStatusForUser(input: {
   const optional_steps = optionalDefs.map(mapStep);
 
   const firstIncomplete = required_steps.find((step) => !step.completed) ?? null;
+  const firstIncompleteOptional = optional_steps.find((step) => !step.completed) ?? null;
+  const required_complete = !firstIncomplete;
+  const optional_complete = optional_steps.every((step) => step.completed);
+  const optional_steps_skipped = hasOptionalStepsSkippedRecord(
+    checklistRows as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
+    userId
+  );
   return {
     role,
     required_steps,
     optional_steps,
-    is_complete: !firstIncomplete,
-    next_step_href: firstIncomplete?.href ?? null,
+    required_complete,
+    optional_complete,
+    optional_steps_skipped,
+    is_complete: required_complete && (optional_complete || optional_steps_skipped),
+    next_step_href: firstIncomplete?.href ?? firstIncompleteOptional?.href ?? null,
+    next_optional_step_href: firstIncompleteOptional?.href ?? null,
   };
 }
 
@@ -275,5 +291,50 @@ export async function markSetupStepCompleted(input: {
     await input.supabase.from("onboarding_checklist").update(payload).eq("id", existingResult.data.id);
     return;
   }
+  await input.supabase.from("onboarding_checklist").insert(payload);
+}
+
+export async function markOptionalSetupStepsSkipped(input: {
+  supabase: SupabaseClient;
+  companyId: string;
+  userId: string;
+}) {
+  const nowIso = new Date().toISOString();
+  const existingResult = await input.supabase
+    .from("onboarding_checklist")
+    .select("id")
+    .eq("company_id", input.companyId)
+    .eq("user_id", input.userId)
+    .eq("key", SETUP_OPTIONAL_STEPS_SKIPPED_KEY)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingResult.error && isMissingOnboardingTable(existingResult.error.message)) {
+    upsertFallbackChecklistRow({
+      companyId: input.companyId,
+      userId: input.userId,
+      key: SETUP_OPTIONAL_STEPS_SKIPPED_KEY,
+      completedAt: nowIso,
+      completedBy: input.userId,
+    });
+    return;
+  }
+
+  if (existingResult.error) return;
+
+  const payload = {
+    company_id: input.companyId,
+    user_id: input.userId,
+    key: SETUP_OPTIONAL_STEPS_SKIPPED_KEY,
+    completed_at: nowIso,
+    completed_by: input.userId,
+    updated_at: nowIso,
+  };
+
+  if (existingResult.data?.id) {
+    await input.supabase.from("onboarding_checklist").update(payload).eq("id", existingResult.data.id);
+    return;
+  }
+
   await input.supabase.from("onboarding_checklist").insert(payload);
 }

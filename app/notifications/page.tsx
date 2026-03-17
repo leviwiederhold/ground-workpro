@@ -1,14 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { navigateNotificationHref } from "@/lib/notifications/navigation";
 
 type NotificationItem = {
   id: string;
   title: string;
   message: string;
+  notification_type?: string;
+  entity_id?: string | null;
   link?: string;
   payload?: Record<string, unknown>;
   is_read: boolean;
+  read_at?: string | null;
   created_at: string;
 };
 
@@ -68,9 +72,14 @@ export default function NotificationsPage() {
     try {
       const rawId = String(id).startsWith("n:") ? String(id).slice(2) : String(id);
       const response = await fetch(`/api/notifications/${rawId}/read`, { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
       if (!response.ok) return;
       setItems((prev) =>
-        prev.map((item) => (String(item.id) === String(id) ? { ...item, is_read: true } : item))
+        prev.map((item) =>
+          String(item.id) === String(id)
+            ? { ...item, is_read: true, read_at: payload?.item?.readAt ?? payload?.item?.read_at ?? item.read_at ?? null }
+            : item
+        )
       );
     } catch {
       // no-op
@@ -93,6 +102,49 @@ export default function NotificationsPage() {
     await load();
   }, [items, load]);
 
+  const deleteOne = useCallback(async (id: string) => {
+    try {
+      const rawId = String(id).startsWith("n:") ? String(id).slice(2) : String(id);
+      const response = await fetch(`/api/notifications/${rawId}`, { method: "DELETE" });
+      if (!response.ok) return;
+      setItems((prev) => prev.filter((item) => String(item.id) !== String(id)));
+      await load();
+    } catch {
+      // no-op
+    }
+  }, [load]);
+
+  const respondToInvite = useCallback(async (item: NotificationItem, responseStatus: "accepted" | "declined") => {
+    const eventId = String(item?.payload?.eventId ?? item?.entity_id ?? "").trim();
+    if (!eventId) return;
+    try {
+      const response = await fetch(`/api/calendar/events/${eventId}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ responseStatus }),
+      });
+      if (!response.ok) return;
+      setItems((prev) =>
+        prev.map((entry) =>
+          String(entry.id) === String(item.id)
+            ? {
+                ...entry,
+                is_read: true,
+                read_at: new Date().toISOString(),
+                message:
+                  responseStatus === "accepted"
+                    ? "You accepted this event invitation."
+                    : "You declined this event invitation.",
+              }
+            : entry
+        )
+      );
+      await load();
+    } catch {
+      // no-op
+    }
+  }, [load]);
+
   const visibleItems = useMemo(
     () => (filter === "unread" ? items.filter((item) => !item.is_read) : items),
     [items, filter]
@@ -102,7 +154,7 @@ export default function NotificationsPage() {
     const href = getNotificationHref(item);
     if (!href) return;
     if (!item.is_read) await markOneRead(item.id);
-    window.location.assign(href);
+    navigateNotificationHref({ href });
   }, [markOneRead]);
 
   return (
@@ -155,7 +207,19 @@ export default function NotificationsPage() {
             <div className="px-4 py-4 text-sm text-gray-500">No notifications.</div>
           ) : (
             visibleItems.map((item) => (
-              <div key={item.id} className={`border-b border-gray-100 px-4 py-3 ${item.is_read ? "bg-white" : "bg-brand-50/30"}`}>
+              <div
+                key={item.id}
+                className={`border-b border-gray-100 px-4 py-3 ${item.is_read ? "bg-white" : "bg-brand-50/30"} ${getNotificationHref(item) ? "cursor-pointer hover:bg-gray-50" : ""}`}
+                role={getNotificationHref(item) ? "button" : undefined}
+                tabIndex={getNotificationHref(item) ? 0 : undefined}
+                onClick={getNotificationHref(item) ? () => openItem(item) : undefined}
+                onKeyDown={getNotificationHref(item) ? (event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    void openItem(item);
+                  }
+                } : undefined}
+              >
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-gray-900">{item.title}</p>
                   {!item.is_read && <span className="h-2 w-2 rounded-full bg-brand-500" />}
@@ -164,16 +228,61 @@ export default function NotificationsPage() {
                 <div className="mt-2 flex items-center justify-between">
                   <p className="text-xs text-gray-400">{formatNotificationTime(item.created_at)}</p>
                   <div className="flex items-center gap-3">
+                    {item.notification_type === "calendar_invite" &&
+                      !item.is_read &&
+                      String(item?.payload?.eventId ?? item?.entity_id ?? "").trim() && (
+                        <>
+                          <button
+                            className="text-xs font-medium text-emerald-700 hover:text-emerald-800"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void respondToInvite(item, "accepted");
+                            }}
+                          >
+                            Accept
+                          </button>
+                          <button
+                            className="text-xs font-medium text-red-600 hover:text-red-700"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void respondToInvite(item, "declined");
+                            }}
+                          >
+                            Decline
+                          </button>
+                        </>
+                      )}
                     {Boolean(getNotificationHref(item)) && (
-                      <button className="text-xs font-medium text-gray-600 hover:text-gray-800" onClick={() => openItem(item)}>
+                      <button
+                        className="text-xs font-medium text-gray-600 hover:text-gray-800"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void openItem(item);
+                        }}
+                      >
                         Open
                       </button>
                     )}
                     {!item.is_read && (
-                      <button className="text-xs font-medium text-brand-600 hover:text-brand-700" onClick={() => markOneRead(item.id)}>
+                      <button
+                        className="text-xs font-medium text-brand-600 hover:text-brand-700"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void markOneRead(item.id);
+                        }}
+                      >
                         Mark read
                       </button>
                     )}
+                    <button
+                      className="text-xs font-medium text-gray-600 hover:text-gray-800"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deleteOne(item.id);
+                      }}
+                    >
+                      Remove
+                    </button>
                   </div>
                 </div>
               </div>

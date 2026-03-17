@@ -856,8 +856,8 @@ const WorkspaceLoadingScreen = () => (
           operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
-          operator: ['dashboard', 'messages', 'schedule', 'safety'],
-          field: ['dashboard', 'messages', 'schedule', 'safety'],
+          operator: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
+          field: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
         };
         return (byRole[String(role || 'executive')] || byRole.executive).map((key) => navLibrary[key]).filter(Boolean);
       }, []);
@@ -3095,8 +3095,8 @@ const WorkspaceLoadingScreen = () => (
         manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'view', team_management: 'view' },
         foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
         mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', finance: 'none', team_management: 'none' },
-        operator: { jobs: 'view', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
-        fieldstaff: { jobs: 'view', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', finance: 'none', team_management: 'none' },
+        operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
+        fieldstaff: { jobs: 'none', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', finance: 'none', team_management: 'none' },
       };
       const appRoleToInviteRole = (role) => {
         const normalized = String(role || '').toLowerCase();
@@ -8770,6 +8770,10 @@ const WorkspaceLoadingScreen = () => (
                 </button>
               </div>
             </div>
+            <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-blue-100 ring-1 ring-white/10">
+              <Icon name="circle-info" className="text-[11px]" />
+              Not configured yet
+            </div>
           </Card>
 
           <Card className="p-4">
@@ -9873,7 +9877,7 @@ const WorkspaceLoadingScreen = () => (
       };
 
       return (
-        <ComingSoonOverlay>
+        <ComingSoonOverlay active={false}>
           <div className="space-y-6">
           {/* Header */}
           <div className="flex items-center justify-between">
@@ -12441,8 +12445,11 @@ const WorkspaceLoadingScreen = () => (
 	            signal: controller.signal,
 	          }).finally(() => window.clearTimeout(timeoutId));
 	          const payload = await response.json().catch(() => ({}));
-	          const isComplete = Boolean(payload?.item?.is_complete);
-	          if (!isComplete && typeof window !== 'undefined' && window.location.pathname !== '/setup') {
+	          const requiredComplete =
+	            payload?.item?.required_complete === undefined
+	              ? Boolean(payload?.item?.is_complete)
+	              : Boolean(payload?.item?.required_complete);
+	          if (!requiredComplete && typeof window !== 'undefined' && window.location.pathname !== '/setup') {
 	            window.location.replace('/setup');
 	            return;
 	          }

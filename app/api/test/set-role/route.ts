@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       return NextResponse.json(toValidationError(parsed.error.issues), { status: 422 });
     }
 
-    const { supabase, userId } = await getCompanyId();
+    const { supabase, userId, companyId } = await getCompanyId();
 
     const membershipUpdate = await supabase
       .from("memberships")
@@ -37,6 +37,13 @@ export async function POST(request: Request) {
     if (membershipUpdate.error) {
       return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
     }
+
+    await supabase
+      .from("module_permissions")
+      .delete()
+      .eq("company_id", companyId)
+      .eq("user_id", userId);
+
     const response = NextResponse.json({ item: { role: parsed.data.role }, success: true });
     response.cookies.set("e2e_role", parsed.data.role, { path: "/", sameSite: "lax" });
     response.cookies.set("gw_acting_role", parsed.data.role, { path: "/", sameSite: "lax" });

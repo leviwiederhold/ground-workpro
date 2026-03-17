@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { deleteFallbackNotification } from "@/lib/notifications/fallbackStore";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -34,8 +35,10 @@ export async function DELETE(
     }
 
     const { supabase, companyId, userId } = await getCompanyId();
+    const admin = getSupabaseAdmin();
 
-    const result = await supabase
+    const deleteClient = admin ?? supabase;
+    const result = await deleteClient
       .from("notifications")
       .delete()
       .eq("company_id", companyId)

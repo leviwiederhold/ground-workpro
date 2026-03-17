@@ -68,7 +68,7 @@ const templateDefaults: Record<InvitationRole, ModulePermissionMap> = {
     team_management: "none",
   },
   operator: {
-    jobs: "view",
+    jobs: "none",
     fleet: "view",
     maintenance: "none",
     daily_reports: "edit",
@@ -78,7 +78,7 @@ const templateDefaults: Record<InvitationRole, ModulePermissionMap> = {
     team_management: "none",
   },
   fieldstaff: {
-    jobs: "view",
+    jobs: "none",
     fleet: "none",
     maintenance: "none",
     daily_reports: "edit",

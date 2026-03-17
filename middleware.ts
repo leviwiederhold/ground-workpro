@@ -2,7 +2,7 @@ import type { NextRequest, NextFetchEvent } from "next/server";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseEnv } from "@/lib/supabase/env";
-import { normalizeAppRole } from "@/lib/nav/config";
+import { normalizeAppRole, ROUTE_GUARDS, type AppRole } from "@/lib/nav/config";
 import { ACTING_ROLE_COOKIE, clampActingRole } from "@/lib/auth/effectiveRole";
 import {
   applyPermissionOverrideFromCookie,
@@ -21,17 +21,6 @@ function buildRequestId(request: NextRequest) {
   if (existing && existing.trim().length > 0) return existing.trim();
   return crypto.randomUUID();
 }
-
-const PAGE_MODULE_GUARDS: Array<{ prefix: string; module: ModulePermissionKey }> = [
-  { prefix: "/jobs", module: "jobs" },
-  { prefix: "/fleet", module: "fleet" },
-  { prefix: "/maintenance", module: "maintenance" },
-  { prefix: "/reports", module: "daily_reports" },
-  { prefix: "/safety", module: "safety" },
-  { prefix: "/messages", module: "messages" },
-  { prefix: "/finance", module: "finance" },
-  { prefix: "/team", module: "team_management" },
-];
 
 const API_MODULE_GUARDS: Array<{ prefix: string; module: ModulePermissionKey }> = [
   { prefix: "/api/jobs", module: "jobs" },
@@ -56,6 +45,20 @@ function findGuardedModule(
   guards: Array<{ prefix: string; module: ModulePermissionKey }>
 ) {
   return guards.find((entry) => pathname === entry.prefix || pathname.startsWith(`${entry.prefix}/`));
+}
+
+function findGuardedRoles(pathname: string): AppRole[] | null {
+  const entry = Object.entries(ROUTE_GUARDS)
+    .sort((a, b) => b[0].length - a[0].length)
+    .find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  return entry?.[1] ?? null;
+}
+
+function shouldBypassApiModuleGuard(pathname: string, method: string): boolean {
+  if (method.toUpperCase() === "GET" && /^\/api\/jobs\/[^/]+$/.test(pathname)) {
+    return true;
+  }
+  return false;
 }
 
 function requiredAccessForApiMethod(method: string): ModuleAccessLevel {
@@ -104,11 +107,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const { data: authData } = await supabase.auth.getUser();
 
   const isApi = request.nextUrl.pathname.startsWith("/api/");
-  const guardedPage = !isApi ? findGuardedModule(request.nextUrl.pathname, PAGE_MODULE_GUARDS) : null;
-  const guardedApi = isApi ? findGuardedModule(request.nextUrl.pathname, API_MODULE_GUARDS) : null;
-  const guardedModule = guardedPage?.module ?? guardedApi?.module ?? null;
+  const guardedPageRoles = !isApi ? findGuardedRoles(request.nextUrl.pathname) : null;
+  const guardedApi =
+    isApi && !shouldBypassApiModuleGuard(request.nextUrl.pathname, request.method)
+      ? findGuardedModule(request.nextUrl.pathname, API_MODULE_GUARDS)
+      : null;
+  const guardedModule = guardedApi?.module ?? null;
 
-  if (guardedModule) {
+  if (guardedPageRoles || guardedModule) {
       const cookieRole =
         process.env.NODE_ENV !== "production" || process.env.E2E === "true"
           ? request.cookies.get("e2e_role")?.value
@@ -154,22 +160,28 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 
-      permissions = await resolveUserModulePermissions({
-        supabase,
-        companyId,
-        userId,
-        role: resolvedRole,
-      });
-      if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
-        permissions = applyPermissionOverrideFromCookie(
-          permissions,
-          request.cookies.get(TEST_MODULE_ACCESS_COOKIE)?.value
-        );
+      if (guardedPageRoles && !guardedPageRoles.includes(resolvedRole)) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 
-      const required = guardedApi ? requiredAccessForApiMethod(request.method) : "view";
-      if (!hasModuleAccess(permissions, guardedModule, required)) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (guardedModule) {
+        permissions = await resolveUserModulePermissions({
+          supabase,
+          companyId,
+          userId,
+          role: resolvedRole,
+        });
+        if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+          permissions = applyPermissionOverrideFromCookie(
+            permissions,
+            request.cookies.get(TEST_MODULE_ACCESS_COOKIE)?.value
+          );
+        }
+
+        const required = guardedApi ? requiredAccessForApiMethod(request.method) : "view";
+        if (!hasModuleAccess(permissions, guardedModule, required)) {
+          return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+        }
       }
   }
 

@@ -104,7 +104,8 @@ export async function ensureParticipants(
     last_read_at: now,
   }));
 
-  const upsertResult = await supabase
+  const participantClient = getSupabaseAdmin() ?? supabase;
+  const upsertResult = await participantClient
     .from("message_participants")
     .upsert(rows, { onConflict: "company_id,thread_id,user_id", ignoreDuplicates: false });
 

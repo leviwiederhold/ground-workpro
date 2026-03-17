@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { clearFallbackReadNotifications } from "@/lib/notifications/fallbackStore";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ function isMissingNotificationsColumns(message: string) {
 export async function POST() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
+    const admin = getSupabaseAdmin();
 
     const currentRows = await supabase
       .from("notifications")
@@ -53,7 +55,8 @@ export async function POST() {
       return NextResponse.json({ item: { deleted: fallbackDeleted } });
     }
 
-    const result = await supabase
+    const deleteClient = admin ?? supabase;
+    const result = await deleteClient
       .from("notifications")
       .delete()
       .eq("company_id", companyId)
@@ -62,7 +65,7 @@ export async function POST() {
       .select("id");
 
     if (result.error && isMissingNotificationsColumns(result.error.message || "")) {
-      const legacy = await supabase
+      const legacy = await deleteClient
         .from("notifications")
         .delete()
         .eq("company_id", companyId)

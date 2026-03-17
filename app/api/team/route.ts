@@ -11,7 +11,7 @@ const querySchema = z.object({
   q: z.string().trim().optional().default(""),
   status: z.enum(["all", "active", "inactive"]).optional().default("all"),
   role: z.enum(["all", "admin", "pm", "foreman", "mechanic", "operator", "fieldstaff"]).optional().default("all"),
-  limit: z.coerce.number().int().min(1).max(50).optional().default(25),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(25),
 });
 
 const normalizeId = (value: unknown) => String(value ?? "");
@@ -180,23 +180,23 @@ export async function GET(request: Request) {
       .eq("company_id", companyId)
       .in("employee_id", employeeIds)
       .order("created_at", { ascending: false });
-    let inviteStatusRows: Array<Record<string, unknown>> = (pendingInviteResult.data ??
-      []) as Array<Record<string, unknown>>;
-    if (pendingInviteResult.error) {
-      const inviteStatusResult = await supabase
-        .from("invite_tokens")
-        .select("employee_id, email, used_at, expires_at")
-        .eq("company_id", companyId)
-        .in("employee_id", employeeIds)
-        .order("created_at", { ascending: false });
-      inviteStatusRows = (inviteStatusResult.data ?? []) as Array<Record<string, unknown>>;
-      if (inviteStatusResult.error) {
-        if (isMissingSchemaError(inviteStatusResult.error.message)) {
-          inviteStatusRows = [];
-        } else {
-          return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
-        }
-      }
+    let inviteStatusRows: Array<Record<string, unknown>> = [];
+    if (!pendingInviteResult.error) {
+      inviteStatusRows = (pendingInviteResult.data ?? []) as Array<Record<string, unknown>>;
+    } else if (!isMissingSchemaError(pendingInviteResult.error.message)) {
+      return NextResponse.json({ error: pendingInviteResult.error.message }, { status: 400 });
+    }
+
+    const inviteStatusResult = await supabase
+      .from("invite_tokens")
+      .select("employee_id, email, used_at, expires_at")
+      .eq("company_id", companyId)
+      .in("employee_id", employeeIds)
+      .order("created_at", { ascending: false });
+    if (!inviteStatusResult.error) {
+      inviteStatusRows.push(...((inviteStatusResult.data ?? []) as Array<Record<string, unknown>>));
+    } else if (!isMissingSchemaError(inviteStatusResult.error.message)) {
+      return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
     }
     const pendingInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmployeeIds = new Set<string>();

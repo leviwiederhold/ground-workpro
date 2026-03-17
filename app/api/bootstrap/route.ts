@@ -43,6 +43,40 @@ async function seedPersonalProfile(
   }
 }
 
+const isMissingSchemaError = (message: string | undefined) =>
+  /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
+    message ?? ""
+  );
+
+async function ensureCompanyBootstrapDefaults(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+  companyId: string,
+  metadata: Record<string, unknown> | undefined
+) {
+  const fallbackTimezone = String(metadata?.timezone ?? "").trim() || "America/New_York";
+  const companyResult = await supabase
+    .from("companies")
+    .select("timezone")
+    .eq("id", companyId)
+    .maybeSingle();
+
+  if (companyResult.error) {
+    if (isMissingSchemaError(companyResult.error.message)) return;
+    throw new Error(companyResult.error.message || "Failed to load company defaults");
+  }
+
+  const currentTimezone = String(companyResult.data?.timezone ?? "").trim();
+  if (currentTimezone) return;
+
+  const updateResult = await supabase
+    .from("companies")
+    .update({ timezone: fallbackTimezone })
+    .eq("id", companyId);
+  if (updateResult.error && !isMissingSchemaError(updateResult.error.message)) {
+    throw new Error(updateResult.error.message || "Failed to initialize company timezone");
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const rateLimited = enforceRateLimit(request, {
@@ -83,6 +117,7 @@ export async function POST(request: Request) {
       await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
       const existingCompanyId = String(existingMemberships?.[0]?.company_id ?? "");
       if (existingCompanyId) {
+        await ensureCompanyBootstrapDefaults(supabase, existingCompanyId, userMetadata);
         try {
           await ensureCompanyHasAtLeastOneCeoMembership(supabase, existingCompanyId);
         } catch {
@@ -121,6 +156,7 @@ export async function POST(request: Request) {
 
       if (linkedEmployee.data?.company_id) {
         await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
+        await ensureCompanyBootstrapDefaults(supabase, String(linkedEmployee.data.company_id), userMetadata);
         const membershipRole = normalizeMembershipRole(linkedEmployee.data.role);
         const { error: membershipUpsertError } = await supabase.from("memberships").upsert(
           {
@@ -167,7 +203,7 @@ export async function POST(request: Request) {
     // 2) Create company
     const { data: company, error: companyError } = await supabase
       .from("companies")
-      .insert({ name: requestedCompanyName || "My First Company" })
+      .insert({ name: requestedCompanyName || "My First Company", timezone: String(userMetadata?.timezone ?? "").trim() || "America/New_York" })
       .select()
       .single();
 

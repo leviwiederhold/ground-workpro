@@ -203,15 +203,24 @@ export async function GET(
   try {
     const { id } = await params;
     const { supabase, companyId, userId } = await getCompanyId();
-    const effectiveRole = await getEffectiveRole();
     const membershipRole = await resolveMembershipRole(supabase, companyId, userId);
+    const effectiveRole = await getEffectiveRole();
     const role = effectiveRole ?? membershipRole;
 
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    if (role === "mechanic") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const normalizedId = normalizeId(id);
+    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const { data, error } = await supabase
       .from("jobs")
       .select("*")

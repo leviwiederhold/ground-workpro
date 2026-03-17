@@ -145,7 +145,6 @@ export async function PATCH(request: Request) {
       job_title: payload.job_title || null,
       timezone: payload.timezone || null,
       avatar_url: payload.avatar_url || null,
-      email: fallbackEmail || null,
     };
     const upsertResult = await upsertProfileColumns({
       supabase,

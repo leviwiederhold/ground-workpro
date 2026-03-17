@@ -26,7 +26,6 @@ async function seedPersonalProfile(
   const rawFullName = String(metadata?.full_name ?? metadata?.name ?? "").trim();
   const payload: Record<string, unknown> = {
     id: userId,
-    email: email || null,
   };
   if (rawFullName) {
     payload.full_name = sanitizeProfileFullName(rawFullName, email);
@@ -36,7 +35,7 @@ async function seedPersonalProfile(
     supabase,
     userId,
     payload,
-    selectColumns: ["full_name", "email"],
+    selectColumns: ["full_name"],
   });
 
   if (result.error) {

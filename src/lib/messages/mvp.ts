@@ -294,28 +294,26 @@ export async function resolveDisplayNames(
 
   const profilesResult = await supabase
     .from("profiles")
-    .select("id, full_name, display_name, email")
+    .select("id, full_name, display_name")
     .in("id", unique);
-  let profileRows: Array<{ id?: string; full_name?: string; display_name?: string; email?: string }> = [];
+  let profileRows: Array<{ id?: string; full_name?: string; display_name?: string }> = [];
   if (!profilesResult.error) {
     profileRows = (profilesResult.data ?? []) as Array<{
       id?: string;
       full_name?: string;
       display_name?: string;
-      email?: string;
     }>;
   } else if (
     /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")
   ) {
     const fallbackProfilesResult = await supabase
       .from("profiles")
-      .select("id, full_name, email")
+      .select("id, full_name")
       .in("id", unique);
     if (!fallbackProfilesResult.error) {
       profileRows = (fallbackProfilesResult.data ?? []).map((row) => ({
         id: (row as { id?: string }).id,
         full_name: (row as { full_name?: string }).full_name,
-        email: (row as { email?: string }).email,
       }));
     }
   }
@@ -324,7 +322,6 @@ export async function resolveDisplayNames(
       const resolved = pickDisplayName({
         fullName: row.full_name,
         displayName: (row as { display_name?: string }).display_name,
-        email: row.email,
       });
       if (resolved) map.set(String(row.id), resolved);
   }

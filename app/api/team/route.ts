@@ -5,6 +5,7 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
@@ -268,22 +269,15 @@ export async function GET(request: Request) {
       if (memberUserIds.length > 0) {
         const profilesResult = await supabase
           .from("profiles")
-          .select("id, full_name, display_name, email, avatar_url")
+          .select("id, full_name, display_name, avatar_url")
           .in("id", memberUserIds);
         let profileRows: Array<Record<string, unknown>> = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
         if (profilesResult.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
           const fallbackProfilesWithDisplay = await supabase
             .from("profiles")
-            .select("id, full_name, display_name, email")
+            .select("id, full_name, display_name")
             .in("id", memberUserIds);
           profileRows = (fallbackProfilesWithDisplay.data ?? []) as Array<Record<string, unknown>>;
-        }
-        if (profilesResult.error && /email|Could not find the 'email' column/i.test(profilesResult.error.message || "")) {
-          const fallbackProfilesWithoutEmail = await supabase
-            .from("profiles")
-            .select("id, full_name, display_name, avatar_url")
-            .in("id", memberUserIds);
-          profileRows = (fallbackProfilesWithoutEmail.data ?? []) as Array<Record<string, unknown>>;
         }
         if (profilesResult.error && /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")) {
           const fallbackProfiles = await supabase
@@ -292,10 +286,23 @@ export async function GET(request: Request) {
             .in("id", memberUserIds);
           profileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
         }
+        const authEmailByUserId = new Map<string, string>();
+        const admin = getSupabaseAdmin();
+        if (admin) {
+          const listUsersResult = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+          if (!listUsersResult.error) {
+            for (const authUser of listUsersResult.data.users ?? []) {
+              const authUserId = String(authUser.id ?? "").trim();
+              if (!authUserId || !memberUserIds.includes(authUserId)) continue;
+              const authEmail = String(authUser.email ?? "").trim().toLowerCase();
+              if (authEmail) authEmailByUserId.set(authUserId, authEmail);
+            }
+          }
+        }
         for (const row of profileRows) {
-          const email = String(row.email ?? "").trim().toLowerCase();
-          if (email) companyMemberEmails.add(email);
           const profileUserId = normalizeId(row.id);
+          const email = authEmailByUserId.get(profileUserId) ?? "";
+          if (email) companyMemberEmails.add(email);
           if (email && profileUserId) companyUserIdByEmail.set(email, profileUserId);
           if (profileUserId) {
             const fullName = String(row.full_name ?? "").trim();

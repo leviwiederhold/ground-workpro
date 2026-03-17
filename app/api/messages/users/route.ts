@@ -79,40 +79,22 @@ export async function GET() {
     );
 
     let profiles: {
-      data: Array<{ id?: string; full_name?: string; display_name?: string; email?: string; avatar_url?: string }> | null;
+      data: Array<{ id?: string; full_name?: string; display_name?: string; avatar_url?: string }> | null;
       error: { message?: string } | null;
     } = userIds.length
-      ? await db.from("profiles").select("id, full_name, display_name, email, avatar_url").in("id", userIds)
+      ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
       : { data: [], error: null };
 
     if (profiles.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profiles.error.message || "")) {
       const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, display_name, email").in("id", userIds)
+        ? await db.from("profiles").select("id, full_name, display_name").in("id", userIds)
         : { data: [], error: null };
       profiles = {
         data: (fallbackProfiles.data ?? []).map(
-          (row: { id?: string; full_name?: string; display_name?: string; email?: string }) => ({
+          (row: { id?: string; full_name?: string; display_name?: string }) => ({
             id: row.id,
             full_name: row.full_name,
             display_name: row.display_name,
-            email: row.email,
-          })
-        ),
-        error: fallbackProfiles.error,
-      };
-    }
-
-    if (profiles.error && /email|Could not find the 'email' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map(
-          (row: { id?: string; full_name?: string; display_name?: string; avatar_url?: string }) => ({
-            id: row.id,
-            full_name: row.full_name,
-            display_name: row.display_name,
-            avatar_url: row.avatar_url,
           })
         ),
         error: fallbackProfiles.error,
@@ -165,14 +147,13 @@ export async function GET() {
     for (const profile of profiles.data ?? []) {
       const profileId = String(profile.id ?? "").trim();
       if (!profileId) continue;
-      nameById.set(
-        profileId,
-        pickDisplayName({
-          fullName: profile.full_name,
-          displayName: profile.display_name,
-          email: profile.email,
-        })
-      );
+      const profileName = pickDisplayName({
+        fullName: profile.full_name,
+        displayName: profile.display_name,
+      });
+      if (profileName !== "Team Member") {
+        nameById.set(profileId, profileName);
+      }
       const avatarUrl = String(profile.avatar_url ?? "").trim();
       if (avatarUrl) avatarById.set(profileId, avatarUrl);
     }

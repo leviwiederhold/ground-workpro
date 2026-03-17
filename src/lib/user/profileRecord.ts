@@ -3,7 +3,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type ProfileRecord = {
   full_name?: string | null;
   display_name?: string | null;
-  email?: string | null;
   phone?: string | null;
   job_title?: string | null;
   timezone?: string | null;

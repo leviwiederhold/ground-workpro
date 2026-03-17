@@ -284,7 +284,6 @@ export async function POST(request: Request) {
     const profileName = rawProfileName ? sanitizeProfileFullName(rawProfileName, email) : "";
     const profilePayload: Record<string, unknown> = {
       id: userId,
-      email,
     };
     if (profileName) {
       profilePayload.full_name = profileName;
@@ -293,7 +292,7 @@ export async function POST(request: Request) {
       supabase: client,
       userId,
       payload: profilePayload,
-      selectColumns: ["full_name", "email"],
+      selectColumns: ["full_name"],
     });
     if (profileUpsert.error) {
       return NextResponse.json({ error: profileUpsert.error.message }, { status: 400 });

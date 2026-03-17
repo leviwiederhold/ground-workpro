@@ -12388,8 +12388,6 @@ const WorkspaceLoadingScreen = () => (
 	        const fullName = String(profileItem?.full_name ?? '').trim();
 	        const displayName = String(profileItem?.display_name ?? '').trim();
 	        const avatarUrl = String(profileItem?.avatar_url ?? '').trim();
-	        const resolvedEmail = String(profileItem?.email ?? '').trim();
-	        if (!email && resolvedEmail) email = resolvedEmail;
 
 	        let companyName = 'My Company';
 	        let companyLogo = '';

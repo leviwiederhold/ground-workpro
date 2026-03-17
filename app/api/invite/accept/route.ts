@@ -7,6 +7,8 @@ import {
   isCeoMembershipRole,
   listCompanyMembershipRoles,
 } from "@/lib/auth/ceoGuard";
+import { upsertProfileColumns } from "@/lib/user/profileRecord";
+import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
@@ -274,24 +276,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
     }
 
-    const profileName = String(
+    const rawProfileName = String(
       authData.user.user_metadata?.full_name ??
         authData.user.user_metadata?.name ??
         ""
     ).trim();
+    const profileName = rawProfileName ? sanitizeProfileFullName(rawProfileName, email) : "";
+    const profilePayload: Record<string, unknown> = {
+      id: userId,
+      email,
+    };
     if (profileName) {
-      let profileUpsert = await client
-        .from("profiles")
-        .upsert({ id: userId, full_name: profileName, email });
-      if (
-        profileUpsert.error &&
-        /column .*email.* does not exist|Could not find the 'email' column/i.test(profileUpsert.error.message || "")
-      ) {
-        profileUpsert = await client.from("profiles").upsert({ id: userId, full_name: profileName });
-      }
-      if (profileUpsert.error) {
-        return NextResponse.json({ error: profileUpsert.error.message }, { status: 400 });
-      }
+      profilePayload.full_name = profileName;
+    }
+    const profileUpsert = await upsertProfileColumns({
+      supabase: client,
+      userId,
+      payload: profilePayload,
+      selectColumns: ["full_name", "email"],
+    });
+    if (profileUpsert.error) {
+      return NextResponse.json({ error: profileUpsert.error.message }, { status: 400 });
     }
 
     const employeeRole = resolvedRole === "ceo" ? "admin" : resolvedRole;

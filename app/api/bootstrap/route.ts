@@ -2,6 +2,8 @@ import { supabaseServer } from "@/lib/supabase/server";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
 import { ensureCompanyHasAtLeastOneCeoMembership } from "@/lib/auth/ceoGuard";
+import { upsertProfileColumns } from "@/lib/user/profileRecord";
+import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
@@ -14,6 +16,33 @@ const normalizeMembershipRole = (value: unknown) => {
   if (raw.includes("mechanic")) return "mechanic";
   return "operator";
 };
+
+async function seedPersonalProfile(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+  userId: string,
+  email: string,
+  metadata: Record<string, unknown> | undefined
+) {
+  const rawFullName = String(metadata?.full_name ?? metadata?.name ?? "").trim();
+  const payload: Record<string, unknown> = {
+    id: userId,
+    email: email || null,
+  };
+  if (rawFullName) {
+    payload.full_name = sanitizeProfileFullName(rawFullName, email);
+  }
+
+  const result = await upsertProfileColumns({
+    supabase,
+    userId,
+    payload,
+    selectColumns: ["full_name", "email"],
+  });
+
+  if (result.error) {
+    throw new Error(result.error.message || "Failed to initialize profile");
+  }
+}
 
 export async function POST(request: Request) {
   const rateLimited = enforceRateLimit(request, {
@@ -33,6 +62,11 @@ export async function POST(request: Request) {
 
   const user = userData.user;
   const userEmail = String(user.email ?? "").trim().toLowerCase();
+  const userMetadata =
+    user.user_metadata && typeof user.user_metadata === "object"
+      ? (user.user_metadata as Record<string, unknown>)
+      : undefined;
+  const requestedCompanyName = String(userMetadata?.company_name ?? userMetadata?.company ?? "").trim();
 
   // Idempotent: if user already has membership, do not create duplicate company.
   const { data: existingMemberships, error: existingMembershipError } = await supabase
@@ -46,6 +80,7 @@ export async function POST(request: Request) {
   }
 
   if ((existingMemberships ?? []).length > 0) {
+    await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
     const existingCompanyId = String(existingMemberships?.[0]?.company_id ?? "");
     if (existingCompanyId) {
       try {
@@ -85,6 +120,7 @@ export async function POST(request: Request) {
     }
 
     if (linkedEmployee.data?.company_id) {
+      await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
       const membershipRole = normalizeMembershipRole(linkedEmployee.data.role);
       const { error: membershipUpsertError } = await supabase.from("memberships").upsert(
         {
@@ -126,14 +162,12 @@ export async function POST(request: Request) {
   }
 
   // 1) Ensure profile exists
-  await supabase.from("profiles").upsert({
-    id: user.id,
-  });
+  await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
 
   // 2) Create company
   const { data: company, error: companyError } = await supabase
     .from("companies")
-    .insert({ name: "My First Company" })
+    .insert({ name: requestedCompanyName || "My First Company" })
     .select()
     .single();
 

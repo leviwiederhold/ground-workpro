@@ -745,9 +745,8 @@ const WorkspaceLoadingScreen = () => (
         Boolean(resolvedUserEmail) &&
         resolvedUserEmail.toLowerCase() !== resolvedUserDisplayName.toLowerCase();
       const resolvedCompanyName = String(currentUser?.company ?? '').trim() || 'My Company';
-      const resolvedCompanyLogo = String(currentUser?.companyLogo ?? '').trim();
       const resolvedUserAvatar = String(currentUser?.avatarUrl ?? '').trim();
-      const headerAvatarSrc = resolvedUserAvatar || resolvedCompanyLogo;
+      const headerAvatarSrc = resolvedUserAvatar;
       const roleBadgeLabel =
         currentRoleDisplay === 'executive'
           ? 'CEO'
@@ -2112,7 +2111,7 @@ const WorkspaceLoadingScreen = () => (
                         {headerAvatarSrc ? (
                           <img
                             src={headerAvatarSrc}
-                            alt={resolvedUserAvatar ? `${resolvedUserDisplayName} avatar` : `${resolvedCompanyName} logo`}
+                            alt={`${resolvedUserDisplayName} avatar`}
                             className="w-full h-full rounded-full object-cover"
                           />
                         ) : (
@@ -11658,6 +11657,14 @@ const WorkspaceLoadingScreen = () => (
           const { data, error } = await supabase.auth.signUp({
             email: formData.email,
             password: formData.password,
+            options: {
+              data: {
+                full_name: String(formData.name || '').trim() || undefined,
+                name: String(formData.name || '').trim() || undefined,
+                company_name: String(formData.company || '').trim() || undefined,
+                company: String(formData.company || '').trim() || undefined,
+              },
+            },
           });
 
           if (error) {

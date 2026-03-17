@@ -298,7 +298,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: profileUpsert.error.message }, { status: 400 });
     }
 
-    const employeeRole = resolvedRole === "ceo" ? "admin" : resolvedRole;
+    const employeeRole =
+      resolvedRole === "ceo"
+        ? "admin"
+        : resolvedRole === "fieldstaff"
+          ? "operator"
+          : resolvedRole;
     const inviteEmail = tokenEmail || email;
     let employeeId = String(invitationData.employee_id ?? "").trim();
 

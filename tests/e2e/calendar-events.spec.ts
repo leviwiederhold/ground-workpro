@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { getE2ECreds, loginViaUI } from './helpers';
+import { loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
@@ -27,18 +27,19 @@ function atHour(dateKey: string, hour: number) {
 }
 
 test('calendar events persist and attendee visibility is enforced', async ({ page }) => {
-  const { email } = getE2ECreds();
   await loginViaUI(page);
   await setRole(page, 'admin');
 
   const stamp = Date.now();
   const weekStart = getWeekStartKey();
+  const operatorEmail = `calendar-operator-${stamp}@example.com`;
+  const operatorPassword = `CalendarPass!${stamp}`;
 
   const operatorEmployeeResponse = await page.request.post('/api/employees', {
     data: {
       name: `E2E Calendar Operator ${stamp}`,
       role: 'Operator',
-      email,
+      email: operatorEmail,
     },
     timeout: 30_000,
   });
@@ -46,6 +47,29 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
   expect(operatorEmployeeResponse.status(), operatorEmployeeBody).toBe(200);
   const operatorEmployeeId = JSON.parse(operatorEmployeeBody)?.employee?.id;
   expect(operatorEmployeeId).toBeTruthy();
+
+  const operatorInviteResponse = await page.request.post('/api/invite/create', {
+    data: {
+      employeeId: operatorEmployeeId,
+      email: operatorEmail,
+      role: 'operator',
+    },
+    timeout: 30_000,
+  });
+  const operatorInviteBody = await operatorInviteResponse.text();
+  expect(operatorInviteResponse.status(), operatorInviteBody).toBe(200);
+  const operatorInviteToken = String(JSON.parse(operatorInviteBody)?.item?.token ?? '');
+  expect(operatorInviteToken.length).toBeGreaterThanOrEqual(20);
+
+  const acceptOperatorInviteResponse = await page.request.post('/api/test/accept-invite', {
+    data: {
+      token: operatorInviteToken,
+      email: operatorEmail,
+      password: operatorPassword,
+    },
+    timeout: 30_000,
+  });
+  expect(acceptOperatorInviteResponse.status(), await acceptOperatorInviteResponse.text()).toBe(200);
 
   const visibleEventResponse = await page.request.post('/api/calendar/events', {
     data: {
@@ -98,6 +122,14 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
   const hiddenEvent = JSON.parse(hiddenEventBody)?.item;
   expect(hiddenEvent?.id).toBeTruthy();
 
+  const loginOperatorResponse = await page.request.post('/api/test/login', {
+    data: {
+      email: operatorEmail,
+      password: operatorPassword,
+    },
+    timeout: 30_000,
+  });
+  expect(loginOperatorResponse.status(), await loginOperatorResponse.text()).toBe(200);
   await setRole(page, 'operator');
 
   const operatorWeekResponse = await page.request.get(`/api/calendar/week?start=${weekStart}`);
@@ -108,6 +140,25 @@ test('calendar events persist and attendee visibility is enforced', async ({ pag
 
   expect(titles).toContain(`E2E Visible Event ${stamp}`);
   expect(titles).not.toContain(`E2E Hidden Event ${stamp}`);
+
+  const creatorEventResponse = await page.request.post('/api/calendar/events', {
+    data: {
+      title: `E2E Creator Event ${stamp}`,
+      startsAt: atHour(weekStart, 18),
+      endsAt: atHour(weekStart, 19),
+      visibility: 'attendees',
+      eventType: 'meeting',
+      attendees: [{ type: 'employee', employeeId: otherOperatorEmployeeId }],
+    },
+    timeout: 30_000,
+  });
+  expect(creatorEventResponse.status(), await creatorEventResponse.text()).toBe(200);
+
+  const creatorWeekResponse = await page.request.get(`/api/calendar/week?start=${weekStart}`);
+  expect(creatorWeekResponse.status()).toBe(200);
+  const creatorWeek = await creatorWeekResponse.json();
+  const creatorTitles = (creatorWeek.items || []).map((item: { title: string }) => item.title);
+  expect(creatorTitles).toContain(`E2E Creator Event ${stamp}`);
 
   // UI rendering can vary by schedule view mode; API visibility checks above are the stable contract.
 });

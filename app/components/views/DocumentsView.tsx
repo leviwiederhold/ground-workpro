@@ -9,7 +9,8 @@ const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? Th
 
 export function DocumentsView({ currentRole, ui }) {
   const { SearchInput, Button, Icon, Card, formatDate } = ui;
-  const canManageDocuments = currentRole === 'executive' || currentRole === 'operations';
+  const normalizedRole = String(currentRole || '').trim().toLowerCase();
+  const canManageDocuments = ['executive', 'operations', 'admin', 'pm'].includes(normalizedRole);
   const fileInputRef = useRef(null);
 
   const [documents, setDocuments] = useState([]);

@@ -174,9 +174,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ items: [] });
     }
 
-    const pendingInviteResult = await supabase
+    const adminDb = getSupabaseAdmin() ?? supabase;
+
+    const pendingInviteResult = await adminDb
       .from("pending_invitations")
-      .select("employee_id, email, accepted_at, expires_at")
+      .select("employee_id, email, role, accepted_at, accepted_user_id, expires_at")
       .eq("company_id", companyId)
       .in("employee_id", employeeIds)
       .order("created_at", { ascending: false });
@@ -187,9 +189,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: pendingInviteResult.error.message }, { status: 400 });
     }
 
-    const inviteStatusResult = await supabase
+    const inviteStatusResult = await adminDb
       .from("invite_tokens")
-      .select("employee_id, email, used_at, expires_at")
+      .select("employee_id, email, role, used_at, expires_at")
       .eq("company_id", companyId)
       .in("employee_id", employeeIds)
       .order("created_at", { ascending: false });
@@ -201,15 +203,27 @@ export async function GET(request: Request) {
     const pendingInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmails = new Set<string>();
+    const acceptedInviteUserIdByEmployeeId = new Map<string, string>();
+    const acceptedInviteUserIdByEmail = new Map<string, string>();
+    const fieldStaffEmployeeIds = new Set<string>();
+    const fieldStaffEmails = new Set<string>();
+    const fieldStaffUserIds = new Set<string>();
     for (const row of inviteStatusRows) {
       const employeeId = normalizeId(row.employee_id);
       if (!employeeId) continue;
+      const inviteRole = String(row.role ?? "").trim().toLowerCase();
+      const inviteEmail = String(row.email ?? "").trim().toLowerCase();
+      if (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff")) {
+        fieldStaffEmployeeIds.add(employeeId);
+        if (inviteEmail) fieldStaffEmails.add(inviteEmail);
+      }
       const usedAt = row.used_at ? String(row.used_at) : row.accepted_at ? String(row.accepted_at) : "";
+      const acceptedUserId = String(row.accepted_user_id ?? "").trim();
       const expiresAt = row.expires_at ? new Date(String(row.expires_at)).getTime() : Number.POSITIVE_INFINITY;
       if (usedAt) {
         acceptedInviteEmployeeIds.add(employeeId);
-        const usedEmail = String(row.email ?? "").trim().toLowerCase();
-        if (usedEmail) acceptedInviteEmails.add(usedEmail);
+        if (acceptedUserId) acceptedInviteUserIdByEmployeeId.set(employeeId, acceptedUserId);
+        if (inviteEmail) acceptedInviteEmails.add(inviteEmail);
         continue;
       }
       if (expiresAt > Date.now()) {
@@ -225,16 +239,19 @@ export async function GET(request: Request) {
       )
     );
     if (employeeEmails.length > 0) {
-      let acceptedByEmailResult = await supabase
+      let acceptedByEmailResult: {
+        data: Array<Record<string, unknown>> | null;
+        error: { message?: string } | null;
+      } = await supabase
         .from("pending_invitations")
-        .select("email")
+        .select("email, role, accepted_user_id")
         .eq("company_id", companyId)
         .not("accepted_at", "is", null)
         .in("email", employeeEmails);
       if (acceptedByEmailResult.error) {
         acceptedByEmailResult = await supabase
           .from("invite_tokens")
-          .select("email")
+          .select("email, role")
           .eq("company_id", companyId)
           .not("used_at", "is", null)
           .in("email", employeeEmails);
@@ -243,6 +260,12 @@ export async function GET(request: Request) {
         for (const row of (acceptedByEmailResult.data ?? []) as Array<Record<string, unknown>>) {
           const value = String(row.email ?? "").trim().toLowerCase();
           if (value) acceptedInviteEmails.add(value);
+          const acceptedUserId = String(row.accepted_user_id ?? "").trim();
+          if (value && acceptedUserId) acceptedInviteUserIdByEmail.set(value, acceptedUserId);
+          const inviteRole = String(row.role ?? "").trim().toLowerCase();
+          if (value && (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff"))) {
+            fieldStaffEmails.add(value);
+          }
         }
       }
     }
@@ -252,11 +275,14 @@ export async function GET(request: Request) {
     const membershipRoleByUserId = new Map<string, string>();
     const profileDisplayNameByUserId = new Map<string, string>();
     const profileAvatarByUserId = new Map<string, string>();
-    const membershipsResult = await supabase
+    const membershipsResult = await adminDb
       .from("memberships")
       .select("user_id, role")
       .eq("company_id", companyId);
     if (!membershipsResult.error) {
+      for (const [email, acceptedUserId] of acceptedInviteUserIdByEmail) {
+        companyUserIdByEmail.set(email, acceptedUserId);
+      }
       for (const row of (membershipsResult.data ?? []) as Array<Record<string, unknown>>) {
         const membershipUserId = normalizeId(row.user_id);
         if (!membershipUserId) continue;
@@ -267,24 +293,50 @@ export async function GET(request: Request) {
         new Set((membershipsResult.data ?? []).map((row: Record<string, unknown>) => normalizeId(row.user_id)).filter(Boolean))
       );
       if (memberUserIds.length > 0) {
-        const profilesResult = await supabase
+        const acceptedInvitesByUserResult = await adminDb
+          .from("pending_invitations")
+          .select("accepted_user_id, role")
+          .eq("company_id", companyId)
+          .not("accepted_at", "is", null)
+          .in("accepted_user_id", memberUserIds);
+        if (!acceptedInvitesByUserResult.error) {
+          for (const row of (acceptedInvitesByUserResult.data ?? []) as Array<Record<string, unknown>>) {
+            const acceptedUserId = String(row.accepted_user_id ?? "").trim();
+            const inviteRole = String(row.role ?? "").trim().toLowerCase();
+            if (
+              acceptedUserId &&
+              (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff"))
+            ) {
+              fieldStaffUserIds.add(acceptedUserId);
+            }
+          }
+        }
+      }
+      if (memberUserIds.length > 0) {
+        const profilesResult = await adminDb
           .from("profiles")
           .select("id, full_name, display_name, avatar_url")
           .in("id", memberUserIds);
         let profileRows: Array<Record<string, unknown>> = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
-        if (profilesResult.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
-          const fallbackProfilesWithDisplay = await supabase
+        if (profilesResult.error && /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")) {
+          const fallbackProfilesWithAvatar = await adminDb
+            .from("profiles")
+            .select("id, full_name, avatar_url")
+            .in("id", memberUserIds);
+          profileRows = (fallbackProfilesWithAvatar.data ?? []) as Array<Record<string, unknown>>;
+          if (fallbackProfilesWithAvatar.error && /avatar_url|Could not find the 'avatar_url' column/i.test(fallbackProfilesWithAvatar.error.message || "")) {
+            const fallbackProfiles = await adminDb
+              .from("profiles")
+              .select("id, full_name")
+              .in("id", memberUserIds);
+            profileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
+          }
+        } else if (profilesResult.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
+          const fallbackProfilesWithDisplay = await adminDb
             .from("profiles")
             .select("id, full_name, display_name")
             .in("id", memberUserIds);
           profileRows = (fallbackProfilesWithDisplay.data ?? []) as Array<Record<string, unknown>>;
-        }
-        if (profilesResult.error && /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")) {
-          const fallbackProfiles = await supabase
-            .from("profiles")
-            .select("id, full_name")
-            .in("id", memberUserIds);
-          profileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
         }
         const authEmailByUserId = new Map<string, string>();
         const admin = getSupabaseAdmin();
@@ -398,11 +450,15 @@ export async function GET(request: Request) {
       const employeeEmail = String(item.email ?? "").trim().toLowerCase();
       const linkedUserId =
         String(item.userId ?? "").trim() ||
+        acceptedInviteUserIdByEmployeeId.get(item.id) ||
         companyUserIdByEmail.get(employeeEmail) ||
         "";
       const membershipRole = linkedUserId ? membershipRoleByUserId.get(linkedUserId) : null;
       if (membershipRole) {
         item.role = membershipRole;
+      }
+      if (fieldStaffEmployeeIds.has(item.id) || fieldStaffEmails.has(employeeEmail) || (linkedUserId && fieldStaffUserIds.has(linkedUserId))) {
+        item.role = "fieldstaff";
       }
       if (linkedUserId && !item.userId) {
         item.userId = linkedUserId;

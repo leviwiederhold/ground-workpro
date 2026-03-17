@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { getE2ECreds, loginViaUI } from './helpers';
+import { loginViaUI } from './helpers';
 
 type Role = 'admin' | 'pm' | 'foreman' | 'mechanic' | 'operator';
 
@@ -10,12 +10,13 @@ async function setRole(page: Page, role: Role) {
 }
 
 test('operator is blocked from company week and only sees personal week data', async ({ page }) => {
-  const { email } = getE2ECreds();
   await loginViaUI(page);
   await setRole(page, 'admin');
 
   const stamp = Date.now();
   const date = new Date().toISOString().slice(0, 10);
+  const operatorEmail = `my-week-operator-${stamp}@example.com`;
+  const operatorPassword = `MyWeekPass!${stamp}`;
 
   const [jobARes, jobBRes] = await Promise.all([
     page.request.post('/api/jobs', {
@@ -35,7 +36,7 @@ test('operator is blocked from company week and only sees personal week data', a
 
   const [operatorRes, foremanRes] = await Promise.all([
     page.request.post('/api/employees', {
-      data: { name: `Week Operator ${stamp}`, role: 'Operator', email },
+      data: { name: `Week Operator ${stamp}`, role: 'Operator', email: operatorEmail },
     }),
     page.request.post('/api/employees', {
       data: { name: `Week Foreman ${stamp}`, role: 'Foreman' },
@@ -48,6 +49,28 @@ test('operator is blocked from company week and only sees personal week data', a
 
   const operatorEmployeeId = JSON.parse(operatorBody)?.employee?.id;
   const foremanEmployeeId = JSON.parse(foremanBody)?.employee?.id;
+
+  const inviteOperatorResponse = await page.request.post('/api/invite/create', {
+    data: {
+      employeeId: operatorEmployeeId,
+      email: operatorEmail,
+      role: 'operator',
+    },
+  });
+  const inviteOperatorBody = await inviteOperatorResponse.text();
+  expect(inviteOperatorResponse.status(), inviteOperatorBody).toBe(200);
+  const inviteOperatorJson = JSON.parse(inviteOperatorBody);
+  const inviteOperatorToken = String(inviteOperatorJson?.item?.token ?? '');
+  expect(inviteOperatorToken.length).toBeGreaterThanOrEqual(20);
+
+  const acceptOperatorResponse = await page.request.post('/api/test/accept-invite', {
+    data: {
+      token: inviteOperatorToken,
+      email: operatorEmail,
+      password: operatorPassword,
+    },
+  });
+  expect(acceptOperatorResponse.status(), await acceptOperatorResponse.text()).toBe(200);
 
   const [operatorAssignRes, foremanAssignRes] = await Promise.all([
     page.request.post('/api/schedule/assignments', {
@@ -87,6 +110,13 @@ test('operator is blocked from company week and only sees personal week data', a
   expect(visibleEventRes.status(), await visibleEventRes.text()).toBe(200);
   expect(hiddenEventRes.status(), await hiddenEventRes.text()).toBe(200);
 
+  const loginOperatorResponse = await page.request.post('/api/test/login', {
+    data: {
+      email: operatorEmail,
+      password: operatorPassword,
+    },
+  });
+  expect(loginOperatorResponse.status(), await loginOperatorResponse.text()).toBe(200);
   await setRole(page, 'operator');
 
   const companyWeekRes = await page.request.get(`/api/schedule/week?start=${date}`);

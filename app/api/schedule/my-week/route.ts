@@ -164,8 +164,8 @@ function eventVisibleForRole(
   if (event.visibility === "private") {
     return String(event.created_by) === String(userId);
   }
-  if (role === "admin" || role === "pm") return true;
   if (event.visibility === "company") return true;
+  if (String(event.created_by) === String(userId)) return true;
   return attendees.some((attendee) => {
     if (attendee.attendee_type === "user") {
       return String(attendee.user_id ?? "") === String(userId) && String(attendee.response_status ?? "invited") !== "declined";

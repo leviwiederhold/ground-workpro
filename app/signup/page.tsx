@@ -103,8 +103,9 @@ export default function SignupPage() {
         router.refresh();
         return;
       }
-
       setNotice("Check your email to confirm your account, then log in.");
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Failed to create account");
     } finally {
       setLoading(false);
     }

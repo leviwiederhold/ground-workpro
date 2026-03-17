@@ -43,6 +43,11 @@ async function toDataUrl(file: File) {
   });
 }
 
+function firstInvalidFieldKey(fieldErrors: Record<string, string>) {
+  const orderedFields: Array<keyof ProfileForm> = ["avatar_url", "full_name", "phone", "job_title", "timezone"];
+  return orderedFields.find((field) => fieldErrors[field]) ?? null;
+}
+
 export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -62,7 +67,7 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const getFieldClassName = (field: keyof ProfileForm) =>
-    `w-full rounded-lg px-3 py-2 ${fieldErrors[field] ? "border border-red-400 bg-red-50" : "border border-gray-300"}`;
+    `w-full rounded-lg px-3 py-2 ${fieldErrors[field] ? "border border-red-500 bg-red-50 ring-1 ring-red-200" : "border border-gray-300"}`;
 
   const resolvedName = useMemo(
     () => {
@@ -77,12 +82,19 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
 
   const handleAvatarUpload = async (file: File | null) => {
     if (!file) return;
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.avatar_url;
+      return next;
+    });
     if (!ALLOWED_AVATAR_TYPES.has(String(file.type).toLowerCase())) {
-      setError("Only PNG, JPEG, WEBP, or SVG avatars are supported.");
+      setFieldErrors((prev) => ({ ...prev, avatar_url: "Only PNG, JPEG, WEBP, or SVG avatars are supported." }));
+      setError("Please fix the highlighted fields.");
       return;
     }
     if (file.size > MAX_AVATAR_SIZE_BYTES) {
-      setError("Avatar file must be 2MB or smaller.");
+      setFieldErrors((prev) => ({ ...prev, avatar_url: "Avatar file must be 2MB or smaller." }));
+      setError("Please fix the highlighted fields.");
       return;
     }
     const dataUrl = await toDataUrl(file);
@@ -170,6 +182,12 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
     .slice(0, 2)
     .toUpperCase();
 
+  const inlineErrorSummary = useMemo(() => {
+    const key = firstInvalidFieldKey(fieldErrors);
+    if (!key) return "";
+    return fieldErrors[key] ?? "";
+  }, [fieldErrors]);
+
   return (
     <main className="min-h-screen bg-gray-50 p-6">
       <div className="mx-auto max-w-3xl space-y-4">
@@ -201,6 +219,7 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
                   }}
                 />
               </label>
+              {fieldErrors.avatar_url ? <p className="text-xs text-red-600">{fieldErrors.avatar_url}</p> : null}
               {form.avatar_url && (
                 <button
                   type="button"
@@ -270,7 +289,7 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
             </label>
           </div>
 
-          {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
+          {error && <p className="mt-4 text-sm text-red-600">{inlineErrorSummary || error}</p>}
           {!error && status && <p className="mt-4 text-sm text-green-700">{status}</p>}
 
           <div className="mt-6 flex items-center gap-3">

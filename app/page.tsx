@@ -11524,13 +11524,19 @@ const WorkspaceLoadingScreen = () => (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Attendees</label>
                 <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 border border-gray-200 rounded-lg">
-                  {employees.filter(e => e.status === 'clocked-in').map(emp => (
+                  {employees
+                    .filter((employee) => {
+                      const accountStatus = String(employee.accountStatus || '').toLowerCase();
+                      const status = String(employee.status || '').toLowerCase();
+                      return accountStatus === 'active' || ['active', 'clocked-in'].includes(status);
+                    })
+                    .map(emp => (
                     <label key={emp.id} className="flex items-center gap-2 text-sm">
                       <input type="checkbox" checked={attendees.includes(emp.id)} onChange={(e) => {
                         if (e.target.checked) setAttendees(prev => [...prev, emp.id]);
                         else setAttendees(prev => prev.filter(id => id !== emp.id));
                       }} />
-                      {emp.name}
+                      {emp.displayName || emp.name || emp.email || 'Team Member'}
                     </label>
                   ))}
                 </div>

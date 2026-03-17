@@ -71,6 +71,36 @@ const mapEvent = (event: CalendarEventRow, attendees: CalendarAttendeeRow[]) => 
 
 const normalizeEmail = (email: string | null | undefined) => String(email ?? "").trim().toLowerCase();
 
+function canUserSeeEvent(params: {
+  event: { visibility: string; created_by: string };
+  attendees: Array<
+    Pick<CalendarAttendeeRow, "attendee_type" | "user_id" | "employee_id" | "response_status">
+  >;
+  userId: string;
+  userEmployeeIds: Set<string>;
+}) {
+  const { event, attendees, userId, userEmployeeIds } = params;
+  if (event.visibility === "private") {
+    return String(event.created_by) === String(userId);
+  }
+  if (event.visibility === "company") {
+    return true;
+  }
+  if (String(event.created_by) === String(userId)) {
+    return true;
+  }
+  return attendees.some((attendee) => {
+    if (String(attendee.response_status ?? "invited") === "declined") return false;
+    if (attendee.attendee_type === "user") {
+      return String(attendee.user_id ?? "") === String(userId);
+    }
+    if (attendee.attendee_type === "employee" && attendee.employee_id) {
+      return userEmployeeIds.has(String(attendee.employee_id));
+    }
+    return false;
+  });
+}
+
 async function resolveUserEmployeeIds(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
@@ -165,23 +195,14 @@ export async function GET(request: Request) {
         const userEmployeeIds = userEmployeeIdsResult.ids;
 
         const fallbackItems = listFallbackEventsForWeek(companyId, weekDays[0], weekEnd)
-          .filter((event) => {
-            if (event.visibility === "private") return String(event.created_by) === String(userId);
-            if (effectiveRole === "admin" || effectiveRole === "pm") return true;
-            if (event.visibility === "company") return true;
-            return event.attendees.some((attendee) => {
-              if (attendee.attendee_type === "user") {
-                return String(attendee.user_id ?? "") === String(userId) && String(attendee.response_status ?? "invited") !== "declined";
-              }
-              if (attendee.attendee_type === "employee" && attendee.employee_id) {
-                return (
-                  userEmployeeIds.has(String(attendee.employee_id)) &&
-                  String(attendee.response_status ?? "invited") !== "declined"
-                );
-              }
-              return false;
-            });
-          })
+          .filter((event) =>
+            canUserSeeEvent({
+              event,
+              attendees: event.attendees,
+              userId,
+              userEmployeeIds,
+            })
+          )
           .map((event) => ({
             id: event.id,
             title: event.title,
@@ -231,23 +252,14 @@ export async function GET(request: Request) {
     }
     const userEmployeeIds = userEmployeeIdsResult.ids;
 
-    const visibleEvents = allEvents.filter((event) => {
-      if (event.visibility === "private") {
-        return String(event.created_by) === String(userId);
-      }
-      if (effectiveRole === "admin" || effectiveRole === "pm") return true;
-      if (event.visibility === "company") return true;
-      const attendees = attendeesByEvent.get(event.id) ?? [];
-      return attendees.some((attendee) => {
-        if (attendee.attendee_type === "user") {
-          return String(attendee.user_id ?? "") === String(userId) && String(attendee.response_status ?? "invited") !== "declined";
-        }
-        if (attendee.attendee_type === "employee" && attendee.employee_id) {
-          return userEmployeeIds.has(String(attendee.employee_id)) && String(attendee.response_status ?? "invited") !== "declined";
-        }
-        return false;
-      });
-    });
+    const visibleEvents = allEvents.filter((event) =>
+      canUserSeeEvent({
+        event,
+        attendees: attendeesByEvent.get(event.id) ?? [],
+        userId,
+        userEmployeeIds,
+      })
+    );
 
     const items = visibleEvents.map((event) => mapEvent(event, attendeesByEvent.get(event.id) ?? []));
     return NextResponse.json({ items });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { requireModuleAccess } from "@/lib/auth/requireRole";
+import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okSuccess } from "@/lib/http/json";
@@ -47,6 +47,11 @@ export async function DELETE(
 
     try {
       await requireModuleAccess("safety", "edit");
+    } catch {
+      return forbidden();
+    }
+    try {
+      await requireRole(["admin", "pm"]);
     } catch {
       return forbidden();
     }

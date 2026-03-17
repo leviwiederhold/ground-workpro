@@ -85,6 +85,20 @@ export async function GET() {
       ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
       : { data: [], error: null };
 
+    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
+      const fallbackProfiles = userIds.length
+        ? await db.from("profiles").select("id, full_name, avatar_url").in("id", userIds)
+        : { data: [], error: null };
+      profiles = {
+        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string; avatar_url?: string }) => ({
+          id: row.id,
+          full_name: row.full_name,
+          avatar_url: row.avatar_url,
+        })),
+        error: fallbackProfiles.error,
+      };
+    }
+
     if (profiles.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profiles.error.message || "")) {
       const fallbackProfiles = userIds.length
         ? await db.from("profiles").select("id, full_name, display_name").in("id", userIds)
@@ -101,28 +115,15 @@ export async function GET() {
       };
     }
 
-    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string }) => ({
-          id: row.id,
-          full_name: row.full_name,
-        })),
-        error: fallbackProfiles.error,
-      };
-    }
-
     if (profiles.error) return serverError();
 
     let employees: {
-      data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; status?: string | null }> | null;
+      data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; role?: string | null; status?: string | null }> | null;
       error: { message?: string } | null;
     } = userIds.length
       ? await db
           .from("employees")
-          .select("user_id, name, full_name, email, status")
+          .select("user_id, name, full_name, email, role, status")
           .eq("company_id", companyId)
           .in("user_id", userIds)
       : { data: [], error: null };
@@ -144,6 +145,7 @@ export async function GET() {
 
     const nameById = new Map<string, string>();
     const avatarById = new Map<string, string>();
+    const roleOverrideById = new Map<string, string>();
     for (const profile of profiles.data ?? []) {
       const profileId = String(profile.id ?? "").trim();
       if (!profileId) continue;
@@ -168,6 +170,29 @@ export async function GET() {
       if (employeeName) {
         nameById.set(userIdKey, employeeName);
       }
+      const employeeRole = String(employee.role ?? "").trim().toLowerCase();
+      if (employeeRole.includes("fieldstaff") || employeeRole.includes("field_staff") || employeeRole.includes("field staff")) {
+        roleOverrideById.set(userIdKey, "fieldstaff");
+      }
+    }
+
+    if (userIds.length > 0) {
+      const acceptedInvitesResult = await db
+        .from("pending_invitations")
+        .select("accepted_user_id, role")
+        .eq("company_id", companyId)
+        .not("accepted_at", "is", null)
+        .in("accepted_user_id", userIds);
+      if (!acceptedInvitesResult.error) {
+        for (const row of acceptedInvitesResult.data ?? []) {
+          const acceptedUserId = String(row.accepted_user_id ?? "").trim();
+          const inviteRole = String(row.role ?? "").trim().toLowerCase();
+          if (!acceptedUserId) continue;
+          if (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff")) {
+            roleOverrideById.set(acceptedUserId, "fieldstaff");
+          }
+        }
+      }
     }
 
     if (admin) {
@@ -191,7 +216,7 @@ export async function GET() {
         .filter((row) => !inactiveUserIds.has(String(row.user_id ?? "").trim()))
         .map((row) => ({
         userId: row.user_id,
-        role: toRoleLabel(row.role),
+        role: toRoleLabel(roleOverrideById.get(String(row.user_id ?? "").trim()) || row.role),
         displayName: nameById.get(String(row.user_id ?? "").trim()) || "Team Member",
         avatarUrl: avatarById.get(String(row.user_id ?? "").trim()) || "",
       })),

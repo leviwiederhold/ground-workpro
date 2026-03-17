@@ -185,7 +185,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
   }
 
-  const membershipRole = role === "ceo" ? COMPANY_OWNER_MEMBERSHIP_ROLE : role;
+  const membershipRole =
+    role === "ceo"
+      ? COMPANY_OWNER_MEMBERSHIP_ROLE
+      : role === "fieldstaff"
+        ? "operator"
+        : role;
   const membershipInsert = await admin.from("memberships").upsert(
     {
       company_id: invitation.company_id,

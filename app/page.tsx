@@ -325,9 +325,24 @@ const WorkspaceLoadingScreen = () => (
     // ICON COMPONENT
     // ============================================
 
-    const Icon = ({ name, className = '' }) => (
-      <i className={`fa-solid fa-${name} ${className}`}></i>
-    );
+    const ICON_ALIASES = {
+      'grid-2': 'table-columns',
+      'truck-field': 'truck',
+      'calendar-week': 'calendar-days',
+      'shield-heart': 'shield-halved',
+      'external-link': 'up-right-from-square',
+      'file-export': 'file-arrow-down',
+      'clipboard-list': 'clipboard-check',
+    };
+
+    const BRAND_ICONS = new Set(['google', 'microsoft']);
+
+    const Icon = ({ name, className = '' }) => {
+      const normalized = String(name || '').trim();
+      const resolved = ICON_ALIASES[normalized] || normalized;
+      const stylePrefix = BRAND_ICONS.has(resolved) || className.includes('fab') ? 'fa-brands' : 'fa-solid';
+      return <i className={`${stylePrefix} fa-${resolved} ${className}`}></i>;
+    };
 
     // ============================================
     // SHARED COMPONENTS
@@ -11345,15 +11360,97 @@ const WorkspaceLoadingScreen = () => (
         { title: 'Job Costing', subtitle: 'Watch margin drift before it becomes a problem.', icon: 'chart-line' },
       ];
 
+      const FeatureGlyph = ({ type, className = '' }) => {
+        const shared = {
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 1.8,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        };
+
+        switch (type) {
+          case 'dashboard':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <rect x="3.5" y="4" width="17" height="16" rx="2.5" {...shared} />
+                <rect x="6.5" y="7" width="4" height="4" rx="0.8" {...shared} />
+                <rect x="13.5" y="7" width="4" height="4" rx="0.8" {...shared} />
+                <rect x="6.5" y="13" width="4" height="4" rx="0.8" {...shared} />
+                <path d="M13.5 15h4" {...shared} />
+                <path d="M15.5 13v4" {...shared} />
+              </svg>
+            );
+          case 'fleet':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <path d="M3.5 7.5h11l2.5 4H20a1 1 0 0 1 1 1V16h-1.5" {...shared} />
+                <path d="M4 16H3V9a1.5 1.5 0 0 1 1.5-1.5" {...shared} />
+                <circle cx="7" cy="16.5" r="2" {...shared} />
+                <circle cx="17" cy="16.5" r="2" {...shared} />
+                <path d="M9 16.5h6" {...shared} />
+              </svg>
+            );
+          case 'schedule':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <rect x="4" y="5" width="16" height="15" rx="2.5" {...shared} />
+                <path d="M8 3.5v3M16 3.5v3M4 9h16" {...shared} />
+                <path d="m9.5 14 1.5 1.5 3.5-4" {...shared} />
+              </svg>
+            );
+          case 'messaging':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <path d="M5 6.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H11l-4.5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z" {...shared} />
+                <path d="M8 11.5h8M8 14.5h5" {...shared} />
+              </svg>
+            );
+          case 'costing':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <path d="M7 4.5h8l3 3v12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 19.5V6a1.5 1.5 0 0 1 1-1.5Z" {...shared} />
+                <path d="M15 4.5V8h3" {...shared} />
+                <path d="M9 12.5h6M9 16h4" {...shared} />
+              </svg>
+            );
+          case 'safety':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <path d="M12 3.5 19 6v5.5c0 4.2-2.7 8-7 9.5-4.3-1.5-7-5.3-7-9.5V6l7-2.5Z" {...shared} />
+                <path d="m9.5 12 1.7 1.7 3.3-3.7" {...shared} />
+              </svg>
+            );
+          case 'reports':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <path d="M4 19.5h16" {...shared} />
+                <path d="M7 16v-3.5M12 16V9M17 16V6.5" {...shared} />
+                <path d="m6 10.5 4-3 3 2 5-4" {...shared} />
+              </svg>
+            );
+          case 'integrations':
+            return (
+              <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+                <path d="M9 3.5V8M15 3.5V8" {...shared} />
+                <path d="M8 8h8v3a4 4 0 0 1-4 4 4 4 0 0 1-4-4V8Z" {...shared} />
+                <path d="M12 15v5" {...shared} />
+              </svg>
+            );
+          default:
+            return null;
+        }
+      };
+
       const features = [
-        { icon: 'table-columns', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
-        { icon: 'truck', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
-        { icon: 'calendar-days', title: 'Smart Scheduling', desc: 'Drag-and-drop crew and equipment scheduling with conflict detection.' },
-        { icon: 'comments', title: 'Team Messaging', desc: 'Built-in communication with channels, DMs, and file sharing.' },
-        { icon: 'file-invoice-dollar', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
-        { icon: 'shield', title: 'Safety & Compliance', desc: 'Digital safety sign-offs, incident tracking, and certification management.' },
-        { icon: 'chart-line', title: 'Advanced Reports', desc: 'Generate insights on productivity, costs, and equipment performance.' },
-        { icon: 'plug', title: '40+ Integrations', desc: 'Connect QuickBooks, Samsara, Procore, and all your favorite tools.' },
+        { glyph: 'dashboard', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
+        { glyph: 'fleet', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
+        { glyph: 'schedule', title: 'Smart Scheduling', desc: 'Drag-and-drop crew and equipment scheduling with conflict detection.' },
+        { glyph: 'messaging', title: 'Team Messaging', desc: 'Built-in communication with channels, DMs, and file sharing.' },
+        { glyph: 'costing', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
+        { glyph: 'safety', title: 'Safety & Compliance', desc: 'Digital safety sign-offs, incident tracking, and certification management.' },
+        { glyph: 'reports', title: 'Advanced Reports', desc: 'Generate insights on productivity, costs, and equipment performance.' },
+        { glyph: 'integrations', title: '40+ Integrations', desc: 'Connect QuickBooks, Samsara, Procore, and all your favorite tools.' },
       ];
 
       const testimonials = [
@@ -11520,7 +11617,7 @@ const WorkspaceLoadingScreen = () => (
           </nav>
 
           {/* Hero Section */}
-          <section className="pt-32 pb-20 px-6 relative overflow-hidden">
+          <section className="relative overflow-hidden px-4 pb-16 pt-24 sm:px-6 sm:pb-20 sm:pt-32">
             {/* Background Image */}
             <div className="absolute inset-0 z-0">
               {IMAGES.hero !== 'YOUR_HERO_IMAGE_URL' ? (
@@ -11549,28 +11646,28 @@ const WorkspaceLoadingScreen = () => (
               <div className="absolute inset-0 bg-gradient-to-r from-white via-white/95 to-white/80"></div>
             </div>
 
-            <div className="max-w-7xl mx-auto relative z-10">
+            <div className="relative z-10 mx-auto max-w-7xl">
               <div className="max-w-2xl">
-                <div className="inline-flex items-center gap-2 px-4 py-2 bg-brand-50 text-brand-700 rounded-full text-sm font-medium mb-6">
+                <div className="mb-6 inline-flex items-center gap-2 rounded-full bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 sm:px-4 sm:text-sm">
                   <Icon name="sparkles" />
                   The #1 Platform for Excavation Companies
                 </div>
-                <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+                <h1 className="mb-5 text-4xl font-bold leading-tight text-gray-900 sm:mb-6 sm:text-5xl md:text-6xl">
                   Run Your Excavation Business
                   <span className="text-brand-500"> Like a Pro</span>
                 </h1>
-                <p className="text-xl text-gray-600 mb-10 leading-relaxed">
+                <p className="mb-8 text-lg leading-relaxed text-gray-600 sm:mb-10 sm:text-xl">
                   Manage crews, track equipment, schedule jobs, and control costs—all from one powerful platform built specifically for excavation and grading contractors.
                 </p>
-                <div className="flex flex-col sm:flex-row items-start gap-4">
+                <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:gap-4">
                   <button
                     onClick={() => { window.location.href = '/signup'; }}
-                    className="px-8 py-4 bg-brand-500 text-white font-semibold rounded-xl hover:bg-brand-600 transition-all transform hover:scale-105 shadow-lg shadow-brand-500/30 flex items-center gap-2"
+                    className="flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-6 py-3.5 font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:scale-105 hover:bg-brand-600 sm:px-8 sm:py-4"
                   >
                     Start Free Trial
                     <Icon name="arrow-right" />
                   </button>
-                  <button className="px-8 py-4 bg-white text-gray-700 font-semibold rounded-xl border border-gray-200 hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-sm">
+                  <button className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-6 py-3.5 font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 sm:px-8 sm:py-4">
                     <Icon name="play-circle" />
                     Watch Demo
                   </button>
@@ -11578,16 +11675,16 @@ const WorkspaceLoadingScreen = () => (
                 <p className="mt-6 text-sm text-gray-500">14-day free trial. No credit card required.</p>
 
                 {/* Trust badges */}
-                <div className="flex items-center gap-6 mt-10 pt-10 border-t border-gray-200">
-                  <div className="flex items-center gap-2">
+                <div className="mt-8 grid grid-cols-1 gap-3 border-t border-gray-200 pt-6 sm:mt-10 sm:grid-cols-3 sm:gap-6 sm:pt-10">
+                  <div className="flex items-center gap-2 rounded-2xl bg-white/75 px-3 py-2 shadow-sm shadow-slate-200/60 backdrop-blur">
                     <Icon name="shield-check" className="text-green-500" />
                     <span className="text-sm text-gray-600">SOC 2 Compliant</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-2xl bg-white/75 px-3 py-2 shadow-sm shadow-slate-200/60 backdrop-blur">
                     <Icon name="lock" className="text-green-500" />
                     <span className="text-sm text-gray-600">256-bit Encryption</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-2xl bg-white/75 px-3 py-2 shadow-sm shadow-slate-200/60 backdrop-blur">
                     <Icon name="clock" className="text-green-500" />
                     <span className="text-sm text-gray-600">99.9% Uptime</span>
                   </div>
@@ -11595,40 +11692,42 @@ const WorkspaceLoadingScreen = () => (
               </div>
 
               {/* Dashboard Preview - Working Mini Dashboard */}
-              <div className="mt-16 relative">
-                <div className="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent z-10 pointer-events-none" style={{height: '120%'}}></div>
-                <div className="bg-dark-900 rounded-2xl p-2 shadow-2xl">
-                  <div className="bg-gray-50 rounded-xl overflow-hidden">
+              <div className="relative mt-12 sm:mt-16">
+                <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-white via-transparent to-transparent" style={{height: '120%'}}></div>
+                <div className="overflow-hidden rounded-2xl bg-dark-900 p-2 shadow-2xl">
+                  <div className="overflow-hidden rounded-xl bg-gray-50">
                     {/* Browser Chrome */}
-                    <div className="bg-dark-800 px-4 py-2 flex items-center gap-2">
+                    <div className="flex items-center gap-2 bg-dark-800 px-3 py-2 sm:px-4">
                       <div className="flex gap-1.5">
                         <div className="w-3 h-3 rounded-full bg-red-500"></div>
                         <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
                         <div className="w-3 h-3 rounded-full bg-green-500"></div>
                       </div>
-                      <div className="flex-1 text-center">
+                      <div className="hidden flex-1 text-center sm:block">
                         <span className="text-xs text-gray-400">app.groundworkpro.com/dashboard</span>
                       </div>
                     </div>
                     {/* Mini Dashboard */}
-                    <div className="flex h-[500px]">
+                    <div className="flex min-h-[720px] flex-col sm:h-[500px] sm:min-h-0 sm:flex-row">
                       {/* Sidebar */}
-                      <div className="w-48 bg-dark-900 p-3 flex-shrink-0">
-                        <div className="flex items-center gap-2 mb-6">
+                      <div className="bg-dark-900 p-3 sm:w-48 sm:flex-shrink-0">
+                        <div className="mb-4 flex items-center gap-2 sm:mb-6">
                           <div className="w-8 h-8 bg-brand-500 rounded-lg flex items-center justify-center">
                             <Icon name="mountain" className="text-white text-sm" />
                           </div>
                           <span className="text-white font-dozer text-sm tracking-wide">GROUNDWORK</span>
                         </div>
+                        <div className="grid grid-cols-3 gap-2 sm:block">
                         {['Dashboard', 'Messages', 'Schedule', 'Jobs', 'Fleet', 'Team'].map((item, i) => (
-                          <div key={i} className={`flex items-center gap-2 px-2 py-2 rounded text-xs mb-1 ${i === 0 ? 'bg-brand-500 text-white' : 'text-gray-400'}`}>
+                          <div key={i} className={`mb-1 flex items-center gap-2 rounded px-2 py-2 text-xs ${i === 0 ? 'bg-brand-500 text-white' : 'text-gray-400'} sm:mb-1`}>
                             <Icon name={['grid-2', 'comments', 'calendar-week', 'briefcase', 'truck-field', 'people-group'][i]} />
                             <span>{item}</span>
                           </div>
                         ))}
+                        </div>
                       </div>
                       {/* Main Content */}
-                      <div className="flex-1 p-4 overflow-hidden">
+                      <div className="flex-1 overflow-hidden p-3 sm:p-4">
                         {/* Header */}
                         <div className="flex items-center justify-between mb-4">
                           <div>
@@ -11643,14 +11742,14 @@ const WorkspaceLoadingScreen = () => (
                           </div>
                         </div>
                         {/* Stats */}
-                        <div className="grid grid-cols-4 gap-3 mb-4">
+                        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                           {[
                             { label: 'Active Jobs', value: '8', icon: 'briefcase', color: 'brand' },
                             { label: 'Fleet Utilization', value: '87%', icon: 'truck-field', color: 'green' },
                             { label: 'Crew On-Site', value: '24', icon: 'users', color: 'blue' },
                             { label: 'Month Revenue', value: '$847K', icon: 'dollar-sign', color: 'green' },
                           ].map((stat, i) => (
-                            <div key={i} className="bg-white rounded-lg p-3 border border-gray-200">
+                            <div key={i} className="rounded-lg border border-gray-200 bg-white p-3">
                               <div className="flex items-center justify-between mb-1">
                                 <Icon name={stat.icon} className={`text-${stat.color}-500 text-xs`} />
                               </div>
@@ -11660,9 +11759,9 @@ const WorkspaceLoadingScreen = () => (
                           ))}
                         </div>
                         {/* Content Grid */}
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                           {/* Jobs List */}
-                          <div className="col-span-2 bg-white rounded-lg border border-gray-200 p-3">
+                          <div className="rounded-lg border border-gray-200 bg-white p-3 sm:col-span-2">
                             <h4 className="font-medium text-gray-900 text-xs mb-3">Active Jobs</h4>
                             {['Highway 42 Expansion', 'Riverside Commercial', 'Oak Hills Subdivision'].map((job, i) => (
                               <div key={i} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
@@ -11677,7 +11776,7 @@ const WorkspaceLoadingScreen = () => (
                             ))}
                           </div>
                           {/* Weather */}
-                          <div className="bg-white rounded-lg border border-gray-200 p-3">
+                          <div className="rounded-lg border border-gray-200 bg-white p-3">
                             <h4 className="font-medium text-gray-900 text-xs mb-2">Weather</h4>
                             <div className="text-center">
                               <Icon name="sun" className="text-yellow-500 text-2xl mb-1" />
@@ -11726,7 +11825,7 @@ const WorkspaceLoadingScreen = () => (
                 {features.map((feature, i) => (
                   <div key={i} className="p-6 bg-white rounded-xl border border-gray-200 hover:border-brand-300 hover:shadow-lg transition-all group">
                     <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white shadow-sm group-hover:border-brand-200 group-hover:from-brand-100 group-hover:to-brand-50">
-                      <Icon name={feature.icon} className="text-2xl text-brand-600" />
+                      <FeatureGlyph type={feature.glyph} className="h-7 w-7 text-brand-600" />
                     </div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
                     <p className="text-gray-600 text-sm">{feature.desc}</p>
@@ -11754,18 +11853,16 @@ const WorkspaceLoadingScreen = () => (
                   { alt: 'Dozer on pile', placeholder: 'GALLERY 7' },
                   { alt: 'Dozer pushing grade', placeholder: 'GALLERY 8' },
                 ].map((img, i) => (
-                  <div key={i} className={`group overflow-hidden rounded-xl ${i === 0 || i === 5 ? 'md:col-span-2 md:row-span-2' : ''}`}>
+                  <div key={i} className="group aspect-[4/5] overflow-hidden rounded-xl md:aspect-[5/4]">
                     {IMAGES.gallery[i] && !IMAGES.gallery[i].includes('YOUR_') ? (
                       <img
                         src={IMAGES.gallery[i]}
                         alt={img.alt}
                         className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-105"
-                        style={{ minHeight: i === 0 || i === 5 ? '260px' : '150px' }}
                       />
                     ) : (
                       <div
                         className="flex h-full w-full items-end bg-[linear-gradient(160deg,#dbeafe_0%,#e2e8f0_45%,#cbd5e1_100%)] p-3 sm:p-4"
-                        style={{ minHeight: i === 0 || i === 5 ? '260px' : '150px' }}
                       >
                         <div className="w-full rounded-2xl border border-white/60 bg-white/70 p-3 text-slate-700 shadow-lg backdrop-blur">
                           <div className="mb-8 flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-500 text-white">

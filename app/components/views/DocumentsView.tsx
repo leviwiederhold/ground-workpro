@@ -8,7 +8,15 @@ import { EmptyState, InlineError, SkeletonBlock } from '@/app/components/ui/Feed
 const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 
 export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
-  const { SearchInput, Button, Icon, Card, formatDate } = ui;
+  const {
+    SearchInput,
+    Button,
+    Icon,
+    Card,
+    formatDate,
+    suppressSetupRefreshDuringFilePicker,
+    clearSetupRefreshSuppression,
+  } = ui;
   const normalizedRole = String(currentRole || '').trim().toLowerCase();
   const documentsAccess = String(moduleAccess?.documents || '').trim().toLowerCase();
   const canViewDocuments = documentsAccess === 'view' || documentsAccess === 'edit';
@@ -82,6 +90,7 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   }, [loadDocuments]);
 
   const handleUpload = async (event) => {
+    clearSetupRefreshSuppression?.();
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file || !canManageDocuments) return;
@@ -106,15 +115,21 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
         payload = null;
       }
 
-      if (!response.ok) {
+      if (!response.ok || !payload?.attachment) {
         setError(payload?.error || raw || 'Failed to upload document');
         return;
       }
 
+      setSelectedDocumentId(payload.attachment.id);
+      setDocuments((prev) => {
+        const nextDocs = [payload.attachment, ...prev.filter((item) => item.id !== payload.attachment.id)];
+        return nextDocs;
+      });
       await loadDocuments();
     } catch {
       setError('Failed to upload document');
     } finally {
+      clearSetupRefreshSuppression?.();
       setUploading(false);
     }
   };
@@ -227,7 +242,10 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
           />
           <Button
             variant="brand"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => {
+              suppressSetupRefreshDuringFilePicker?.();
+              fileInputRef.current?.click();
+            }}
             disabled={!canManageDocuments || uploading || deletingId !== null || loading}
             data-testid="documents-upload-button"
           >

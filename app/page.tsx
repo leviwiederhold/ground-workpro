@@ -354,7 +354,7 @@ const WorkspaceLoadingScreen = () => (
       </div>
     );
 
-    const Button = ({ children, variant = 'primary', size = 'md', onClick, disabled, className = '', ...props }) => {
+    const Button = ({ children, variant = 'primary', size = 'md', type = 'button', onClick, disabled, className = '', ...props }) => {
       const variants = {
         primary: 'bg-dark-900 hover:bg-dark-800 text-white',
         secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300',
@@ -369,6 +369,7 @@ const WorkspaceLoadingScreen = () => (
       };
       return (
         <button
+          type={type}
           className={`${variants[variant]} ${sizes[size]} rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed mobile-tap-target ${className}`}
           onClick={onClick}
           disabled={disabled}
@@ -478,6 +479,27 @@ const WorkspaceLoadingScreen = () => (
         />
       </div>
     );
+
+    const SETUP_REFRESH_SUPPRESSION_MS = 15000;
+
+    const suppressSetupRefreshDuringFilePicker = (durationMs = SETUP_REFRESH_SUPPRESSION_MS) => {
+      if (typeof window === 'undefined') return;
+      const nextUntil = Date.now() + durationMs;
+      const statefulWindow = window as typeof window & { __groundworkSuppressSetupRefreshUntil?: number };
+      statefulWindow.__groundworkSuppressSetupRefreshUntil = nextUntil;
+    };
+
+    const clearSetupRefreshSuppression = () => {
+      if (typeof window === 'undefined') return;
+      const statefulWindow = window as typeof window & { __groundworkSuppressSetupRefreshUntil?: number };
+      delete statefulWindow.__groundworkSuppressSetupRefreshUntil;
+    };
+
+    const isSetupRefreshSuppressed = () => {
+      if (typeof window === 'undefined') return false;
+      const statefulWindow = window as typeof window & { __groundworkSuppressSetupRefreshUntil?: number };
+      return Number(statefulWindow.__groundworkSuppressSetupRefreshUntil || 0) > Date.now();
+    };
 
     const StatCard = ({ icon, label, value, subValue, trend, color = 'brand', onClick, href, testId }) => {
       const iconBg = {
@@ -671,7 +693,15 @@ const WorkspaceLoadingScreen = () => (
                 className="hidden"
                 onChange={handleUpload}
               />
-              <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  suppressSetupRefreshDuringFilePicker();
+                  fileInputRef.current?.click();
+                }}
+                disabled={uploading}
+              >
                 <Icon name="paperclip" className="mr-1" />
                 {uploading ? 'Uploading...' : 'Upload'}
               </Button>
@@ -1777,6 +1807,8 @@ const WorkspaceLoadingScreen = () => (
         Icon,
         Card,
         formatDate,
+        suppressSetupRefreshDuringFilePicker,
+        clearSetupRefreshSuppression,
       };
       const sharedViewUi = {
         SearchInput,
@@ -12413,12 +12445,18 @@ const WorkspaceLoadingScreen = () => (
         if (!isAuthenticated) return undefined;
 
         const refreshOnReturn = () => {
+          if (isSetupRefreshSuppressed()) {
+            return;
+          }
           if (document.visibilityState === 'visible') {
             void verifySetup();
           }
         };
 
         const refreshOnPageShow = () => {
+          if (isSetupRefreshSuppressed()) {
+            return;
+          }
           void verifySetup();
         };
 

@@ -7,7 +7,13 @@ export const modulePermissionKeys = [
   "daily_reports",
   "safety",
   "messages",
+  "inventory",
+  "reports",
+  "vendors",
+  "documents",
+  "training",
   "finance",
+  "integrations",
   "team_management",
 ] as const;
 
@@ -41,4 +47,3 @@ export type ModulePermissionRow = {
   module_key: ModulePermissionKey;
   access_level: ModuleAccessLevel;
 };
-

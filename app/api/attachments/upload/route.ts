@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
 
 const allowedEntityTypes = ["job", "daily_report", "work_order", "document", "vendor"] as const;
@@ -166,7 +166,11 @@ export async function POST(request: Request) {
 
     try {
       if (entityType === "document" || entityType === "vendor") {
-        await requireRole(["admin", "pm"]);
+        if (entityType === "document") {
+          await requireModuleAccess("documents", "edit");
+        } else {
+          await requireRole(["admin", "pm"]);
+        }
       } else {
         await requireRole(["admin", "pm", "foreman", "mechanic", "operator"]);
       }

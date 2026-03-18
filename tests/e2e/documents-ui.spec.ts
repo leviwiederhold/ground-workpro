@@ -27,4 +27,7 @@ test('documents page upload works from the UI', async ({ page }) => {
   });
 
   await expect(page.getByRole('heading', { name: fileName })).toBeVisible({ timeout: 30_000 });
+  await page.reload();
+  await page.getByTestId('nav-documents').click();
+  await expect(page.getByRole('heading', { name: fileName })).toBeVisible({ timeout: 30_000 });
 });

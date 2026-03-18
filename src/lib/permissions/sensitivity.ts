@@ -5,7 +5,7 @@ export const SENSITIVE_PERMISSION_WARNING_COPY =
 
 export const SENSITIVE_PERMISSION_MODULES = {
   finance: "Finance",
-  daily_reports: "Reports",
+  reports: "Reports",
   billing: "Billing",
 } as const;
 
@@ -19,7 +19,7 @@ const isGranted = (value: unknown): value is ModuleAccessLevel =>
   value === "view" || value === "edit";
 
 export function isSensitivePermissionModule(moduleKey: string): boolean {
-  return moduleKey === "finance" || moduleKey === "daily_reports" || moduleKey === "billing";
+  return moduleKey === "finance" || moduleKey === "reports" || moduleKey === "billing";
 }
 
 export function getSensitiveInvitePermissionGrants(params: {
@@ -28,7 +28,7 @@ export function getSensitiveInvitePermissionGrants(params: {
 }): SensitivePermissionGrant[] {
   const grants: SensitivePermissionGrant[] = [];
   const financeLevel = params.permissions.finance;
-  const reportsLevel = params.permissions.daily_reports;
+  const reportsLevel = params.permissions.reports;
   const billingLevel = params.permissions.billing;
 
   if (isGranted(financeLevel)) {
@@ -41,8 +41,8 @@ export function getSensitiveInvitePermissionGrants(params: {
 
   if (isGranted(reportsLevel)) {
     grants.push({
-      key: "daily_reports",
-      label: SENSITIVE_PERMISSION_MODULES.daily_reports,
+      key: "reports",
+      label: SENSITIVE_PERMISSION_MODULES.reports,
       accessLevel: reportsLevel,
     });
   }

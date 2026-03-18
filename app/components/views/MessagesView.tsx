@@ -615,38 +615,40 @@ export function MessagesView({ employees = [], ui }) {
           </div>
           {channelsError && <p className="mt-3 text-sm text-red-500 dark:text-red-300">{channelsError}</p>}
         </div>
-        <div className="flex-1 overflow-y-auto">
-          {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">No channels yet.</div> : filteredChannels.map((channel) => (
-            <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-zinc-900 dark:hover:bg-[#131313] ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white dark:bg-brand-600' : ''}`} data-testid={`messages-channel-${channel.id}`}>
-              <div className="flex items-center justify-between gap-2">
-                <span className={`truncate text-sm font-medium ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-900 dark:text-zinc-100'}`}>
-                  {isDirectChannel(channel)
-                    ? getChannelDisplayName(channel)
-                    : `# ${channel.name}`}
-                </span>
-                {(channel.unread_count ?? channel.message_count) > 0 && <span className={`rounded-full px-1.5 py-0.5 text-xs ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700 dark:bg-zinc-800 dark:text-zinc-200'}`}>{channel.unread_count ?? channel.message_count}</span>}
-              </div>
-              <p className={`truncate text-xs ${activeChannel?.id === channel.id ? 'text-white/85' : 'text-gray-500 dark:text-zinc-400'}`}>
-                {channel.last_message_at ? formatThreadSubtextTime(channel.last_message_at) : (channel.last_message_preview || 'No messages yet')}
-              </p>
-            </button>
-          ))}
-          {pendingDirectContact && (
-            <button
-              type="button"
-              onClick={() => setActiveChannel(null)}
-              className="w-full border-b border-gray-100 bg-brand-500 px-4 py-3 text-left dark:border-zinc-900 dark:bg-brand-600"
-              data-testid="messages-channel-pending-direct"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-medium text-sm truncate text-white">{pendingDirectContact.label}</span>
-              </div>
-              <p className="text-xs truncate text-white/80">No messages yet</p>
-            </button>
-          )}
-          <div className="border-t border-gray-100 px-4 py-3 dark:border-zinc-900">
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">No channels yet.</div> : filteredChannels.map((channel) => (
+              <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-zinc-900 dark:hover:bg-[#131313] ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white dark:bg-brand-600' : ''}`} data-testid={`messages-channel-${channel.id}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`truncate text-sm font-medium ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-900 dark:text-zinc-100'}`}>
+                    {isDirectChannel(channel)
+                      ? getChannelDisplayName(channel)
+                      : `# ${channel.name}`}
+                  </span>
+                  {(channel.unread_count ?? channel.message_count) > 0 && <span className={`rounded-full px-1.5 py-0.5 text-xs ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700 dark:bg-zinc-800 dark:text-zinc-200'}`}>{channel.unread_count ?? channel.message_count}</span>}
+                </div>
+                <p className={`truncate text-xs ${activeChannel?.id === channel.id ? 'text-white/85' : 'text-gray-500 dark:text-zinc-400'}`}>
+                  {channel.last_message_at ? formatThreadSubtextTime(channel.last_message_at) : (channel.last_message_preview || 'No messages yet')}
+                </p>
+              </button>
+            ))}
+            {pendingDirectContact && (
+              <button
+                type="button"
+                onClick={() => setActiveChannel(null)}
+                className="w-full border-b border-gray-100 bg-brand-500 px-4 py-3 text-left dark:border-zinc-900 dark:bg-brand-600"
+                data-testid="messages-channel-pending-direct"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-sm truncate text-white">{pendingDirectContact.label}</span>
+                </div>
+                <p className="text-xs truncate text-white/80">No messages yet</p>
+              </button>
+            )}
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col border-t border-gray-100 px-4 py-3 dark:border-zinc-900">
             <p className="mb-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">Team Members</p>
-            <div className="space-y-1 max-h-48 overflow-y-auto">
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1" data-testid="messages-team-members-list">
               {filteredContacts.map((contact) => {
                 const directChannel = contact.userId ? directChannelByUserId.get(String(contact.userId)) : null;
                 const isActiveDirect =

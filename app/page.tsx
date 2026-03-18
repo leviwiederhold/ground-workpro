@@ -905,10 +905,15 @@ const WorkspaceLoadingScreen = () => (
           jobs: 'jobs',
           fleet: 'fleet',
           maintenance: 'maintenance',
-          reports: 'daily_reports',
+          inventory: 'inventory',
+          reports: 'reports',
+          vendors: 'vendors',
+          documents: 'documents',
+          training: 'training',
           safety: 'safety',
           messages: 'messages',
           finance: 'finance',
+          integrations: 'integrations',
           team: 'team_management',
         };
         return map[String(view || '').toLowerCase()] || null;
@@ -1798,7 +1803,7 @@ const WorkspaceLoadingScreen = () => (
           case 'audit': return <AuditView currentRole={currentRole} />;
           case 'marketing': return <MarketingView />;
           case 'integrations': return <IntegrationsView />;
-          case 'documents': return <DocumentsView currentRole={currentRole} ui={documentsViewUi} />;
+          case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} />;
           default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
         }
       };
@@ -3086,17 +3091,23 @@ const WorkspaceLoadingScreen = () => (
         { key: 'daily_reports', label: 'Daily Reports' },
         { key: 'safety', label: 'Safety' },
         { key: 'messages', label: 'Messages' },
+        { key: 'inventory', label: 'Inventory' },
+        { key: 'reports', label: 'Reports' },
+        { key: 'vendors', label: 'Vendors' },
+        { key: 'documents', label: 'Documents' },
+        { key: 'training', label: 'Training' },
         { key: 'finance', label: 'Finance' },
+        { key: 'integrations', label: 'Integrations' },
         { key: 'team_management', label: 'Team Management' },
       ];
       const permissionLevels = ['none', 'view', 'edit'];
       const roleTemplateDefaults = {
-        ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'edit', team_management: 'edit' },
-        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'view', team_management: 'view' },
-        foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
-        mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', finance: 'none', team_management: 'none' },
-        operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', finance: 'none', team_management: 'none' },
-        fieldstaff: { jobs: 'none', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', finance: 'none', team_management: 'none' },
+        ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', integrations: 'edit', team_management: 'edit' },
+        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'none', integrations: 'none', team_management: 'view' },
+        foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', integrations: 'none', team_management: 'none' },
+        mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'none', documents: 'none', training: 'view', finance: 'none', integrations: 'none', team_management: 'none' },
+        operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', integrations: 'none', team_management: 'none' },
+        fieldstaff: { jobs: 'none', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', integrations: 'none', team_management: 'none' },
       };
       const appRoleToInviteRole = (role) => {
         const normalized = String(role || '').toLowerCase();
@@ -9727,327 +9738,63 @@ const WorkspaceLoadingScreen = () => (
     // MESSAGES VIEW - Team Communication Hub
     // ============================================
     const IntegrationsView = () => {
-      type IntegrationCapability = {
-        canConnect: boolean;
-        canDisconnect: boolean;
-        hasSync: boolean;
-      };
-
-      type IntegrationCatalogItem = {
-        provider: string;
-        name: string;
-        category: string;
-        icon: string;
-        description: string;
-        popular: boolean;
-        capabilities: IntegrationCapability;
-        connect_url_placeholder: string;
-      };
-
-      type IntegrationConnection = {
-        id: string;
-        provider: string;
-        connected: boolean;
-        connected_at?: string | null;
-        disconnected_at?: string | null;
-        created_at?: string | null;
-        updated_at?: string | null;
-      };
-
-      const [searchTerm, setSearchTerm] = useState('');
-      const [activeCategory, setActiveCategory] = useState('all');
-      const [connections, setConnections] = useState<IntegrationConnection[]>([]);
-      const [integrations, setIntegrations] = useState<IntegrationCatalogItem[]>([]);
-      const [loadingConnections, setLoadingConnections] = useState(false);
-      const [loadingCapabilities, setLoadingCapabilities] = useState(false);
-      const [connectionsError, setConnectionsError] = useState('');
-      const [activeProviderAction, setActiveProviderAction] = useState<string | null>(null);
-
-      const loadConnections = useCallback(async () => {
-        setLoadingConnections(true);
-        setConnectionsError('');
-        try {
-          const response = await fetch('/api/integrations', { cache: 'no-store' });
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-
-          if (!response.ok) {
-            setConnectionsError(parsed?.error || raw || 'Failed to load integrations');
-            setConnections([]);
-            return;
-          }
-
-          setConnections(Array.isArray(parsed?.items) ? parsed.items : []);
-        } catch {
-          setConnectionsError('Failed to load integrations');
-          setConnections([]);
-        } finally {
-          setLoadingConnections(false);
-        }
-      }, []);
-
-      const loadCapabilities = useCallback(async () => {
-        setLoadingCapabilities(true);
-        setConnectionsError('');
-        try {
-          const response = await fetch('/api/integrations/capabilities', { cache: 'no-store' });
-          const raw = await response.text();
-          let parsed: { items?: IntegrationCatalogItem[]; error?: string } = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-
-          if (!response.ok) {
-            setConnectionsError(parsed.error || raw || 'Failed to load integration capabilities');
-            setIntegrations([]);
-            return;
-          }
-
-          setIntegrations(Array.isArray(parsed.items) ? parsed.items : []);
-        } catch {
-          setConnectionsError('Failed to load integration capabilities');
-          setIntegrations([]);
-        } finally {
-          setLoadingCapabilities(false);
-        }
-      }, []);
-
-      useEffect(() => {
-        loadConnections();
-        loadCapabilities();
-      }, [loadConnections, loadCapabilities]);
-
-      const connectedIntegrations = connections
-        .filter((item) => item.connected)
-        .map((item) => item.provider);
-
-      const categories = [
-        { id: 'all', label: 'All Integrations', icon: 'grid-2' },
-        { id: 'financial', label: 'Financial', icon: 'landmark' },
-        { id: 'fleet', label: 'Fleet & GPS', icon: 'satellite-dish' },
-        { id: 'time', label: 'Time & Payroll', icon: 'clock' },
-        { id: 'project', label: 'Project Management', icon: 'helmet-safety' },
-        { id: 'communication', label: 'Communication', icon: 'comment-sms' },
-        { id: 'documents', label: 'Documents', icon: 'file-signature' },
-        { id: 'weather', label: 'Weather', icon: 'cloud-sun' },
-        { id: 'fuel', label: 'Fuel & Purchasing', icon: 'gas-pump' },
-        { id: 'compliance', label: 'Compliance', icon: 'shield-halved' },
-        { id: 'crm', label: 'CRM & Sales', icon: 'chart-line' },
-      ];
-
-      const filteredIntegrations = integrations.filter(int => {
-        const matchesSearch = int.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              int.description.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchesCategory = activeCategory === 'all' || int.category === activeCategory;
-        return matchesSearch && matchesCategory;
-      });
-
-      const toggleConnection = async (id, connected) => {
-        setActiveProviderAction(id);
-        setConnectionsError('');
-        try {
-          const endpoint = connected
-            ? `/api/integrations/${id}/disconnect`
-            : `/api/integrations/${id}/connect`;
-          const response = await fetch(endpoint, { method: 'POST' });
-          const raw = await response.text();
-          let parsed = {};
-          try {
-            parsed = raw ? JSON.parse(raw) : {};
-          } catch {
-            parsed = {};
-          }
-          if (!response.ok) {
-            setConnectionsError(parsed?.error || raw || 'Failed to update integration connection');
-            return;
-          }
-          await loadConnections();
-        } catch {
-          setConnectionsError('Failed to update integration connection');
-        } finally {
-          setActiveProviderAction(null);
-        }
-      };
-
       return (
-        <ComingSoonOverlay active={false}>
+        <ComingSoonOverlay active={true}>
           <div className="space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Integrations</h2>
-              <p className="text-sm text-gray-500">Connect your favorite tools to streamline operations</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="success" className="text-sm">
-                <Icon name="plug" className="mr-1" />
-                {connectedIntegrations.length} Connected
-              </Badge>
-            </div>
-          </div>
-
-          {loadingConnections && (
-            <Card className="p-4">
-              <p className="text-sm text-gray-500">Loading integrations...</p>
-            </Card>
-          )}
-          {loadingCapabilities && (
-            <Card className="p-4">
-              <p className="text-sm text-gray-500">Loading integration capabilities...</p>
-            </Card>
-          )}
-          {connectionsError && (
-            <Card className="p-4 border border-red-200 bg-red-50">
-              <p className="text-sm text-red-700">{connectionsError}</p>
-            </Card>
-          )}
-          {!loadingConnections && !loadingCapabilities && !connectionsError && connections.length === 0 && (
-            <Card className="p-4">
-              <p className="text-sm text-gray-500">No saved integrations yet.</p>
-            </Card>
-          )}
-
-          {/* Search and Stats */}
-          <div className="flex items-center gap-4">
-            <div className="relative flex-1 max-w-md">
-              <Icon name="magnifying-glass" className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder="Search integrations..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-              />
-            </div>
-          </div>
-
-          <div className="flex gap-6">
-            {/* Categories Sidebar */}
-            <div className="w-56 flex-shrink-0">
-              <Card className="p-2">
-                <nav className="space-y-1">
-                  {categories.map(cat => (
-                    <button
-                      key={cat.id}
-                      onClick={() => setActiveCategory(cat.id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
-                        activeCategory === cat.id
-                          ? 'bg-brand-50 text-brand-700 font-medium'
-                          : 'text-gray-600 hover:bg-gray-50'
-                      }`}
-                    >
-                      <Icon name={cat.icon} className={activeCategory === cat.id ? 'text-brand-500' : 'text-gray-400'} />
-                      {cat.label}
-                      <span className={`ml-auto text-xs ${activeCategory === cat.id ? 'text-brand-500' : 'text-gray-400'}`}>
-                        {cat.id === 'all' ? integrations.length : integrations.filter(i => i.category === cat.id).length}
-                      </span>
-                    </button>
-                  ))}
-                </nav>
-              </Card>
-            </div>
-
-            {/* Integrations Grid */}
-            <div className="flex-1">
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {filteredIntegrations.map(integration => {
-                  const isConnected = connectedIntegrations.includes(integration.provider);
-                  const isBusy = activeProviderAction === integration.provider || loadingConnections || loadingCapabilities;
-                  const canConnect = integration.capabilities?.canConnect !== false;
-                  const canDisconnect = integration.capabilities?.canDisconnect !== false;
-                  return (
-                    <Card
-                      key={integration.provider}
-                      data-testid={`integration-card-${integration.provider}`}
-                      className={`p-4 transition-all ${isConnected ? 'ring-2 ring-green-500 bg-green-50/30' : 'hover:shadow-md'}`}
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${isConnected ? 'bg-green-100' : 'bg-gray-100'}`}>
-                            <Icon name={integration.icon} className={`text-xl ${isConnected ? 'text-green-600' : 'text-gray-600'}`} />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-gray-900">{integration.name}</h4>
-                              {integration.popular && (
-                                <Badge className="bg-brand-100 text-brand-700 text-xs">Popular</Badge>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500 capitalize">{integration.category.replace('-', ' ')}</p>
-                          </div>
+            <Card className="overflow-hidden border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#090909]">
+              <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
+                <div className="space-y-5 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 px-6 py-8 text-white sm:px-8">
+                  <Badge className="w-fit bg-white/10 text-white ring-1 ring-white/20">Coming Soon</Badge>
+                  <div className="space-y-3">
+                    <h2 className="text-2xl font-semibold tracking-tight">Integrations are staged for the beta roadmap.</h2>
+                    <p className="max-w-2xl text-sm text-slate-200">
+                      Groundwork Pro will support accounting, telematics, payroll, and document platform connections, but setup is intentionally blocked during this beta.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {[
+                      { title: 'Accounting', body: 'QuickBooks and ERP sync for costs, billing, and vendor workflows.' },
+                      { title: 'Field Systems', body: 'GPS, telematics, and time capture links for crews and equipment.' },
+                      { title: 'Documents', body: 'Secure handoff to storage, forms, and external compliance systems.' },
+                    ].map((item) => (
+                      <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-sm font-medium text-white">{item.title}</p>
+                        <p className="mt-2 text-xs leading-5 text-slate-300">{item.body}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-4 bg-slate-50 px-6 py-8 dark:bg-[#050505] sm:px-8">
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white/80 p-5 dark:border-zinc-700 dark:bg-[#101010]">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-900">
+                        <Icon name="plug" className="text-lg" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">Beta access is disabled</p>
+                        <p className="text-xs text-slate-600 dark:text-zinc-400">Connect and disconnect controls will turn on in a later release.</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 space-y-2">
+                      {['QuickBooks', 'Samsara', 'ADP', 'Procore'].map((name) => (
+                        <div key={name} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 dark:border-zinc-800">
+                          <span className="text-sm text-slate-700 dark:text-zinc-300">{name}</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:bg-zinc-900 dark:text-zinc-400">
+                            blocked
+                          </span>
                         </div>
-                      </div>
-                      <p className="text-sm text-gray-600 mb-4">{integration.description}</p>
-                      <div className="flex items-center justify-between">
-                        {isConnected ? (
-                          <>
-                            <span className="flex items-center gap-1 text-sm text-green-600 font-medium">
-                              <Icon name="check-circle" /> Connected
-                            </span>
-                            <div className="flex gap-2">
-                              <Button variant="secondary" size="sm">
-                                <Icon name="gear" />
-                              </Button>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => toggleConnection(integration.provider, true)}
-                                disabled={isBusy || !canDisconnect}
-                                data-testid={`integration-disconnect-${integration.provider}`}
-                              >
-                                {isBusy ? '...' : 'Disconnect'}
-                              </Button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <span className="text-sm text-gray-400">Not connected</span>
-                            <Button
-                              variant="brand"
-                              size="sm"
-                              onClick={() => toggleConnection(integration.provider, false)}
-                              disabled={isBusy || !canConnect}
-                              data-testid={`integration-connect-${integration.provider}`}
-                            >
-                              <Icon name="plug" className="mr-1" /> {isBusy ? '...' : 'Connect'}
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </Card>
-                  );
-                })}
+                      ))}
+                    </div>
+                  </div>
+                  <Card className="border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+                    <p className="text-sm font-medium">This page is intentionally non-interactive for beta.</p>
+                    <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+                      Visibility stays in the app so teams know the module exists, but no live integration state can be changed yet.
+                    </p>
+                  </Card>
+                </div>
               </div>
-
-              {filteredIntegrations.length === 0 && (
-                <Card className="p-12 text-center">
-                  <Icon name="plug-circle-xmark" className="text-4xl text-gray-300 mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No integrations found</h3>
-                  <p className="text-gray-500">Try adjusting your search or category filter</p>
-                </Card>
-              )}
-            </div>
-          </div>
-
-          {/* Integration Requests */}
-          <Card className="p-6 bg-gradient-to-r from-gray-50 to-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-gray-900 mb-1">Don't see what you need?</h3>
-                <p className="text-sm text-gray-600">We're always adding new integrations. Let us know what tools you'd like to connect.</p>
-              </div>
-              <Button variant="secondary">
-                <Icon name="paper-plane" className="mr-2" /> Request Integration
-              </Button>
-            </div>
-          </Card>
+            </Card>
           </div>
         </ComingSoonOverlay>
       );

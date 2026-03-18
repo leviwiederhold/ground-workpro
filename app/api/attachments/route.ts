@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
@@ -167,6 +167,14 @@ export async function GET(request: Request) {
     const { supabase, companyId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
 
+    if (entityTypeParsed.data === "document") {
+      try {
+        await requireModuleAccess("documents", "view");
+      } catch {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+
     let query = supabase
       .from("attachments")
       .select("*", { count: "exact" })
@@ -288,7 +296,7 @@ export async function POST(request: Request) {
 
     try {
       if (entityType === "document") {
-        await requireRole(["admin", "pm"]);
+        await requireModuleAccess("documents", "edit");
       } else {
         await requireRole(["admin", "pm", "foreman", "mechanic"]);
       }

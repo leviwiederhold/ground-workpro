@@ -63,9 +63,14 @@ const NAV_MODULE_MAP: Partial<Record<string, ModulePermissionKey>> = {
   maintenance: "maintenance",
   safety: "safety",
   messages: "messages",
+  inventory: "inventory",
+  reports: "reports",
+  vendors: "vendors",
+  documents: "documents",
+  training: "training",
   finance: "finance",
+  integrations: "integrations",
   team: "team_management",
-  reports: "daily_reports",
 };
 
 export async function GET() {

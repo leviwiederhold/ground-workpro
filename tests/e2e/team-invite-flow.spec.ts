@@ -41,6 +41,29 @@ test("team invite flow requires role+permissions before link and supports pendin
   const pending = (listJson?.items ?? []).find((item: { id: string }) => String(item.id) === invitationId);
   expect(pending).toBeTruthy();
   expect(String(pending.email)).toBe(email);
+  const pendingPermissions = new Map(
+    ((pending?.permissions ?? []) as Array<{ module_key: string; access_level: string }>).map((row) => [row.module_key, row.access_level])
+  );
+  for (const moduleKey of [
+    "jobs",
+    "fleet",
+    "maintenance",
+    "daily_reports",
+    "safety",
+    "messages",
+    "inventory",
+    "reports",
+    "vendors",
+    "documents",
+    "training",
+    "finance",
+    "integrations",
+    "team_management",
+  ]) {
+    expect(pendingPermissions.has(moduleKey)).toBeTruthy();
+  }
+  expect(pendingPermissions.get("finance")).toBe("none");
+  expect(pendingPermissions.get("reports")).toBe("none");
 
   const regenerateResponse = await page.request.patch(`/api/team/invitations/${invitationId}`, {
     data: { regenerate: true },

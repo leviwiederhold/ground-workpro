@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { requireRole } from "@/lib/auth/requireRole";
+import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
 const isDocumentAttachment = (attachment: Record<string, unknown>, companyId: string) => {
@@ -36,7 +36,7 @@ export async function DELETE(
 
     try {
       if (isDocumentAttachment(existing, companyId)) {
-        await requireRole(["admin", "pm"]);
+        await requireModuleAccess("documents", "edit");
       } else {
         await requireRole(["admin", "pm", "foreman", "mechanic"]);
       }

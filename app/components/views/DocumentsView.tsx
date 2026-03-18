@@ -7,10 +7,13 @@ import { EmptyState, InlineError, SkeletonBlock } from '@/app/components/ui/Feed
 
 const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 
-export function DocumentsView({ currentRole, ui }) {
+export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   const { SearchInput, Button, Icon, Card, formatDate } = ui;
   const normalizedRole = String(currentRole || '').trim().toLowerCase();
-  const canManageDocuments = ['executive', 'operations', 'admin', 'pm'].includes(normalizedRole);
+  const documentsAccess = String(moduleAccess?.documents || '').trim().toLowerCase();
+  const canViewDocuments = documentsAccess === 'view' || documentsAccess === 'edit';
+  const canManageDocuments =
+    documentsAccess === 'edit' || ['executive', 'operations', 'admin', 'pm'].includes(normalizedRole);
   const fileInputRef = useRef(null);
 
   const [documents, setDocuments] = useState([]);
@@ -253,9 +256,9 @@ export function DocumentsView({ currentRole, ui }) {
         ))}
       </div>
 
-      {!canManageDocuments && (
+      {!canManageDocuments && canViewDocuments && (
         <Card>
-          <p className="text-sm text-gray-600">Read-only: only admin/pm can upload or delete documents.</p>
+          <p className="text-sm text-gray-600">Read-only: upload and delete require document edit access.</p>
         </Card>
       )}
 

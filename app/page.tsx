@@ -11328,14 +11328,14 @@ const WorkspaceLoadingScreen = () => (
         ctaBg: 'YOUR_CTA_BG_URL',
         // Gallery images (8 total)
         gallery: [
-          'YOUR_GALLERY_IMAGE_1_URL', // Large - Volvo EC220D on mound
-          'YOUR_GALLERY_IMAGE_2_URL', // Aerial trenching shot
-          'YOUR_GALLERY_IMAGE_3_URL', // CAT D6M dozer
-          'YOUR_GALLERY_IMAGE_4_URL', // Operator in cab
-          'YOUR_GALLERY_IMAGE_5_URL', // Wheel loader
-          'YOUR_GALLERY_IMAGE_6_URL', // Large - Excavator
-          'YOUR_GALLERY_IMAGE_7_URL', // Dozer on pile
-          'YOUR_GALLERY_IMAGE_8_URL', // Dozer in woods
+          '/images/field-gallery/excavator-on-mound.jpg', // Large - excavator on mound
+          '/images/field-gallery/aerial-trenching.jpg', // Aerial trenching shot
+          '/images/field-gallery/cat-dozer.jpg', // CAT dozer
+          '/images/field-gallery/crew-handshake.jpg', // Crew coordination
+          '/images/field-gallery/equipment-detail.jpg', // Equipment close-up
+          '/images/field-gallery/excavator-working.jpg', // Large - excavator working
+          '/images/field-gallery/dozer-on-pile.jpg', // Dozer on pile
+          '/images/field-gallery/dozer-pushing-grade.jpg', // Dozer pushing grade
         ],
       };
 
@@ -11346,13 +11346,13 @@ const WorkspaceLoadingScreen = () => (
       ];
 
       const features = [
-        { icon: 'grid-2', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
-        { icon: 'truck-field', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
-        { icon: 'calendar-week', title: 'Smart Scheduling', desc: 'Drag-and-drop crew and equipment scheduling with conflict detection.' },
+        { icon: 'table-columns', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
+        { icon: 'truck', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
+        { icon: 'calendar-days', title: 'Smart Scheduling', desc: 'Drag-and-drop crew and equipment scheduling with conflict detection.' },
         { icon: 'comments', title: 'Team Messaging', desc: 'Built-in communication with channels, DMs, and file sharing.' },
-        { icon: 'money-check-dollar', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
-        { icon: 'shield-heart', title: 'Safety & Compliance', desc: 'Digital safety sign-offs, incident tracking, and certification management.' },
-        { icon: 'chart-mixed', title: 'Advanced Reports', desc: 'Generate insights on productivity, costs, and equipment performance.' },
+        { icon: 'file-invoice-dollar', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
+        { icon: 'shield', title: 'Safety & Compliance', desc: 'Digital safety sign-offs, incident tracking, and certification management.' },
+        { icon: 'chart-line', title: 'Advanced Reports', desc: 'Generate insights on productivity, costs, and equipment performance.' },
         { icon: 'plug', title: '40+ Integrations', desc: 'Connect QuickBooks, Samsara, Procore, and all your favorite tools.' },
       ];
 
@@ -11725,7 +11725,7 @@ const WorkspaceLoadingScreen = () => (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {features.map((feature, i) => (
                   <div key={i} className="p-6 bg-white rounded-xl border border-gray-200 hover:border-brand-300 hover:shadow-lg transition-all group">
-                    <div className="w-14 h-14 bg-brand-50 rounded-xl flex items-center justify-center mb-4 group-hover:bg-brand-100 transition-colors">
+                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50 to-white shadow-sm group-hover:border-brand-200 group-hover:from-brand-100 group-hover:to-brand-50">
                       <Icon name={feature.icon} className="text-2xl text-brand-600" />
                     </div>
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">{feature.title}</h3>
@@ -11748,11 +11748,11 @@ const WorkspaceLoadingScreen = () => (
                   { alt: 'Volvo excavator on mound', placeholder: 'GALLERY 1' },
                   { alt: 'Aerial trenching', placeholder: 'GALLERY 2' },
                   { alt: 'CAT dozer', placeholder: 'GALLERY 3' },
-                  { alt: 'Operator in cab', placeholder: 'GALLERY 4' },
-                  { alt: 'Wheel loader', placeholder: 'GALLERY 5' },
+                  { alt: 'Crew handshake on jobsite', placeholder: 'GALLERY 4' },
+                  { alt: 'CAT equipment detail', placeholder: 'GALLERY 5' },
                   { alt: 'Excavator working', placeholder: 'GALLERY 6' },
                   { alt: 'Dozer on pile', placeholder: 'GALLERY 7' },
-                  { alt: 'Dozer in woods', placeholder: 'GALLERY 8' },
+                  { alt: 'Dozer pushing grade', placeholder: 'GALLERY 8' },
                 ].map((img, i) => (
                   <div key={i} className={`group overflow-hidden rounded-xl ${i === 0 || i === 5 ? 'md:col-span-2 md:row-span-2' : ''}`}>
                     {IMAGES.gallery[i] && !IMAGES.gallery[i].includes('YOUR_') ? (

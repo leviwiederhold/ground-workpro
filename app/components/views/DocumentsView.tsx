@@ -93,7 +93,7 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
       formData.append('entity_type', 'document');
       formData.append('file', file);
 
-      const response = await fetch('/api/attachments/upload', {
+      const response = await fetch('/api/attachments', {
         method: 'POST',
         body: formData,
       });

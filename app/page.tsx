@@ -606,7 +606,11 @@ const WorkspaceLoadingScreen = () => (
           formData.append('entity_id', String(entityId));
           formData.append('file', file);
 
-          const response = await fetch('/api/attachments/upload', {
+          const uploadEndpoint = String(entityType).toLowerCase() === 'document'
+            ? '/api/attachments'
+            : '/api/attachments/upload';
+
+          const response = await fetch(uploadEndpoint, {
             method: 'POST',
             body: formData,
           });

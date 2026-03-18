@@ -7,19 +7,19 @@ async function setRole(page: Page, role: 'admin' | 'pm' | 'foreman' | 'mechanic'
   expect(response.status(), body).toBe(200);
 }
 
-test('documents page upload works from the UI', async ({ page }) => {
-  await loginViaUI(page);
-  await setRole(page, 'admin');
-  const subscriptionResponse = await page.request.post('/api/test/set-subscription', {
-    data: { subscription_status: 'active' },
+async function setSubscription(page: Page, subscriptionStatus: 'inactive' | 'trialing' | 'active' | 'past_due' | 'canceled') {
+  const response = await page.request.post('/api/test/set-subscription', {
+    data: { subscription_status: subscriptionStatus },
   });
-  expect(subscriptionResponse.status()).toBe(200);
+  const body = await response.text();
+  expect(response.status(), body).toBe(200);
+}
 
+async function expectUiUploadSuccess(page: Page, fileName: string) {
   await page.goto('/');
   await page.getByTestId('nav-documents').click();
   await expect(page.getByTestId('documents-upload-button')).toBeVisible();
 
-  const fileName = `ui-doc-${Date.now()}.txt`;
   await page.getByTestId('documents-upload-input').setInputFiles({
     name: fileName,
     mimeType: 'text/plain',
@@ -30,4 +30,23 @@ test('documents page upload works from the UI', async ({ page }) => {
   await page.reload();
   await page.getByTestId('nav-documents').click();
   await expect(page.getByRole('heading', { name: fileName })).toBeVisible({ timeout: 30_000 });
+}
+
+test('documents page upload works from the UI with an active subscription', async ({ page }) => {
+  await loginViaUI(page);
+  await setRole(page, 'admin');
+  await setSubscription(page, 'active');
+
+  await page.goto('/');
+  const fileName = `ui-doc-${Date.now()}.txt`;
+  await expectUiUploadSuccess(page, fileName);
+});
+
+test('documents page upload works from the UI without an active subscription', async ({ page }) => {
+  await loginViaUI(page);
+  await setRole(page, 'admin');
+  await setSubscription(page, 'inactive');
+
+  const fileName = `ui-doc-inactive-${Date.now()}.txt`;
+  await expectUiUploadSuccess(page, fileName);
 });

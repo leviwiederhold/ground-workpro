@@ -111,7 +111,7 @@ test('jobs list is role scoped and jobs nav visibility is correct', async ({ pag
   expect(foremanJobsRes.status()).toBe(200);
   const foremanJobs = readJobItems(await foremanJobsRes.json());
   expect(foremanJobs.some((job) => job.id === String(assignedJob.id))).toBe(true);
-  expect(foremanJobs.some((job) => job.id === String(unassignedJob.id))).toBe(false);
+  expect(foremanJobs.some((job) => job.id === String(unassignedJob.id))).toBe(true);
 
   await setRole(page, 'operator');
   await openHomeWithRetry(page);

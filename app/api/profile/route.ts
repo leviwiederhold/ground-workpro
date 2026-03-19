@@ -10,12 +10,45 @@ import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
 import { selectProfileColumns, upsertProfileColumns, type ProfileRecord } from "@/lib/user/profileRecord";
 
+const MAX_AVATAR_SIZE_BYTES = 2 * 1024 * 1024;
+
+function getDecodedDataUrlSize(value: string) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^data:[^;]+;base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  const base64 = match[1];
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
 const profileSchema = z.object({
   full_name: z.string().trim().min(1, "Full name is required.").max(160),
   phone: z.string().trim().max(32).optional().or(z.literal("")),
   job_title: z.string().trim().max(120).optional().or(z.literal("")),
   timezone: z.string().trim().max(120).optional().or(z.literal("")),
-  avatar_url: z.string().trim().max(2_000_000).optional().or(z.literal("")),
+  avatar_url: z
+    .string()
+    .trim()
+    .optional()
+    .or(z.literal(""))
+    .superRefine((value, ctx) => {
+      const normalized = String(value ?? "").trim();
+      if (!normalized) return;
+      const decodedSize = getDecodedDataUrlSize(normalized);
+      if (decodedSize !== null && decodedSize > MAX_AVATAR_SIZE_BYTES) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Avatar file must be 2MB or smaller.",
+        });
+        return;
+      }
+      if (decodedSize === null && normalized.length > 2_000_000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Avatar value is too large.",
+        });
+      }
+    }),
 });
 
 function normalizeProfile(row: ProfileRecord | null | undefined, fallbackEmail: string) {

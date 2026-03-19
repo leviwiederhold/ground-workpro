@@ -18,19 +18,26 @@ async function signupFromInvite(browser: Browser, inviteUrl: string, email: stri
   return { context, page };
 }
 
-test('invited user profile shows field errors and avatar updates across team and messaging surfaces', async ({ page, browser }) => {
+async function runAvatarFlow(params: {
+  page: Page;
+  browser: Browser;
+  invitedRole: 'operator' | 'foreman';
+  avatarName: string;
+  avatarBuffer: Buffer;
+}) {
+  const { page, browser, invitedRole, avatarName, avatarBuffer } = params;
   await loginViaUI(page);
   await setRole(page, 'admin');
 
   const stamp = Date.now();
-  const email = `profile-avatar-${stamp}@example.com`;
+  const email = `profile-avatar-${invitedRole}-${stamp}@example.com`;
   const password = `ProfilePass!${stamp}`;
 
   const invitationResponse = await page.request.post('/api/team/invitations', {
     data: {
       full_name: `Avatar User ${stamp}`,
       email,
-      role: 'operator',
+      role: invitedRole,
       permissions: [
         { module_key: 'messages', access_level: 'edit' },
         { module_key: 'safety', access_level: 'edit' },
@@ -60,17 +67,13 @@ test('invited user profile shows field errors and avatar updates across team and
   await invitedPage.getByRole('button', { name: 'Save Profile' }).click();
   await expect(invitedPage.getByText('Full name is required.').first()).toBeVisible();
 
-  const validAvatar = Buffer.from(
-    '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="#0f766e"/></svg>',
-    'utf8'
-  );
   await fullNameInput.fill(`Avatar User ${stamp}`);
   await invitedPage.getByPlaceholder('(555) 123-4567').fill('5551234567');
   await invitedPage.getByRole('combobox').selectOption('America/New_York');
   await invitedPage.locator('input[type="file"]').setInputFiles({
-    name: 'avatar.svg',
+    name: avatarName,
     mimeType: 'image/svg+xml',
-    buffer: validAvatar,
+    buffer: avatarBuffer,
   });
   await invitedPage.getByRole('button', { name: 'Save Profile' }).click();
   await invitedPage.waitForURL(/\/setup/, { timeout: 30_000 });
@@ -105,4 +108,28 @@ test('invited user profile shows field errors and avatar updates across team and
   expect(String(messageUser?.avatarUrl ?? '')).not.toBe('');
 
   await context.close();
+}
+
+test('invited operator profile shows field errors and avatar updates across team and messaging surfaces', async ({ page, browser }) => {
+  await runAvatarFlow({
+    page,
+    browser,
+    invitedRole: 'operator',
+    avatarName: 'avatar.svg',
+    avatarBuffer: Buffer.from(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><rect width="20" height="20" fill="#0f766e"/></svg>',
+      'utf8'
+    ),
+  });
+});
+
+test('invited foreman profile accepts a sub-2MB avatar that expands past the old base64 string limit', async ({ page, browser }) => {
+  const largeSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><text x="0" y="16">${'A'.repeat(1_550_000)}</text></svg>`;
+  await runAvatarFlow({
+    page,
+    browser,
+    invitedRole: 'foreman',
+    avatarName: 'foreman-avatar.svg',
+    avatarBuffer: Buffer.from(largeSvg, 'utf8'),
+  });
 });

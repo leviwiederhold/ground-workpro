@@ -17,7 +17,7 @@ function readJobItems(json: unknown): Array<{ id: string; name: string }> {
   return rows.map((row) => ({ id: String(row.id ?? ''), name: String(row.name ?? '') }));
 }
 
-test('real invited foreman with jobs access sees assigned jobs', async ({ page }) => {
+test('real invited foreman with jobs access sees company jobs', async ({ page }) => {
   await loginViaUI(page);
   await setRole(page, 'admin');
 
@@ -96,5 +96,5 @@ test('real invited foreman with jobs access sees assigned jobs', async ({ page }
   expect(jobsResponse.status(), jobsBody).toBe(200);
   const jobs = readJobItems(JSON.parse(jobsBody));
   expect(jobs.some((job) => job.id === String(assignedJob.id))).toBe(true);
-  expect(jobs.some((job) => job.id === String(unassignedJob.id))).toBe(false);
+  expect(jobs.some((job) => job.id === String(unassignedJob.id))).toBe(true);
 });

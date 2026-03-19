@@ -1,11 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { cookies } from "next/headers";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import { getRoleScopedEquipmentIds } from "@/lib/jobs/roleScope";
+import {
+  applyPermissionOverrideFromCookie,
+  hasModuleAccess,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
 
 const equipmentStatusSchema = z.enum(["active", "idle", "maintenance"]);
 
@@ -128,20 +135,38 @@ async function insertWithColumnFallback(supabase: any, payload: Record<string, u
 
 export async function GET(request: Request) {
   try {
-    try {
-      await requireModuleAccess("fleet", "view");
-    } catch {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
+    const url = new URL(request.url);
+    const allowMaintenanceContext = url.searchParams.get("context") === "maintenance";
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { supabase, companyId, userId } = await getCompanyId();
     const role = await getEffectiveRole();
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const permissions = await resolveUserModulePermissions({
+      supabase,
+      companyId,
+      userId,
+      role,
+    });
+    const cookieStore = await cookies();
+    const effectivePermissions =
+      process.env.NODE_ENV !== "production"
+        ? applyPermissionOverrideFromCookie(
+            permissions,
+            cookieStore.get(TEST_MODULE_ACCESS_COOKIE)?.value
+          )
+        : permissions;
+    const canViewFleet = hasModuleAccess(effectivePermissions, "fleet", "view");
+    const canViewMaintenance = hasModuleAccess(effectivePermissions, "maintenance", "view");
+    if (!canViewFleet && !(allowMaintenanceContext && canViewMaintenance)) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-    const scopedEquipmentIds = await getRoleScopedEquipmentIds(supabase, companyId, userId, role);
+    const scopedEquipmentIds =
+      role === "foreman" && allowMaintenanceContext
+        ? null
+        : await getRoleScopedEquipmentIds(supabase, companyId, userId, role);
     if (scopedEquipmentIds && scopedEquipmentIds.length === 0) {
       const pagination = getPaginationMeta(0, page, pageSize);
       return NextResponse.json({ equipment: [], items: [], ...pagination });

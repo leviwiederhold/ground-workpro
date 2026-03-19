@@ -286,6 +286,9 @@ function resolveStatusFilters(status: ListStatus): string[] | null {
   return ["completed", "complete"];
 }
 
+const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
+  role === "operator" || role === "mechanic";
+
 export async function GET(request: Request) {
   try {
     try {
@@ -326,7 +329,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    const scopedJobIds = shouldScopeJobsToAssignments(role)
+      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+      : null;
     if (scopedJobIds && scopedJobIds.length === 0) {
       return NextResponse.json({ items: [], jobs: [], nextCursor: null, page: 1, pageSize: limit, total: 0 });
     }

@@ -47,6 +47,18 @@ function findGuardedModule(
   return guards.find((entry) => pathname === entry.prefix || pathname.startsWith(`${entry.prefix}/`));
 }
 
+function resolveApiGuardedModule(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  if (
+    request.method.toUpperCase() === "GET" &&
+    pathname === "/api/equipment" &&
+    request.nextUrl.searchParams.get("context") === "maintenance"
+  ) {
+    return { prefix: "/api/equipment", module: "maintenance" as ModulePermissionKey };
+  }
+  return findGuardedModule(pathname, API_MODULE_GUARDS);
+}
+
 function findGuardedRoles(pathname: string): AppRole[] | null {
   const entry = Object.entries(ROUTE_GUARDS)
     .sort((a, b) => b[0].length - a[0].length)
@@ -110,7 +122,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const guardedPageRoles = !isApi ? findGuardedRoles(request.nextUrl.pathname) : null;
   const guardedApi =
     isApi && !shouldBypassApiModuleGuard(request.nextUrl.pathname, request.method)
-      ? findGuardedModule(request.nextUrl.pathname, API_MODULE_GUARDS)
+      ? resolveApiGuardedModule(request)
       : null;
   const guardedModule = guardedApi?.module ?? null;
 

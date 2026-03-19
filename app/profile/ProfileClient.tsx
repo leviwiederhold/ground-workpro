@@ -43,6 +43,15 @@ async function toDataUrl(file: File) {
   });
 }
 
+function getDecodedDataUrlSize(value: string) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^data:[^;]+;base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return null;
+  const base64 = match[1];
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor((base64.length * 3) / 4) - padding;
+}
+
 function firstInvalidFieldKey(fieldErrors: Record<string, string>) {
   const orderedFields: Array<keyof ProfileForm> = ["avatar_url", "full_name", "phone", "job_title", "timezone"];
   return orderedFields.find((field) => fieldErrors[field]) ?? null;
@@ -98,6 +107,12 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
       return;
     }
     const dataUrl = await toDataUrl(file);
+    const decodedSize = getDecodedDataUrlSize(dataUrl);
+    if (decodedSize !== null && decodedSize > MAX_AVATAR_SIZE_BYTES) {
+      setFieldErrors((prev) => ({ ...prev, avatar_url: "Avatar file must be 2MB or smaller." }));
+      setError("Please fix the highlighted fields.");
+      return;
+    }
     setForm((prev) => ({ ...prev, avatar_url: dataUrl }));
     setError("");
   };

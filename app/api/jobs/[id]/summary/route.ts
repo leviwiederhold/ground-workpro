@@ -43,6 +43,9 @@ const isMissingSchemaError = (errorMessage: string) => {
   );
 };
 
+const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
+  role === "operator" || role === "mechanic";
+
 async function findAcceptedBid(supabase: any, companyId: string, jobId: string | number) {
   const attempts = [
     () =>
@@ -129,7 +132,9 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    const scopedJobIds = shouldScopeJobsToAssignments(role)
+      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+      : null;
     if (scopedJobIds && !scopedJobIds.includes(String(jobId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

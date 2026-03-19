@@ -131,9 +131,10 @@ export async function GET(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const role = access.role;
 
-    const scopedEquipmentIds = role === "foreman"
-      ? await getRoleScopedEquipmentIds(supabase, companyId, userId, role)
-      : null;
+    const scopedEquipmentIds =
+      role === "operator"
+        ? await getRoleScopedEquipmentIds(supabase, companyId, userId, role)
+        : null;
 
     if (scopedEquipmentIds && scopedEquipmentIds.length === 0) {
       const pagination = getPaginationMeta(0, page, pageSize);

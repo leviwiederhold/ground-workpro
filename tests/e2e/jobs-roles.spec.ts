@@ -102,7 +102,10 @@ test('jobs list and detail are role scoped', async ({ page }) => {
   expect(foremanJobsRes.status()).toBe(200);
   const foremanJobs = readJobItems(await foremanJobsRes.json());
   expect(foremanJobs.some((job) => job.id === String(assignedJob.id))).toBe(true);
-  expect(foremanJobs.some((job) => job.id === String(unassignedJob.id))).toBe(false);
+  expect(foremanJobs.some((job) => job.id === String(unassignedJob.id))).toBe(true);
+
+  const foremanUnassignedDetail = await page.request.get(`/api/jobs/${unassignedJob.id}`);
+  expect(foremanUnassignedDetail.status()).toBe(200);
 
   await setRole(page, 'operator');
   const operatorUnassignedDetail = await page.request.get(`/api/jobs/${unassignedJob.id}`);

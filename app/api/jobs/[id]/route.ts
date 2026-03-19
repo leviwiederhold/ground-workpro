@@ -114,6 +114,9 @@ const parseMissingColumn = (message: string | undefined): string | null => {
 const isMissingTableError = (message: string | undefined) =>
   /relation .* does not exist|Could not find the table/i.test(message ?? "");
 
+const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
+  role === "operator" || role === "mechanic";
+
 async function updateJobWithSchemaFallback(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
@@ -216,7 +219,9 @@ export async function GET(
     }
 
     const normalizedId = normalizeId(id);
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    const scopedJobIds = shouldScopeJobsToAssignments(role)
+      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+      : null;
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -286,7 +291,9 @@ export async function PATCH(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    const scopedJobIds = shouldScopeJobsToAssignments(role)
+      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+      : null;
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -386,7 +393,9 @@ export async function DELETE(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
+    const scopedJobIds = shouldScopeJobsToAssignments(role)
+      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+      : null;
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

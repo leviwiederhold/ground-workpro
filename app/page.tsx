@@ -55,6 +55,12 @@ const hasRecordId = (value) => {
 };
 
 const NAV_CACHE_KEY = 'groundwork.nav-cache';
+const BETA_TOOLTIP_COPY = "Groundwork Pro is currently in beta. We’re actively improving the platform based on user feedback.";
+const FEEDBACK_TYPE_OPTIONS = [
+  { value: 'bug', label: 'Bug' },
+  { value: 'feature_request', label: 'Feature Request' },
+  { value: 'general_feedback', label: 'General Feedback' },
+];
 
 const loadCachedNavState = () => {
   if (typeof window === 'undefined') {
@@ -762,6 +768,7 @@ const WorkspaceLoadingScreen = () => (
 
     const App = ({ currentUser, onLogout }) => {
       const cachedNavState = useMemo(() => loadCachedNavState(), []);
+      const betaBadgeRef = useRef(null);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
         return window.localStorage.getItem('app.currentView') || 'dashboard';
@@ -778,6 +785,7 @@ const WorkspaceLoadingScreen = () => (
       const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
+      const [showBetaPopover, setShowBetaPopover] = useState(false);
       const [notifications, setNotifications] = useState([]);
       const [notificationsLoading, setNotificationsLoading] = useState(false);
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
@@ -796,6 +804,16 @@ const WorkspaceLoadingScreen = () => (
       const resolvedCompanyName = String(currentUser?.company ?? '').trim() || 'My Company';
       const resolvedUserAvatar = String(currentUser?.avatarUrl ?? '').trim();
       const headerAvatarSrc = resolvedUserAvatar;
+      const defaultFeedbackName =
+        resolvedUserDisplayName && resolvedUserDisplayName !== 'Team Member' ? resolvedUserDisplayName : '';
+      const [feedbackForm, setFeedbackForm] = useState(() => ({
+        type: 'general_feedback',
+        message: '',
+        name: defaultFeedbackName,
+        email: resolvedUserEmail,
+      }));
+      const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+      const [feedbackStatus, setFeedbackStatus] = useState({ type: 'idle', message: '' });
       const roleBadgeLabel =
         currentRoleDisplay === 'executive'
           ? 'CEO'
@@ -817,10 +835,98 @@ const WorkspaceLoadingScreen = () => (
         window.location.assign(path);
       }, []);
 
+      useEffect(() => {
+        if (!showBetaPopover) return undefined;
+
+        const handlePointerDown = (event) => {
+          if (!betaBadgeRef.current?.contains(event.target)) {
+            setShowBetaPopover(false);
+          }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('touchstart', handlePointerDown);
+        return () => {
+          document.removeEventListener('mousedown', handlePointerDown);
+          document.removeEventListener('touchstart', handlePointerDown);
+        };
+      }, [showBetaPopover]);
+
       const openComingSoon = useCallback((message) => {
         setComingSoonMessage(message || 'This feature is coming soon.');
         setShowModal({ type: 'coming-soon', data: null });
       }, []);
+
+      const openFeedbackModal = useCallback(() => {
+        setFeedbackStatus({ type: 'idle', message: '' });
+        setFeedbackForm((current) => ({
+          ...current,
+          name: current.name || defaultFeedbackName,
+          email: current.email || resolvedUserEmail,
+        }));
+        setShowModal({ type: 'feedback', data: null });
+      }, [defaultFeedbackName, resolvedUserEmail]);
+
+      const closeFeedbackModal = useCallback(() => {
+        if (feedbackSubmitting) return;
+        setShowModal((current) => (current.type === 'feedback' ? { type: null, data: null } : current));
+      }, [feedbackSubmitting]);
+
+      const handleFeedbackFieldChange = useCallback((field, value) => {
+        setFeedbackForm((current) => ({
+          ...current,
+          [field]: value,
+        }));
+        setFeedbackStatus((current) => (current.type === 'error' ? { type: 'idle', message: '' } : current));
+      }, []);
+
+      const handleFeedbackSubmit = useCallback(async (event) => {
+        event.preventDefault();
+        const trimmedMessage = String(feedbackForm.message ?? '').trim();
+        if (!trimmedMessage) {
+          setFeedbackStatus({ type: 'error', message: 'Please enter a message before sending feedback.' });
+          return;
+        }
+
+        setFeedbackSubmitting(true);
+        setFeedbackStatus({ type: 'idle', message: '' });
+
+        try {
+          const response = await fetch('/api/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              feedback_type: feedbackForm.type,
+              message: trimmedMessage,
+              name: String(feedbackForm.name ?? '').trim(),
+              email: String(feedbackForm.email ?? '').trim(),
+              page: typeof window !== 'undefined' ? window.location.pathname : '',
+              current_view: currentView,
+            }),
+          });
+
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(String(payload?.error || 'Unable to send feedback right now.'));
+          }
+
+          setFeedbackStatus({
+            type: 'success',
+            message: 'Thanks. Your feedback was sent to the Groundwork Pro team.',
+          });
+          setFeedbackForm((current) => ({
+            ...current,
+            message: '',
+          }));
+        } catch (error) {
+          setFeedbackStatus({
+            type: 'error',
+            message: error instanceof Error ? error.message : 'Unable to send feedback right now.',
+          });
+        } finally {
+          setFeedbackSubmitting(false);
+        }
+      }, [currentView, feedbackForm]);
 
       // Data State
       const [jobs, setJobs] = useState([]);
@@ -1669,7 +1775,8 @@ const WorkspaceLoadingScreen = () => (
         const loadEquipment = async () => {
           try {
             setEquipmentLoading(true);
-            const response = await fetch('/api/equipment', { cache: 'no-store' });
+            const equipmentUrl = currentView === 'maintenance' ? '/api/equipment?context=maintenance' : '/api/equipment';
+            const response = await fetch(equipmentUrl, { cache: 'no-store' });
             const payload = await response.json();
             if (!response.ok) {
               throw new Error(payload?.error || 'Failed to load equipment');
@@ -1951,6 +2058,26 @@ const WorkspaceLoadingScreen = () => (
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <div ref={betaBadgeRef} className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowBetaPopover((current) => !current)}
+                      className="group inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700 transition hover:border-amber-300 hover:bg-amber-100/80 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                      aria-label="Groundwork Pro beta information"
+                      aria-expanded={showBetaPopover}
+                    >
+                      <span>BETA</span>
+                      <Icon name="circle-info" className="text-[10px] normal-case tracking-normal md:hidden" />
+                    </button>
+                    <div className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-72 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                      {BETA_TOOLTIP_COPY}
+                    </div>
+                    {showBetaPopover && (
+                      <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:hidden">
+                        {BETA_TOOLTIP_COPY}
+                      </div>
+                    )}
+                  </div>
                   <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100">
                     <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
                     <span className="text-sm font-medium text-gray-700">{roleBadgeLabel}</span>
@@ -2238,6 +2365,22 @@ const WorkspaceLoadingScreen = () => (
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
               <div className="max-w-screen-2xl mx-auto">
                 {renderView()}
+                <div className="mt-6 border-t border-gray-200 pt-4">
+                  <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">How can we improve?</p>
+                      <p className="text-xs text-gray-500">Share beta feedback without leaving Groundwork Pro.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={openFeedbackModal}
+                      className="inline-flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-300 hover:text-brand-600"
+                    >
+                      <Icon name="message" className="text-sm text-brand-500" />
+                      Send feedback
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </main>
@@ -2267,6 +2410,86 @@ const WorkspaceLoadingScreen = () => (
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} employees={employees} workOrders={workOrders} setWorkOrders={setWorkOrders} data={showModal.data} />
           <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} onSubmitSafetyLog={handleCreateSafetyLog} submitLoading={safetyCreateLoading} />
+          <Modal isOpen={showModal.type === 'feedback'} onClose={closeFeedbackModal} title="Send feedback" size="sm">
+            <form onSubmit={handleFeedbackSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Feedback type</label>
+                <select
+                  value={feedbackForm.type}
+                  onChange={(event) => handleFeedbackFieldChange('type', event.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                >
+                  {FEEDBACK_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Message</label>
+                <textarea
+                  value={feedbackForm.message}
+                  onChange={(event) => handleFeedbackFieldChange('message', event.target.value)}
+                  rows={5}
+                  maxLength={2000}
+                  placeholder="Tell us what’s working, what’s not, or what would make your workflow better."
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  required
+                />
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-gray-500">Your feedback goes straight to the Groundwork Pro team.</p>
+                  <p className="text-xs text-gray-400">{String(feedbackForm.message ?? '').length}/2000</p>
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Name <span className="text-gray-400">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={feedbackForm.name}
+                    onChange={(event) => handleFeedbackFieldChange('name', event.target.value)}
+                    maxLength={120}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="Your name"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Email <span className="text-gray-400">(optional)</span></label>
+                  <input
+                    type="email"
+                    value={feedbackForm.email}
+                    onChange={(event) => handleFeedbackFieldChange('email', event.target.value)}
+                    maxLength={200}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    placeholder="name@company.com"
+                  />
+                </div>
+              </div>
+              {feedbackStatus.message && (
+                <div
+                  className={`rounded-xl border px-3 py-2 text-sm ${
+                    feedbackStatus.type === 'success'
+                      ? 'border-green-200 bg-green-50 text-green-700'
+                      : feedbackStatus.type === 'error'
+                        ? 'border-red-200 bg-red-50 text-red-700'
+                        : 'border-gray-200 bg-gray-50 text-gray-600'
+                  }`}
+                  aria-live="polite"
+                >
+                  {feedbackStatus.message}
+                </div>
+              )}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="secondary" onClick={closeFeedbackModal} disabled={feedbackSubmitting}>
+                  Cancel
+                </Button>
+                <Button variant="brand" type="submit" disabled={feedbackSubmitting || !String(feedbackForm.message ?? '').trim()}>
+                  {feedbackSubmitting ? 'Sending...' : 'Send feedback'}
+                </Button>
+              </div>
+            </form>
+          </Modal>
         </div>
       );
     };

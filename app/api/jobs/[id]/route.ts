@@ -5,7 +5,11 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
-import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import {
+  getRoleScopedJobIds,
+  resolveMembershipRole,
+  shouldRestrictJobsToAssignedJobs,
+} from "@/lib/jobs/roleScope";
 
 const jobStatusSchema = z.enum([
   "draft",
@@ -114,9 +118,6 @@ const parseMissingColumn = (message: string | undefined): string | null => {
 const isMissingTableError = (message: string | undefined) =>
   /relation .* does not exist|Could not find the table/i.test(message ?? "");
 
-const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
-  role === "operator" || role === "mechanic";
-
 async function updateJobWithSchemaFallback(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
@@ -219,7 +220,7 @@ export async function GET(
     }
 
     const normalizedId = normalizeId(id);
-    const scopedJobIds = shouldScopeJobsToAssignments(role)
+    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
       ? await getRoleScopedJobIds(supabase, companyId, userId, role)
       : null;
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
@@ -291,7 +292,7 @@ export async function PATCH(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = shouldScopeJobsToAssignments(role)
+    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
       ? await getRoleScopedJobIds(supabase, companyId, userId, role)
       : null;
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
@@ -393,7 +394,7 @@ export async function DELETE(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = shouldScopeJobsToAssignments(role)
+    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
       ? await getRoleScopedJobIds(supabase, companyId, userId, role)
       : null;
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {

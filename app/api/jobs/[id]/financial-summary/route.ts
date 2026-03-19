@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { requireRole } from "@/lib/auth/requireRole";
-import { getRoleScopedJobIds } from "@/lib/jobs/roleScope";
+import { getRoleScopedJobIds, shouldRestrictJobsToAssignedJobs } from "@/lib/jobs/roleScope";
 import { getJobCostSummary } from "@/lib/job-costing/getJobCostSummary";
 import { getBidSummaryData } from "@/lib/bids/getBidSummaryData";
 
@@ -66,9 +66,6 @@ const isMissingSchemaError = (errorMessage: string) => {
     (message.includes("relation") && message.includes("does not exist"))
   );
 };
-
-const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
-  role === "operator" || role === "mechanic";
 
 async function findAcceptedBidId(supabase: any, companyId: string, jobId: string | number) {
   const attempts = [
@@ -146,7 +143,7 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = shouldScopeJobsToAssignments(effectiveRole)
+    const scopedJobIds = shouldRestrictJobsToAssignedJobs(effectiveRole)
       ? await getRoleScopedJobIds(supabase, companyId, userId, effectiveRole)
       : null;
     if (scopedJobIds && !scopedJobIds.includes(String(jobId))) {

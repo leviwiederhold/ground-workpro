@@ -5,7 +5,11 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
-import { getRoleScopedJobIds, resolveMembershipRole } from "@/lib/jobs/roleScope";
+import {
+  getRoleScopedJobIds,
+  resolveMembershipRole,
+  shouldRestrictJobsToAssignedJobs,
+} from "@/lib/jobs/roleScope";
 
 const persistedJobStatusSchema = z.enum([
   "draft",
@@ -286,9 +290,6 @@ function resolveStatusFilters(status: ListStatus): string[] | null {
   return ["completed", "complete"];
 }
 
-const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
-  role === "operator" || role === "mechanic";
-
 export async function GET(request: Request) {
   try {
     try {
@@ -329,7 +330,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = shouldScopeJobsToAssignments(role)
+    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
       ? await getRoleScopedJobIds(supabase, companyId, userId, role)
       : null;
     if (scopedJobIds && scopedJobIds.length === 0) {
@@ -384,6 +385,9 @@ export async function GET(request: Request) {
 
       if (statusFilters) {
         fallbackQuery = fallbackQuery.in("status", statusFilters);
+      }
+      if (scopedJobIds) {
+        fallbackQuery = fallbackQuery.in("id", scopedJobIds);
       }
       if (queryInput.q) {
         const escaped = queryInput.q.replace(/[%_]/g, "");

@@ -5,7 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getJobCostSummary } from "@/lib/job-costing/getJobCostSummary";
 import { getBidSummaryData } from "@/lib/bids/getBidSummaryData";
-import { getRoleScopedJobIds } from "@/lib/jobs/roleScope";
+import { getRoleScopedJobIds, shouldRestrictJobsToAssignedJobs } from "@/lib/jobs/roleScope";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -42,9 +42,6 @@ const isMissingSchemaError = (errorMessage: string) => {
     (message.includes("relation") && message.includes("does not exist"))
   );
 };
-
-const shouldScopeJobsToAssignments = (role: string | null | undefined) =>
-  role === "operator" || role === "mechanic";
 
 async function findAcceptedBid(supabase: any, companyId: string, jobId: string | number) {
   const attempts = [
@@ -132,7 +129,7 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = shouldScopeJobsToAssignments(role)
+    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
       ? await getRoleScopedJobIds(supabase, companyId, userId, role)
       : null;
     if (scopedJobIds && !scopedJobIds.includes(String(jobId))) {

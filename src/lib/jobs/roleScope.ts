@@ -103,6 +103,10 @@ export async function getRoleScopedJobIds(
   return getAssignedJobIds(supabase, companyId, userId);
 }
 
+export function shouldRestrictJobsToAssignedJobs(role: AppRole | null | undefined): boolean {
+  return role === "mechanic";
+}
+
 export async function getRoleScopedEquipmentIds(
   supabase: any,
   companyId: string,

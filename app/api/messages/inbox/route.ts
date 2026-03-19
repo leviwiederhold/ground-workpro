@@ -4,6 +4,7 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
+  buildGroupThreadDisplayName,
   listMessagesByThreadIds,
   listParticipantRowsForThreads,
   listParticipantRowsForUser,
@@ -127,10 +128,18 @@ export async function GET(request: Request) {
         const participants = Array.from(new Set(participantsByThread.get(key) ?? []));
         const otherUserId = participants.find((id) => id !== String(userId)) ?? null;
         const latest = latestByThread.get(key);
+        const kind = String(thread.kind || "direct");
+        const isDirect = kind === "direct";
         return {
           id: thread.id,
-          kind: "direct",
-          name: otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member",
+          kind,
+          name: isDirect
+            ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
+            : buildGroupThreadDisplayName({
+                participantUserIds: participants,
+                currentUserId: String(userId),
+                displayNames,
+              }),
           created_at: thread.created_at,
           updated_at: thread.updated_at,
           message_count: countByThread.get(key) ?? 0,
@@ -138,7 +147,7 @@ export async function GET(request: Request) {
           last_message_at: latest?.created_at ?? thread.last_message_at ?? null,
           last_message_preview: latest?.body ?? null,
           member_count: participants.length,
-          other_user_id: otherUserId,
+          other_user_id: isDirect ? otherUserId : null,
         };
       })
       .sort((a, b) =>

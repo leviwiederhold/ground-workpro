@@ -3,7 +3,12 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
-import { getThreadIfParticipant, listMessagesForThread } from "@/lib/messages/mvp";
+import {
+  getThreadIfParticipant,
+  listMessagesForThread,
+  resolveAvatarUrls,
+  resolveDisplayNames,
+} from "@/lib/messages/mvp";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +71,13 @@ export async function GET(
     if (!thread) return notFound("Thread not found");
 
     const { items, count } = await listMessagesForThread(supabase, companyId, threadId, from, to);
+    const senderUserIds = Array.from(
+      new Set(items.map((row) => String(row.sender_user_id ?? "")).filter(Boolean))
+    );
+    const [displayNames, avatarUrls] = await Promise.all([
+      resolveDisplayNames(supabase, companyId, senderUserIds),
+      resolveAvatarUrls(supabase, senderUserIds),
+    ]);
 
     return Response.json({
       items: items.map((row) => ({
@@ -73,6 +85,8 @@ export async function GET(
         thread_id: row.thread_id,
         channel_id: row.thread_id,
         sender_user_id: row.sender_user_id,
+        sender_display_name: displayNames.get(String(row.sender_user_id)) || "Team Member",
+        sender_avatar_url: avatarUrls.get(String(row.sender_user_id)) || "",
         body: row.body,
         created_at: row.created_at,
       })),

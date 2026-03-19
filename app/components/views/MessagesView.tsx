@@ -167,6 +167,10 @@ export function MessagesView({ employees = [], ui }) {
       new Map((availableUsers || []).map((user) => [String(user.userId), String(user.avatarUrl || '')])),
     [availableUsers]
   );
+  const isGroupChannel = useCallback(
+    (channel) => String(channel?.kind || '') === 'group',
+    []
+  );
   const contactDisplayNameByUserId = useMemo(() => {
     const map = new Map();
     for (const contact of contactOptions) {
@@ -741,13 +745,29 @@ export function MessagesView({ employees = [], ui }) {
                     </div>
                   )}
                   <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
-                    <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 ${
+                    <div className={`flex max-w-[80%] ${isMine ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
+                      {isGroupChannel(activeChannel) && !isMine && (
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
+                          {msg.sender_avatar_url ? (
+                            <img src={msg.sender_avatar_url} alt={msg.sender_display_name || 'Team Member'} className="h-full w-full object-cover" />
+                          ) : (
+                            initialsForName(msg.sender_display_name || 'Team Member')
+                          )}
+                        </span>
+                      )}
+                    <div className={`rounded-2xl px-4 py-2.5 ${
                       isMine
                         ? 'rounded-br-md bg-brand-600 text-white dark:bg-brand-500'
                         : 'rounded-bl-md border border-zinc-800 bg-[#111111] text-zinc-100'
                     }`}>
+                      {isGroupChannel(activeChannel) && (
+                        <p className={`mb-1 text-[11px] font-semibold ${isMine ? 'text-white/85' : 'text-gray-400 dark:text-zinc-400'}`}>
+                          {msg.sender_display_name || (isMine ? 'You' : 'Team Member')}
+                        </p>
+                      )}
                       <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
                       <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
+                    </div>
                     </div>
                   </div>
                 </div>

@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable @next/next/no-img-element */
 // @ts-nocheck
 'use client';
 
@@ -6,6 +7,62 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EmptyState, InlineError, SkeletonBlock } from '@/app/components/ui/FeedbackBlocks';
 
 const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
+const PREVIEWABLE_CONTENT_TYPES = new Set([
+  'application/pdf',
+  'image/png',
+  'image/jpg',
+  'image/jpeg',
+  'image/webp',
+]);
+
+const inferContentTypeFromName = (fileName) => {
+  const normalized = String(fileName || '').trim().toLowerCase();
+  if (normalized.endsWith('.pdf')) return 'application/pdf';
+  if (normalized.endsWith('.png')) return 'image/png';
+  if (normalized.endsWith('.jpg')) return 'image/jpg';
+  if (normalized.endsWith('.jpeg')) return 'image/jpeg';
+  if (normalized.endsWith('.webp')) return 'image/webp';
+  if (normalized.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  if (normalized.endsWith('.xlsx')) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (normalized.endsWith('.zip')) return 'application/zip';
+  if (normalized.endsWith('.txt')) return 'text/plain';
+  return '';
+};
+
+const resolveDocumentContentType = (doc) =>
+  String(doc?.contentType || inferContentTypeFromName(doc?.fileName) || 'application/octet-stream')
+    .trim()
+    .toLowerCase();
+
+const isPreviewableDocument = (doc) => PREVIEWABLE_CONTENT_TYPES.has(resolveDocumentContentType(doc));
+const isImageDocument = (doc) => resolveDocumentContentType(doc).startsWith('image/');
+const isPdfDocument = (doc) => resolveDocumentContentType(doc) === 'application/pdf';
+
+const getDocumentFileTypeLabel = (doc) => {
+  const contentType = resolveDocumentContentType(doc);
+  if (contentType === 'application/pdf') return 'PDF';
+  if (contentType === 'image/png') return 'PNG';
+  if (contentType === 'image/jpg' || contentType === 'image/jpeg') return 'JPG';
+  if (contentType === 'image/webp') return 'WEBP';
+  if (contentType.includes('wordprocessingml')) return 'DOCX';
+  if (contentType.includes('spreadsheetml')) return 'XLSX';
+  if (contentType === 'application/zip') return 'ZIP';
+  if (contentType === 'text/plain') return 'TXT';
+  const fileName = String(doc?.fileName || '');
+  const parts = fileName.split('.');
+  return parts.length > 1 ? String(parts.pop() || 'FILE').toUpperCase() : 'FILE';
+};
+
+const getDocumentLink = (doc) => doc?.download_url || doc?.signedDownloadUrl || '';
+const getDocumentIconName = (doc) => {
+  if (isPdfDocument(doc)) return 'file-pdf';
+  if (isImageDocument(doc)) return 'image';
+  const type = getDocumentFileTypeLabel(doc);
+  if (type === 'DOCX') return 'file-word';
+  if (type === 'XLSX') return 'file-excel';
+  if (type === 'ZIP') return 'file-zipper';
+  return 'file-lines';
+};
 
 export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   const {
@@ -33,6 +90,9 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   const [activeView, setActiveView] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
+  const [previewDocumentId, setPreviewDocumentId] = useState(null);
+  const [hoveredDocumentId, setHoveredDocumentId] = useState(null);
+  const [supportsHoverPreview, setSupportsHoverPreview] = useState(false);
 
   const formatFileSize = (value) => {
     const size = Number(value || 0);
@@ -43,6 +103,19 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   };
 
   const normalizeText = (value) => String(value || '').trim().toLowerCase();
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mediaQuery = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const syncMatches = () => setSupportsHoverPreview(mediaQuery.matches);
+    syncMatches();
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', syncMatches);
+      return () => mediaQuery.removeEventListener('change', syncMatches);
+    }
+    mediaQuery.addListener(syncMatches);
+    return () => mediaQuery.removeListener(syncMatches);
+  }, []);
 
   const classifyDocument = (doc) => {
     const fileName = normalizeText(doc.fileName);
@@ -186,6 +259,8 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
     });
 
   const selectedDocument = filteredDocs.find((doc) => doc.id === selectedDocumentId) || filteredDocs[0] || null;
+  const previewDocument = documents.find((doc) => doc.id === previewDocumentId) || null;
+  const hoveredPreviewDocument = filteredDocs.find((doc) => doc.id === hoveredDocumentId) || null;
   const totalDocuments = documents.length;
   const totalThisMonth = documents.filter((doc) => {
     if (!doc.createdAt) return false;
@@ -294,8 +369,19 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
               return (
                 <Card
                   key={doc.id}
-                  className={`p-3 sm:p-4 cursor-pointer ${isSelected ? 'ring-2 ring-brand-500' : ''}`}
-                  onClick={() => setSelectedDocumentId(doc.id)}
+                  className={`relative p-3 sm:p-4 cursor-pointer ${isSelected ? 'ring-2 ring-brand-500' : ''}`}
+                  onClick={() => {
+                    setSelectedDocumentId(doc.id);
+                    setPreviewDocumentId(doc.id);
+                  }}
+                  onMouseEnter={() => {
+                    if (supportsHoverPreview && isPreviewableDocument(doc)) {
+                      setHoveredDocumentId(doc.id);
+                    }
+                  }}
+                  onMouseLeave={() => {
+                    if (hoveredDocumentId === doc.id) setHoveredDocumentId(null);
+                  }}
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between min-w-0">
                     <div className="min-w-0">
@@ -310,6 +396,25 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                       {classifyDocument(doc)}
                     </span>
                   </div>
+                  {supportsHoverPreview && hoveredPreviewDocument?.id === doc.id && isPreviewableDocument(doc) && (
+                    <div className="pointer-events-none absolute right-4 top-[calc(100%-0.5rem)] z-20 hidden w-56 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-xl lg:block dark:border-zinc-700 dark:bg-zinc-900">
+                      <div className="border-b border-gray-100 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500 dark:border-zinc-800 dark:text-zinc-400">
+                        Quick Preview
+                      </div>
+                      {isImageDocument(doc) ? (
+                        <img
+                          src={getDocumentLink(doc)}
+                          alt={doc.fileName || 'Document preview'}
+                          className="h-40 w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-40 flex-col items-center justify-center gap-2 bg-gradient-to-br from-red-50 to-white text-red-700 dark:from-zinc-950 dark:to-zinc-900 dark:text-red-300">
+                          <Icon name="file-pdf" className="text-3xl" />
+                          <p className="px-3 text-center text-xs font-medium">PDF preview available on click</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </Card>
               );
             })}
@@ -321,11 +426,22 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                 <h3 className="font-semibold text-gray-900 break-all">{selectedDocument.fileName || 'Untitled file'}</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Category</span><span className="text-gray-900 capitalize">{classifyDocument(selectedDocument)}</span></div>
-                  <div className="flex justify-between gap-3"><span className="text-gray-500">Type</span><span className="text-gray-900 break-all">{selectedDocument.contentType || '-'}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Type</span><span className="text-gray-900 break-all">{getDocumentFileTypeLabel(selectedDocument)}</span></div>
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Size</span><span className="text-gray-900">{formatFileSize(selectedDocument.fileSize)}</span></div>
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Uploaded</span><span className="text-gray-900">{selectedDocument.createdAt ? formatDate(selectedDocument.createdAt) : '-'}</span></div>
                 </div>
                 <div className="pt-2 border-t border-gray-100 flex gap-2">
+                  {getDocumentLink(selectedDocument) ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setPreviewDocumentId(selectedDocument.id)}
+                      data-testid="documents-preview-button"
+                    >
+                      <Icon name="eye" className="mr-2" />
+                      Preview
+                    </Button>
+                  ) : null}
                   {(selectedDocument.download_url || selectedDocument.signedDownloadUrl) ? (
                     <a
                       href={selectedDocument.download_url || selectedDocument.signedDownloadUrl}
@@ -354,6 +470,91 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
               <p className="text-sm text-gray-500">Select a document to view details.</p>
             )}
           </Card>
+        </div>
+      )}
+
+      {previewDocument && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6"
+          onClick={() => setPreviewDocumentId(null)}
+          data-testid="documents-preview-modal"
+        >
+          <div
+            className="flex h-[88dvh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:h-[85vh] sm:rounded-3xl dark:bg-zinc-950"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-4 py-4 sm:px-6 dark:border-zinc-800">
+              <div className="min-w-0">
+                <h3 className="text-base font-semibold text-gray-900 break-all dark:text-zinc-100">
+                  {previewDocument.fileName || 'Untitled file'}
+                </h3>
+                <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                  {getDocumentFileTypeLabel(previewDocument)} • {formatFileSize(previewDocument.fileSize)} • {previewDocument.createdAt ? formatDate(previewDocument.createdAt) : 'Unknown upload date'}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {getDocumentLink(previewDocument) ? (
+                  <a
+                    href={getDocumentLink(previewDocument)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                    data-testid="documents-preview-download"
+                  >
+                    <Icon name="download" className="mr-2" />
+                    Download
+                  </a>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setPreviewDocumentId(null)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  aria-label="Close preview"
+                  data-testid="documents-preview-close"
+                >
+                  <Icon name="xmark" />
+                </button>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60">
+              {isImageDocument(previewDocument) && getDocumentLink(previewDocument) ? (
+                <div className="flex min-h-full items-center justify-center">
+                  <img
+                    src={getDocumentLink(previewDocument)}
+                    alt={previewDocument.fileName || 'Document preview'}
+                    className="max-h-full w-auto max-w-full rounded-2xl border border-gray-200 bg-white object-contain shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
+                    data-testid="documents-preview-image"
+                  />
+                </div>
+              ) : isPdfDocument(previewDocument) && getDocumentLink(previewDocument) ? (
+                <iframe
+                  title={previewDocument.fileName || 'PDF preview'}
+                  src={getDocumentLink(previewDocument)}
+                  className="h-full min-h-[60dvh] w-full rounded-2xl border border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-950"
+                  data-testid="documents-preview-pdf"
+                />
+              ) : (
+                <div
+                  className="flex h-full min-h-[60dvh] flex-col items-center justify-center rounded-3xl border border-dashed border-gray-300 bg-white px-6 text-center dark:border-zinc-700 dark:bg-zinc-950"
+                  data-testid="documents-preview-fallback"
+                >
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100 text-gray-600 dark:bg-zinc-900 dark:text-zinc-300">
+                    <Icon name={getDocumentIconName(previewDocument)} className="text-2xl" />
+                  </div>
+                  <h4 className="mt-4 text-lg font-semibold text-gray-900 dark:text-zinc-100">Preview not available</h4>
+                  <p className="mt-2 max-w-md text-sm text-gray-500 dark:text-zinc-400">
+                    This file type can&apos;t be previewed in the app yet. You can still download it safely.
+                  </p>
+                  <div className="mt-5 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-left dark:border-zinc-800 dark:bg-zinc-900">
+                    <p className="text-sm font-medium text-gray-900 break-all dark:text-zinc-100">{previewDocument.fileName || 'Untitled file'}</p>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
+                      {getDocumentFileTypeLabel(previewDocument)} • {formatFileSize(previewDocument.fileSize)}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>

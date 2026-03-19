@@ -114,6 +114,10 @@ export async function ensureParticipants(
   }
 }
 
+export function uniqueParticipantUserIds(userIds: string[]): string[] {
+  return Array.from(new Set(userIds.map((id) => String(id).trim()).filter(Boolean)));
+}
+
 export async function getOrCreateDirectThread(
   supabase: SupabaseClient,
   companyId: string,
@@ -156,6 +160,44 @@ export async function getOrCreateDirectThread(
 
   const thread = insertResult.data as ThreadRow;
   await ensureParticipants(supabase, companyId, thread.id, [currentUserId, otherUserId]);
+  return thread;
+}
+
+export async function createGroupThread(
+  supabase: SupabaseClient,
+  companyId: string,
+  currentUserId: string,
+  participantUserIds: string[]
+): Promise<ThreadRow> {
+  const uniqueUserIds = uniqueParticipantUserIds([currentUserId, ...participantUserIds]);
+  const otherUserIds = uniqueUserIds.filter((id) => id !== String(currentUserId));
+  if (otherUserIds.length < 2) {
+    throw new Error("Group threads require at least two teammates");
+  }
+
+  const now = new Date().toISOString();
+  const insertResult = await supabase
+    .from("message_threads")
+    .insert({
+      company_id: companyId,
+      kind: "group",
+      type: "group",
+      dm_user_a: currentUserId,
+      dm_user_b: otherUserIds[0],
+      created_by: currentUserId,
+      created_at: now,
+      updated_at: now,
+      last_message_at: null,
+    })
+    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .single();
+
+  if (insertResult.error || !insertResult.data) {
+    throw new Error(insertResult.error?.message || "Failed to create group thread");
+  }
+
+  const thread = insertResult.data as ThreadRow;
+  await ensureParticipants(supabase, companyId, thread.id, uniqueUserIds);
   return thread;
 }
 
@@ -284,6 +326,25 @@ export async function listMessagesForThread(
   };
 }
 
+export function buildGroupThreadDisplayName(input: {
+  participantUserIds: string[];
+  currentUserId: string;
+  displayNames: Map<string, string>;
+}): string {
+  const otherNames = Array.from(
+    new Set(
+      input.participantUserIds
+        .filter((id) => String(id) !== String(input.currentUserId))
+        .map((id) => String(input.displayNames.get(String(id)) || "Team Member").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (otherNames.length === 0) return "Group Chat";
+  if (otherNames.length <= 3) return otherNames.join(", ");
+  return `${otherNames.slice(0, 3).join(", ")} +${otherNames.length - 3}`;
+}
+
 export async function resolveDisplayNames(
   supabase: SupabaseClient,
   companyId: string,
@@ -395,4 +456,33 @@ export async function resolveDisplayNames(
   }
 
   return map;
+}
+
+export async function resolveAvatarUrls(
+  supabase: SupabaseClient,
+  userIds: string[]
+): Promise<Map<string, string>> {
+  const unique = uniqueParticipantUserIds(userIds);
+  const map = new Map<string, string>();
+  if (unique.length === 0) return map;
+
+  const profilesResult = await supabase
+    .from("profiles")
+    .select("id, avatar_url")
+    .in("id", unique);
+
+  if (!profilesResult.error) {
+    for (const row of (profilesResult.data ?? []) as Array<{ id?: string; avatar_url?: string }>) {
+      const id = String(row.id ?? "").trim();
+      const avatarUrl = String(row.avatar_url ?? "").trim();
+      if (id && avatarUrl) map.set(id, avatarUrl);
+    }
+    return map;
+  }
+
+  if (/avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
+    return map;
+  }
+
+  throw new Error(profilesResult.error.message);
 }

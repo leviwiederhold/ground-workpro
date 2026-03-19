@@ -2,7 +2,13 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
-import { ensureCompanyMember, getOrCreateDirectThread, resolveDisplayNames } from "@/lib/messages/mvp";
+import {
+  buildGroupThreadDisplayName,
+  createGroupThread,
+  ensureCompanyMember,
+  getOrCreateDirectThread,
+  resolveDisplayNames,
+} from "@/lib/messages/mvp";
 
 export { GET } from "@/app/api/messages/inbox/route";
 
@@ -48,30 +54,62 @@ export async function POST(request: Request) {
       )
     );
 
-    if (targetUserIds.length !== 1) {
+    if (targetUserIds.length === 0) {
       return validationError([
         {
           path: "memberUserIds",
-          message: "Messaging MVP supports direct messages only. Provide exactly one teammate.",
+          message: "Select at least one teammate.",
         },
       ]);
     }
 
-    const otherUserId = targetUserIds[0];
-    const otherIsCompanyMember = await ensureCompanyMember(supabase, companyId, otherUserId);
-    if (!otherIsCompanyMember) return notFound("User not found");
+    const membershipChecks = await Promise.all(
+      targetUserIds.map(async (memberUserId) => ({
+        userId: memberUserId,
+        isMember: await ensureCompanyMember(supabase, companyId, memberUserId),
+      }))
+    );
+    const missingMember = membershipChecks.find((row) => !row.isMember);
+    if (missingMember) return notFound("User not found");
 
-    const thread = await getOrCreateDirectThread(supabase, companyId, userId, otherUserId);
-    const names = await resolveDisplayNames(supabase, companyId, [otherUserId]);
+    if (targetUserIds.length === 1) {
+      const otherUserId = targetUserIds[0];
+      const thread = await getOrCreateDirectThread(supabase, companyId, userId, otherUserId);
+      const names = await resolveDisplayNames(supabase, companyId, [otherUserId]);
+
+      return okItem(
+        {
+          id: thread.id,
+          kind: "direct",
+          name: names.get(otherUserId) || "Team Member",
+          created_at: thread.created_at,
+          updated_at: thread.updated_at,
+          other_user_id: otherUserId,
+          member_count: 2,
+        },
+        201
+      );
+    }
+
+    const thread = await createGroupThread(supabase, companyId, userId, targetUserIds);
+    const names = await resolveDisplayNames(supabase, companyId, [userId, ...targetUserIds]);
+    const computedName =
+      parsedBody.data.name?.trim() ||
+      buildGroupThreadDisplayName({
+        participantUserIds: [userId, ...targetUserIds],
+        currentUserId: userId,
+        displayNames: names,
+      });
 
     return okItem(
       {
         id: thread.id,
-        kind: "direct",
-        name: names.get(otherUserId) || "Team Member",
+        kind: "group",
+        name: computedName,
         created_at: thread.created_at,
         updated_at: thread.updated_at,
-        other_user_id: otherUserId,
+        other_user_id: null,
+        member_count: targetUserIds.length + 1,
       },
       201
     );

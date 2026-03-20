@@ -467,7 +467,10 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-gray-500">Select a document to view details.</p>
+              <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-5 text-center text-gray-500 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-400">
+                <p className="font-medium text-gray-600 dark:text-zinc-300">Document details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-zinc-500">Open a file to review its preview, upload info, and download action.</p>
+              </div>
             )}
           </Card>
         </div>

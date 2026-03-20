@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { getOptionalCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {
   normalizePhoneForStorage,
   normalizeTimezoneOption,
@@ -67,12 +67,13 @@ function normalizeProfile(row: ProfileRecord | null | undefined, fallbackEmail: 
 }
 
 async function syncEmployeeProfile(
-  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
-  companyId: string,
+  supabase: Awaited<ReturnType<typeof getOptionalCompanyId>>["supabase"],
+  companyId: string | null,
   userId: string,
   fallbackEmail: string,
   payload: z.infer<typeof profileSchema>
 ) {
+  if (!companyId) return;
   const employeeByUserId = await supabase
     .from("employees")
     .select("id")
@@ -124,7 +125,7 @@ async function syncEmployeeProfile(
 
 export async function GET() {
   try {
-    const { supabase, userId, userEmail } = await getCompanyId();
+    const { supabase, userId, userEmail } = await getOptionalCompanyId();
     const authUser = await supabase.auth.getUser();
     const fallbackEmail = String(authUser.data?.user?.email ?? userEmail ?? "").trim();
     const profileResult = await selectProfileColumns(supabase, userId, ["full_name", "phone", "job_title", "timezone", "avatar_url"]);
@@ -145,7 +146,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { supabase, companyId, userId, userEmail } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getOptionalCompanyId();
     const body = await request.json().catch(() => null);
     const parsed = profileSchema.safeParse(body);
     if (!parsed.success) {

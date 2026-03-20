@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { getOptionalCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSetupStatusForUser, markOptionalSetupStepsSkipped } from "@/lib/onboarding/setupFlow";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const { supabase, companyId, userId, userEmail } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getOptionalCompanyId();
     const status = await getSetupStatusForUser({
       supabase,
       companyId,
@@ -27,7 +27,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { supabase, companyId, userId, userEmail } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getOptionalCompanyId();
     const body = await request.json().catch(() => ({}));
     if (String(body?.action ?? "") !== "skip_optional_steps") {
       return NextResponse.json({ error: "Invalid action" }, { status: 422 });

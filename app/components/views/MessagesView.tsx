@@ -16,7 +16,7 @@ const hasUserId = (value) => {
   return userId !== null && userId !== undefined && String(userId).trim() !== '';
 };
 
-export function MessagesView({ employees = [], ui }) {
+export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const { Button, Icon } = ui;
   const [activeChannel, setActiveChannel] = useState(null);
   const [messageText, setMessageText] = useState('');
@@ -34,7 +34,7 @@ export function MessagesView({ employees = [], ui }) {
   const [createChannelError, setCreateChannelError] = useState('');
   const [sendLoading, setSendLoading] = useState(false);
   const [sendError, setSendError] = useState('');
-  const [availableUsers, setAvailableUsers] = useState([]);
+  const [availableUsers, setAvailableUsers] = useState(() => (Array.isArray(availableUsersSeed) ? availableUsersSeed.filter(hasUserId) : []));
   const [selectedNewChatUsers, setSelectedNewChatUsers] = useState([]);
   const [showMembers, setShowMembers] = useState(false);
   const [members, setMembers] = useState([]);
@@ -55,6 +55,11 @@ export function MessagesView({ employees = [], ui }) {
   useEffect(() => {
     channelsRef.current = channels;
   }, [channels]);
+
+  useEffect(() => {
+    if (!Array.isArray(availableUsersSeed) || availableUsersSeed.length === 0) return;
+    setAvailableUsers((current) => (current.length > 0 ? current : availableUsersSeed.filter(hasUserId)));
+  }, [availableUsersSeed]);
 
   const normalized = (value) => String(value || '').trim().toLowerCase();
   const initialsForName = useCallback((value) => {
@@ -357,8 +362,10 @@ export function MessagesView({ employees = [], ui }) {
 
   useEffect(() => {
     loadChannels();
-    loadUsers().catch(() => setAvailableUsers([]));
-  }, [loadChannels, loadUsers]);
+    if ((availableUsersSeed || []).length === 0) {
+      loadUsers().catch(() => setAvailableUsers([]));
+    }
+  }, [availableUsersSeed, loadChannels, loadUsers]);
 
   useEffect(() => {
     const refreshInbox = () => {
@@ -531,11 +538,37 @@ export function MessagesView({ employees = [], ui }) {
       });
       const payload = await response.json();
       if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
+      const sentBody = messageText.trim();
       setMessageText('');
-      await loadMessages(channelId);
-      const nextChannels = await loadChannels();
       const pendingLabel = String(pendingDirectContact?.label || 'Team Member');
       const pendingUserId = String(pendingDirectContact?.userId || '');
+      setMessages((prev) => [
+        ...prev,
+        {
+          ...payload.item,
+          sender_display_name: 'You',
+          sender_avatar_url: '',
+        },
+      ]);
+      setChannels((prev) => {
+        const existing = prev.find((channel) => String(channel.id) === String(channelId));
+        const nextChannel = {
+          ...(existing || {
+            id: channelId,
+            kind: pendingUserId ? 'direct' : 'group',
+            name: pendingLabel,
+            created_at: payload.item.created_at,
+            member_count: pendingUserId ? 2 : 1,
+          }),
+          other_user_id: existing?.other_user_id || pendingUserId || null,
+          last_message_at: payload.item.created_at,
+          updated_at: payload.item.created_at,
+          last_message_preview: sentBody,
+          message_count: Number(existing?.message_count || 0) + 1,
+          unread_count: 0,
+        };
+        return [nextChannel, ...prev.filter((channel) => String(channel.id) !== String(channelId))];
+      });
       if (channelId) {
         setForcedDirectLabels((prev) => ({
           ...prev,
@@ -543,17 +576,15 @@ export function MessagesView({ employees = [], ui }) {
         }));
       }
       setPendingDirectContact(null);
-      const refreshed = (nextChannels || []).find((channel) => String(channel.id) === String(channelId));
-      if (refreshed) {
-        const isDirect = isDirectChannel(refreshed);
-        const patched = isDirect
-          ? {
-              ...refreshed,
-              other_user_id: refreshed.other_user_id || pendingUserId || null,
-            }
-          : refreshed;
-        setActiveChannel(patched);
-      }
+      setActiveChannel((current) => ({
+        ...(current && String(current.id) === String(channelId) ? current : activeChannel || {}),
+        id: channelId,
+        kind: pendingUserId ? 'direct' : String(activeChannel?.kind || 'group'),
+        name: pendingLabel || String(activeChannel?.name || ''),
+        other_user_id: pendingUserId || activeChannel?.other_user_id || null,
+        message_count: Number(activeChannel?.message_count || 0) + 1,
+      }));
+      loadChannels(true);
     } catch (error) {
       setSendError(error instanceof Error ? error.message : 'Failed to send message');
     } finally {

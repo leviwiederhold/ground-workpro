@@ -194,6 +194,8 @@ const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
     href: "/documents",
     scope: "user",
     roles: ["operator"],
+    requiredModule: "documents",
+    requiredAccess: "edit",
   },
   {
     key: "close_first_work_order",

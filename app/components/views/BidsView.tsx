@@ -995,8 +995,9 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
               ) : (
                 <EmptyState testId="bids-select-empty">
                   <div className="text-center">
-                    <Icon name="file-invoice-dollar" className="text-4xl mb-2 text-gray-300" />
-                    <p>Select a bid to view details</p>
+                    <Icon name="file-invoice-dollar" className="mb-3 text-4xl text-gray-300" />
+                    <p className="font-medium text-gray-600">Bid details stay here.</p>
+                    <p className="mt-1 text-sm text-gray-500">Open a bid to review pricing, notes, and line items.</p>
                   </div>
                 </EmptyState>
               )}

@@ -56,7 +56,7 @@ const hasRecordId = (value) => {
 
 const NAV_CACHE_KEY = 'groundwork.nav-cache';
 const BETA_TOOLTIP_COPY = "Groundwork Pro is currently in beta. We’re actively improving the platform based on user feedback.";
-const AI_HELPER_TOOLTIP_COPY = "Coming Soon: A built-in AI helper that will assist with scheduling, job planning, crew coordination, document help, and daily operations inside Groundwork Pro.";
+const AI_HELPER_TOOLTIP_COPY = "Coming Soon: A built-in smart assistant that will help with scheduling, job planning, crew coordination, document help, and daily operations inside Groundwork Pro.";
 const FEEDBACK_TYPE_OPTIONS = [
   { value: 'bug', label: 'Bug' },
   { value: 'feature_request', label: 'Feature Request' },
@@ -204,18 +204,6 @@ const WorkspaceLoadingScreen = () => (
       { id: 8, name: 'Geotextile Fabric', category: 'Materials', unit: 'SY', qtyOnHand: 2500, qtyReserved: 800, reorderPoint: 500, unitCost: 2.5, jobId: null, location: 'Yard C' },
       { id: 9, name: 'Silt Fence', category: 'Erosion Control', unit: 'LF', qtyOnHand: 1800, qtyReserved: 500, reorderPoint: 400, unitCost: 3, jobId: 2, location: 'Yard C' },
       { id: 10, name: 'Orange Safety Fence', category: 'Safety', unit: 'LF', qtyOnHand: 600, qtyReserved: 200, reorderPoint: 200, unitCost: 0.5, jobId: null, location: 'Yard C' },
-    ];
-
-    // SAFETY TRAINING DATA
-    const SAFETY_TRAINING = [
-      { id: 1, title: 'Excavation & Trenching Safety', category: 'OSHA Required', duration: '45 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300', required: true, dueDate: '2026-03-01', completedBy: [1, 2, 3, 5] },
-      { id: 2, title: 'Fall Protection Fundamentals', category: 'OSHA Required', duration: '30 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1581094794329-c8112a89af12?w=300', required: true, dueDate: '2026-03-01', completedBy: [1, 4, 6] },
-      { id: 3, title: 'Heavy Equipment Blind Spots', category: 'Equipment', duration: '20 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300', required: true, dueDate: '2026-02-15', completedBy: [2, 3, 6] },
-      { id: 4, title: 'Silica Dust Exposure Prevention', category: 'Health', duration: '25 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300', required: true, dueDate: '2026-04-01', completedBy: [1, 2, 3, 4, 5, 6] },
-      { id: 5, title: 'Lockout/Tagout Procedures', category: 'OSHA Required', duration: '35 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1581094794329-c8112a89af12?w=300', required: true, dueDate: '2026-03-15', completedBy: [] },
-      { id: 6, title: 'Spotter Signals & Communication', category: 'Equipment', duration: '15 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=300', required: false, dueDate: null, completedBy: [2, 3, 6] },
-      { id: 7, title: 'Heat Illness Prevention', category: 'Health', duration: '20 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300', required: false, dueDate: null, completedBy: [1, 2, 3, 4, 5, 6, 7, 8] },
-      { id: 8, title: 'Underground Utility Awareness', category: 'Site Safety', duration: '30 min', videoUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ', thumbnail: 'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300', required: true, dueDate: '2026-02-28', completedBy: [1, 4] },
     ];
 
     // VENDORS DATA
@@ -976,7 +964,7 @@ const WorkspaceLoadingScreen = () => (
       const [safetyLogsError, setSafetyLogsError] = useState('');
       const [safetyCreateLoading, setSafetyCreateLoading] = useState(false);
       const [safetyDeleteLoadingId, setSafetyDeleteLoadingId] = useState(null);
-      const [trainingData, setTrainingData] = useState(SAFETY_TRAINING);
+      const [trainingData, setTrainingData] = useState([]);
       const [trainingLoading, setTrainingLoading] = useState(true);
       const [trainingError, setTrainingError] = useState('');
       const moduleLoadedRef = useRef({
@@ -1212,10 +1200,8 @@ const WorkspaceLoadingScreen = () => (
         title: course.title,
         category: course.category || 'General',
         duration: `${Number(course.durationMinutes || 0)} min`,
-        videoUrl: toYouTubeEmbedUrl(course.videoUrl || 'https://www.youtube.com/embed/dQw4w9WgXcQ'),
-        thumbnail:
-          deriveYouTubeThumbnail(course.videoUrl || '', course.thumbnailUrl || '') ||
-          'https://images.unsplash.com/photo-1504307651254-35680f356dfd?w=300',
+        videoUrl: toYouTubeEmbedUrl(course.videoUrl || ''),
+        thumbnail: deriveYouTubeThumbnail(course.videoUrl || '', course.thumbnailUrl || ''),
         required: Boolean(course.required),
         dueDate: course.dueDate || null,
         completedBy: (course.completedEmployeeIds || []).map((value) => String(value)),
@@ -1404,7 +1390,6 @@ const WorkspaceLoadingScreen = () => (
         const shouldLoad =
           currentView === 'dashboard' ||
           currentView === 'jobs' ||
-          currentView === 'schedule' ||
           currentView === 'reports' ||
           currentView === 'team';
         if (!shouldLoad || moduleLoadedRef.current.jobs) return () => { isMounted = false; };
@@ -1929,7 +1914,7 @@ const WorkspaceLoadingScreen = () => (
         }
         switch(currentView) {
           case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
-          case 'messages': return <MessagesView employees={employees} ui={sharedViewUi} />;
+          case 'messages': return <MessagesView employees={employees} availableUsersSeed={companyMembers} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
@@ -2023,34 +2008,33 @@ const WorkspaceLoadingScreen = () => (
           <main className="flex-1 flex min-h-0 flex-col overflow-hidden">
             {/* Header */}
             <header className="sticky top-0 z-20 bg-white border-b border-gray-200 px-3 sm:px-4 md:px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-start gap-3">
+              <div className="flex items-start justify-between gap-3 sm:items-center">
+                <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
                   <button
                     onClick={() => setMobileSidebarOpen(true)}
-                    className="inline-flex lg:hidden items-center justify-center w-10 h-10 rounded-lg border border-gray-300 text-gray-700"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-700 lg:hidden"
                     aria-label="Open sidebar"
                   >
                     <Icon name="bars" />
                   </button>
-                  <div>
-                    <h1 className="text-lg md:text-xl font-semibold text-gray-900 capitalize">{currentView.replace('-', ' ')}</h1>
-                    <p className="text-xs sm:text-sm text-gray-500" suppressHydrationWarning>
+                  <div className="min-w-0">
+                    <h1 className="truncate text-lg font-semibold capitalize text-gray-900 md:text-xl">{currentView.replace('-', ' ')}</h1>
+                    <p className="truncate text-xs text-gray-500 sm:text-sm" suppressHydrationWarning>
                       {headerDateLabel || getUtcDateLabel()}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex shrink-0 items-center gap-2 sm:gap-3">
                   <div ref={aiHelperBadgeRef} className="group relative">
                     <button
                       type="button"
                       onClick={() => setShowAiHelperPopover((current) => !current)}
-                      className="group inline-flex items-center gap-1 rounded-full border border-sky-200/80 bg-sky-50/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 transition hover:border-sky-300 hover:bg-sky-100/80 focus:outline-none focus:ring-2 focus:ring-sky-200"
+                      className="group inline-flex h-9 w-9 items-center justify-center rounded-full border border-sky-200/80 bg-sky-50/80 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100/80 focus:outline-none focus:ring-2 focus:ring-sky-200"
                       aria-label="AI helper coming soon"
                       aria-expanded={showAiHelperPopover}
                       data-testid="header-ai-helper-badge"
                     >
-                      <span>AI Helper</span>
-                      <Icon name="sparkles" className="text-[10px] normal-case tracking-normal md:hidden" />
+                      <Icon name="robot" className="text-sm" />
                     </button>
                     <div className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-80 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                       {AI_HELPER_TOOLTIP_COPY}
@@ -2065,7 +2049,7 @@ const WorkspaceLoadingScreen = () => (
                     <button
                       type="button"
                       onClick={() => setShowBetaPopover((current) => !current)}
-                      className="group inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700 transition hover:border-amber-300 hover:bg-amber-100/80 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                      className="group inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/80 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700 transition hover:border-amber-300 hover:bg-amber-100/80 focus:outline-none focus:ring-2 focus:ring-amber-200 sm:px-2.5"
                       aria-label="Groundwork Pro beta information"
                       aria-expanded={showBetaPopover}
                     >
@@ -2631,6 +2615,29 @@ const WorkspaceLoadingScreen = () => (
       const [isMobileFleet, setIsMobileFleet] = useState(false);
       const [showFleetDetails, setShowFleetDetails] = useState(false);
       const canManageFleet = String(moduleAccess?.fleet || 'none') === 'edit';
+      const mapEquipmentSeedToFleetItem = useCallback((row) => {
+        const normalizedStatus = String(row?.status || 'active').toLowerCase();
+        const currentJob = row?.jobId
+          ? jobs.find((job) => String(job.id) === String(row.jobId))
+          : null;
+        return {
+          ...row,
+          hours: Number(row?.hours || 0),
+          nextService: Number(row?.nextService || 0),
+          fuelLevel: Number(row?.fuelLevel ?? 100),
+          dailyRate: Number(row?.dailyRate || 0),
+          purchasePrice: Number(row?.purchasePrice || 0),
+          purchaseDate: row?.purchaseDate || '',
+          lastUpdate: row?.lastUpdate || 'just now',
+          currentJob: currentJob ? { id: currentJob.id, name: currentJob.name } : null,
+          derivedStatus:
+            normalizedStatus === 'maintenance' || normalizedStatus === 'in_maintenance'
+              ? 'IN_MAINTENANCE'
+              : normalizedStatus === 'idle'
+                ? 'IDLE'
+                : 'ASSIGNED',
+        };
+      }, [jobs]);
 
       const EquipmentTypeGlyph = useCallback(({ type, className = '' }) => {
         const normalized = String(type || '').trim().toLowerCase();
@@ -2803,6 +2810,11 @@ const WorkspaceLoadingScreen = () => (
       }, [EQUIPMENT_TYPE_OPTIONS, selectedEquipment]);
 
       useEffect(() => {
+        if (equipment.length === 0) return;
+        setFleetItems((current) => (current.length > 0 ? current : equipment.map(mapEquipmentSeedToFleetItem)));
+      }, [equipment, mapEquipmentSeedToFleetItem]);
+
+      useEffect(() => {
         loadFleetItems(filter);
       }, [filter, loadFleetItems]);
 
@@ -2811,13 +2823,31 @@ const WorkspaceLoadingScreen = () => (
           setEquipmentActionError('Forbidden');
           return;
         }
+        const tempId = `temp-equipment-${Date.now()}`;
+        const baseCount = equipment.length + 1;
+        const optimisticEquipment = {
+          id: tempId,
+          name: `New Equipment ${baseCount}`,
+          type: 'Equipment',
+          status: 'active',
+          hours: 0,
+          nextService: 0,
+          fuelLevel: 100,
+          dailyRate: 0,
+          purchasePrice: 0,
+          purchaseDate: '',
+          lastUpdate: 'just now',
+        };
+        setEquipmentActionError('');
+        setEquipment((prev) => [optimisticEquipment, ...prev]);
+        setFleetItems((prev) => [mapEquipmentSeedToFleetItem(optimisticEquipment), ...prev]);
+        setSelectedEquipmentId(tempId);
         try {
-          const baseCount = equipment.length + 1;
           const response = await fetch('/api/equipment', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              name: `New Equipment ${baseCount}`,
+              name: optimisticEquipment.name,
               type: 'Equipment',
               status: 'active',
               hours: 0,
@@ -2840,14 +2870,24 @@ const WorkspaceLoadingScreen = () => (
           if (!response.ok || !createdEquipment) {
             const message = payload?.error || raw || response.statusText || 'Failed to create equipment';
             setEquipmentActionError(message);
+            setEquipment((prev) => prev.filter((item) => String(item.id) !== tempId));
+            setFleetItems((prev) => prev.filter((item) => String(item.id) !== tempId));
+            setSelectedEquipmentId((current) => (String(current) === tempId ? null : current));
             console.warn('Create equipment failed', message);
             return;
           }
-          setEquipment((prev) => [createdEquipment, ...prev]);
+          setEquipment((prev) =>
+            prev.map((item) => (String(item.id) === tempId ? createdEquipment : item))
+          );
+          setFleetItems((prev) =>
+            prev.map((item) => (String(item.id) === tempId ? mapEquipmentSeedToFleetItem(createdEquipment) : item))
+          );
           setSelectedEquipmentId(createdEquipment.id);
-          await loadFleetItems(filter);
         } catch (error) {
           setEquipmentActionError('Failed to create equipment');
+          setEquipment((prev) => prev.filter((item) => String(item.id) !== tempId));
+          setFleetItems((prev) => prev.filter((item) => String(item.id) !== tempId));
+          setSelectedEquipmentId((current) => (String(current) === tempId ? null : current));
           console.warn('Create equipment failed', error);
         }
       };
@@ -2997,9 +3037,9 @@ const WorkspaceLoadingScreen = () => (
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 lg:items-start">
             {/* Equipment Grid/List */}
-            <div className={`lg:col-span-2 ${viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-3'}`}>
+            <div className={`self-start lg:col-span-2 ${viewMode === 'grid' ? 'grid grid-cols-1 gap-4 sm:grid-cols-2' : 'space-y-3'}`}>
               {equipmentLoading || fleetItemsLoading ? (
                 <LoadingBlock testId="fleet-loading">Loading equipment...</LoadingBlock>
               ) : filteredEquipment.length === 0 ? (
@@ -3124,7 +3164,7 @@ const WorkspaceLoadingScreen = () => (
                   onClick={() => setShowFleetDetails(false)}
                 />
               )}
-              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
+              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
@@ -3323,9 +3363,10 @@ const WorkspaceLoadingScreen = () => (
               </Card>
               </>
             ) : (
-              !isMobileFleet ? <Card className="p-8 text-center text-gray-500">
-                <Icon name="truck-monster" className="text-4xl mb-2 text-gray-300" />
-                <p>Select equipment to view details</p>
+              !isMobileFleet ? <Card className="self-start rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
+                <Icon name="truck-monster" className="mb-3 text-4xl text-gray-300" />
+                <p className="font-medium text-gray-600">Equipment details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500">Open any vehicle to inspect status, assignment, and service info.</p>
               </Card> : null
             )}
           </div>
@@ -3413,6 +3454,32 @@ const WorkspaceLoadingScreen = () => (
       const [isMobileTeam, setIsMobileTeam] = useState(false);
       const [showTeamDetails, setShowTeamDetails] = useState(false);
       const isTeamMemberOnSite = (employee) => employee.status === 'active' || Boolean(employee.assignedToday);
+      const mapEmployeeSeedToTeamItem = useCallback((employee) => ({
+        id: employee.id,
+        name: employee.name || employee.full_name || employee.displayName || '',
+        role: employee.role || 'operator',
+        status: employee.status === 'clocked-in' ? 'active' : (employee.status || 'inactive'),
+        user_id: employee.user_id || null,
+        accountStatus: employee.user_id ? 'active' : 'invited',
+        assignedToday: employee.jobId
+          ? {
+              jobId: String(employee.jobId),
+              jobName: jobs.find((job) => String(job.id) === String(employee.jobId))?.name || 'Assigned job',
+            }
+          : null,
+        hoursThisWeek: Number(employee.hoursThisWeek || 0),
+        pay: {
+          visible: ['executive', 'operations', 'admin', 'pm'].includes(String(currentRole || '').toLowerCase()),
+          hourlyRate: Number(employee.hourlyRate || 0),
+          loadedHourlyCost: 0,
+        },
+        hourlyRate: Number(employee.hourlyRate || 0),
+        certifications: Array.isArray(employee.certifications) ? employee.certifications : [],
+        phone: employee.phone || '',
+        email: employee.email || '',
+        avatarUrl: employee.avatarUrl || '',
+        clockedInAt: employee.clockedInAt || null,
+      }), [currentRole, jobs]);
 
       const filteredEmployees = teamItems.filter(emp => {
         if (filter === 'all') return true;
@@ -3531,8 +3598,14 @@ const WorkspaceLoadingScreen = () => (
       }, [loadTeamItems]);
 
       useEffect(() => {
+        if (employees.length === 0) return;
+        setTeamItems((current) => (current.length > 0 ? current : employees.map(mapEmployeeSeedToTeamItem)));
+      }, [employees, mapEmployeeSeedToTeamItem]);
+
+      useEffect(() => {
+        if (!showInviteModal) return;
         loadPendingInvites();
-      }, [loadPendingInvites]);
+      }, [showInviteModal, loadPendingInvites]);
 
       useEffect(() => {
         if (!selectedEmployeeId) return;
@@ -4306,9 +4379,10 @@ const WorkspaceLoadingScreen = () => (
               </Card>
               </>
             ) : (
-              !isMobileTeam ? <Card className="p-8 text-center text-gray-500">
-                <Icon name="user" className="text-4xl mb-2 text-gray-300" />
-                <p>Select an employee to view details</p>
+              !isMobileTeam ? <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
+                <Icon name="user" className="mb-3 text-4xl text-gray-300" />
+                <p className="font-medium text-gray-600">Employee details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500">Pick someone from the roster to review role, contact info, and assignments.</p>
               </Card> : null
             )}
 
@@ -4977,9 +5051,10 @@ const WorkspaceLoadingScreen = () => (
               </Card>
               </>
             ) : (
-              !isMobileMaintenance ? <Card className="p-8 text-center text-gray-500 dark:border-zinc-800 dark:bg-[#090909] dark:text-zinc-400">
-                <Icon name="wrench" className="mb-2 text-4xl text-gray-300 dark:text-zinc-700" />
-                <p>Select a work order to view details</p>
+              !isMobileMaintenance ? <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm dark:border-zinc-800 dark:bg-[#090909] dark:text-zinc-400">
+                <Icon name="wrench" className="mb-3 text-4xl text-gray-300 dark:text-zinc-700" />
+                <p className="font-medium text-gray-600 dark:text-zinc-300">Work order details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500 dark:text-zinc-500">Open a work order when you want the full scope, status, and notes.</p>
               </Card> : null
             )}
           </div>
@@ -5210,6 +5285,18 @@ const WorkspaceLoadingScreen = () => (
         if (reportJobFilter === 'all') return true;
         return item.jobId && allowedJobIds.has(String(item.jobId));
       });
+      const overviewJobs = filteredJobs.filter((job) => job.status !== 'bidding');
+      const overviewJobLabels = overviewJobs.map((job) => job.name.split(' ').slice(0, 2).join(' '));
+      const overviewBudgetSeries = overviewJobs.map((job) => Number(job.budget || 0));
+      const overviewSpentSeries = overviewJobs.map((job) => Number(job.spent || 0));
+      const activeEquipmentCount = filteredEquipment.filter((item) => String(item.status || '').toLowerCase() === 'active').length;
+      const idleEquipmentCount = filteredEquipment.filter((item) => String(item.status || '').toLowerCase() === 'idle').length;
+      const maintenanceEquipmentCount = filteredEquipment.filter((item) =>
+        ['maintenance', 'in_maintenance', 'out_of_service'].includes(String(item.status || '').toLowerCase())
+      ).length;
+      const equipmentUtilizationTotal = activeEquipmentCount + idleEquipmentCount + maintenanceEquipmentCount;
+      const chartTextColor = '#4b5563';
+      const chartMutedGrid = 'rgba(148, 163, 184, 0.18)';
 
       const exportRowsToCsv = (filename, rows) => {
         if (!rows.length) return;
@@ -5301,17 +5388,70 @@ const WorkspaceLoadingScreen = () => (
                 revenueChart = new Chart(ctx, {
                   type: 'bar',
                   data: {
-                    labels: filteredJobs.filter(j => j.status !== 'bidding').map(j => j.name.split(' ').slice(0, 2).join(' ')),
+                    labels: overviewJobLabels,
                     datasets: [
-                      { label: 'Budget', data: filteredJobs.filter(j => j.status !== 'bidding').map(j => j.budget), backgroundColor: '#e5e7eb' },
-                      { label: 'Spent', data: filteredJobs.filter(j => j.status !== 'bidding').map(j => j.spent), backgroundColor: '#f97316' },
+                      {
+                        label: 'Budget',
+                        data: overviewBudgetSeries,
+                        backgroundColor: '#cbd5e1',
+                        borderRadius: 10,
+                        borderSkipped: false,
+                        barThickness: 18,
+                      },
+                      {
+                        label: 'Spent',
+                        data: overviewSpentSeries,
+                        backgroundColor: '#f97316',
+                        borderRadius: 10,
+                        borderSkipped: false,
+                        barThickness: 18,
+                      },
                     ]
                   },
                   options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { position: 'bottom' } },
-                    scales: { y: { beginAtZero: true, ticks: { callback: (v) => '$' + (v / 1000) + 'k' } } }
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                      legend: {
+                        position: 'bottom',
+                        align: 'start',
+                        labels: {
+                          usePointStyle: true,
+                          pointStyle: 'circle',
+                          boxWidth: 8,
+                          color: chartTextColor,
+                          padding: 18,
+                          font: { size: 12, weight: 600 },
+                        },
+                      },
+                      tooltip: {
+                        backgroundColor: '#111827',
+                        titleColor: '#f9fafb',
+                        bodyColor: '#e5e7eb',
+                        padding: 12,
+                        cornerRadius: 12,
+                        callbacks: {
+                          label: (context) => `${context.dataset.label}: ${formatCurrency(Number(context.raw || 0))}`,
+                        },
+                      },
+                    },
+                    scales: {
+                      x: {
+                        grid: { display: false },
+                        ticks: { color: chartTextColor, font: { size: 11, weight: 600 } },
+                        border: { display: false },
+                      },
+                      y: {
+                        beginAtZero: true,
+                        grid: { color: chartMutedGrid, drawBorder: false },
+                        border: { display: false },
+                        ticks: {
+                          color: chartTextColor,
+                          callback: (v) => '$' + Number(v) / 1000 + 'k',
+                        },
+                      },
+                    },
                   }
                 });
               }
@@ -5329,17 +5469,48 @@ const WorkspaceLoadingScreen = () => (
                     labels: ['Active', 'Idle', 'Maintenance'],
                     datasets: [{
                       data: [
-                        filteredEquipment.filter(e => e.status === 'active').length,
-                        filteredEquipment.filter(e => e.status === 'idle').length,
-                        filteredEquipment.filter(e => e.status === 'maintenance').length,
+                        activeEquipmentCount,
+                        idleEquipmentCount,
+                        maintenanceEquipmentCount,
                       ],
-                      backgroundColor: ['#22c55e', '#eab308', '#ef4444'],
+                      backgroundColor: ['#22c55e', '#f59e0b', '#ef4444'],
+                      borderColor: '#ffffff',
+                      borderWidth: 4,
+                      hoverOffset: 6,
                     }]
                   },
                   options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    plugins: { legend: { position: 'bottom' } }
+                    cutout: '68%',
+                    plugins: {
+                      legend: {
+                        position: 'bottom',
+                        align: 'start',
+                        labels: {
+                          usePointStyle: true,
+                          pointStyle: 'circle',
+                          boxWidth: 8,
+                          color: chartTextColor,
+                          padding: 18,
+                          font: { size: 12, weight: 600 },
+                        },
+                      },
+                      tooltip: {
+                        backgroundColor: '#111827',
+                        titleColor: '#f9fafb',
+                        bodyColor: '#e5e7eb',
+                        padding: 12,
+                        cornerRadius: 12,
+                        callbacks: {
+                          label: (context) => {
+                            const value = Number(context.raw || 0);
+                            const percent = equipmentUtilizationTotal > 0 ? Math.round((value / equipmentUtilizationTotal) * 100) : 0;
+                            return `${context.label}: ${value} (${percent}%)`;
+                          },
+                        },
+                      },
+                    },
                   }
                 });
               }
@@ -5358,7 +5529,17 @@ const WorkspaceLoadingScreen = () => (
           if (revenueChart) revenueChart.destroy();
           if (utilizationChart) utilizationChart.destroy();
         };
-      }, [filteredJobs, filteredEquipment]);
+      }, [
+        activeEquipmentCount,
+        chartMutedGrid,
+        chartTextColor,
+        equipmentUtilizationTotal,
+        idleEquipmentCount,
+        maintenanceEquipmentCount,
+        overviewBudgetSeries,
+        overviewJobLabels,
+        overviewSpentSeries,
+      ]);
 
       return (
         <div className="space-y-6">
@@ -5475,8 +5656,17 @@ const WorkspaceLoadingScreen = () => (
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">Budget vs Spent by Job</h3>
+                <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Budget vs Spent by Job</h3>
+                      <p className="mt-1 text-sm text-gray-500">Current contract totals against field spend for active reporting jobs.</p>
+                    </div>
+                    <div className="rounded-2xl bg-gray-900 px-3 py-2 text-right text-white">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-gray-300">Open Jobs</p>
+                      <p className="text-lg font-semibold">{overviewJobs.length}</p>
+                    </div>
+                  </div>
                   <div className="h-64">
                     {chartsUnavailable ? (
                       <div className="h-full rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
@@ -5487,8 +5677,17 @@ const WorkspaceLoadingScreen = () => (
                     )}
                   </div>
                 </Card>
-                <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">Fleet Utilization</h3>
+                <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm">
+                  <div className="mb-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="font-semibold text-gray-900">Fleet Utilization</h3>
+                      <p className="mt-1 text-sm text-gray-500">Live equipment mix across active, idle, and maintenance states.</p>
+                    </div>
+                    <div className="rounded-2xl bg-green-50 px-3 py-2 text-right text-green-700">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-green-600/70">Active Rate</p>
+                      <p className="text-lg font-semibold">{equipmentUtilizationTotal > 0 ? Math.round((activeEquipmentCount / equipmentUtilizationTotal) * 100) : 0}%</p>
+                    </div>
+                  </div>
                   <div className="h-64">
                     {chartsUnavailable ? (
                       <div className="h-full rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
@@ -7545,7 +7744,13 @@ const WorkspaceLoadingScreen = () => (
                 return (
                   <Card key={course.id} className="overflow-hidden cursor-pointer hover:shadow-lg transition-shadow" onClick={() => setSelectedVideoId(course.id)}>
                     <div className="relative">
-                      <img src={course.thumbnail} alt={course.title} className="w-full h-32 object-cover" />
+                      {course.thumbnail ? (
+                        <img src={course.thumbnail} alt={course.title} className="w-full h-32 object-cover" />
+                      ) : (
+                        <div className="flex h-32 items-center justify-center bg-gray-100 text-gray-500">
+                          <Icon name="play-circle" className="text-3xl" />
+                        </div>
+                      )}
                       <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
                         <Icon name="play-circle" className="text-white text-4xl" />
                       </div>
@@ -7576,17 +7781,32 @@ const WorkspaceLoadingScreen = () => (
               })}
             </div>
 
-            {selectedVideo ? (
+            {trainingLoading ? (
+              <Card className="p-8 text-center text-gray-500">
+                <Icon name="spinner" className="text-4xl mb-2 text-gray-300 animate-spin" />
+                <p>Loading course details...</p>
+              </Card>
+            ) : selectedVideo ? (
               <Card className="p-4 h-fit sticky top-4">
-                <div className="aspect-video mb-4 bg-black rounded-lg overflow-hidden">
-                  <iframe
-                    src={selectedVideo.videoUrl}
-                    className="w-full h-full"
-                    frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                  ></iframe>
-                </div>
+                {selectedVideo.videoUrl ? (
+                  <div className="aspect-video mb-4 bg-black rounded-lg overflow-hidden">
+                    <iframe
+                      src={selectedVideo.videoUrl}
+                      className="w-full h-full"
+                      frameBorder="0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    ></iframe>
+                  </div>
+                ) : selectedVideo.thumbnail ? (
+                  <div className="aspect-video mb-4 overflow-hidden rounded-lg bg-gray-100">
+                    <img src={selectedVideo.thumbnail} alt={selectedVideo.title} className="h-full w-full object-cover" />
+                  </div>
+                ) : (
+                  <div className="mb-4 flex aspect-video items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500">
+                    Video preview unavailable
+                  </div>
+                )}
                 <h3 className="font-semibold text-gray-900 mb-2">{selectedVideo.title}</h3>
                 <div className="flex items-center gap-4 text-sm text-gray-500 mb-4">
                   <span><Icon name="clock" className="mr-1" />{selectedVideo.duration}</span>
@@ -7649,9 +7869,10 @@ const WorkspaceLoadingScreen = () => (
                 </div>
               </Card>
             ) : (
-              <Card className="p-8 text-center text-gray-500">
-                <Icon name="play-circle" className="text-4xl mb-2 text-gray-300" />
-                <p>Select a course to view details</p>
+              <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
+                <Icon name="play-circle" className="mb-3 text-4xl text-gray-300" />
+                <p className="font-medium text-gray-600">Course details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500">Open a training item to review progress, completion, and notes.</p>
               </Card>
             )}
           </div>
@@ -8545,9 +8766,10 @@ const WorkspaceLoadingScreen = () => (
                 </div>
               </Card>
             ) : (
-              <Card className="p-8 text-center text-gray-500">
-                <Icon name="building" className="text-4xl mb-2 text-gray-300" />
-                <p>Select a vendor to view details</p>
+              <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
+                <Icon name="building" className="mb-3 text-4xl text-gray-300" />
+                <p className="font-medium text-gray-600">Vendor details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500">Choose a vendor to review contact info, balances, and recent purchase orders.</p>
               </Card>
             )}
           </div>
@@ -8677,9 +8899,10 @@ const WorkspaceLoadingScreen = () => (
                 </div>
               </Card>
             ) : (
-              <Card className="p-8 text-center text-gray-500">
-                <Icon name="file-invoice" className="text-4xl mb-2 text-gray-300" />
-                <p>Select a purchase order to view details</p>
+              <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
+                <Icon name="file-invoice" className="mb-3 text-4xl text-gray-300" />
+                <p className="font-medium text-gray-600">Purchase order details stay here.</p>
+                <p className="mt-1 text-sm text-gray-500">Open an order to inspect line items, approvals, and delivery progress.</p>
               </Card>
             )}
           </div>
@@ -10002,7 +10225,7 @@ const WorkspaceLoadingScreen = () => (
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">Select an event to inspect details.</p>
+                  <p className="text-sm text-gray-500">Event details appear here once you open one from the calendar.</p>
                 )}
               </Card>
             </div>

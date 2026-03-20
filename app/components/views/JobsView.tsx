@@ -85,13 +85,28 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
   const handleCreateJob = async () => {
     if (!canEditJobs) return;
+    const baseCount = jobs.length + 1;
+    const tempId = `temp-job-${Date.now()}`;
+    const optimisticJob = {
+      id: tempId,
+      name: `New Job ${baseCount}`,
+      status: 'in_progress',
+      client: '',
+      site_address: '',
+      start_date: '',
+      target_end_date: '',
+      notes: '',
+      crew_assigned_count: 0,
+      equipment_assigned_count: 0,
+    };
+    setJobs((prev) => [...prev, optimisticJob]);
+    setSelectedJobId(tempId);
     try {
-      const baseCount = jobs.length + 1;
       const response = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: `New Job ${baseCount}`,
+          name: optimisticJob.name,
           status: 'in_progress',
           client: '',
           site_address: '',
@@ -110,13 +125,17 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       }
 
       if (!response.ok || !payload?.job) {
+        setJobs((prev) => prev.filter((job) => String(job.id) !== tempId));
+        setSelectedJobId((current) => (String(current) === tempId ? null : current));
         console.warn('Create job failed', payload?.error || raw || response.statusText);
         return;
       }
 
-      setJobs((prev) => [...prev, payload.job]);
+      setJobs((prev) => prev.map((job) => (String(job.id) === tempId ? payload.job : job)));
       setSelectedJobId(payload.job.id);
     } catch (error) {
+      setJobs((prev) => prev.filter((job) => String(job.id) !== tempId));
+      setSelectedJobId((current) => (String(current) === tempId ? null : current));
       console.warn('Create job failed', error);
     }
   };
@@ -927,9 +946,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
             </div>
           </Card>
         ) : (
-          <Card className="p-8 text-center text-gray-500">
-            <Icon name="hand-pointer" className="text-4xl mb-2 text-gray-300" />
-            <p>Select a job to view details</p>
+          <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
+            <Icon name="hand-pointer" className="mb-3 text-4xl text-gray-300" />
+            <p className="font-medium text-gray-600">Job details stay here.</p>
+            <p className="mt-1 text-sm text-gray-500">Open a job to review timeline, client info, crew, and notes.</p>
           </Card>
         ))}
       </div>

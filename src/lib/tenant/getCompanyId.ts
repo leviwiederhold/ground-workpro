@@ -272,3 +272,29 @@ export async function getCompanyId() {
 
   return { supabase, companyId, userId: userData.user.id, userEmail: String(userData.user.email ?? "").trim().toLowerCase() };
 }
+
+export async function getOptionalCompanyId() {
+  try {
+    return await getCompanyId();
+  } catch (error) {
+    if (!(error instanceof TenantResolverError) || error.status !== 403) {
+      throw error;
+    }
+    if (!/No company membership found/i.test(error.message)) {
+      throw error;
+    }
+
+    const supabase = await supabaseServer();
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData?.user) {
+      throw new TenantResolverError("Not authenticated", 401);
+    }
+
+    return {
+      supabase,
+      companyId: null,
+      userId: userData.user.id,
+      userEmail: String(userData.user.email ?? "").trim().toLowerCase(),
+    };
+  }
+}

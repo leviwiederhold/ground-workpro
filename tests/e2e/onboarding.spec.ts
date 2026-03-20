@@ -87,6 +87,13 @@ test('onboarding checklist persists and is role-aware', async ({ page }) => {
   await page.getByTestId('nav-dashboard').click();
 
   await expect(page.getByRole('heading', { name: 'Getting Started' })).toBeVisible();
-  await expect(page.getByTestId('onboarding-item-upload_first_photo')).toBeVisible();
   await expect(page.getByTestId('onboarding-item-create_first_bid')).toHaveCount(0);
+  await expect(page.getByTestId('onboarding-item-upload_first_photo')).toHaveCount(0);
+
+  const operatorSummaryResponse = await page.request.get('/api/dashboard/summary');
+  expect(operatorSummaryResponse.status(), await operatorSummaryResponse.text()).toBe(200);
+  const operatorSummary = await operatorSummaryResponse.json();
+  const operatorChecklistItems = operatorSummary?.item?.sections?.gettingStarted?.items ?? [];
+  expect(operatorChecklistItems.some((entry: { key: string }) => entry.key === 'create_first_bid')).toBeFalsy();
+  expect(operatorChecklistItems.some((entry: { key: string }) => entry.key === 'upload_first_photo')).toBeFalsy();
 });

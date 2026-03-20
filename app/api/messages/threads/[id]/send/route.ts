@@ -104,36 +104,38 @@ export async function POST(
         .eq("id", thread.id),
     ]);
 
-    try {
-      const participantsResult = await db
-        .from("message_participants")
-        .select("user_id")
-        .eq("company_id", companyId)
-        .eq("thread_id", thread.id);
-      if (!participantsResult.error) {
-        const recipientUserIds = (participantsResult.data ?? [])
-          .map((row) => String((row as { user_id?: string }).user_id ?? ""))
-          .filter((id) => id && id !== String(userId));
-        if (recipientUserIds.length > 0) {
-          await enqueueNotifications({
-            supabase,
-            companyId,
-            userIds: recipientUserIds,
-            type: "new_message",
-            payload: {
-              threadId: thread.id,
-              messagePreview: parsedBody.data.body.slice(0, 120),
-              href: "/messages",
-            },
-            entityType: "message_thread",
-            entityId: thread.id,
-            actorUserId: userId,
-          });
+    void (async () => {
+      try {
+        const participantsResult = await db
+          .from("message_participants")
+          .select("user_id")
+          .eq("company_id", companyId)
+          .eq("thread_id", thread.id);
+        if (!participantsResult.error) {
+          const recipientUserIds = (participantsResult.data ?? [])
+            .map((row) => String((row as { user_id?: string }).user_id ?? ""))
+            .filter((id) => id && id !== String(userId));
+          if (recipientUserIds.length > 0) {
+            await enqueueNotifications({
+              supabase,
+              companyId,
+              userIds: recipientUserIds,
+              type: "new_message",
+              payload: {
+                threadId: thread.id,
+                messagePreview: parsedBody.data.body.slice(0, 120),
+                href: "/messages",
+              },
+              entityType: "message_thread",
+              entityId: thread.id,
+              actorUserId: userId,
+            });
+          }
         }
+      } catch {
+        // Non-blocking: message send should succeed even if notification fanout fails.
       }
-    } catch {
-      // Non-blocking: message send should succeed even if notification fanout fails.
-    }
+    })();
 
     return okItem(
       {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { getOptionalCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { normalizeTimezoneOption } from "@/lib/user/profileFields";
 import { resolveDisplayName } from "@/lib/user/identity";
 import { markSetupStepCompleted } from "@/lib/onboarding/setupFlow";
@@ -45,7 +45,7 @@ function normalizeSettings(row: SettingsRow | null | undefined, fallbackEmail: s
   };
 }
 
-async function selectSettings(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], userId: string) {
+async function selectSettings(supabase: Awaited<ReturnType<typeof getOptionalCompanyId>>["supabase"], userId: string) {
   return await selectProfileColumns(supabase, userId, [
     "full_name",
     "timezone",
@@ -56,7 +56,7 @@ async function selectSettings(supabase: Awaited<ReturnType<typeof getCompanyId>>
 
 export async function GET() {
   try {
-    const { supabase, userId, userEmail } = await getCompanyId();
+    const { supabase, userId, userEmail } = await getOptionalCompanyId();
     const authUser = await supabase.auth.getUser();
     const fallbackEmail = String(authUser.data?.user?.email ?? userEmail ?? "").trim();
     const settingsResult = await selectSettings(supabase, userId);
@@ -75,7 +75,7 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { supabase, companyId, userId, userEmail } = await getCompanyId();
+    const { supabase, companyId, userId, userEmail } = await getOptionalCompanyId();
     const body = await request.json().catch(() => null);
     const parsed = accountSettingsSchema.safeParse(body);
     if (!parsed.success) {

@@ -123,13 +123,8 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
         return;
       }
 
-      const [assignmentsResponse, eventsResponse] = await Promise.all([
-        fetch(`/api/schedule/week?start=${weekStartKey}`, { cache: 'no-store' }),
-        fetch(`/api/calendar/week?start=${weekStartKey}`, { cache: 'no-store' }),
-      ]);
-
+      const assignmentsResponse = await fetch(`/api/schedule/week?start=${weekStartKey}`, { cache: 'no-store' });
       const assignmentsPayload = await assignmentsResponse.json().catch(() => ({}));
-      const eventsPayload = await eventsResponse.json().catch(() => ({}));
       if (requestId !== requestIdRef.current) return;
 
       if (!assignmentsResponse.ok) {
@@ -161,13 +156,22 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
         }
       }
       setScheduleData(nextSchedule);
-
-      if (!eventsResponse.ok) {
-        setScheduleError(eventsPayload?.error || 'Failed to load calendar events.');
-        return;
-      }
-
-      setEventsByDate(bucketEventsByWeekDate(eventsPayload?.items || []));
+      fetch(`/api/calendar/week?start=${weekStartKey}`, { cache: 'no-store' })
+        .then((response) => response.json().catch(() => ({})).then((payload) => ({ ok: response.ok, payload })))
+        .then(({ ok, payload }) => {
+          if (requestId !== requestIdRef.current) return;
+          if (!ok) {
+            setScheduleWarning(payload?.error || 'Calendar events are still loading.');
+            return;
+          }
+          setScheduleWarning('');
+          setEventsByDate(bucketEventsByWeekDate(payload?.items || []));
+        })
+        .catch(() => {
+          if (requestId === requestIdRef.current) {
+            setScheduleWarning('Calendar events are still loading.');
+          }
+        });
     } catch {
       if (requestId === requestIdRef.current) {
         setScheduleError('Failed to load schedule assignments.');

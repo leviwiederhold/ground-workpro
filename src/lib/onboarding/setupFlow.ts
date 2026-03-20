@@ -23,6 +23,8 @@ type SetupRole = AppRole;
 
 type SetupStatus = {
   role: SetupRole;
+  company_id: string | null;
+  has_company: boolean;
   required_steps: SetupStep[];
   optional_steps: SetupStep[];
   required_complete: boolean;
@@ -75,11 +77,28 @@ function getOptionalSetupStepDefs(role: SetupRole): SetupStepDef[] {
   ];
 }
 
+function getRequiredSetupStepDefsForContext(role: SetupRole, hasCompany: boolean): SetupStepDef[] {
+  if (!hasCompany) {
+    return [
+      { ...PROFILE_STEP, required: true },
+      {
+        ...COMPANY_STEP,
+        label: "Create Company Workspace",
+        description: "Create your company workspace so your account can finish setup and enter the app.",
+        href: "/setup?create-company=1",
+        required: true,
+      },
+    ];
+  }
+  return getRequiredSetupStepDefs(role);
+}
+
 async function resolveRole(
   supabase: SupabaseClient,
-  companyId: string,
+  companyId: string | null,
   userId: string
 ): Promise<SetupRole> {
+  if (!companyId) return "admin";
   const membershipResult = await supabase
     .from("memberships")
     .select("role")
@@ -174,23 +193,29 @@ function hasOptionalStepsSkippedRecord(
 
 export async function getSetupStatusForUser(input: {
   supabase: SupabaseClient;
-  companyId: string;
+  companyId: string | null;
   userId: string;
   userEmail: string;
 }): Promise<SetupStatus> {
   const { supabase, companyId, userId, userEmail } = input;
+  const hasCompany = Boolean(companyId);
   const role = await resolveRole(supabase, companyId, userId);
-  const requiredDefs = getRequiredSetupStepDefs(role);
+  const requiredDefs = getRequiredSetupStepDefsForContext(role, hasCompany);
   const optionalDefs = getOptionalSetupStepDefs(role);
   const requiredKeys = [...new Set([...requiredDefs, ...optionalDefs].map((step) => step.key))];
+  const checklistRows = companyId
+    ? (() => {
+        const checklistResult = supabase
+          .from("onboarding_checklist")
+          .select("key,user_id,completed_at")
+          .eq("company_id", companyId)
+          .in("key", requiredKeys as string[]);
+        return checklistResult;
+      })()
+    : Promise.resolve({ data: [], error: null });
 
-  const checklistResult = await supabase
-    .from("onboarding_checklist")
-    .select("key,user_id,completed_at")
-    .eq("company_id", companyId)
-    .in("key", requiredKeys as string[]);
-
-  const checklistRows = checklistResult.error
+  const checklistResult = await checklistRows;
+  const checklistData = checklistResult.error
     ? isMissingOnboardingTable(checklistResult.error.message)
       ? []
       : []
@@ -198,12 +223,12 @@ export async function getSetupStatusForUser(input: {
 
   const [profile, company] = await Promise.all([
     loadProfileForSetup(supabase, userId),
-    role === "admin" ? loadCompanyForSetup(supabase, companyId) : Promise.resolve(null),
+    role === "admin" && companyId ? loadCompanyForSetup(supabase, companyId) : Promise.resolve(null),
   ]);
 
   const mapStep = (def: SetupStepDef) => {
     const byRecord = isStepCompletedByRecord(
-      checklistRows as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
+      checklistData as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
       def.key,
       def.scope,
       userId
@@ -228,11 +253,13 @@ export async function getSetupStatusForUser(input: {
   const required_complete = !firstIncomplete;
   const optional_complete = optional_steps.every((step) => step.completed);
   const optional_steps_skipped = hasOptionalStepsSkippedRecord(
-    checklistRows as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
+    checklistData as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
     userId
   );
   return {
     role,
+    company_id: companyId,
+    has_company: hasCompany,
     required_steps,
     optional_steps,
     required_complete,
@@ -246,11 +273,12 @@ export async function getSetupStatusForUser(input: {
 
 export async function markSetupStepCompleted(input: {
   supabase: SupabaseClient;
-  companyId: string;
+  companyId: string | null;
   userId: string;
   key: SetupStepKey;
   scope: SetupStepScope;
 }) {
+  if (!input.companyId) return;
   const rowUserId = input.scope === "company" ? null : input.userId;
   const nowIso = new Date().toISOString();
 
@@ -296,9 +324,10 @@ export async function markSetupStepCompleted(input: {
 
 export async function markOptionalSetupStepsSkipped(input: {
   supabase: SupabaseClient;
-  companyId: string;
+  companyId: string | null;
   userId: string;
 }) {
+  if (!input.companyId) return;
   const nowIso = new Date().toISOString();
   const existingResult = await input.supabase
     .from("onboarding_checklist")

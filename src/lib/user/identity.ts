@@ -1,4 +1,4 @@
-import { getCompanyId } from "@/lib/tenant/getCompanyId";
+import { getOptionalCompanyId } from "@/lib/tenant/getCompanyId";
 import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 import { selectProfileColumns, type ProfileRecord } from "@/lib/user/profileRecord";
 
@@ -12,7 +12,7 @@ export type CurrentUserIdentity = {
   phone: string;
   jobTitle: string;
   timezone: string;
-  companyId: string;
+  companyId: string | null;
   companyName: string;
 };
 
@@ -38,7 +38,7 @@ export function resolveDisplayName({
 }
 
 export async function getCurrentUserIdentity(): Promise<CurrentUserIdentity> {
-  const { supabase, companyId, userId, userEmail } = await getCompanyId();
+  const { supabase, companyId, userId, userEmail } = await getOptionalCompanyId();
   let email = String(userEmail ?? "").trim();
 
   const userResult = await supabase.auth.getUser();
@@ -61,12 +61,13 @@ export async function getCurrentUserIdentity(): Promise<CurrentUserIdentity> {
   const jobTitle = String(profile?.job_title ?? "").trim();
   const timezone = String(profile?.timezone ?? "").trim();
 
-  const companyResult = await supabase
-    .from("companies")
-    .select("name")
-    .eq("id", companyId)
-    .maybeSingle();
-
+  const companyResult = companyId
+    ? await supabase
+        .from("companies")
+        .select("name")
+        .eq("id", companyId)
+        .maybeSingle()
+    : { data: null };
   const companyName = String(companyResult.data?.name ?? "").trim() || "My Company";
 
   return {

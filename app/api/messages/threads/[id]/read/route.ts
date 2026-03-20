@@ -4,6 +4,7 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import { getThreadIfParticipant } from "@/lib/messages/mvp";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,7 @@ export async function POST(
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
+    const db = getSupabaseAdmin() ?? supabase;
 
     const { thread, participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
     if (!participant) {
@@ -61,7 +63,7 @@ export async function POST(
     if (!thread) return notFound("Thread not found");
 
     const now = new Date().toISOString();
-    const updateResult = await supabase
+    const updateResult = await db
       .from("message_participants")
       .update({ last_read_at: now })
       .eq("company_id", companyId)

@@ -26,6 +26,10 @@ type MessageRow = {
   created_at: string;
 };
 
+function getMessagingDb(supabase: SupabaseClient) {
+  return getSupabaseAdmin() ?? supabase;
+}
+
 const pickDisplayName = ({
   fullName,
   displayName,
@@ -71,7 +75,7 @@ export async function findDirectThread(
   userB: string
 ): Promise<ThreadRow | null> {
   const [dmUserA, dmUserB] = sortDirectPair(userA, userB);
-  const result = await supabase
+  const result = await getMessagingDb(supabase)
     .from("message_threads")
     .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
@@ -207,7 +211,9 @@ export async function getThreadIfParticipant(
   threadId: string,
   userId: string
 ): Promise<{ thread: ThreadRow | null; participant: ParticipantRow | null }> {
-  const participantResult = await supabase
+  const db = getMessagingDb(supabase);
+
+  const participantResult = await db
     .from("message_participants")
     .select("thread_id, user_id, last_read_at")
     .eq("company_id", companyId)
@@ -220,7 +226,7 @@ export async function getThreadIfParticipant(
     return { thread: null, participant: null };
   }
 
-  const threadResult = await supabase
+  const threadResult = await db
     .from("message_threads")
     .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
@@ -243,7 +249,7 @@ export async function listParticipantRowsForUser(
   companyId: string,
   userId: string
 ): Promise<ParticipantRow[]> {
-  const result = await supabase
+  const result = await getMessagingDb(supabase)
     .from("message_participants")
     .select("thread_id, user_id, last_read_at")
     .eq("company_id", companyId)
@@ -259,7 +265,7 @@ export async function listParticipantRowsForThreads(
   threadIds: string[]
 ): Promise<ParticipantRow[]> {
   if (threadIds.length === 0) return [];
-  const result = await supabase
+  const result = await getMessagingDb(supabase)
     .from("message_participants")
     .select("thread_id, user_id, last_read_at")
     .eq("company_id", companyId)
@@ -276,7 +282,7 @@ export async function listThreadsByIds(
 ): Promise<ThreadRow[]> {
   if (threadIds.length === 0) return [];
 
-  const result = await supabase
+  const result = await getMessagingDb(supabase)
     .from("message_threads")
     .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
@@ -293,7 +299,7 @@ export async function listMessagesByThreadIds(
 ): Promise<MessageRow[]> {
   if (threadIds.length === 0) return [];
 
-  const result = await supabase
+  const result = await getMessagingDb(supabase)
     .from("messages")
     .select("id, thread_id, sender_user_id, body, created_at")
     .eq("company_id", companyId)
@@ -311,7 +317,7 @@ export async function listMessagesForThread(
   from: number,
   to: number
 ): Promise<{ items: MessageRow[]; count: number }> {
-  const result = await supabase
+  const result = await getMessagingDb(supabase)
     .from("messages")
     .select("id, thread_id, sender_user_id, body, created_at", { count: "exact" })
     .eq("company_id", companyId)

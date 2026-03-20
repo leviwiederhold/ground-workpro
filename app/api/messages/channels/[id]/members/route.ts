@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
-import { resolveDisplayNames } from "@/lib/messages/mvp";
+import { getThreadIfParticipant, resolveDisplayNames } from "@/lib/messages/mvp";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 
@@ -22,18 +23,11 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
+    const db = getSupabaseAdmin() ?? supabase;
 
-    const myParticipant = await supabase
-      .from("message_participants")
-      .select("id")
-      .eq("company_id", companyId)
-      .eq("thread_id", threadId)
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle();
-
-    if (!myParticipant.data) {
-      const thread = await supabase
+    const { participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
+    if (!participant) {
+      const thread = await db
         .from("message_threads")
         .select("id")
         .eq("company_id", companyId)
@@ -44,7 +38,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       return forbidden();
     }
 
-    const participantsResult = await supabase
+    const participantsResult = await db
       .from("message_participants")
       .select("id, user_id, created_at")
       .eq("company_id", companyId)

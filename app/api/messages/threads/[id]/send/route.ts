@@ -5,6 +5,7 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { okItem } from "@/lib/http/json";
 import { getThreadIfParticipant } from "@/lib/messages/mvp";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,7 @@ export async function POST(
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
+    const db = getSupabaseAdmin() ?? supabase;
 
     const { thread, participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
     if (!participant) {
@@ -69,7 +71,7 @@ export async function POST(
     if (!thread) return notFound("Thread not found");
 
     const now = new Date().toISOString();
-    const insertResult = await supabase
+    const insertResult = await db
       .from("messages")
       .insert({
         company_id: companyId,
@@ -86,13 +88,13 @@ export async function POST(
     }
 
     await Promise.all([
-      supabase
+      db
         .from("message_participants")
         .update({ last_read_at: insertResult.data.created_at })
         .eq("company_id", companyId)
         .eq("thread_id", thread.id)
         .eq("user_id", userId),
-      supabase
+      db
         .from("message_threads")
         .update({
           updated_at: insertResult.data.created_at,
@@ -103,7 +105,7 @@ export async function POST(
     ]);
 
     try {
-      const participantsResult = await supabase
+      const participantsResult = await db
         .from("message_participants")
         .select("user_id")
         .eq("company_id", companyId)

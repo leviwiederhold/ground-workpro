@@ -56,6 +56,7 @@ const hasRecordId = (value) => {
 
 const NAV_CACHE_KEY = 'groundwork.nav-cache';
 const BETA_TOOLTIP_COPY = "Groundwork Pro is currently in beta. We’re actively improving the platform based on user feedback.";
+const AI_HELPER_TOOLTIP_COPY = "Coming Soon: A built-in AI helper that will assist with scheduling, job planning, crew coordination, document help, and daily operations inside Groundwork Pro.";
 const FEEDBACK_TYPE_OPTIONS = [
   { value: 'bug', label: 'Bug' },
   { value: 'feature_request', label: 'Feature Request' },
@@ -769,6 +770,7 @@ const WorkspaceLoadingScreen = () => (
     const App = ({ currentUser, onLogout }) => {
       const cachedNavState = useMemo(() => loadCachedNavState(), []);
       const betaBadgeRef = useRef(null);
+      const aiHelperBadgeRef = useRef(null);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
         return window.localStorage.getItem('app.currentView') || 'dashboard';
@@ -786,10 +788,10 @@ const WorkspaceLoadingScreen = () => (
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
       const [showBetaPopover, setShowBetaPopover] = useState(false);
+      const [showAiHelperPopover, setShowAiHelperPopover] = useState(false);
       const [notifications, setNotifications] = useState([]);
       const [notificationsLoading, setNotificationsLoading] = useState(false);
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
-      const [unreadMessagesCount, setUnreadMessagesCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
       const resolvedUserDisplayName = pickDisplayName({
@@ -851,6 +853,23 @@ const WorkspaceLoadingScreen = () => (
           document.removeEventListener('touchstart', handlePointerDown);
         };
       }, [showBetaPopover]);
+
+      useEffect(() => {
+        if (!showAiHelperPopover) return undefined;
+
+        const handlePointerDown = (event) => {
+          if (!aiHelperBadgeRef.current?.contains(event.target)) {
+            setShowAiHelperPopover(false);
+          }
+        };
+
+        document.addEventListener('mousedown', handlePointerDown);
+        document.addEventListener('touchstart', handlePointerDown);
+        return () => {
+          document.removeEventListener('mousedown', handlePointerDown);
+          document.removeEventListener('touchstart', handlePointerDown);
+        };
+      }, [showAiHelperPopover]);
 
       const openComingSoon = useCallback((message) => {
         setComingSoonMessage(message || 'This feature is coming soon.');
@@ -1167,17 +1186,6 @@ const WorkspaceLoadingScreen = () => (
         }
       }, []);
 
-      const loadUnreadMessagesCount = useCallback(async () => {
-        try {
-          const response = await fetch('/api/messages/inbox?pageSize=1', { cache: 'no-store' });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) return;
-          setUnreadMessagesCount(Number(payload?.unread_count ?? 0));
-        } catch {
-          // no-op
-        }
-      }, []);
-
       const applyNotificationState = useCallback((nextItems) => {
         setNotifications(nextItems);
         setUnreadNotificationsCount(nextItems.filter((item) => !item.is_read).length);
@@ -1468,20 +1476,14 @@ const WorkspaceLoadingScreen = () => (
       }, [loadNotifications]);
 
       useEffect(() => {
-        loadUnreadMessagesCount();
-      }, [loadUnreadMessagesCount]);
-
-      useEffect(() => {
         const poll = () => {
           if (typeof document !== 'undefined' && document.hidden) return;
           loadNotifications();
-          loadUnreadMessagesCount();
         };
         const intervalId = setInterval(poll, 30000);
         const onVisibilityChange = () => {
           if (!document.hidden) {
             loadNotifications();
-            loadUnreadMessagesCount();
           }
         };
         if (typeof document !== 'undefined') {
@@ -1493,7 +1495,7 @@ const WorkspaceLoadingScreen = () => (
             document.removeEventListener('visibilitychange', onVisibilityChange);
           }
         };
-      }, [loadNotifications, loadUnreadMessagesCount]);
+      }, [loadNotifications]);
 
       useEffect(() => {
         const shouldLoad = currentView === 'dashboard' || currentView === 'safety';
@@ -1811,25 +1813,10 @@ const WorkspaceLoadingScreen = () => (
         setHeaderDateLabel(getUtcDateLabel());
       }, []);
 
-      const navCountsByKey = {
-        messages: unreadMessagesCount,
-        jobs: jobs.filter(j => j.status === 'active').length,
-        fleet: equipment.length,
-        team: employees.length,
-        inventory: inventory.filter(i => i.qtyOnHand <= i.reorderPoint).length,
-        maintenance: workOrders.filter(w => w.status !== 'completed').length,
-        training: trainingData.filter((t) => {
-          const assignedCount = (t.assignedEmployeeIds || []).length || employees.length || 1;
-          return t.required && t.completedBy.length < assignedCount;
-        }).length,
-        bids: bids.filter(b => b.status === 'pending').length,
-      };
-
       const navItems = serverNavItems.map((item) => ({
         id: item.key,
         icon: item.iconKey || 'circle',
         label: item.label,
-        count: navCountsByKey[item.key],
       }));
 
       useEffect(() => {
@@ -2015,11 +2002,6 @@ const WorkspaceLoadingScreen = () => (
                   {!sidebarCollapsed && (
                     <>
                       <span className="flex-1 text-left text-sm">{item.label}</span>
-                      {item.count !== undefined && (
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${currentView === item.id ? 'bg-brand-600' : 'bg-dark-700'}`}>
-                          {item.count}
-                        </span>
-                      )}
                     </>
                   )}
                 </button>
@@ -2058,6 +2040,27 @@ const WorkspaceLoadingScreen = () => (
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  <div ref={aiHelperBadgeRef} className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => setShowAiHelperPopover((current) => !current)}
+                      className="group inline-flex items-center gap-1 rounded-full border border-sky-200/80 bg-sky-50/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700 transition hover:border-sky-300 hover:bg-sky-100/80 focus:outline-none focus:ring-2 focus:ring-sky-200"
+                      aria-label="AI helper coming soon"
+                      aria-expanded={showAiHelperPopover}
+                      data-testid="header-ai-helper-badge"
+                    >
+                      <span>AI Helper</span>
+                      <Icon name="sparkles" className="text-[10px] normal-case tracking-normal md:hidden" />
+                    </button>
+                    <div className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-80 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                      {AI_HELPER_TOOLTIP_COPY}
+                    </div>
+                    {showAiHelperPopover && (
+                      <div className="absolute right-0 top-full z-30 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:hidden">
+                        {AI_HELPER_TOOLTIP_COPY}
+                      </div>
+                    )}
+                  </div>
                   <div ref={betaBadgeRef} className="group relative">
                     <button
                       type="button"

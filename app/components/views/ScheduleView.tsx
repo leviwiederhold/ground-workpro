@@ -44,6 +44,8 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const employeesRef = useRef(employees);
   const equipmentRef = useRef(equipment);
   const requestIdRef = useRef(0);
+  const dayStripRef = useRef(null);
+  const initialMobileScrollDoneRef = useRef(false);
 
   useEffect(() => {
     employeesRef.current = employees;
@@ -180,6 +182,38 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   useEffect(() => {
     loadWeekAssignments();
   }, [loadWeekAssignments]);
+
+  useEffect(() => {
+    if (currentWeek !== 0) return;
+    if (typeof window === 'undefined') return;
+    if (!window.matchMedia('(max-width: 767px)').matches) return;
+    if (initialMobileScrollDoneRef.current) return;
+
+    const today = new Date();
+    const todayKey = asDateKey(today);
+    const strip = dayStripRef.current;
+    if (!strip) return;
+
+    const scrollToToday = () => {
+      const todayHeader = strip.querySelector(`[data-schedule-day-header="${todayKey}"]`);
+      if (!(todayHeader instanceof HTMLElement)) return;
+
+      const targetLeft =
+        todayHeader.offsetLeft - Math.max(0, (strip.clientWidth - todayHeader.offsetWidth) / 2);
+      const maxLeft = Math.max(0, strip.scrollWidth - strip.clientWidth);
+      strip.scrollTo({ left: Math.min(maxLeft, Math.max(0, targetLeft)), behavior: 'auto' });
+      initialMobileScrollDoneRef.current = true;
+    };
+
+    const frameId = window.requestAnimationFrame(scrollToToday);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [currentWeek, weekDateKeys]);
+
+  useEffect(() => {
+    if (currentWeek === 0) {
+      initialMobileScrollDoneRef.current = false;
+    }
+  }, [currentWeek]);
 
   const formatHourLabel = (hour) => {
     const date = new Date(Date.UTC(2026, 0, 1, hour, 0, 0));
@@ -377,7 +411,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
         </div>
       </Card>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto" ref={dayStripRef} data-testid="schedule-day-strip">
           <Card
             className="min-w-[880px] border border-gray-200/80 p-0 shadow-sm dark:border-zinc-800 dark:bg-[#090909]"
             aria-busy={scheduleLoading || Boolean(movingEventId)}
@@ -387,8 +421,14 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
               <div className="border-r border-gray-200 dark:border-zinc-800" />
               {weekDates.map((date, i) => {
                 const isToday = date.toDateString() === new Date().toDateString();
+                const dateKey = asDateKey(date);
                 return (
-                  <div key={i} className={`border-r border-gray-200 p-3 text-center last:border-r-0 dark:border-zinc-800 ${isToday ? 'bg-brand-50/80 dark:bg-brand-950/30' : ''}`}>
+                  <div
+                    key={i}
+                    data-testid={`schedule-day-header-${dateKey}`}
+                    data-schedule-day-header={dateKey}
+                    className={`border-r border-gray-200 p-3 text-center last:border-r-0 dark:border-zinc-800 ${isToday ? 'bg-brand-50/80 dark:bg-brand-950/30' : ''}`}
+                  >
                     <div className="text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-zinc-500">{date.toLocaleDateString('en-US', { weekday: 'short' })}</div>
                     <div className={`text-xl font-semibold mt-0.5 ${isToday ? 'text-brand-600' : 'text-gray-900'}`}>{date.getDate()}</div>
                   </div>

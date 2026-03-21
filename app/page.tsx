@@ -5070,6 +5070,7 @@ const WorkspaceLoadingScreen = () => (
       const pieChartRef = useRef(null);
       const [activeTab, setActiveTab] = useState('overview');
       const [chartsUnavailable, setChartsUnavailable] = useState(false);
+      const [reportsDarkMode, setReportsDarkMode] = useState(false);
       const [editingReportId, setEditingReportId] = useState(null);
       const [reportActionLoading, setReportActionLoading] = useState(false);
       const [reportActionError, setReportActionError] = useState('');
@@ -5295,8 +5296,27 @@ const WorkspaceLoadingScreen = () => (
         ['maintenance', 'in_maintenance', 'out_of_service'].includes(String(item.status || '').toLowerCase())
       ).length;
       const equipmentUtilizationTotal = activeEquipmentCount + idleEquipmentCount + maintenanceEquipmentCount;
-      const chartTextColor = '#4b5563';
-      const chartMutedGrid = 'rgba(148, 163, 184, 0.18)';
+      const chartTheme = useMemo(() => ({
+        text: reportsDarkMode ? '#d4d4d8' : '#4b5563',
+        mutedText: reportsDarkMode ? '#a1a1aa' : '#6b7280',
+        grid: reportsDarkMode ? 'rgba(113, 113, 122, 0.3)' : 'rgba(148, 163, 184, 0.18)',
+        tooltipBg: reportsDarkMode ? '#09090b' : '#111827',
+        tooltipTitle: reportsDarkMode ? '#fafafa' : '#f9fafb',
+        tooltipBody: reportsDarkMode ? '#e4e4e7' : '#e5e7eb',
+        budgetBar: reportsDarkMode ? '#475569' : '#cbd5e1',
+        spentBar: reportsDarkMode ? '#fb923c' : '#f97316',
+        donutBorder: reportsDarkMode ? '#111113' : '#ffffff',
+      }), [reportsDarkMode]);
+
+      useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const root = window.document.documentElement;
+        const updateTheme = () => setReportsDarkMode(root.classList.contains('dark'));
+        updateTheme();
+        const observer = new MutationObserver(updateTheme);
+        observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+        return () => observer.disconnect();
+      }, []);
 
       const exportRowsToCsv = (filename, rows) => {
         if (!rows.length) return;
@@ -5393,7 +5413,7 @@ const WorkspaceLoadingScreen = () => (
                       {
                         label: 'Budget',
                         data: overviewBudgetSeries,
-                        backgroundColor: '#cbd5e1',
+                        backgroundColor: chartTheme.budgetBar,
                         borderRadius: 10,
                         borderSkipped: false,
                         barThickness: 18,
@@ -5401,7 +5421,7 @@ const WorkspaceLoadingScreen = () => (
                       {
                         label: 'Spent',
                         data: overviewSpentSeries,
-                        backgroundColor: '#f97316',
+                        backgroundColor: chartTheme.spentBar,
                         borderRadius: 10,
                         borderSkipped: false,
                         barThickness: 18,
@@ -5420,17 +5440,19 @@ const WorkspaceLoadingScreen = () => (
                           usePointStyle: true,
                           pointStyle: 'circle',
                           boxWidth: 8,
-                          color: chartTextColor,
+                          color: chartTheme.text,
                           padding: 18,
                           font: { size: 12, weight: 600 },
                         },
                       },
                       tooltip: {
-                        backgroundColor: '#111827',
-                        titleColor: '#f9fafb',
-                        bodyColor: '#e5e7eb',
+                        backgroundColor: chartTheme.tooltipBg,
+                        titleColor: chartTheme.tooltipTitle,
+                        bodyColor: chartTheme.tooltipBody,
                         padding: 12,
                         cornerRadius: 12,
+                        borderWidth: 1,
+                        borderColor: reportsDarkMode ? 'rgba(161, 161, 170, 0.18)' : 'rgba(255, 255, 255, 0.08)',
                         callbacks: {
                           label: (context) => `${context.dataset.label}: ${formatCurrency(Number(context.raw || 0))}`,
                         },
@@ -5439,15 +5461,15 @@ const WorkspaceLoadingScreen = () => (
                     scales: {
                       x: {
                         grid: { display: false },
-                        ticks: { color: chartTextColor, font: { size: 11, weight: 600 } },
+                        ticks: { color: chartTheme.text, font: { size: 11, weight: 600 } },
                         border: { display: false },
                       },
                       y: {
                         beginAtZero: true,
-                        grid: { color: chartMutedGrid, drawBorder: false },
+                        grid: { color: chartTheme.grid, drawBorder: false },
                         border: { display: false },
                         ticks: {
-                          color: chartTextColor,
+                          color: chartTheme.text,
                           callback: (v) => '$' + Number(v) / 1000 + 'k',
                         },
                       },
@@ -5474,7 +5496,7 @@ const WorkspaceLoadingScreen = () => (
                         maintenanceEquipmentCount,
                       ],
                       backgroundColor: ['#22c55e', '#f59e0b', '#ef4444'],
-                      borderColor: '#ffffff',
+                      borderColor: chartTheme.donutBorder,
                       borderWidth: 4,
                       hoverOffset: 6,
                     }]
@@ -5491,17 +5513,19 @@ const WorkspaceLoadingScreen = () => (
                           usePointStyle: true,
                           pointStyle: 'circle',
                           boxWidth: 8,
-                          color: chartTextColor,
+                          color: chartTheme.text,
                           padding: 18,
                           font: { size: 12, weight: 600 },
                         },
                       },
                       tooltip: {
-                        backgroundColor: '#111827',
-                        titleColor: '#f9fafb',
-                        bodyColor: '#e5e7eb',
+                        backgroundColor: chartTheme.tooltipBg,
+                        titleColor: chartTheme.tooltipTitle,
+                        bodyColor: chartTheme.tooltipBody,
                         padding: 12,
                         cornerRadius: 12,
+                        borderWidth: 1,
+                        borderColor: reportsDarkMode ? 'rgba(161, 161, 170, 0.18)' : 'rgba(255, 255, 255, 0.08)',
                         callbacks: {
                           label: (context) => {
                             const value = Number(context.raw || 0);
@@ -5531,14 +5555,14 @@ const WorkspaceLoadingScreen = () => (
         };
       }, [
         activeEquipmentCount,
-        chartMutedGrid,
-        chartTextColor,
+        chartTheme,
         equipmentUtilizationTotal,
         idleEquipmentCount,
         maintenanceEquipmentCount,
         overviewBudgetSeries,
         overviewJobLabels,
         overviewSpentSeries,
+        reportsDarkMode,
       ]);
 
       return (
@@ -5656,20 +5680,20 @@ const WorkspaceLoadingScreen = () => (
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm">
+                <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm dark:border-zinc-800 dark:bg-gradient-to-br dark:from-[#0b0b0d] dark:to-[#111215] dark:shadow-black/30">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="font-semibold text-gray-900">Budget vs Spent by Job</h3>
-                      <p className="mt-1 text-sm text-gray-500">Current contract totals against field spend for active reporting jobs.</p>
+                      <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Budget vs Spent by Job</h3>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">Current contract totals against field spend for active reporting jobs.</p>
                     </div>
-                    <div className="rounded-2xl bg-gray-900 px-3 py-2 text-right text-white">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-gray-300">Open Jobs</p>
+                    <div className="rounded-2xl bg-gray-900 px-3 py-2 text-right text-white dark:bg-zinc-100 dark:text-zinc-950">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-gray-300 dark:text-zinc-500">Open Jobs</p>
                       <p className="text-lg font-semibold">{overviewJobs.length}</p>
                     </div>
                   </div>
-                  <div className="h-64">
+                  <div className="h-64 rounded-2xl bg-white/70 p-2 dark:bg-black/20">
                     {chartsUnavailable ? (
-                      <div className="h-full rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
+                      <div className="flex h-full items-center justify-center rounded-xl border border-gray-200 bg-gray-100 text-sm text-gray-500 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-400">
                         Chart unavailable
                       </div>
                     ) : (
@@ -5677,20 +5701,20 @@ const WorkspaceLoadingScreen = () => (
                     )}
                   </div>
                 </Card>
-                <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm">
+                <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm dark:border-zinc-800 dark:bg-gradient-to-br dark:from-[#0b0b0d] dark:to-[#111215] dark:shadow-black/30">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="font-semibold text-gray-900">Fleet Utilization</h3>
-                      <p className="mt-1 text-sm text-gray-500">Live equipment mix across active, idle, and maintenance states.</p>
+                      <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Fleet Utilization</h3>
+                      <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">Live equipment mix across active, idle, and maintenance states.</p>
                     </div>
-                    <div className="rounded-2xl bg-green-50 px-3 py-2 text-right text-green-700">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-green-600/70">Active Rate</p>
+                    <div className="rounded-2xl bg-green-50 px-3 py-2 text-right text-green-700 dark:bg-green-500/12 dark:text-green-300">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-green-600/70 dark:text-green-400/70">Active Rate</p>
                       <p className="text-lg font-semibold">{equipmentUtilizationTotal > 0 ? Math.round((activeEquipmentCount / equipmentUtilizationTotal) * 100) : 0}%</p>
                     </div>
                   </div>
-                  <div className="h-64">
+                  <div className="h-64 rounded-2xl bg-white/70 p-2 dark:bg-black/20">
                     {chartsUnavailable ? (
-                      <div className="h-full rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
+                      <div className="flex h-full items-center justify-center rounded-xl border border-gray-200 bg-gray-100 text-sm text-gray-500 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-400">
                         Chart unavailable
                       </div>
                     ) : (

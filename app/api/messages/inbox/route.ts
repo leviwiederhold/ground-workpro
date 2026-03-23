@@ -4,7 +4,6 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
-  buildGroupThreadDisplayName,
   listMessagesByThreadIds,
   listParticipantRowsForThreads,
   listParticipantRowsForUser,
@@ -130,16 +129,13 @@ export async function GET(request: Request) {
         const latest = latestByThread.get(key);
         const kind = String(thread.kind || "direct");
         const isDirect = kind === "direct";
+        const explicitGroupName = String((thread as { name?: string }).name ?? "").trim();
         return {
           id: thread.id,
           kind,
           name: isDirect
             ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
-            : buildGroupThreadDisplayName({
-                participantUserIds: participants,
-                currentUserId: String(userId),
-                displayNames,
-              }),
+            : explicitGroupName || "Group Chat",
           created_at: thread.created_at,
           updated_at: thread.updated_at,
           message_count: countByThread.get(key) ?? 0,

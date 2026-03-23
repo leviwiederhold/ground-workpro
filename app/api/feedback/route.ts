@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 
-const FEEDBACK_DESTINATION = "info@formanusa.com";
-
 const feedbackSchema = z.object({
   feedback_type: z.enum(["bug", "feature_request", "general_feedback"]),
   message: z.string().trim().min(5, "Please include a bit more detail.").max(2000, "Message must be 2000 characters or fewer."),
@@ -13,22 +11,9 @@ const feedbackSchema = z.object({
   current_view: z.string().trim().max(120).optional().or(z.literal("")),
 });
 
-const feedbackTypeLabel = {
-  bug: "Bug",
-  feature_request: "Feature Request",
-  general_feedback: "General Feedback",
-} as const;
-
-function formatMultilineValue(value: string) {
-  return value
-    .split("\n")
-    .map((line) => line.trimEnd())
-    .join("\n");
-}
-
 export async function POST(request: Request) {
   try {
-    const { companyId, userId, userEmail } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const body = await request.json().catch(() => null);
     const parsed = feedbackSchema.safeParse(body);
 
@@ -46,35 +31,20 @@ export async function POST(request: Request) {
     }
 
     const payload = parsed.data;
-    const typeLabel = feedbackTypeLabel[payload.feedback_type];
-    const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(FEEDBACK_DESTINATION)}`, {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
-      body: JSON.stringify({
-        _subject: `[Groundwork Pro Beta] ${typeLabel}`,
-        _captcha: "false",
-        _template: "table",
-        product: "Groundwork Pro",
-        feedback_type: typeLabel,
-        message: formatMultilineValue(payload.message),
-        name: payload.name || "Not provided",
-        email: payload.email || userEmail || "Not provided",
-        page: payload.page || "Unknown",
-        current_view: payload.current_view || "Unknown",
-        company_id: companyId,
-        user_id: userId,
-        submitted_at: new Date().toISOString(),
-      }),
+    const insertResult = await supabase.from("feedback_submissions").insert({
+      company_id: companyId,
+      user_id: userId,
+      feedback_type: payload.feedback_type,
+      message: payload.message,
+      name: payload.name || null,
+      email: payload.email || null,
+      page: payload.page || null,
+      current_view: payload.current_view || null,
     });
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "");
+    if (insertResult.error) {
       return NextResponse.json(
-        { error: errorText || "Feedback could not be sent right now. Please try again." },
+        { error: "Feedback could not be sent right now. Please try again." },
         { status: 502 }
       );
     }

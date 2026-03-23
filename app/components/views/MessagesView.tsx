@@ -192,6 +192,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       if (!channel) return 'Direct Message';
       const forcedLabel = forcedDirectLabels[String(channel.id || '')];
       if (forcedLabel) return String(forcedLabel);
+      if (isGroupChannel(channel)) {
+        const groupName = String(channel.name || '').trim();
+        return groupName || 'Group Chat';
+      }
       if (!isDirectChannel(channel)) return String(channel.name || '');
       const otherUserId = String(channel.other_user_id || '');
       if (otherUserId && userDisplayNameById.has(otherUserId)) {
@@ -204,7 +208,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       if (fallbackName && !looksLikeDmName(fallbackName)) return fallbackName;
       return 'Team Member';
     },
-    [forcedDirectLabels, isDirectChannel, userDisplayNameById, contactDisplayNameByUserId, looksLikeDmName]
+    [forcedDirectLabels, isGroupChannel, isDirectChannel, userDisplayNameById, contactDisplayNameByUserId, looksLikeDmName]
   );
 
   const loadUsers = useCallback(async () => {
@@ -484,9 +488,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         throw new Error('Enter a group name or select at least one member');
       }
 
-      const generatedName =
-        newChannelName.trim() ||
-        `group-${Date.now()}`;
+      const generatedName = newChannelName.trim() || 'Group Chat';
 
       const response = await fetch('/api/messages/channels', {
         method: 'POST',
@@ -656,9 +658,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-zinc-900 dark:hover:bg-[#131313] ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white dark:bg-brand-600' : ''}`} data-testid={`messages-channel-${channel.id}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className={`truncate text-sm font-medium ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-900 dark:text-zinc-100'}`}>
-                    {isDirectChannel(channel)
-                      ? getChannelDisplayName(channel)
-                      : `# ${channel.name}`}
+                    {getChannelDisplayName(channel)}
                   </span>
                   {(channel.unread_count ?? channel.message_count) > 0 && <span className={`rounded-full px-1.5 py-0.5 text-xs ${activeChannel?.id === channel.id ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-700 dark:bg-zinc-800 dark:text-zinc-200'}`}>{channel.unread_count ?? channel.message_count}</span>}
                 </div>
@@ -750,9 +750,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               )}
               <div className="min-w-0">
               <h3 className="font-semibold text-gray-900 dark:text-zinc-100" data-testid="messages-active-channel">
-                {isDirectChannel(activeChannel)
-                  ? getChannelDisplayName(activeChannel)
-                  : `# ${activeChannel.name}`}
+                {getChannelDisplayName(activeChannel)}
               </h3>
               <p className="text-xs text-gray-500 dark:text-zinc-400">{activeChannel.message_count || 0} messages</p>
               </div>
@@ -786,18 +784,20 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                           )}
                         </span>
                       )}
+                    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                    {isGroupChannel(activeChannel) && (
+                      <p className={`mb-1 px-1 text-[11px] font-semibold ${isMine ? 'text-gray-500 dark:text-zinc-400' : 'text-gray-600 dark:text-zinc-300'}`}>
+                        {msg.sender_display_name || (isMine ? 'You' : 'Team Member')}
+                      </p>
+                    )}
                     <div className={`rounded-2xl px-4 py-2.5 ${
                       isMine
                         ? 'rounded-br-md bg-brand-600 text-white dark:bg-brand-500'
                         : 'rounded-bl-md border border-zinc-800 bg-[#111111] text-zinc-100'
                     }`}>
-                      {isGroupChannel(activeChannel) && (
-                        <p className={`mb-1 text-[11px] font-semibold ${isMine ? 'text-white/85' : 'text-gray-400 dark:text-zinc-400'}`}>
-                          {msg.sender_display_name || (isMine ? 'You' : 'Team Member')}
-                        </p>
-                      )}
                       <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
                       <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
+                    </div>
                     </div>
                     </div>
                   </div>

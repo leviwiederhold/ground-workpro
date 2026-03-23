@@ -3,7 +3,6 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import {
-  buildGroupThreadDisplayName,
   createGroupThread,
   ensureCompanyMember,
   getOrCreateDirectThread,
@@ -92,14 +91,7 @@ export async function POST(request: Request) {
     }
 
     const thread = await createGroupThread(supabase, companyId, userId, targetUserIds);
-    const names = await resolveDisplayNames(supabase, companyId, [userId, ...targetUserIds]);
-    const computedName =
-      parsedBody.data.name?.trim() ||
-      buildGroupThreadDisplayName({
-        participantUserIds: [userId, ...targetUserIds],
-        currentUserId: userId,
-        displayNames: names,
-      });
+    const computedName = parsedBody.data.name?.trim() || "Group Chat";
 
     return okItem(
       {

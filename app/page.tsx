@@ -1430,7 +1430,9 @@ const WorkspaceLoadingScreen = () => (
           currentView === 'dashboard' ||
           currentView === 'team' ||
           currentView === 'schedule' ||
-          currentView === 'messages';
+          currentView === 'messages' ||
+          currentView === 'maintenance' ||
+          currentView === 'fleet';
         if (!shouldLoad || moduleLoadedRef.current.companyMembers) return () => { isMounted = false; };
 
         const loadCompanyMembers = async () => {
@@ -1920,7 +1922,7 @@ const WorkspaceLoadingScreen = () => (
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
-          case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
+          case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} companyMembers={companyMembers} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} trainingLoading={trainingLoading} trainingError={trainingError} onRefreshTraining={loadTraining} />;
           case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} safetyLogs={safetyLogs} safetyLogsLoading={safetyLogsLoading} safetyLogsError={safetyLogsError} onDeleteSafetyLog={handleDeleteSafetyLog} deleteLoadingId={safetyDeleteLoadingId} moduleAccess={moduleAccess} />;
           case 'bids': return <BidsView bids={bids} bidsLoading={bidsLoading} setBids={setBids} jobs={jobs} ui={bidsViewUi} currentRole={currentRole} />;
@@ -2036,11 +2038,11 @@ const WorkspaceLoadingScreen = () => (
                     >
                       <Icon name="robot" className="text-sm" />
                     </button>
-                    <div className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-80 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                    <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
                       {AI_HELPER_TOOLTIP_COPY}
                     </div>
                     {showAiHelperPopover && (
-                      <div className="absolute right-0 top-full z-30 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:hidden">
+                      <div className="absolute left-1/2 top-full z-30 mt-2 w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:hidden">
                         {AI_HELPER_TOOLTIP_COPY}
                       </div>
                     )}
@@ -2395,7 +2397,7 @@ const WorkspaceLoadingScreen = () => (
           <TimeClockModal isOpen={showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} />
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
-          <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} employees={employees} workOrders={workOrders} setWorkOrders={setWorkOrders} data={showModal.data} />
+          <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} companyMembers={companyMembers} setWorkOrders={setWorkOrders} data={showModal.data} />
           <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} onSubmitSafetyLog={handleCreateSafetyLog} submitLoading={safetyCreateLoading} />
           <Modal isOpen={showModal.type === 'feedback'} onClose={closeFeedbackModal} title="Send feedback" size="sm">
             <form onSubmit={handleFeedbackSubmit} className="space-y-4">
@@ -4187,8 +4189,16 @@ const WorkspaceLoadingScreen = () => (
               )}
               <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
                 <div className="text-center mb-4">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
-                    {selectedEmployee.name.split(' ').map(n => n[0]).join('')}
+                  <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 overflow-hidden ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
+                    {selectedEmployee.avatarUrl ? (
+                      <img
+                        src={selectedEmployee.avatarUrl}
+                        alt={selectedEmployee.name || 'Team member'}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      selectedEmployee.name.split(' ').map(n => n[0]).join('')
+                    )}
                   </div>
                   {isMobileTeam && (
                     <button
@@ -4639,7 +4649,7 @@ const WorkspaceLoadingScreen = () => (
     // ============================================
     // MAINTENANCE VIEW
     // ============================================
-    const MaintenanceView = ({ workOrders, workOrdersLoading, setWorkOrders, equipment, employees, setShowModal, moduleAccess = {} }) => {
+    const MaintenanceView = ({ workOrders, workOrdersLoading, setWorkOrders, equipment, employees, companyMembers, setShowModal, moduleAccess = {} }) => {
       const [filter, setFilter] = useState('all');
       const [selectedWOId, setSelectedWOId] = useState(null);
       const [woStatus, setWoStatus] = useState('scheduled');
@@ -4666,7 +4676,28 @@ const WorkspaceLoadingScreen = () => (
       });
       const selectedWO = workOrders.find(w => w.id === selectedWOId);
       const selectedEquipment = selectedWO ? equipment.find(e => e.id === selectedWO.equipmentId) : null;
-      const assignee = selectedWO ? employees.find(e => e.id === selectedWO.assignedTo) : null;
+      const memberByUserId = useMemo(() => {
+        const map = new Map();
+        for (const member of Array.isArray(companyMembers) ? companyMembers : []) {
+          const userId = String(member?.userId || '');
+          if (!userId) continue;
+          map.set(userId, member);
+        }
+        return map;
+      }, [companyMembers]);
+
+      const getAssigneeLabel = useCallback((workOrder) => {
+        if (!workOrder) return 'Unassigned';
+        if (String(workOrder.assignmentMode || '').toLowerCase() === 'outsourced') return 'Outsourced';
+        const assignedId = String(workOrder.assignedTo || '');
+        if (!assignedId) return 'Unassigned';
+        const member = memberByUserId.get(assignedId);
+        if (member?.displayName) return member.displayName;
+        const employee = employees.find((item) => String(item.id) === assignedId);
+        return employee?.name || 'Assigned';
+      }, [employees, memberByUserId]);
+
+      const assigneeLabel = getAssigneeLabel(selectedWO);
 
       const upcomingPM = equipment.filter(e => (e.nextService - e.hours) < 250);
 
@@ -4819,7 +4850,7 @@ const WorkspaceLoadingScreen = () => (
                 <EmptyState testId="maintenance-empty">No work orders yet.</EmptyState>
               ) : filteredWOs.map(wo => {
                 const eq = equipment.find(e => e.id === wo.equipmentId);
-                const tech = employees.find(e => e.id === wo.assignedTo);
+                const techLabel = getAssigneeLabel(wo);
 
                 return (
                   <Card
@@ -4858,7 +4889,7 @@ const WorkspaceLoadingScreen = () => (
                       <Badge className={getStatusColor(getWoDisplayStatus(wo.status))}>{getWoDisplayStatus(wo.status)}</Badge>
                     </div>
                     <div className="mt-3 flex flex-col gap-2 text-xs text-gray-500 dark:text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
-                      <span><Icon name="user" className="mr-1" />{tech?.name || 'Unassigned'}</span>
+                      <span><Icon name="user" className="mr-1" />{techLabel}</span>
                       <span><Icon name="calendar" className="mr-1" />Due {formatDate(wo.dueDate)}</span>
                     </div>
                   </Card>
@@ -5007,7 +5038,7 @@ const WorkspaceLoadingScreen = () => (
 
                   <div>
                     <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Assigned To</p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{assignee?.name || 'Unassigned'}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{assigneeLabel}</p>
                   </div>
 
                   {selectedWO.parts.length > 0 && (
@@ -5686,8 +5717,8 @@ const WorkspaceLoadingScreen = () => (
                       <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Budget vs Spent by Job</h3>
                       <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">Current contract totals against field spend for active reporting jobs.</p>
                     </div>
-                    <div className="rounded-2xl bg-gray-900 px-3 py-2 text-right text-white dark:bg-zinc-100 dark:text-zinc-950">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-gray-300 dark:text-zinc-500">Open Jobs</p>
+                    <div className="rounded-2xl bg-gray-900 px-3 py-2 text-right text-white dark:border dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-gray-300 dark:text-zinc-400">Open Jobs</p>
                       <p className="text-lg font-semibold">{overviewJobs.length}</p>
                     </div>
                   </div>
@@ -5707,8 +5738,8 @@ const WorkspaceLoadingScreen = () => (
                       <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Fleet Utilization</h3>
                       <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">Live equipment mix across active, idle, and maintenance states.</p>
                     </div>
-                    <div className="rounded-2xl bg-green-50 px-3 py-2 text-right text-green-700 dark:bg-green-500/12 dark:text-green-300">
-                      <p className="text-[11px] uppercase tracking-[0.18em] text-green-600/70 dark:text-green-400/70">Active Rate</p>
+                    <div className="rounded-2xl bg-green-50 px-3 py-2 text-right text-green-700 dark:border dark:border-green-900/60 dark:bg-green-950/40 dark:text-green-200">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-green-600/70 dark:text-green-300/80">Active Rate</p>
                       <p className="text-lg font-semibold">{equipmentUtilizationTotal > 0 ? Math.round((activeEquipmentCount / equipmentUtilizationTotal) * 100) : 0}%</p>
                     </div>
                   </div>
@@ -11596,7 +11627,19 @@ const WorkspaceLoadingScreen = () => (
       );
     };
 
-    const WorkOrderModal = ({ isOpen, onClose, equipment, employees, workOrders, setWorkOrders, data }) => {
+    const WorkOrderModal = ({ isOpen, onClose, equipment, companyMembers, setWorkOrders, data }) => {
+      const mechanicOptions = useMemo(() => {
+        const members = Array.isArray(companyMembers) ? companyMembers : [];
+        return members
+          .filter((member) => String(member?.role || '').toLowerCase() === 'mechanic')
+          .filter((member) => !['inactive', 'deleted', 'archived'].includes(String(member?.status || '').toLowerCase()))
+          .map((member) => ({
+            value: String(member.userId || ''),
+            label: member.displayName || member.email || 'Mechanic',
+          }))
+          .filter((member) => member.value);
+      }, [companyMembers]);
+
       const [form, setForm] = useState({
         equipmentId: data?.equipmentId || '',
         type: data?.type || 'repair',
@@ -11604,6 +11647,7 @@ const WorkspaceLoadingScreen = () => (
         title: '',
         description: '',
         assignedTo: '',
+        assignmentMode: 'in_house',
         dueDate: '',
       });
       const [submitLoading, setSubmitLoading] = useState(false);
@@ -11628,7 +11672,8 @@ const WorkspaceLoadingScreen = () => (
               status: 'scheduled',
               title: form.title,
               description: form.description,
-              assignedTo: form.assignedTo || null,
+              assignedTo: form.assignmentMode === 'in_house' ? form.assignedTo || null : null,
+              assignmentMode: form.assignmentMode,
               dueDate: form.dueDate,
               laborHours: 0,
             }),
@@ -11695,10 +11740,22 @@ const WorkspaceLoadingScreen = () => (
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Assign To</label>
-                <select value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Assign Technician</label>
+                <select
+                  value={form.assignmentMode === 'outsourced' ? 'outsourced' : form.assignedTo}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === 'outsourced') {
+                      setForm({ ...form, assignmentMode: 'outsourced', assignedTo: '' });
+                      return;
+                    }
+                    setForm({ ...form, assignmentMode: 'in_house', assignedTo: value });
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                >
                   <option value="">Select Technician</option>
-                  {employees.filter(e => e.role === 'Mechanic').map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                  <option value="outsourced">Outsourced</option>
+                  {mechanicOptions.map((mechanic) => <option key={mechanic.value} value={mechanic.value}>{mechanic.label}</option>)}
                 </select>
               </div>
               <div>

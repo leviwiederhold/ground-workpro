@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { resolveWorkOrderAssignment } from "@/lib/work-orders/assignment";
 
 const workOrderTypeSchema = z.enum(["repair", "preventive", "inspection"]);
 const workOrderPrioritySchema = z.enum(["low", "medium", "high"]);
@@ -26,6 +27,7 @@ const updateWorkOrderSchema = z
     title: z.string().min(1).optional(),
     description: z.string().optional(),
     assignedTo: z.union([z.number(), z.string()]).nullable().optional(),
+    assignmentMode: z.enum(["in_house", "outsourced"]).optional(),
     dueDate: z.string().optional(),
     laborHours: z.number().nonnegative().optional(),
   })
@@ -38,14 +40,6 @@ const normalizeId = (id: unknown) => {
   if (typeof id === "number") return id;
   if (typeof id === "string" && /^\d+$/.test(id)) return Number(id);
   return id;
-};
-
-const normalizeUuid = (value: unknown) => {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value !== "string") return null;
-  const uuidPattern =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  return uuidPattern.test(value) ? value : null;
 };
 
 const toDbStatus = (status: string | undefined) => {
@@ -97,6 +91,7 @@ const mapWorkOrder = (row: any) => ({
   title: row.title ?? "",
   description: row.description ?? "",
   assignedTo: normalizeId(row.assigned_to ?? row.assignedTo),
+  assignmentMode: row.assignment_mode === "outsourced" ? "outsourced" : "in_house",
   createdAt: row.created_at ?? row.createdAt ?? "",
   dueDate: row.due_date ?? row.dueDate ?? "",
   parts: row.parts ?? [],
@@ -177,7 +172,19 @@ export async function PATCH(
     if (payload.status !== undefined) updatePayload.status = toDbStatus(payload.status);
     if (payload.title !== undefined) updatePayload.title = payload.title;
     if (payload.description !== undefined) updatePayload.description = payload.description;
-    if (payload.assignedTo !== undefined) updatePayload.assigned_to = normalizeUuid(payload.assignedTo);
+    if (payload.assignedTo !== undefined || payload.assignmentMode !== undefined) {
+      const assignment = await resolveWorkOrderAssignment({
+        supabase,
+        companyId,
+        assignedTo: payload.assignedTo,
+        assignmentMode: payload.assignmentMode,
+      });
+      if (!assignment.ok) {
+        return NextResponse.json({ error: assignment.error }, { status: assignment.status ?? 422 });
+      }
+      updatePayload.assigned_to = assignment.assignedTo;
+      updatePayload.assignment_mode = assignment.assignmentMode;
+    }
     if (payload.dueDate !== undefined) updatePayload.due_date = payload.dueDate ? payload.dueDate : null;
     if (payload.laborHours !== undefined) updatePayload.labor_hours = payload.laborHours;
 

@@ -47,6 +47,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const messagesEndRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
+  const resolvedDirectChannelIdsRef = useRef(new Set());
   const safeEmployees = useMemo(
     () => (Array.isArray(employees) ? employees.filter(hasRecordId) : []),
     [employees]
@@ -60,6 +61,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     if (!Array.isArray(availableUsersSeed) || availableUsersSeed.length === 0) return;
     setAvailableUsers((current) => (current.length > 0 ? current : availableUsersSeed.filter(hasUserId)));
   }, [availableUsersSeed]);
+
+  const activeChannelId = String(activeChannel?.id || '');
 
   const normalized = (value) => String(value || '').trim().toLowerCase();
   const initialsForName = useCallback((value) => {
@@ -303,7 +306,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     const candidates = (channels || []).filter(
       (channel) =>
         isDirectChannel(channel) &&
-        (!channel.other_user_id || isGenericDirectLabel(channel.name))
+        (!channel.other_user_id || isGenericDirectLabel(channel.name)) &&
+        !resolvedDirectChannelIdsRef.current.has(String(channel.id))
     );
     if (candidates.length === 0) return;
 
@@ -333,6 +337,9 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       if (cancelled) return;
       const byId = new Map(updates.filter(Boolean).map((update) => [String(update.id), update]));
       if (byId.size === 0) return;
+      byId.forEach((_, id) => {
+        resolvedDirectChannelIdsRef.current.add(String(id));
+      });
       setChannels((prev) =>
         prev.map((channel) => {
           const patch = byId.get(String(channel.id));
@@ -373,43 +380,39 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
 
   useEffect(() => {
     const refreshInbox = () => {
-      if (typeof document !== 'undefined' && document.hidden) return;
+      if (typeof document === 'undefined' || document.hidden) return;
       loadChannels(true);
     };
 
-    const timer = setInterval(refreshInbox, 30000);
-    if (typeof window !== 'undefined') {
-      window.addEventListener('focus', refreshInbox);
+    if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', refreshInbox);
     }
 
     return () => {
-      clearInterval(timer);
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('focus', refreshInbox);
+      if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', refreshInbox);
       }
     };
   }, [loadChannels]);
 
   useEffect(() => {
-    if (!activeChannel?.id) {
+    if (!activeChannelId) {
       setMessages([]);
       setMembers([]);
       return;
     }
-    if (invalidChannelIds.includes(String(activeChannel.id))) {
+    if (invalidChannelIds.includes(activeChannelId)) {
       setActiveChannel(null);
       return;
     }
     setNewIncomingCount(0);
-    loadMessages(activeChannel.id);
-  }, [activeChannel, invalidChannelIds, loadMessages]);
+    loadMessages(activeChannelId);
+  }, [activeChannelId, invalidChannelIds, loadMessages]);
 
   useEffect(() => {
-    if (!showMembers || !activeChannel?.id) return;
-    loadMembers(activeChannel.id);
-  }, [showMembers, activeChannel, loadMembers]);
+    if (!showMembers || !activeChannelId) return;
+    loadMembers(activeChannelId);
+  }, [showMembers, activeChannelId, loadMembers]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });

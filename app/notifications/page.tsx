@@ -91,16 +91,14 @@ export default function NotificationsPage() {
     const response = await fetch("/api/notifications/read-all", { method: "POST" });
     if (!response.ok) return;
     setItems((prev) => prev.map((item) => ({ ...item, is_read: true })));
-    await load();
-  }, [items, load]);
+  }, [items]);
 
   const clearRead = useCallback(async () => {
     if (!items.some((item) => item.is_read)) return;
     const response = await fetch("/api/notifications/clear-read", { method: "POST" });
     if (!response.ok) return;
     setItems((prev) => prev.filter((item) => !item.is_read));
-    await load();
-  }, [items, load]);
+  }, [items]);
 
   const deleteOne = useCallback(async (id: string) => {
     try {
@@ -108,11 +106,10 @@ export default function NotificationsPage() {
       const response = await fetch(`/api/notifications/${rawId}`, { method: "DELETE" });
       if (!response.ok) return;
       setItems((prev) => prev.filter((item) => String(item.id) !== String(id)));
-      await load();
     } catch {
       // no-op
     }
-  }, [load]);
+  }, []);
 
   const respondToInvite = useCallback(async (item: NotificationItem, responseStatus: "accepted" | "declined") => {
     const eventId = String(item?.payload?.eventId ?? item?.entity_id ?? "").trim();
@@ -139,11 +136,10 @@ export default function NotificationsPage() {
             : entry
         )
       );
-      await load();
     } catch {
       // no-op
     }
-  }, [load]);
+  }, []);
 
   const visibleItems = useMemo(
     () => (filter === "unread" ? items.filter((item) => !item.is_read) : items),

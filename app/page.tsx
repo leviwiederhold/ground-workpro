@@ -1295,7 +1295,6 @@ const WorkspaceLoadingScreen = () => (
           applyNotificationState(
             notifications.map((item) => ({ ...item, is_read: true, read_at: item.read_at ?? now }))
           );
-          await loadNotifications();
         } catch {
           // no-op
         }
@@ -1308,7 +1307,6 @@ const WorkspaceLoadingScreen = () => (
           const response = await fetch('/api/notifications/clear-read', { method: 'POST' });
           if (!response.ok) return;
           applyNotificationState(notifications.filter((item) => !item.is_read));
-          await loadNotifications();
         } catch {
           // no-op
         }
@@ -1321,7 +1319,6 @@ const WorkspaceLoadingScreen = () => (
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) return;
           applyNotificationState(notifications.filter((item) => String(item.id) !== String(notificationId)));
-          await loadNotifications();
         } catch {
           // no-op
         }
@@ -1378,12 +1375,11 @@ const WorkspaceLoadingScreen = () => (
                 : item
             )
           );
-          await loadNotifications();
           setCalendarRefreshVersion((prev) => prev + 1);
         } catch {
           // no-op
         }
-      }, [loadNotifications, applyNotificationState]);
+      }, [applyNotificationState]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1460,28 +1456,6 @@ const WorkspaceLoadingScreen = () => (
 
       useEffect(() => {
         loadNotifications();
-      }, [loadNotifications]);
-
-      useEffect(() => {
-        const poll = () => {
-          if (typeof document !== 'undefined' && document.hidden) return;
-          loadNotifications();
-        };
-        const intervalId = setInterval(poll, 30000);
-        const onVisibilityChange = () => {
-          if (!document.hidden) {
-            loadNotifications();
-          }
-        };
-        if (typeof document !== 'undefined') {
-          document.addEventListener('visibilitychange', onVisibilityChange);
-        }
-        return () => {
-          clearInterval(intervalId);
-          if (typeof document !== 'undefined') {
-            document.removeEventListener('visibilitychange', onVisibilityChange);
-          }
-        };
       }, [loadNotifications]);
 
       useEffect(() => {

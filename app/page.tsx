@@ -62,6 +62,8 @@ const FEEDBACK_TYPE_OPTIONS = [
   { value: 'feature_request', label: 'Feature Request' },
   { value: 'general_feedback', label: 'General Feedback' },
 ];
+const INSTALL_REMIND_AFTER_MS = 1000 * 60 * 60 * 24;
+const INSTALL_DISMISSED_AT_KEY = 'groundwork.install.dismissedAt';
 
 const loadCachedNavState = () => {
   if (typeof window === 'undefined') {
@@ -775,6 +777,11 @@ const WorkspaceLoadingScreen = () => (
       const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
+      const [isMobileInstallSurface, setIsMobileInstallSurface] = useState(false);
+      const [isAndroidInstallAvailable, setIsAndroidInstallAvailable] = useState(false);
+      const [showInstallCta, setShowInstallCta] = useState(false);
+      const [showIphoneInstallModal, setShowIphoneInstallModal] = useState(false);
+      const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
       const [showBetaPopover, setShowBetaPopover] = useState(false);
       const [showAiHelperPopover, setShowAiHelperPopover] = useState(false);
       const [notifications, setNotifications] = useState([]);
@@ -819,10 +826,88 @@ const WorkspaceLoadingScreen = () => (
                   ? 'Operator'
                   : 'Team Member';
       const isCeoRole = currentRole === 'executive';
+      const isIphoneInstallFlow = isMobileInstallSurface && !isAndroidInstallAvailable;
+
+      const dismissInstallCta = useCallback(() => {
+        setShowInstallCta(false);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(INSTALL_DISMISSED_AT_KEY, String(Date.now()));
+        }
+      }, []);
+
+      const openInstallFlow = useCallback(async () => {
+        if (isAndroidInstallAvailable && deferredInstallPrompt) {
+          try {
+            await deferredInstallPrompt.prompt();
+            const outcome = await deferredInstallPrompt.userChoice;
+            if (outcome?.outcome === 'accepted') {
+              setShowInstallCta(false);
+            } else {
+              dismissInstallCta();
+            }
+          } catch {
+            dismissInstallCta();
+          } finally {
+            setDeferredInstallPrompt(null);
+            setIsAndroidInstallAvailable(false);
+          }
+          return;
+        }
+
+        setShowIphoneInstallModal(true);
+      }, [deferredInstallPrompt, dismissInstallCta, isAndroidInstallAvailable]);
 
       const navigateFromUserMenu = useCallback((path) => {
         setShowUserMenu(false);
         window.location.assign(path);
+      }, []);
+
+      useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+
+        const mediaQuery = window.matchMedia('(max-width: 768px)');
+        const updateMobileState = () => {
+          setIsMobileInstallSurface(mediaQuery.matches);
+          if (!mediaQuery.matches) {
+            setShowInstallCta(false);
+            setShowIphoneInstallModal(false);
+            return;
+          }
+
+          const dismissedAtRaw = window.localStorage.getItem(INSTALL_DISMISSED_AT_KEY);
+          const dismissedAt = dismissedAtRaw ? Number(dismissedAtRaw) : 0;
+          const canShowAgain = !dismissedAt || Number.isNaN(dismissedAt) || Date.now() - dismissedAt >= INSTALL_REMIND_AFTER_MS;
+          setShowInstallCta(canShowAgain);
+        };
+
+        updateMobileState();
+        mediaQuery.addEventListener('change', updateMobileState);
+        return () => mediaQuery.removeEventListener('change', updateMobileState);
+      }, []);
+
+      useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+
+        const handleBeforeInstallPrompt = (event) => {
+          event.preventDefault();
+          setDeferredInstallPrompt(event);
+          if (window.matchMedia('(max-width: 768px)').matches) {
+            setIsAndroidInstallAvailable(true);
+          }
+        };
+
+        const handleInstalled = () => {
+          setShowInstallCta(false);
+          setDeferredInstallPrompt(null);
+          setIsAndroidInstallAvailable(false);
+        };
+
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.addEventListener('appinstalled', handleInstalled);
+        return () => {
+          window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+          window.removeEventListener('appinstalled', handleInstalled);
+        };
       }, []);
 
       useEffect(() => {
@@ -2292,6 +2377,16 @@ const WorkspaceLoadingScreen = () => (
                           >
                             <Icon name="gear" className="text-gray-400" /> Account Settings
                           </button>
+                          <button
+                            onClick={() => {
+                              setShowUserMenu(false);
+                              setShowInstallCta(true);
+                              void openInstallFlow();
+                            }}
+                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            <Icon name="mobile-screen" className="text-gray-400" /> Install on my phone
+                          </button>
                           {isCeoRole && (
                             <button
                               onClick={() => navigateFromUserMenu('/settings/company')}
@@ -2327,6 +2422,36 @@ const WorkspaceLoadingScreen = () => (
             {/* Content Area */}
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
               <div className="max-w-screen-2xl mx-auto">
+                {isMobileInstallSurface && showInstallCta && (
+                  <div className="mb-4 rounded-3xl border-2 border-brand-200 bg-brand-50 p-4 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="mt-1 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500 text-white">
+                        <Icon name="mobile-screen" className="text-xl" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-lg font-semibold text-brand-900">Install Groundwork Pro</p>
+                        <p className="mt-1 text-sm text-brand-800">Put Groundwork Pro on your phone home screen in a few taps.</p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-2">
+                      <button
+                        type="button"
+                        onClick={openInstallFlow}
+                        className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 px-4 text-base font-semibold text-white transition hover:bg-brand-600"
+                      >
+                        <Icon name="download" className="text-base" />
+                        Install Groundwork Pro
+                      </button>
+                      <button
+                        type="button"
+                        onClick={dismissInstallCta}
+                        className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-brand-200 bg-white px-4 text-sm font-medium text-brand-700 transition hover:border-brand-300"
+                      >
+                        Maybe later
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {renderView()}
                 <div className="mt-6 border-t border-gray-200 pt-4">
                   <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2360,6 +2485,61 @@ const WorkspaceLoadingScreen = () => (
             onClose={() => setShowModal({ type: null })}
             message={comingSoonMessage}
           />
+          <Modal isOpen={showIphoneInstallModal} onClose={() => setShowIphoneInstallModal(false)} title="Install Groundwork Pro" size="sm">
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600">Follow these 3 quick steps:</p>
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white">
+                    <Icon name="share-from-square" className="text-base" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Step 1: Tap Share</p>
+                    <p className="text-xs text-gray-600">Tap the share button at the bottom of your screen.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white">
+                    <Icon name="plus-square" className="text-base" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Step 2: Tap Add to Home Screen</p>
+                    <p className="text-xs text-gray-600">Scroll a little if you do not see it right away.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white">
+                    <Icon name="circle-check" className="text-base" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Step 3: Tap Add</p>
+                    <p className="text-xs text-gray-600">You are done. Groundwork Pro will show on your home screen.</p>
+                  </div>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowIphoneInstallModal(false)}
+                  className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600"
+                >
+                  Got it
+                </button>
+                {isIphoneInstallFlow && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowIphoneInstallModal(false);
+                      dismissInstallCta();
+                    }}
+                    className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                  >
+                    Remind me later
+                  </button>
+                )}
+              </div>
+            </div>
+          </Modal>
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
             onClose={() => setShowModal({ type: null })}

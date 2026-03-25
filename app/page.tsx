@@ -826,7 +826,6 @@ const WorkspaceLoadingScreen = () => (
                   ? 'Operator'
                   : 'Team Member';
       const isCeoRole = currentRole === 'executive';
-      const isIphoneInstallFlow = isMobileInstallSurface && !isAndroidInstallAvailable;
 
       const dismissInstallCta = useCallback(() => {
         setShowInstallCta(false);
@@ -854,6 +853,7 @@ const WorkspaceLoadingScreen = () => (
           return;
         }
 
+        setShowInstallCta(false);
         setShowIphoneInstallModal(true);
       }, [deferredInstallPrompt, dismissInstallCta, isAndroidInstallAvailable]);
 
@@ -2381,7 +2381,7 @@ const WorkspaceLoadingScreen = () => (
                             onClick={() => {
                               setShowUserMenu(false);
                               setShowInstallCta(true);
-                              void openInstallFlow();
+                              setShowIphoneInstallModal(false);
                             }}
                             className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                           >
@@ -2422,36 +2422,6 @@ const WorkspaceLoadingScreen = () => (
             {/* Content Area */}
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
               <div className="max-w-screen-2xl mx-auto">
-                {isMobileInstallSurface && showInstallCta && (
-                  <div className="mb-4 rounded-3xl border-2 border-brand-200 bg-brand-50 p-4 shadow-sm">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-1 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500 text-white">
-                        <Icon name="mobile-screen" className="text-xl" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-lg font-semibold text-brand-900">Install Groundwork Pro</p>
-                        <p className="mt-1 text-sm text-brand-800">Put Groundwork Pro on your phone home screen in a few taps.</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 grid gap-2">
-                      <button
-                        type="button"
-                        onClick={openInstallFlow}
-                        className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 px-4 text-base font-semibold text-white transition hover:bg-brand-600"
-                      >
-                        <Icon name="download" className="text-base" />
-                        Install Groundwork Pro
-                      </button>
-                      <button
-                        type="button"
-                        onClick={dismissInstallCta}
-                        className="inline-flex min-h-11 items-center justify-center rounded-2xl border border-brand-200 bg-white px-4 text-sm font-medium text-brand-700 transition hover:border-brand-300"
-                      >
-                        Maybe later
-                      </button>
-                    </div>
-                  </div>
-                )}
                 {renderView()}
                 <div className="mt-6 border-t border-gray-200 pt-4">
                   <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -2485,59 +2455,44 @@ const WorkspaceLoadingScreen = () => (
             onClose={() => setShowModal({ type: null })}
             message={comingSoonMessage}
           />
-          <Modal isOpen={showIphoneInstallModal} onClose={() => setShowIphoneInstallModal(false)} title="Install Groundwork Pro" size="sm">
-            <div className="space-y-4">
-              <p className="text-sm text-gray-600">Follow these 3 quick steps:</p>
-              <div className="space-y-3">
-                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white">
-                    <Icon name="share-from-square" className="text-base" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">Step 1: Tap Share</p>
-                    <p className="text-xs text-gray-600">Tap the share button at the bottom of your screen.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white">
-                    <Icon name="plus-square" className="text-base" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">Step 2: Tap Add to Home Screen</p>
-                    <p className="text-xs text-gray-600">Scroll a little if you do not see it right away.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-3">
-                  <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-500 text-white">
-                    <Icon name="circle-check" className="text-base" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-gray-900">Step 3: Tap Add</p>
-                    <p className="text-xs text-gray-600">You are done. Groundwork Pro will show on your home screen.</p>
-                  </div>
-                </div>
+          <Modal isOpen={isMobileInstallSurface && showInstallCta} onClose={dismissInstallCta} title="Install Groundwork Pro" size="sm">
+            <div className="space-y-6 px-1 pb-1 pt-2 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-gray-950 text-white shadow-[0_20px_40px_rgba(17,24,39,0.18)]">
+                <Icon name="mobile-screen" className="text-2xl" />
               </div>
-              <div className="grid gap-2">
+              <div className="space-y-2">
+                <p className="text-base leading-6 text-gray-600">Put this on your phone so you can open it like a normal app.</p>
+              </div>
+              <div className="space-y-3">
                 <button
                   type="button"
-                  onClick={() => setShowIphoneInstallModal(false)}
-                  className="inline-flex min-h-12 items-center justify-center rounded-2xl bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600"
+                  onClick={openInstallFlow}
+                  className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-gray-950 px-5 text-base font-semibold text-white transition hover:bg-gray-800"
                 >
-                  Got it
+                  Install Groundwork Pro
                 </button>
-                {isIphoneInstallFlow && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowIphoneInstallModal(false);
-                      dismissInstallCta();
-                    }}
-                    className="inline-flex min-h-10 items-center justify-center rounded-2xl border border-gray-300 bg-white px-4 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
-                  >
-                    Remind me later
-                  </button>
-                )}
+                <p className="text-sm font-medium text-gray-500">Takes about 10 seconds</p>
               </div>
+            </div>
+          </Modal>
+          <Modal isOpen={showIphoneInstallModal} onClose={() => setShowIphoneInstallModal(false)} title="Install Groundwork Pro" size="sm">
+            <div className="space-y-6 px-1 pb-2 pt-2 text-center">
+              <div className="rounded-[28px] border border-gray-200 bg-gradient-to-b from-gray-50 to-white px-5 py-7 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+                <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] bg-gray-950 text-white shadow-[0_20px_50px_rgba(17,24,39,0.22)]">
+                  <Icon name="share-from-square" className="text-4xl" />
+                </div>
+                <div className="mt-6 space-y-3">
+                  <p className="text-2xl font-semibold tracking-tight text-gray-950">Tap this button</p>
+                  <p className="text-lg leading-7 text-gray-600">Then tap Add to Home Screen</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIphoneInstallModal(false)}
+                className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-gray-950 px-5 text-base font-semibold text-white transition hover:bg-gray-800"
+              >
+                Got it
+              </button>
             </div>
           </Modal>
           <CalendarEventModal

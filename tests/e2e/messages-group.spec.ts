@@ -82,6 +82,7 @@ test("group chat creation works and group messages show sender identity", async 
   const groupThreadId = String(groupCreateJson?.item?.id ?? "");
   expect(groupThreadId).toBeTruthy();
   expect(String(groupCreateJson?.item?.kind ?? "")).toBe("group");
+  expect(String(groupCreateJson?.item?.name ?? "")).toBe(`Ops Group ${stamp}`);
   expect(Number(groupCreateJson?.item?.member_count ?? 0)).toBe(3);
 
   const membersRes = await page.request.get(`/api/messages/channels/${groupThreadId}/members`);
@@ -158,7 +159,14 @@ test("group chat creation works and group messages show sender identity", async 
   const participantAInboxBody = await participantAInboxRes.text();
   expect(participantAInboxRes.status(), participantAInboxBody).toBe(200);
   const participantAInbox = (JSON.parse(participantAInboxBody)?.items ?? []) as Array<{ id?: string; kind?: string }>;
-  expect(participantAInbox.some((item) => String(item.id ?? "") === groupThreadId && String(item.kind ?? "") === "group")).toBe(true);
+  expect(
+    participantAInbox.some(
+      (item) =>
+        String(item.id ?? "") === groupThreadId &&
+        String(item.kind ?? "") === "group" &&
+        String((item as { name?: string }).name ?? "") === `Ops Group ${stamp}`
+    )
+  ).toBe(true);
   const participantAMessagesRes = await participantASession.actorPage.request.get(
     `/api/messages/threads/${groupThreadId}/messages`
   );
@@ -206,7 +214,10 @@ test("group chat creation works and group messages show sender identity", async 
   }>;
   expect(
     participantBInbox.some(
-      (item) => String(item.id ?? "") === groupThreadId && String(item.kind ?? "") === "group"
+      (item) =>
+        String(item.id ?? "") === groupThreadId &&
+        String(item.kind ?? "") === "group" &&
+        String((item as { name?: string }).name ?? "") === `Ops Group ${stamp}`
     )
   ).toBe(true);
 

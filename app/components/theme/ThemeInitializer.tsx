@@ -28,6 +28,15 @@ export function ThemeInitializer() {
       return stored;
     };
 
+    const hasPersistedPreference = () => {
+      if (typeof window === "undefined") return false;
+      try {
+        return window.localStorage.getItem("groundwork.appearance") !== null;
+      } catch {
+        return false;
+      }
+    };
+
     const syncFromAccountSettings = async () => {
       try {
         const supabase = supabaseBrowser();
@@ -37,6 +46,8 @@ export function ThemeInitializer() {
         const response = await fetch("/api/account-settings", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || !payload?.item || cancelled) return;
+
+        if (hasPersistedPreference()) return;
 
         const preference = normalizeAppearancePreference(payload.item.appearance) as AppearancePreference;
         applyAppearancePreference(preference);

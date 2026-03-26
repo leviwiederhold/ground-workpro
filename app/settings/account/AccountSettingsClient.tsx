@@ -27,7 +27,7 @@ const defaultSettings: AccountSettingsItem = {
   email: "",
   full_name: "",
   timezone: "",
-  appearance: "system",
+  appearance: "dark",
   notification_preferences: {
     email_notifications: true,
     push_notifications: true,

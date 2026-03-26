@@ -8,7 +8,7 @@ const PUBLIC_THEME_EXACT_PATHS = new Set(["/features", "/pricing", "/testimonial
 export function normalizeAppearancePreference(value: unknown): AppearancePreference {
   const raw = String(value ?? "").trim().toLowerCase();
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
-  return "system";
+  return "dark";
 }
 
 export function isPublicThemePath(pathname: string | null | undefined): boolean {
@@ -40,12 +40,12 @@ export function applyAppearancePreference(preference: AppearancePreference) {
 }
 
 export function loadStoredAppearancePreference(): AppearancePreference {
-  if (typeof window === "undefined") return "system";
+  if (typeof window === "undefined") return "dark";
   try {
     const stored = window.localStorage.getItem(APPEARANCE_STORAGE_KEY);
-    return normalizeAppearancePreference(stored ?? "system");
+    return normalizeAppearancePreference(stored ?? "dark");
   } catch {
-    return "system";
+    return "dark";
   }
 }
 

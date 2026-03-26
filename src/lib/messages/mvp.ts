@@ -11,6 +11,7 @@ type ThreadRow = {
   id: string;
   company_id: string;
   kind: string;
+  name: string | null;
   dm_user_a: string;
   dm_user_b: string;
   created_at: string;
@@ -77,7 +78,7 @@ export async function findDirectThread(
   const [dmUserA, dmUserB] = sortDirectPair(userA, userB);
   const result = await getMessagingDb(supabase)
     .from("message_threads")
-    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
     .eq("kind", "direct")
     .eq("dm_user_a", dmUserA)
@@ -143,6 +144,7 @@ export async function getOrCreateDirectThread(
       company_id: companyId,
       kind: "direct",
       type: "direct",
+      name: null,
       dm_user_a: dmUserA,
       dm_user_b: dmUserB,
       created_by: currentUserId,
@@ -150,7 +152,7 @@ export async function getOrCreateDirectThread(
       updated_at: now,
       last_message_at: null,
     })
-    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .single();
 
   if (insertResult.error) {
@@ -171,7 +173,8 @@ export async function createGroupThread(
   supabase: SupabaseClient,
   companyId: string,
   currentUserId: string,
-  participantUserIds: string[]
+  participantUserIds: string[],
+  groupName: string | null
 ): Promise<ThreadRow> {
   const uniqueUserIds = uniqueParticipantUserIds([currentUserId, ...participantUserIds]);
   const otherUserIds = uniqueUserIds.filter((id) => id !== String(currentUserId));
@@ -186,6 +189,7 @@ export async function createGroupThread(
       company_id: companyId,
       kind: "group",
       type: "group",
+      name: groupName,
       dm_user_a: currentUserId,
       dm_user_b: otherUserIds[0],
       created_by: currentUserId,
@@ -193,7 +197,7 @@ export async function createGroupThread(
       updated_at: now,
       last_message_at: null,
     })
-    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .single();
 
   if (insertResult.error || !insertResult.data) {
@@ -228,7 +232,7 @@ export async function getThreadIfParticipant(
 
   const threadResult = await db
     .from("message_threads")
-    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
     .eq("id", threadId)
     .limit(1)
@@ -284,7 +288,7 @@ export async function listThreadsByIds(
 
   const result = await getMessagingDb(supabase)
     .from("message_threads")
-    .select("id, company_id, kind, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
     .in("id", threadIds);
 

@@ -14,7 +14,7 @@ export { GET } from "@/app/api/messages/inbox/route";
 export const dynamic = "force-dynamic";
 
 const createChannelSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
+  name: z.string().trim().min(1).max(120).nullable().optional(),
   memberUserIds: z.array(z.string().uuid()).default([]),
 });
 
@@ -90,14 +90,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const thread = await createGroupThread(supabase, companyId, userId, targetUserIds);
-    const computedName = parsedBody.data.name?.trim() || "Group Chat";
+    const providedGroupName = typeof parsedBody.data.name === "string" ? parsedBody.data.name.trim() : null;
+    const thread = await createGroupThread(supabase, companyId, userId, targetUserIds, providedGroupName);
 
     return okItem(
       {
         id: thread.id,
         kind: "group",
-        name: computedName,
+        name: thread.name,
         created_at: thread.created_at,
         updated_at: thread.updated_at,
         other_user_id: null,

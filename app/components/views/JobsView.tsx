@@ -99,8 +99,11 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       crew_assigned_count: 0,
       equipment_assigned_count: 0,
     };
-    setJobs((prev) => [...prev, optimisticJob]);
+    setJobs((prev) => [optimisticJob, ...prev]);
     setSelectedJobId(tempId);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
     try {
       const response = await fetch('/api/jobs', {
         method: 'POST',
@@ -147,6 +150,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     return 'other';
   }, []);
 
+  const jobOrder = new Map(jobs.map((job, index) => [String(job.id), index]));
   const filteredJobs = jobs.filter(job => {
     const normalizedStatus = normalizeJobStatus(job.status);
     if (normalizedStatus === 'other') return false;
@@ -158,7 +162,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     const aStatus = normalizeJobStatus(a.status);
     const bStatus = normalizeJobStatus(b.status);
     if (aStatus !== bStatus) return aStatus === 'active' ? -1 : 1;
-    return String(a.name || '').localeCompare(String(b.name || ''));
+    return (jobOrder.get(String(a.id)) ?? 0) - (jobOrder.get(String(b.id)) ?? 0);
   });
 
   const selectedJob = jobs.find(j => j.id === selectedJobId);

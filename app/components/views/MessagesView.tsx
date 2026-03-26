@@ -196,8 +196,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       const forcedLabel = forcedDirectLabels[String(channel.id || '')];
       if (forcedLabel) return String(forcedLabel);
       if (isGroupChannel(channel)) {
-        const groupName = String(channel.name || '').trim();
-        return groupName || 'Group Chat';
+        if (channel.name === null || channel.name === undefined) return 'Group Chat';
+        return String(channel.name);
       }
       if (!isDirectChannel(channel)) return String(channel.name || '');
       const otherUserId = String(channel.other_user_id || '');
@@ -491,21 +491,26 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         throw new Error('Enter a group name or select at least one member');
       }
 
-      const generatedName = newChannelName.trim() || 'Group Chat';
+      const generatedName = newChannelName.trim();
 
       const response = await fetch('/api/messages/channels', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: generatedName, memberUserIds }),
+        body: JSON.stringify({ name: generatedName || null, memberUserIds }),
       });
       const payload = await response.json();
       if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to create channel');
+      const createdChannel = payload.item;
       setShowNewChannel(false);
       setNewChannelName('');
       setSelectedNewChatUsers([]);
-      await loadChannels();
+      setChannels((prev) => {
+        const next = [createdChannel, ...prev.filter((channel) => String(channel.id) !== String(createdChannel.id))];
+        return next;
+      });
+      void loadChannels(true);
       setPendingDirectContact(null);
-      setActiveChannel(payload.item);
+      setActiveChannel(createdChannel);
     } catch (error) {
       setCreateChannelError(error instanceof Error ? error.message : 'Failed to create channel');
     } finally {

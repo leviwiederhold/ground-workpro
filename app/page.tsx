@@ -2478,12 +2478,30 @@ const WorkspaceLoadingScreen = () => (
           <Modal isOpen={showIphoneInstallModal} onClose={() => setShowIphoneInstallModal(false)} title="Install Groundwork Pro" size="sm">
             <div className="space-y-6 px-1 pb-2 pt-2 text-center">
               <div className="rounded-[28px] border border-gray-200 bg-gradient-to-b from-gray-50 to-white px-5 py-7 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
-                <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] bg-gray-950 text-white shadow-[0_20px_50px_rgba(17,24,39,0.22)]">
-                  <Icon name="share-from-square" className="text-4xl" />
+                <div className="mx-auto flex items-center justify-center gap-2.5">
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gray-950 text-white shadow-[0_14px_30px_rgba(17,24,39,0.2)]">
+                      <Icon name="ellipsis" className="text-4xl" />
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700">More</p>
+                  </div>
+                  <Icon name="arrow-right" className="text-xl text-gray-400" />
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gray-950 text-white shadow-[0_14px_30px_rgba(17,24,39,0.2)]">
+                      <Icon name="share-from-square" className="text-3xl" />
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700">Share</p>
+                  </div>
+                  <Icon name="arrow-right" className="text-xl text-gray-400" />
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gray-950 text-white shadow-[0_14px_30px_rgba(17,24,39,0.2)]">
+                      <Icon name="plus" className="text-4xl" />
+                    </div>
+                    <p className="text-sm font-semibold text-gray-700">Add</p>
+                  </div>
                 </div>
-                <div className="mt-6 space-y-3">
-                  <p className="text-2xl font-semibold tracking-tight text-gray-950">Tap this button</p>
-                  <p className="text-lg leading-7 text-gray-600">Then tap Add to Home Screen</p>
+                <div className="mt-6">
+                  <p className="text-lg font-semibold leading-7 text-gray-900">Tap … → Share → Add to Home Screen</p>
                 </div>
               </div>
               <button

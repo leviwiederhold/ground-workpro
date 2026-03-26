@@ -129,13 +129,13 @@ export async function GET(request: Request) {
         const latest = latestByThread.get(key);
         const kind = String(thread.kind || "direct");
         const isDirect = kind === "direct";
-        const explicitGroupName = String((thread as { name?: string }).name ?? "").trim();
+        const explicitGroupName = (thread as { name?: string | null }).name;
         return {
           id: thread.id,
           kind,
           name: isDirect
             ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
-            : explicitGroupName || "Group Chat",
+            : (explicitGroupName === null || explicitGroupName === undefined ? "Group Chat" : String(explicitGroupName)),
           created_at: thread.created_at,
           updated_at: thread.updated_at,
           message_count: countByThread.get(key) ?? 0,

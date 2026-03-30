@@ -6,6 +6,9 @@
     "dev": "next dev",
     "build": "pnpm check-env && pnpm build:next",
     "start": "next start",
+    "cap:sync": "pnpm exec cap sync",
+    "cap:open:ios": "pnpm exec cap open ios",
+    "cap:open:android": "pnpm exec cap open android",
     "lint": "eslint . --max-warnings=0",
     "test:e2e": "playwright test",
     "test:e2e:full": "playwright test",
@@ -23,6 +26,9 @@
     "typecheck": "pnpm exec next typegen && tsc --noEmit --incremental false"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/core": "^8.3.0",
+    "@capacitor/ios": "^8.3.0",
     "@fortawesome/fontawesome-free": "^6.7.2",
     "@sentry/nextjs": "^9.11.0",
     "@supabase/ssr": "^0.8.0",
@@ -35,6 +41,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.3.0",
     "@eslint/eslintrc": "^3.3.1",
     "@playwright/test": "^1.51.1",
     "@types/leaflet": "^1.9.18",

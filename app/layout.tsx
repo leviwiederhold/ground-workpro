@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { validateEnv } from "@/lib/env/validateEnv";
 import { ThemeInitializer } from "@/app/components/theme/ThemeInitializer";
@@ -8,6 +8,12 @@ validateEnv();
 export const metadata: Metadata = {
   title: "Groundwork Pro - Excavation Management Platform",
   description: "Groundwork Pro demo UI",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

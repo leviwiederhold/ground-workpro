@@ -343,14 +343,18 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                     View All <Icon name="arrow-right" className="ml-1" />
                   </Button>
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="p-3 space-y-2">
                   {activeJobsSection.items.length === 0 ? (
-                    <div className="p-4">
+                    <div className="p-1">
                       <EmptyState testId="dashboard-jobs-empty">No active jobs yet.</EmptyState>
                     </div>
                   ) : (
                     activeJobsSection.items.map((job) => (
-                      <div key={job.id} className="p-4 hover:bg-gray-50" onClick={() => setCurrentView('jobs')}>
+                      <div
+                        key={job.id}
+                        className="rounded-xl bg-black/5 p-4 transition-colors hover:bg-black/10 dark:bg-white/5 dark:hover:bg-white/10"
+                        onClick={() => setCurrentView('jobs')}
+                      >
                         <div className="flex items-start justify-between mb-2">
                           <div>
                             <h4 className="font-medium text-gray-900">{job.title}</h4>

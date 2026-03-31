@@ -2000,7 +2000,7 @@ const WorkspaceLoadingScreen = () => (
       };
 
       return (
-        <div className="app-shell relative flex h-[100dvh] min-h-[100dvh] bg-gray-50">
+        <div className="app-shell app-shell--dashboard relative flex bg-gray-50">
           {mobileSidebarOpen && (
             <button
               aria-label="Close sidebar"
@@ -2066,10 +2066,13 @@ const WorkspaceLoadingScreen = () => (
           </aside>
 
           {/* Main Content */}
-          <main className="flex-1 flex min-h-0 flex-col overflow-hidden">
+          <main className="relative flex flex-1 min-h-0 flex-col overflow-hidden">
             {/* Header */}
-            <header className="sticky top-0 z-20 bg-white border-b border-gray-200 px-3 sm:px-4 md:px-6 py-4">
-              <div className="flex items-start justify-between gap-3 sm:items-center">
+            <header
+              data-testid="dashboard-header"
+              className="dashboard-header absolute inset-x-0 top-0 z-20 border-b border-gray-200 bg-white"
+            >
+              <div className="dashboard-header__inner flex items-start justify-between gap-3 px-3 sm:items-center sm:px-4 md:px-6">
                 <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
                   <button
                     onClick={() => setMobileSidebarOpen(true)}
@@ -2165,7 +2168,7 @@ const WorkspaceLoadingScreen = () => (
                           className="fixed inset-0 z-40 bg-black/20 sm:hidden"
                           onClick={() => setShowNotifications(false)}
                         />
-                        <div className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+5rem)] z-50 w-[calc(100vw-24px)] max-w-none overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl shadow-black/15 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-1rem)] sm:rounded-2xl sm:shadow-xl">
+                        <div className="fixed left-3 right-3 top-[calc(var(--dashboard-header-offset)+0.75rem)] z-50 w-[calc(100vw-24px)] max-w-none overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl shadow-black/15 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96 sm:max-w-[calc(100vw-1rem)] sm:rounded-2xl sm:shadow-xl">
                           <div className="border-b border-gray-100 bg-gray-50 px-4 py-4 sm:px-4 sm:py-3">
                             <div className="flex items-start justify-between gap-3">
                               <div>
@@ -2420,7 +2423,10 @@ const WorkspaceLoadingScreen = () => (
             </header>
 
             {/* Content Area */}
-            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 sm:px-4 md:px-6 py-4 md:py-6">
+            <div
+              data-testid="dashboard-scroll-region"
+              className="dashboard-scroll-region flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-3 pb-4 sm:px-4 md:px-6 md:pb-6"
+            >
               <div className="max-w-screen-2xl mx-auto">
                 {renderView()}
                 <div className="mt-6 border-t border-gray-200 pt-4">
@@ -3293,7 +3299,7 @@ const WorkspaceLoadingScreen = () => (
                   onClick={() => setShowFleetDetails(false)}
                 />
               )}
-              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
+              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-[calc(var(--dashboard-header-offset)+0.75rem)] bottom-[calc(var(--safe-area-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto p-4` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
@@ -4314,7 +4320,7 @@ const WorkspaceLoadingScreen = () => (
                   onClick={() => setShowTeamDetails(false)}
                 />
               )}
-              <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
+              <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-[calc(var(--dashboard-header-offset)+0.75rem)] bottom-[calc(var(--safe-area-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
                 <div className="text-center mb-4">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 overflow-hidden ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
                     {selectedEmployee.avatarUrl ? (
@@ -5098,7 +5104,7 @@ const WorkspaceLoadingScreen = () => (
                   onClick={() => setShowMaintenanceDetails(false)}
                 />
               )}
-              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-16 bottom-3 z-50' : 'hidden'} overflow-y-auto rounded-2xl p-4 dark:border-zinc-800 dark:bg-[#090909]` : 'h-fit sticky top-4 p-4 dark:border-zinc-800 dark:bg-[#090909]'}>
+              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-[calc(var(--dashboard-header-offset)+0.75rem)] bottom-[calc(var(--safe-area-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto rounded-2xl p-4 dark:border-zinc-800 dark:bg-[#090909]` : 'h-fit sticky top-4 p-4 dark:border-zinc-800 dark:bg-[#090909]'}>
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <Badge className={`mb-2 ${selectedWO.type === 'repair' ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-slate-100 text-slate-800 dark:bg-[#111111] dark:text-zinc-200'}`}>

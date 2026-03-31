@@ -34,6 +34,35 @@ body {
   min-height: calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom));
 }
 
+.app-shell--dashboard {
+  --dashboard-header-height: 4.5rem;
+  --dashboard-header-offset: calc(var(--dashboard-header-height) + var(--safe-area-top));
+  margin-top: calc(var(--safe-area-top) * -1);
+  height: calc(100svh - var(--safe-area-bottom));
+  min-height: calc(100svh - var(--safe-area-bottom));
+  padding-top: var(--safe-area-top);
+}
+
+.dashboard-header {
+  height: var(--dashboard-header-offset);
+}
+
+.dashboard-header__inner {
+  min-height: var(--dashboard-header-height);
+}
+
+.dashboard-scroll-region {
+  padding-top: var(--dashboard-header-offset);
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+@media (min-width: 640px) {
+  .app-shell--dashboard {
+    --dashboard-header-height: 5rem;
+  }
+}
+
 @font-face {
   font-family: "Dozer";
   src: url("/fonts/Dozer.ttf") format("truetype");

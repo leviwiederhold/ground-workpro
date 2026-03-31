@@ -34,27 +34,56 @@ body {
   min-height: calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom));
 }
 
+body:has(.app-shell--dashboard) {
+  overflow: hidden;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  padding-left: 0;
+}
+
 .app-shell--dashboard {
   --dashboard-header-height: 4.5rem;
-  --dashboard-header-offset: calc(var(--dashboard-header-height) + var(--safe-area-top));
-  margin-top: calc(var(--safe-area-top) * -1);
-  height: calc(100svh - var(--safe-area-bottom));
-  min-height: calc(100svh - var(--safe-area-bottom));
+  --dashboard-header-total-height: calc(var(--dashboard-header-height) + var(--safe-area-top));
+  min-height: 100dvh;
+  height: 100dvh;
   padding-top: var(--safe-area-top);
+  padding-right: var(--safe-area-right);
+  padding-bottom: var(--safe-area-bottom);
+  padding-left: var(--safe-area-left);
+  overflow: hidden;
 }
 
 .dashboard-header {
-  height: var(--dashboard-header-offset);
+  position: fixed;
+  top: var(--safe-area-top);
+  left: 0;
+  right: 0;
+  height: var(--dashboard-header-height);
+  padding-right: var(--safe-area-right);
+  padding-left: var(--safe-area-left);
+  z-index: 20;
 }
 
 .dashboard-header__inner {
-  min-height: var(--dashboard-header-height);
+  height: 100%;
+}
+
+.dashboard-main-shell {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .dashboard-scroll-region {
-  padding-top: var(--dashboard-header-offset);
+  min-height: 0;
+  flex: 1 1 auto;
+  padding-top: var(--dashboard-header-height);
+  padding-bottom: max(1rem, var(--safe-area-bottom));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 @media (min-width: 640px) {

@@ -2011,11 +2011,11 @@ const WorkspaceLoadingScreen = () => (
 
           {/* Sidebar */}
           <aside
-            className={`fixed left-0 top-0 z-40 h-full ${sidebarCollapsed ? 'w-16' : 'w-64'} bg-dark-900 text-white flex flex-col transition-transform duration-300 lg:static lg:translate-x-0 ${
+            className={`dashboard-mobile-drawer fixed left-0 top-0 z-40 h-full ${sidebarCollapsed ? 'w-16' : 'w-64'} bg-dark-900 text-white flex flex-col transition-transform duration-300 lg:static lg:translate-x-0 lg:pt-0 ${
               mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
             }`}
           >
-            <div className="p-4 border-b border-dark-700">
+            <div className="dashboard-mobile-drawer__brand border-b border-dark-700 px-4 pb-4 lg:pt-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-brand-500 rounded-lg flex items-center justify-center">
                   <Icon name="mountain" className="text-white text-lg" />
@@ -2029,7 +2029,7 @@ const WorkspaceLoadingScreen = () => (
               </div>
             </div>
 
-            <nav className="flex-1 p-2 space-y-1 overflow-y-auto scrollbar-thin">
+            <nav className="dashboard-mobile-drawer__nav flex-1 space-y-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
               {navItems.map(item => (
                 <button
                   key={item.id}
@@ -2069,8 +2069,8 @@ const WorkspaceLoadingScreen = () => (
             data-testid="dashboard-header"
             className={`dashboard-header border-b border-gray-200 bg-white ${sidebarCollapsed ? 'lg:left-16' : 'lg:left-64'}`}
           >
-            <div className="dashboard-header__inner flex items-start justify-between gap-3 px-3 sm:items-center sm:px-4 md:px-6">
-                <div className="flex min-w-0 items-start gap-2.5 sm:gap-3">
+            <div className="dashboard-header__inner flex items-center justify-between gap-3 px-3 sm:px-4 md:px-6">
+                <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
                   <button
                     onClick={() => setMobileSidebarOpen(true)}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-700 lg:hidden"
@@ -2078,9 +2078,9 @@ const WorkspaceLoadingScreen = () => (
                   >
                     <Icon name="bars" />
                   </button>
-                  <div className="min-w-0">
-                    <h1 className="truncate text-lg font-semibold capitalize text-gray-900 md:text-xl">{currentView.replace('-', ' ')}</h1>
-                    <p className="truncate text-xs text-gray-500 sm:text-sm" suppressHydrationWarning>
+                  <div className="min-w-0 self-center">
+                    <h1 className="truncate text-lg font-semibold capitalize leading-tight text-gray-900 md:text-xl">{currentView.replace('-', ' ')}</h1>
+                    <p className="truncate text-xs leading-tight text-gray-500 sm:text-sm" suppressHydrationWarning>
                       {headerDateLabel || getUtcDateLabel()}
                     </p>
                   </div>

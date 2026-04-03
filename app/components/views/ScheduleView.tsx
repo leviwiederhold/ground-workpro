@@ -300,9 +300,19 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     });
   }, [eventsByDate, getAssignmentsForDate, mobileMonthAnchor, selectedDateKey]);
 
+  const mobileMonthWeeks = useMemo(() => (
+    Array.from({ length: 6 }, (_, index) => mobileMonthDays.slice(index * 7, index * 7 + 7))
+  ), [mobileMonthDays]);
+
   const handleSelectMobileDate = useCallback((date) => {
     setSelectedDateKey(asDateKey(date));
     setCurrentWeek(getWeekOffsetForDate(date));
+  }, [getWeekOffsetForDate]);
+
+  const handleSelectMobileDateKey = useCallback((dateKey) => {
+    const nextDate = new Date(`${dateKey}T12:00:00`);
+    setSelectedDateKey(dateKey);
+    setCurrentWeek(getWeekOffsetForDate(nextDate));
   }, [getWeekOffsetForDate]);
 
   const handleShiftMobileMonth = useCallback((direction) => {
@@ -574,7 +584,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
               </p>
               <button
                 type="button"
-                onClick={() => handleSelectMobileDate(new Date())}
+                onClick={() => handleSelectMobileDateKey(asDateKey(new Date()))}
                 className="mt-1 text-sm font-medium text-brand-600"
               >
                 Jump to today
@@ -593,25 +603,37 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
             ))}
           </div>
 
-          <div className="mt-2 grid grid-cols-7 gap-1">
-            {mobileMonthDays.map((day) => (
-              <button
-                key={day.dateKey}
-                type="button"
-                onClick={() => handleSelectMobileDate(day.date)}
-                data-testid={`schedule-mobile-day-${day.dateKey}`}
-                data-day-state={getMobileDayState(day)}
-                className={getMobileDayCellClasses(day)}
-                aria-pressed={day.isSelected}
-              >
-                <span className={getMobileDayNumberClasses(day)}>{day.date.getDate()}</span>
-                <span
-                  className={`mt-1 h-1.5 w-1.5 rounded-full ${getMobileDayDotClasses(day)}`}
-                />
-                {day.isToday && day.isSelected ? (
-                  <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-300" aria-hidden="true" />
-                ) : null}
-              </button>
+          <div className="mt-2 space-y-1">
+            {mobileMonthWeeks.map((week, weekIndex) => (
+              <div key={`mobile-month-week-${weekIndex}`} className="grid grid-cols-7 gap-1">
+                {week.map((day) => (
+                  <button
+                    key={day.dateKey}
+                    type="button"
+                    onPointerUp={(event) => {
+                      event.preventDefault();
+                      handleSelectMobileDateKey(day.dateKey);
+                    }}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      handleSelectMobileDateKey(day.dateKey);
+                    }}
+                    data-testid={`schedule-mobile-day-${day.dateKey}`}
+                    data-date-key={day.dateKey}
+                    data-day-state={getMobileDayState(day)}
+                    className={`${getMobileDayCellClasses(day)} isolate w-full touch-manipulation select-none overflow-hidden`}
+                    aria-pressed={day.isSelected}
+                  >
+                    <span className={`pointer-events-none ${getMobileDayNumberClasses(day)}`}>{day.date.getDate()}</span>
+                    <span
+                      className={`pointer-events-none mt-1 h-1.5 w-1.5 rounded-full ${getMobileDayDotClasses(day)}`}
+                    />
+                    {day.isToday && day.isSelected ? (
+                      <span className="pointer-events-none absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-300" aria-hidden="true" />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         </Card>

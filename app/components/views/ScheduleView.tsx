@@ -6,6 +6,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 export function ScheduleView({ equipment, employees, scheduleData, setScheduleData, currentRole, setShowModal, ui }) {
   const { Card, Button, Icon } = ui;
   const [currentWeek, setCurrentWeek] = useState(0);
+  const [selectedDateKey, setSelectedDateKey] = useState(() => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState('');
   const [scheduleWarning, setScheduleWarning] = useState('');
@@ -78,6 +85,11 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     }
     return buckets;
   }, [weekDateKeys]);
+
+  useEffect(() => {
+    if (weekDateKeys.includes(selectedDateKey)) return;
+    setSelectedDateKey(weekDateKeys[0]);
+  }, [selectedDateKey, weekDateKeys]);
 
   const loadWeekAssignments = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -224,19 +236,123 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'UTC' });
   };
 
-  const getTimedHour = (startsAt) => {
-    const start = new Date(startsAt);
-    if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
-    return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
-  };
+  const getWeekOffsetForDate = useCallback((targetDate) => {
+    const baseWeek = getWeekDates(0)[0];
+    const baseStart = new Date(baseWeek);
+    baseStart.setHours(0, 0, 0, 0);
+    const target = new Date(targetDate);
+    target.setHours(0, 0, 0, 0);
+    const diffMs = target.getTime() - baseStart.getTime();
+    return Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+  }, []);
 
-  const getEventTypeClasses = (eventType) => {
+  const formatAgendaTime = useCallback((value) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Time TBD';
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }, []);
+
+  const formatAgendaRange = useCallback((startsAt, endsAt) => {
+    if (!startsAt) return 'All day';
+    const startLabel = formatAgendaTime(startsAt);
+    if (!endsAt) return startLabel;
+    return `${startLabel} - ${formatAgendaTime(endsAt)}`;
+  }, [formatAgendaTime]);
+
+  const selectedDate = useMemo(() => new Date(`${selectedDateKey}T12:00:00`), [selectedDateKey]);
+  const selectedDayEvents = useMemo(() => {
+    const events = [...(eventsByDate[selectedDateKey] || [])];
+    return events.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  }, [eventsByDate, selectedDateKey]);
+  const getAssignmentsForDate = useCallback((dateKey) =>
+    Object.entries(scheduleData).flatMap(([key, items]) => (key.endsWith(`-${dateKey}`) ? items : [])),
+  [scheduleData]);
+
+  const selectedDayAssignments = useMemo(() => {
+    const assignments = [...getAssignmentsForDate(selectedDateKey)];
+    return assignments.sort((a, b) => {
+      if (a.startsAt && b.startsAt) return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
+      if (a.startsAt) return -1;
+      if (b.startsAt) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }, [getAssignmentsForDate, selectedDateKey]);
+
+  const mobileMonthAnchor = useMemo(() => new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1), [selectedDate]);
+  const mobileMonthDays = useMemo(() => {
+    const start = new Date(mobileMonthAnchor);
+    const startWeekday = start.getDay();
+    const offsetToMonday = startWeekday === 0 ? -6 : 1 - startWeekday;
+    start.setDate(start.getDate() + offsetToMonday);
+
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const dateKey = asDateKey(date);
+      return {
+        date,
+        dateKey,
+        inMonth: date.getMonth() === mobileMonthAnchor.getMonth(),
+        isToday: dateKey === asDateKey(new Date()),
+        isSelected: dateKey === selectedDateKey,
+        hasItems: Boolean((eventsByDate[dateKey] || []).length || getAssignmentsForDate(dateKey).length),
+      };
+    });
+  }, [eventsByDate, getAssignmentsForDate, mobileMonthAnchor, selectedDateKey]);
+
+  const handleSelectMobileDate = useCallback((date) => {
+    setSelectedDateKey(asDateKey(date));
+    setCurrentWeek(getWeekOffsetForDate(date));
+  }, [getWeekOffsetForDate]);
+
+  const handleShiftMobileMonth = useCallback((direction) => {
+    const next = new Date(mobileMonthAnchor);
+    next.setMonth(next.getMonth() + direction, 1);
+    handleSelectMobileDate(next);
+  }, [handleSelectMobileDate, mobileMonthAnchor]);
+
+  const getEventTypeClasses = useCallback((eventType) => {
     const type = String(eventType || '').toLowerCase();
     if (type === 'client') return { chip: 'bg-cyan-200 text-cyan-900 border-cyan-300', cell: 'bg-cyan-100 border-cyan-300 ring-1 ring-cyan-300' };
     if (type === 'inspection') return { chip: 'bg-amber-200 text-amber-900 border-amber-300', cell: 'bg-amber-100 border-amber-300 ring-1 ring-amber-300' };
     if (type === 'delivery') return { chip: 'bg-emerald-200 text-emerald-900 border-emerald-300', cell: 'bg-emerald-100 border-emerald-300 ring-1 ring-emerald-300' };
     if (type === 'internal') return { chip: 'bg-slate-300 text-slate-900 border-slate-400', cell: 'bg-slate-200 border-slate-400 ring-1 ring-slate-400' };
     return { chip: 'bg-indigo-200 text-indigo-900 border-indigo-300', cell: 'bg-indigo-100 border-indigo-300 ring-1 ring-indigo-300' };
+  }, []);
+
+  const mobileAgendaItems = useMemo(() => {
+    const eventCards = selectedDayEvents.map((event) => ({
+      id: `event-${event.id}`,
+      kind: 'event',
+      startsAt: event.startsAt,
+      title: event.title,
+      subtitle: formatAgendaRange(event.startsAt, event.endsAt),
+      meta: event.eventType || 'Event',
+      accent: getEventTypeClasses(event.eventType).chip,
+      data: event,
+    }));
+
+    const assignmentCards = selectedDayAssignments.map((assignment) => ({
+      id: `assignment-${assignment.id}`,
+      kind: 'assignment',
+      startsAt: assignment.startsAt || `${selectedDateKey}T23:59:00`,
+      title: assignment.name,
+      subtitle: assignment.startsAt ? formatAgendaRange(assignment.startsAt, assignment.endsAt) : 'Assigned for the day',
+      meta: assignment.type === 'equipment' ? 'Equipment assignment' : 'Crew assignment',
+      accent:
+        assignment.type === 'equipment'
+          ? 'bg-blue-100 text-blue-800 border-blue-200'
+          : 'bg-emerald-100 text-emerald-800 border-emerald-200',
+      data: assignment,
+    }));
+
+    return [...eventCards, ...assignmentCards].sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  }, [formatAgendaRange, getEventTypeClasses, selectedDayAssignments, selectedDayEvents, selectedDateKey]);
+
+  const getTimedHour = (startsAt) => {
+    const start = new Date(startsAt);
+    if (Number.isNaN(start.getTime())) return TIME_GRID_START_HOUR;
+    return Math.max(TIME_GRID_START_HOUR, Math.min(TIME_GRID_END_HOUR - 1, start.getHours()));
   };
 
   const getMinutesSinceGridStart = (dateTimeValue) => {
@@ -337,9 +453,6 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     });
   };
 
-  const getAssignmentsForDate = (dateKey) =>
-    Object.entries(scheduleData).flatMap(([key, items]) => (key.endsWith(`-${dateKey}`) ? items : []));
-
   const findEventById = useCallback(
     (eventId) => {
       for (const dateKey of Object.keys(eventsByDate || {})) {
@@ -392,6 +505,127 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
 
   return (
     <div className="space-y-4">
+      <div className="space-y-4 md:hidden">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">Schedule</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
+              {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}
+            </h2>
+          </div>
+          <Button variant="brand" size="sm" onClick={() => setShowModal({ type: 'calendar-event' })}>
+            <Icon name="calendar-plus" className="mr-2" /> Add Event
+          </Button>
+        </div>
+
+        <Card className="border-0 bg-white px-4 py-4 shadow-sm ring-1 ring-gray-200/80">
+          <div className="flex items-center justify-between gap-2">
+            <Button variant="secondary" size="sm" onClick={() => handleShiftMobileMonth(-1)}>
+              <Icon name="chevron-left" />
+            </Button>
+            <div className="text-center">
+              <p className="text-lg font-semibold text-gray-900">
+                {mobileMonthAnchor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+              </p>
+              <button
+                type="button"
+                onClick={() => handleSelectMobileDate(new Date())}
+                className="mt-1 text-sm font-medium text-brand-600"
+              >
+                Jump to today
+              </button>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => handleShiftMobileMonth(1)}>
+              <Icon name="chevron-right" />
+            </Button>
+          </div>
+
+          <div className="mt-4 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((label) => (
+              <div key={label} className="py-1">
+                {label}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-2 grid grid-cols-7 gap-1">
+            {mobileMonthDays.map((day) => (
+              <button
+                key={day.dateKey}
+                type="button"
+                onClick={() => handleSelectMobileDate(day.date)}
+                data-testid={`schedule-mobile-day-${day.dateKey}`}
+                className={`relative flex min-h-12 flex-col items-center justify-center rounded-2xl px-1 py-2 text-sm transition ${
+                  day.isSelected
+                    ? 'bg-gray-950 text-white shadow-[0_10px_22px_rgba(17,24,39,0.18)]'
+                    : day.inMonth
+                      ? 'text-gray-800 hover:bg-gray-100'
+                      : 'text-gray-300'
+                }`}
+                aria-pressed={day.isSelected}
+              >
+                <span className={`font-medium ${day.isToday && !day.isSelected ? 'text-brand-600' : ''}`}>{day.date.getDate()}</span>
+                <span
+                  className={`mt-1 h-1.5 w-1.5 rounded-full ${
+                    day.hasItems ? (day.isSelected ? 'bg-white/80' : 'bg-brand-500') : 'bg-transparent'
+                  }`}
+                />
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="border-0 bg-white px-4 py-4 shadow-sm ring-1 ring-gray-200/80">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-400">Agenda</p>
+              <h3 data-testid={`schedule-mobile-agenda-title-${selectedDateKey}`} className="mt-1 text-lg font-semibold text-gray-900">
+                {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => openEventModalAtSlot(selectedDateKey, 9)}
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-gray-100 px-4 text-sm font-medium text-gray-700"
+            >
+              Add at 9:00
+            </button>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {mobileAgendaItems.length === 0 ? (
+              <div className="rounded-3xl bg-gray-50 px-4 py-6 text-center">
+                <p className="text-sm font-medium text-gray-700">No events for this day.</p>
+                <p className="mt-1 text-sm text-gray-500">Tap a date above or add a new event.</p>
+              </div>
+            ) : (
+              mobileAgendaItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    if (item.kind === 'event') {
+                      setShowModal({ type: 'calendar-event', data: item.data });
+                    }
+                  }}
+                  className="flex w-full items-start gap-3 rounded-3xl bg-gray-50 px-4 py-4 text-left transition hover:bg-gray-100"
+                >
+                  <div className={`mt-0.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${item.accent}`}>
+                    {item.meta}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-base font-semibold text-gray-900">{item.title}</p>
+                    <p className="mt-1 text-sm text-gray-500">{item.subtitle}</p>
+                  </div>
+                  {item.kind === 'event' && <Icon name="chevron-right" className="mt-1 text-xs text-gray-400" />}
+                </button>
+              ))
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="hidden space-y-4 md:block">
       {/* Header */}
       <Card className="border border-gray-200/80 bg-white/90 p-3 shadow-sm backdrop-blur dark:border-zinc-800 dark:bg-[#090909] sm:p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -573,6 +807,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
       {scheduleError && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">{scheduleError}</div>
       )}
+      </div>
     </div>
   );
 };

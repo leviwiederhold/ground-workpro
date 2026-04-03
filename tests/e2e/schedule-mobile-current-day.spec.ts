@@ -13,20 +13,14 @@ test("mobile schedule opens with the current day already in view", async ({ page
   await loginViaUI(page);
 
   await page.goto("/");
-  await page.getByLabel("Open sidebar").click();
-  await page.getByTestId("nav-schedule").click();
+  await page.evaluate(() => window.localStorage.setItem("app.currentView", "schedule"));
+  await page.reload();
 
-  const strip = page.getByTestId("schedule-day-strip");
-  const todayHeader = page.getByTestId(`schedule-day-header-${asDateKey(new Date())}`);
+  const todayKey = asDateKey(new Date());
+  const todayCell = page.getByTestId(`schedule-mobile-day-${todayKey}`);
+  const agendaTitle = page.getByTestId(`schedule-mobile-agenda-title-${todayKey}`);
 
-  await expect(strip).toBeVisible();
-  await expect(todayHeader).toBeVisible();
-
-  const stripBox = await strip.boundingBox();
-  const todayBox = await todayHeader.boundingBox();
-
-  expect(stripBox).toBeTruthy();
-  expect(todayBox).toBeTruthy();
-  expect(todayBox.x).toBeGreaterThanOrEqual(stripBox.x);
-  expect(todayBox.x + todayBox.width).toBeLessThanOrEqual(stripBox.x + stripBox.width);
+  await expect(todayCell).toBeVisible();
+  await expect(agendaTitle).toBeVisible();
+  await expect(todayCell).toHaveAttribute("aria-pressed", "true");
 });

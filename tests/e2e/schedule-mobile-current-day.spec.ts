@@ -23,4 +23,6 @@ test("mobile schedule opens with the current day already in view", async ({ page
   await expect(todayCell).toBeVisible();
   await expect(agendaTitle).toBeVisible();
   await expect(todayCell).toHaveAttribute("aria-pressed", "true");
+  await expect(todayCell).toHaveAttribute("data-day-state", "today-selected");
+  await expect(page.locator('[data-day-state="selected"], [data-day-state="today-selected"]')).toHaveCount(1);
 });

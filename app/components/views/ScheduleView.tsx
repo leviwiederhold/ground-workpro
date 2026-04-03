@@ -311,6 +311,51 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     handleSelectMobileDate(next);
   }, [handleSelectMobileDate, mobileMonthAnchor]);
 
+  const getMobileDayState = useCallback((day) => {
+    if (day.isSelected && day.isToday) return 'today-selected';
+    if (day.isSelected) return 'selected';
+    if (day.isToday) return 'today';
+    return 'default';
+  }, []);
+
+  const getMobileDayCellClasses = useCallback((day) => {
+    const state = getMobileDayState(day);
+    const base = 'relative flex min-h-12 flex-col items-center justify-center rounded-2xl border px-1 py-2 text-sm transition';
+
+    if (state === 'today-selected') {
+      return `${base} border-gray-950 bg-gray-950 text-white shadow-[0_10px_22px_rgba(17,24,39,0.18)]`;
+    }
+
+    if (state === 'selected') {
+      return `${base} border-gray-950 bg-gray-950 text-white shadow-[0_10px_22px_rgba(17,24,39,0.18)]`;
+    }
+
+    if (state === 'today') {
+      return `${base} border-brand-200 bg-brand-50 text-brand-700`;
+    }
+
+    if (day.inMonth) {
+      return `${base} border-transparent text-gray-800 hover:bg-gray-100`;
+    }
+
+    return `${base} border-transparent text-gray-300`;
+  }, [getMobileDayState]);
+
+  const getMobileDayNumberClasses = useCallback((day) => {
+    const state = getMobileDayState(day);
+    if (state === 'selected' || state === 'today-selected') return 'font-semibold text-white';
+    if (state === 'today') return 'font-semibold text-brand-700';
+    return 'font-medium';
+  }, [getMobileDayState]);
+
+  const getMobileDayDotClasses = useCallback((day) => {
+    if (!day.hasItems) return 'bg-transparent';
+    const state = getMobileDayState(day);
+    if (state === 'selected' || state === 'today-selected') return 'bg-white/80';
+    if (state === 'today') return 'bg-brand-600';
+    return 'bg-brand-500';
+  }, [getMobileDayState]);
+
   const getEventTypeClasses = useCallback((eventType) => {
     const type = String(eventType || '').toLowerCase();
     if (type === 'client') return { chip: 'bg-cyan-200 text-cyan-900 border-cyan-300', cell: 'bg-cyan-100 border-cyan-300 ring-1 ring-cyan-300' };
@@ -555,21 +600,17 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                 type="button"
                 onClick={() => handleSelectMobileDate(day.date)}
                 data-testid={`schedule-mobile-day-${day.dateKey}`}
-                className={`relative flex min-h-12 flex-col items-center justify-center rounded-2xl px-1 py-2 text-sm transition ${
-                  day.isSelected
-                    ? 'bg-gray-950 text-white shadow-[0_10px_22px_rgba(17,24,39,0.18)]'
-                    : day.inMonth
-                      ? 'text-gray-800 hover:bg-gray-100'
-                      : 'text-gray-300'
-                }`}
+                data-day-state={getMobileDayState(day)}
+                className={getMobileDayCellClasses(day)}
                 aria-pressed={day.isSelected}
               >
-                <span className={`font-medium ${day.isToday && !day.isSelected ? 'text-brand-600' : ''}`}>{day.date.getDate()}</span>
+                <span className={getMobileDayNumberClasses(day)}>{day.date.getDate()}</span>
                 <span
-                  className={`mt-1 h-1.5 w-1.5 rounded-full ${
-                    day.hasItems ? (day.isSelected ? 'bg-white/80' : 'bg-brand-500') : 'bg-transparent'
-                  }`}
+                  className={`mt-1 h-1.5 w-1.5 rounded-full ${getMobileDayDotClasses(day)}`}
                 />
+                {day.isToday && day.isSelected ? (
+                  <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-brand-300" aria-hidden="true" />
+                ) : null}
               </button>
             ))}
           </div>

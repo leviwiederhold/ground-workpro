@@ -30,6 +30,20 @@ body {
   padding-left: var(--safe-area-left);
 }
 
+body.mobile-shell-active {
+  overflow: hidden;
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+  padding-left: 0;
+}
+
+body.modal-open {
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
 .app-shell {
   min-height: calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom));
 }
@@ -101,9 +115,50 @@ body:has(.mobile-app-shell) {
   overflow-y: auto;
 }
 
+.mobile-sheet-backdrop {
+  padding-top: var(--safe-area-top);
+  padding-right: var(--safe-area-right);
+  padding-bottom: var(--safe-area-bottom);
+  padding-left: var(--safe-area-left);
+}
+
+.mobile-sheet-panel {
+  width: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+  border-radius: 1.5rem 1.5rem 0 0;
+}
+
+.mobile-sheet-header {
+  padding-top: max(1rem, calc(var(--safe-area-top) * 0.35));
+}
+
+.mobile-sheet-body {
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
 @media (min-width: 640px) {
   .mobile-app-shell {
     --mobile-header-height: 5rem;
+  }
+
+  .mobile-sheet-panel {
+    border-radius: 1.5rem;
+  }
+
+  .mobile-sheet-header {
+    padding-top: 1rem;
+  }
+}
+
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
   }
 }
 

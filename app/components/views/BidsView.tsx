@@ -275,6 +275,14 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
       }, [selectedBid]);
 
       useEffect(() => {
+        if (!(showMobileDetails || showBidModal || showItemModal) || typeof document === 'undefined') return undefined;
+        document.body.classList.add('modal-open');
+        return () => {
+          document.body.classList.remove('modal-open');
+        };
+      }, [showBidModal, showItemModal, showMobileDetails]);
+
+      useEffect(() => {
         if (!selectedBidId && bids.length > 0) {
           setSelectedBidId(bids[0].id);
           return;
@@ -712,24 +720,39 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           </StatGrid>
           {analyticsLoading ? <LoadingBlock>Loading analytics...</LoadingBlock> : null}
 
-          <div className="flex flex-wrap items-center gap-3 justify-between">
-            <div className="flex flex-wrap bg-gray-100 rounded-lg p-1">
-              {['all', 'lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
-                <button
-                  key={status}
-                  onClick={() => setFilter(status)}
-                  className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center lg:w-auto">
+              <div className="w-full sm:hidden">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-[0.16em] text-gray-500">Stage</label>
+                <select
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-base font-medium text-gray-900 shadow-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                  data-testid="bids-mobile-filter"
                 >
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-56 max-w-[60vw]">
+                  {['all', 'lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
+                    <option key={status} value={status}>
+                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="hidden flex-wrap rounded-lg bg-gray-100 p-1 sm:flex">
+                {['all', 'lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFilter(status)}
+                    className={`px-4 py-1.5 text-sm font-medium rounded-md transition-colors ${filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'}`}
+                  >
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className="w-full sm:w-64 lg:w-72">
                 <SearchInput value={search} onChange={setSearch} placeholder="Search bids..." />
               </div>
-              <Button variant="brand" onClick={openCreateBid} data-testid="bids-create"><Icon name="plus" className="mr-2" />New Bid</Button>
             </div>
+            <Button variant="brand" onClick={openCreateBid} data-testid="bids-create" className="w-full sm:w-auto"><Icon name="plus" className="mr-2" />New Bid</Button>
           </div>
 
           {formError && <InlineError testId="bids-form-error">{formError}</InlineError>}
@@ -1013,21 +1036,23 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                 className="fixed inset-0 z-40 bg-black/50"
                 onClick={() => setShowMobileDetails(false)}
               />
-              <Card className="fixed inset-x-3 top-16 bottom-3 z-50 overflow-y-auto p-4">
-                <div className="mb-4 flex items-center justify-between">
+              <Card className="mobile-sheet-backdrop fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none p-0 sm:items-center sm:justify-center sm:bg-black/0 sm:p-4">
+                <div className="mobile-sheet-panel flex min-h-0 flex-1 flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)] sm:max-w-4xl">
+                <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-5">
                   <div>
                     <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
                     <p className="text-sm text-gray-500">{getBidClient(selectedBid) || 'No client selected'}</p>
                   </div>
                   <button
                     type="button"
-                    className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-300 text-gray-700"
                     onClick={() => setShowMobileDetails(false)}
                   >
-                    Close
+                    <Icon name="xmark" />
                   </button>
                 </div>
 
+                <div className="mobile-sheet-body min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
                     <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
@@ -1083,227 +1108,231 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                     )}
                   </div>
                 </div>
+                </div>
+                </div>
               </Card>
             </>
           )}
 
           {showBidModal && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain px-3 py-3 sm:items-center sm:px-4 sm:py-4">
+            <div className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden sm:items-center sm:p-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeBidModal} aria-label="Close bid modal" />
-              <Card className="relative z-10 my-4 w-full max-w-xl p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
-                <div className="flex items-center justify-between mb-4">
+              <Card className="mobile-sheet-panel relative z-10 flex w-full max-w-xl flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)]">
+                <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-5 pb-4 sm:items-center sm:px-6">
                   <h3 className="text-lg font-bold text-gray-900">{editingBidId ? 'Edit Bid' : 'Create Bid'}</h3>
-                  <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeBidModal}>
+                  <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700" onClick={closeBidModal}>
                     <Icon name="xmark" className="text-lg" />
                   </button>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
-                    <input
-                      type="text"
-                      data-testid="bids-title-input"
-                      value={bidForm.title}
-                      onChange={(e) => setBidForm({ ...bidForm, title: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="mobile-sheet-body space-y-3 overflow-y-auto px-5 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-6 sm:pb-6">
+                  <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Stage</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
+                      <input
+                        type="text"
+                        data-testid="bids-title-input"
+                        value={bidForm.title}
+                        onChange={(e) => setBidForm({ ...bidForm, title: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Stage</label>
+                        <select
+                          value={bidForm.stage}
+                          onChange={(e) => setBidForm({ ...bidForm, stage: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        >
+                          {['lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
+                            <option key={status} value={status}>
+                              {status.charAt(0).toUpperCase() + status.slice(1)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Bid Date</label>
+                        <input
+                          type="date"
+                          data-testid="bids-bid-date-input"
+                          value={bidForm.bid_date || ''}
+                          onChange={(e) => setBidForm({ ...bidForm, bid_date: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Related Job (Optional)</label>
                       <select
-                        value={bidForm.stage}
-                        onChange={(e) => setBidForm({ ...bidForm, stage: e.target.value })}
+                        value={bidForm.job_id || ''}
+                        onChange={(e) => setBidForm({ ...bidForm, job_id: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       >
-                        {['lead', 'qualified', 'estimating', 'review', 'won', 'lost'].map((status) => (
-                          <option key={status} value={status}>
-                            {status.charAt(0).toUpperCase() + status.slice(1)}
+                        <option value="">None</option>
+                        {jobs.map((job) => (
+                          <option key={job.id} value={job.id}>
+                            {job.name || job.projectName}
                           </option>
                         ))}
                       </select>
                     </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Bid Date</label>
-                    <input
-                      type="date"
-                      data-testid="bids-bid-date-input"
-                      value={bidForm.bid_date || ''}
-                      onChange={(e) => setBidForm({ ...bidForm, bid_date: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Related Job (Optional)</label>
-                    <select
-                      value={bidForm.job_id || ''}
-                      onChange={(e) => setBidForm({ ...bidForm, job_id: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="">None</option>
-                      {jobs.map((job) => (
-                        <option key={job.id} value={job.id}>
-                          {job.name || job.projectName}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
-                    <input
-                      type="text"
-                      data-testid="bids-client-input"
-                      value={bidForm.client}
-                      onChange={(e) => setBidForm({ ...bidForm, client: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Probability (%)</label>
-                    <input
-                      type="number"
-                      data-testid="bids-probability-input"
-                      min="0"
-                      max="100"
-                      value={bidForm.probability}
-                      onChange={(e) => setBidForm({ ...bidForm, probability: Number(e.target.value) })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Actual Job Cost</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Client</label>
                       <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={bidForm.actual_job_cost}
-                        onChange={(e) => setBidForm({ ...bidForm, actual_job_cost: Number(e.target.value) || 0 })}
+                        type="text"
+                        data-testid="bids-client-input"
+                        value={bidForm.client}
+                        onChange={(e) => setBidForm({ ...bidForm, client: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Revenue</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Probability (%)</label>
                       <input
                         type="number"
+                        data-testid="bids-probability-input"
                         min="0"
-                        step="0.01"
-                        value={bidForm.revenue}
-                        onChange={(e) => setBidForm({ ...bidForm, revenue: Number(e.target.value) || 0 })}
+                        max="100"
+                        value={bidForm.probability}
+                        onChange={(e) => setBidForm({ ...bidForm, probability: Number(e.target.value) })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Profit</label>
-                      <p className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">
-                        {formatCurrency((Number(bidForm.revenue) || 0) - (Number(bidForm.actual_job_cost) || 0))}
-                      </p>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Actual Job Cost</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={bidForm.actual_job_cost}
+                          onChange={(e) => setBidForm({ ...bidForm, actual_job_cost: Number(e.target.value) || 0 })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Revenue</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={bidForm.revenue}
+                          onChange={(e) => setBidForm({ ...bidForm, revenue: Number(e.target.value) || 0 })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Profit</label>
+                        <p className="w-full border border-gray-200 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                          {formatCurrency((Number(bidForm.revenue) || 0) - (Number(bidForm.actual_job_cost) || 0))}
+                        </p>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Margin</label>
+                        <p className="w-full border border-gray-200 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                          {(((Number(bidForm.revenue) || 0) > 0
+                            ? (((Number(bidForm.revenue) || 0) - (Number(bidForm.actual_job_cost) || 0)) / (Number(bidForm.revenue) || 0))
+                            : 0) * 100).toFixed(2)}%
+                        </p>
+                      </div>
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Margin</label>
-                      <p className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-gray-50">
-                        {(((Number(bidForm.revenue) || 0) > 0
-                          ? (((Number(bidForm.revenue) || 0) - (Number(bidForm.actual_job_cost) || 0)) / (Number(bidForm.revenue) || 0))
-                          : 0) * 100).toFixed(2)}%
-                      </p>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+                      <textarea
+                        rows={3}
+                        value={bidForm.notes}
+                        onChange={(e) => setBidForm({ ...bidForm, notes: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      />
                     </div>
+                    {formError && <p className="text-sm text-red-600">{formError}</p>}
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Notes</label>
-                    <textarea
-                      rows={3}
-                      value={bidForm.notes}
-                      onChange={(e) => setBidForm({ ...bidForm, notes: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
+                  <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
+                    <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading} data-testid="bids-save">
+                      {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
+                    </Button>
                   </div>
-                  {formError && <p className="text-sm text-red-600">{formError}</p>}
-                </div>
-
-                <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
-                  <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading} data-testid="bids-save">
-                    {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
-                  </Button>
                 </div>
               </Card>
             </div>
           )}
 
           {showItemModal && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain px-3 py-3 sm:items-center sm:px-4 sm:py-4">
+            <div className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden sm:items-center sm:p-4">
               <button className="absolute inset-0 bg-black/40" onClick={closeItemModal} aria-label="Close bid item modal" />
-              <Card className="relative z-10 my-4 w-full max-w-lg p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
-                <div className="flex items-center justify-between mb-4">
+              <Card className="mobile-sheet-panel relative z-10 flex w-full max-w-lg flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)]">
+                <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-5 pb-4 sm:items-center sm:px-6">
                   <h3 className="text-lg font-bold text-gray-900">{editingItemId ? 'Edit Bid Item' : 'Add Bid Item'}</h3>
-                  <button type="button" className="text-gray-500 hover:text-gray-700" onClick={closeItemModal}>
+                  <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700" onClick={closeItemModal}>
                     <Icon name="xmark" className="text-lg" />
                   </button>
                 </div>
 
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                    <select
-                      value={itemForm.item_type}
-                      onChange={(e) => setItemForm({ ...itemForm, item_type: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    >
-                      {['custom', 'labor', 'equipment', 'material', 'subcontract'].map((type) => (
-                        <option key={type} value={type}>
-                          {type.charAt(0).toUpperCase() + type.slice(1)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <input
-                      type="text"
-                      data-testid="bid-item-description"
-                      value={itemForm.description}
-                      onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="mobile-sheet-body space-y-3 overflow-y-auto px-5 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-6 sm:pb-6">
+                  <div className="space-y-3">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+                      <select
+                        value={itemForm.item_type}
+                        onChange={(e) => setItemForm({ ...itemForm, item_type: e.target.value })}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      >
+                        {['custom', 'labor', 'equipment', 'material', 'subcontract'].map((type) => (
+                          <option key={type} value={type}>
+                            {type.charAt(0).toUpperCase() + type.slice(1)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
                       <input
-                        type="number"
-                        data-testid="bid-item-quantity"
-                        min="0.01"
-                        step="0.01"
-                        value={itemForm.quantity}
-                        onChange={(e) => setItemForm({ ...itemForm, quantity: Number(e.target.value) })}
+                        type="text"
+                        data-testid="bid-item-description"
+                        value={itemForm.description}
+                        onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                       />
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost</label>
-                      <input
-                        type="number"
-                        data-testid="bid-item-unit-cost"
-                        min="0"
-                        step="0.01"
-                        value={itemForm.unit_cost}
-                        onChange={(e) => setItemForm({ ...itemForm, unit_cost: Number(e.target.value) })}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      />
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+                        <input
+                          type="number"
+                          data-testid="bid-item-quantity"
+                          min="0.01"
+                          step="0.01"
+                          value={itemForm.quantity}
+                          onChange={(e) => setItemForm({ ...itemForm, quantity: Number(e.target.value) })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost</label>
+                        <input
+                          type="number"
+                          data-testid="bid-item-unit-cost"
+                          min="0"
+                          step="0.01"
+                          value={itemForm.unit_cost}
+                          onChange={(e) => setItemForm({ ...itemForm, unit_cost: Number(e.target.value) })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                        />
+                      </div>
+                    </div>
+                    {itemError && <p className="text-sm text-red-600">{itemError}</p>}
+                    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                      <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
+                      <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading} data-testid="bids-item-save">
+                        {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
+                      </Button>
                     </div>
                   </div>
-                  {itemError && <p className="text-sm text-red-600">{itemError}</p>}
-                </div>
-
-                <div className="mt-6 flex flex-col sm:flex-row gap-2 sm:justify-end">
-                  <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading} data-testid="bids-item-save">
-                    {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
-                  </Button>
                 </div>
               </Card>
             </div>

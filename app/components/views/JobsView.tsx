@@ -199,6 +199,14 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   }, [selectedJob]);
 
   useEffect(() => {
+    if (!showMobileDetails || typeof document === 'undefined') return undefined;
+    document.body.classList.add('modal-open');
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [showMobileDetails]);
+
+  useEffect(() => {
     if (!selectedJob) return;
     setJobForm({
       name: selectedJob.name || '',
@@ -966,17 +974,19 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
             className="fixed inset-0 z-40 bg-black/50"
             onClick={() => setShowMobileDetails(false)}
           />
-          <Card className="fixed inset-x-3 top-16 bottom-3 z-50 overflow-y-auto p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900">{selectedJob.name}</h3>
+          <Card className="mobile-sheet-backdrop fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none p-0 sm:items-center sm:justify-center sm:bg-black/0 sm:p-4">
+            <div className="mobile-sheet-panel flex min-h-0 flex-1 flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)] sm:max-w-3xl">
+            <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-5">
+              <h3 className="min-w-0 truncate font-semibold text-gray-900">{selectedJob.name}</h3>
               <button
                 type="button"
-                className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-300 text-gray-700"
                 onClick={() => setShowMobileDetails(false)}
               >
-                Close
+                <Icon name="xmark" />
               </button>
             </div>
+            <div className="mobile-sheet-body min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
             <div className="space-y-4">
               <div>
                 <p className="text-xs text-gray-500 mb-1">Name</p>
@@ -1030,6 +1040,8 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   {deleteLoading ? 'Deleting...' : 'Delete'}
                 </Button>
               </div>
+            </div>
+            </div>
             </div>
           </Card>
         </>

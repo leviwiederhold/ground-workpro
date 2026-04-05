@@ -162,6 +162,14 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
     loadDocuments();
   }, [loadDocuments]);
 
+  useEffect(() => {
+    if (!previewDocumentId || typeof document === 'undefined') return undefined;
+    document.body.classList.add('modal-open');
+    return () => {
+      document.body.classList.remove('modal-open');
+    };
+  }, [previewDocumentId]);
+
   const handleUpload = async (event) => {
     clearSetupRefreshSuppression?.();
     const file = event.target.files?.[0];
@@ -478,15 +486,15 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
 
       {previewDocument && (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6"
+          className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6"
           onClick={() => setPreviewDocumentId(null)}
           data-testid="documents-preview-modal"
         >
           <div
-            className="flex h-[88dvh] w-full max-w-5xl flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl sm:h-[85vh] sm:rounded-3xl dark:bg-zinc-950"
+            className="mobile-sheet-panel flex h-full max-h-full w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[85vh] sm:rounded-3xl dark:bg-zinc-950"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-4 py-4 sm:px-6 dark:border-zinc-800">
+            <div className="mobile-sheet-header flex items-start justify-between gap-4 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-6 dark:border-zinc-800">
               <div className="min-w-0">
                 <h3 className="text-base font-semibold text-gray-900 break-all dark:text-zinc-100">
                   {previewDocument.fileName || 'Untitled file'}
@@ -519,15 +527,21 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                 </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60">
+            <div className="mobile-sheet-body min-h-0 flex-1 overflow-auto bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60">
               {isImageDocument(previewDocument) && getDocumentLink(previewDocument) ? (
-                <div className="flex min-h-full items-center justify-center">
-                  <img
-                    src={getDocumentLink(previewDocument)}
-                    alt={previewDocument.fileName || 'Document preview'}
-                    className="max-h-full w-auto max-w-full rounded-2xl border border-gray-200 bg-white object-contain shadow-lg dark:border-zinc-700 dark:bg-zinc-950"
-                    data-testid="documents-preview-image"
-                  />
+                <div
+                  className="flex min-h-full items-center justify-center overflow-auto rounded-3xl border border-gray-200 bg-white/80 p-3 shadow-inner dark:border-zinc-700 dark:bg-zinc-950/80"
+                  style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+                >
+                  <div className="mx-auto min-w-max">
+                    <img
+                      src={getDocumentLink(previewDocument)}
+                      alt={previewDocument.fileName || 'Document preview'}
+                      className="mx-auto block max-h-none w-auto max-w-none rounded-2xl object-contain shadow-lg"
+                      style={{ maxWidth: 'min(100%, 1200px)', maxHeight: 'min(100%, 1200px)' }}
+                      data-testid="documents-preview-image"
+                    />
+                  </div>
                 </div>
               ) : isPdfDocument(previewDocument) && getDocumentLink(previewDocument) ? (
                 <iframe

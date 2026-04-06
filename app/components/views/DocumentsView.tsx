@@ -165,8 +165,19 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   useEffect(() => {
     if (!previewDocumentId || typeof document === 'undefined') return undefined;
     document.body.classList.add('modal-open');
+    const appScrollContainer = document.querySelector('.mobile-app-shell__content');
+    const priorOverflow = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overflow : '';
+    const priorOverscroll = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overscrollBehavior : '';
+    if (appScrollContainer instanceof HTMLElement) {
+      appScrollContainer.style.overflow = 'hidden';
+      appScrollContainer.style.overscrollBehavior = 'none';
+    }
     return () => {
       document.body.classList.remove('modal-open');
+      if (appScrollContainer instanceof HTMLElement) {
+        appScrollContainer.style.overflow = priorOverflow;
+        appScrollContainer.style.overscrollBehavior = priorOverscroll;
+      }
     };
   }, [previewDocumentId]);
 
@@ -486,7 +497,7 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
 
       {previewDocument && (
         <div
-          className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-6"
+          className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-black/70 p-0 sm:items-center sm:p-6"
           onClick={() => setPreviewDocumentId(null)}
           data-testid="documents-preview-modal"
         >
@@ -527,17 +538,17 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                 </button>
               </div>
             </div>
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-auto bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60">
+            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
               {isImageDocument(previewDocument) && getDocumentLink(previewDocument) ? (
                 <div
-                  className="flex min-h-full items-center justify-center overflow-auto rounded-3xl border border-gray-200 bg-white/80 p-3 shadow-inner dark:border-zinc-700 dark:bg-zinc-950/80"
+                  className="flex h-full min-h-full items-center justify-center overflow-auto rounded-3xl border border-gray-200 bg-white/80 p-2 shadow-inner dark:border-zinc-700 dark:bg-zinc-950/80 sm:p-4"
                   style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
                 >
-                  <div className="mx-auto min-w-max">
+                  <div className="mx-auto flex min-h-full w-full items-center justify-center">
                     <img
                       src={getDocumentLink(previewDocument)}
                       alt={previewDocument.fileName || 'Document preview'}
-                      className="mx-auto block max-h-none w-auto max-w-none rounded-2xl object-contain shadow-lg"
+                      className="mx-auto block h-auto w-auto max-h-full max-w-full rounded-2xl object-contain shadow-lg"
                       style={{ maxWidth: 'min(100%, 1200px)', maxHeight: 'min(100%, 1200px)' }}
                       data-testid="documents-preview-image"
                     />

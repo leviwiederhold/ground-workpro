@@ -41,7 +41,6 @@ body.mobile-shell-active {
 body.modal-open {
   overflow: hidden;
   overscroll-behavior: none;
-  touch-action: none;
 }
 
 .app-shell {

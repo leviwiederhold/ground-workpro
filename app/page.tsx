@@ -483,7 +483,7 @@ const MobileAppShell = ({
         <div className="mobile-sheet-backdrop fixed inset-0 z-50 overflow-hidden">
           <div className="fixed inset-0 bg-black/50" onClick={onClose}></div>
           <div className="flex h-full items-end justify-center sm:items-center sm:p-4">
-            <div className={`mobile-sheet-panel relative flex flex-col bg-white shadow-2xl ${sizes[size]} sm:max-h-[min(90dvh,56rem)]`}>
+            <div className={`mobile-sheet-panel relative flex max-h-full w-full flex-col overflow-hidden bg-white shadow-2xl ${sizes[size]} sm:max-h-[min(90dvh,56rem)]`}>
               <div className="mobile-sheet-header flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-5">
                 <div className="min-w-0">
                   <h2 className="text-lg font-semibold leading-tight text-gray-900 sm:text-xl">{title}</h2>
@@ -495,7 +495,7 @@ const MobileAppShell = ({
                   <Icon name="xmark" className="w-5 h-5 text-gray-500" />
                 </button>
               </div>
-              <div className="mobile-sheet-body min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
+              <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
                 {children}
               </div>
             </div>
@@ -11044,6 +11044,9 @@ const MobileAppShell = ({
     );
 
     const CalendarEventModal = ({ isOpen, onClose, members = [], currentRole, initialData, onCreated }) => {
+      const fieldClass = 'w-full rounded-xl border border-gray-300 px-3 py-2 text-sm disabled:bg-gray-100';
+      const labelClass = 'mb-1 block text-sm font-medium text-gray-700';
+      const sectionClass = 'space-y-3 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4';
       const parseLocalDateTime = (value) => {
         const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
         if (!match) return null;
@@ -11278,14 +11281,14 @@ const MobileAppShell = ({
 
       return (
         <Modal isOpen={isOpen} onClose={onClose} title={isEditMode ? (isReadOnly ? 'Event Details' : 'Edit Event') : 'Add Event'} size="md">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-              <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" placeholder="Weekly planning meeting" />
+          <div className="mx-auto w-full max-w-2xl space-y-4">
+            <div className={sectionClass}>
+              <label className={labelClass}>Title</label>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} disabled={isReadOnly} className={fieldClass} placeholder="Weekly planning meeting" />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className={`${sectionClass} grid grid-cols-1 gap-3 sm:grid-cols-2`}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Starts</label>
+                <label className={labelClass}>Starts</label>
                 <input
                   type="datetime-local"
                   value={startsAt}
@@ -11300,18 +11303,18 @@ const MobileAppShell = ({
                     }
                   }}
                   disabled={isReadOnly}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100"
+                  className={fieldClass}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Ends</label>
-                <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" />
+                <label className={labelClass}>Ends</label>
+                <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} disabled={isReadOnly} className={fieldClass} />
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className={`${sectionClass} grid grid-cols-1 gap-3 sm:grid-cols-2`}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                <select value={eventType} onChange={(e) => setEventType(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100">
+                <label className={labelClass}>Type</label>
+                <select value={eventType} onChange={(e) => setEventType(e.target.value)} disabled={isReadOnly} className={fieldClass}>
                   <option value="meeting">Meeting</option>
                   <option value="client">Client</option>
                   <option value="inspection">Inspection</option>
@@ -11320,8 +11323,8 @@ const MobileAppShell = ({
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Visibility</label>
-                <select value={visibility} onChange={(e) => setVisibility(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100">
+                <label className={labelClass}>Visibility</label>
+                <select value={visibility} onChange={(e) => setVisibility(e.target.value)} disabled={isReadOnly} className={fieldClass}>
                   <option value="attendees">Attendees</option>
                   <option value="company">Company</option>
                   <option value="private">Private</option>
@@ -11329,7 +11332,7 @@ const MobileAppShell = ({
               </div>
             </div>
             {!isEditMode && (
-            <div>
+            <div className={sectionClass}>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium text-gray-700">Attendees</label>
                 <button
@@ -11378,7 +11381,7 @@ const MobileAppShell = ({
               <input
                 value={attendeeSearch}
                 onChange={(e) => setAttendeeSearch(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                className={fieldClass}
                 placeholder="Search company members..."
               />
 
@@ -11431,22 +11434,22 @@ const MobileAppShell = ({
             </div>
             )}
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">External attendees (placeholder)</label>
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
+            <div className={sectionClass}>
+              <label className={labelClass}>External attendees (placeholder)</label>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
                 <input
                   value={externalName}
                   onChange={(e) => setExternalName(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  className={fieldClass}
                   placeholder="Name (homeowner/client)"
                 />
                 <input
                   value={externalContact}
                   onChange={(e) => setExternalContact(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  className={fieldClass}
                   placeholder="Phone or email (optional)"
                 />
-                <Button type="button" variant="secondary" onClick={addExternalAttendee} disabled={!externalName.trim()}>
+                <Button type="button" variant="secondary" className="w-full md:w-auto" onClick={addExternalAttendee} disabled={!externalName.trim()}>
                   Add
                 </Button>
               </div>
@@ -11465,17 +11468,17 @@ const MobileAppShell = ({
               )}
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
-              <input value={locationText} onChange={(e) => setLocationText(e.target.value)} disabled={isReadOnly} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" placeholder="Main office" />
+            <div className={sectionClass}>
+              <label className={labelClass}>Location</label>
+              <input value={locationText} onChange={(e) => setLocationText(e.target.value)} disabled={isReadOnly} className={fieldClass} placeholder="Main office" />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={isReadOnly} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100" />
+            <div className={sectionClass}>
+              <label className={labelClass}>Description</label>
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)} disabled={isReadOnly} rows={2} className={fieldClass} />
             </div>
             {warning && <p className="text-sm text-yellow-700">{warning}</p>}
             {error && <p className="text-sm text-red-600">{error}</p>}
-            <div className="flex justify-end gap-3">
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:justify-end sm:gap-3">
               {!isReadOnly && isEditMode && (
                 <Button variant="danger" onClick={handleDelete} disabled={saving || deleting}>
                   {deleting ? 'Deleting...' : 'Delete Event'}

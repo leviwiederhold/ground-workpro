@@ -3,6 +3,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { MobileSheet } from '@/app/components/ui/MobileSheet';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
@@ -197,25 +198,6 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   useEffect(() => {
     if (!selectedJob) setShowMobileDetails(false);
   }, [selectedJob]);
-
-  useEffect(() => {
-    if (!showMobileDetails || typeof document === 'undefined') return undefined;
-    document.body.classList.add('modal-open');
-    const appScrollContainer = document.querySelector('.mobile-app-shell__content');
-    const priorOverflow = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overflow : '';
-    const priorOverscroll = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overscrollBehavior : '';
-    if (appScrollContainer instanceof HTMLElement) {
-      appScrollContainer.style.overflow = 'hidden';
-      appScrollContainer.style.overscrollBehavior = 'none';
-    }
-    return () => {
-      document.body.classList.remove('modal-open');
-      if (appScrollContainer instanceof HTMLElement) {
-        appScrollContainer.style.overflow = priorOverflow;
-        appScrollContainer.style.overscrollBehavior = priorOverscroll;
-      }
-    };
-  }, [showMobileDetails]);
 
   useEffect(() => {
     if (!selectedJob) return;
@@ -978,27 +960,21 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       </div>
 
       {isMobile && showMobileDetails && selectedJob && (
-        <>
-          <button
-            type="button"
-            aria-label="Close job details"
-            className="fixed inset-0 z-40 bg-black/50"
-            onClick={() => setShowMobileDetails(false)}
-          />
-          <Card className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden rounded-none p-0 sm:items-center sm:justify-center sm:bg-black/0 sm:p-4">
-            <div className="mobile-sheet-panel flex min-h-0 max-h-full w-full flex-1 flex-col overflow-hidden bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)] sm:max-w-3xl">
-            <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-5">
-              <h3 className="min-w-0 truncate font-semibold text-gray-900">{selectedJob.name}</h3>
-              <button
-                type="button"
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-300 text-gray-700"
-                onClick={() => setShowMobileDetails(false)}
-              >
-                <Icon name="xmark" />
-              </button>
+        <MobileSheet
+          isOpen={showMobileDetails}
+          onClose={() => setShowMobileDetails(false)}
+          title=""
+          size="lg"
+          headerClassName="mb-0"
+          bodyClassName="pt-4"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3 border-b border-gray-200 pb-4">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">Job Details</p>
+                <h3 className="mt-1 min-w-0 truncate text-lg font-semibold leading-tight text-gray-900">{selectedJob.name}</h3>
+              </div>
             </div>
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
-            <div className="min-w-0 space-y-4">
               <div>
                 <p className="text-xs text-gray-500 mb-1">Name</p>
                 <input type="text" value={jobForm.name} onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
@@ -1051,11 +1027,8 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                   {deleteLoading ? 'Deleting...' : 'Delete'}
                 </Button>
               </div>
-            </div>
-            </div>
-            </div>
-          </Card>
-        </>
+          </div>
+        </MobileSheet>
       )}
     </div>
   );

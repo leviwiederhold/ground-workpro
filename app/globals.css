@@ -115,6 +115,10 @@ body:has(.mobile-app-shell) {
 }
 
 .mobile-sheet-backdrop {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
   padding-top: var(--safe-area-top);
   padding-right: var(--safe-area-right);
   padding-bottom: var(--safe-area-bottom);
@@ -126,17 +130,19 @@ body:has(.mobile-app-shell) {
   min-height: 0;
   max-height: 100%;
   overflow: hidden;
+  overflow-x: hidden;
   border-radius: 1.5rem 1.5rem 0 0;
 }
 
 .mobile-sheet-header {
-  padding-top: max(1rem, calc(var(--safe-area-top) * 0.35));
+  padding-top: max(1rem, calc(var(--safe-area-top) + 0.25rem));
 }
 
 .mobile-sheet-body {
   min-height: 0;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  overflow-x: hidden;
 }
 
 @media (min-width: 640px) {

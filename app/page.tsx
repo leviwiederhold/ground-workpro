@@ -9,6 +9,7 @@ import { supabaseBrowser } from '@/lib/supabase/client';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
 import { ComingSoonOverlay } from '@/app/components/ui/ComingSoonOverlay';
+import { MobileSheet } from '@/app/components/ui/MobileSheet';
 import {
   getSensitiveInvitePermissionGrants,
   isSensitivePermissionModule,
@@ -62,9 +63,6 @@ const FEEDBACK_TYPE_OPTIONS = [
   { value: 'feature_request', label: 'Feature Request' },
   { value: 'general_feedback', label: 'General Feedback' },
 ];
-const INSTALL_REMIND_AFTER_MS = 1000 * 60 * 60 * 24;
-const INSTALL_DISMISSED_AT_KEY = 'groundwork.install.dismissedAt';
-
 const loadCachedNavState = () => {
   if (typeof window === 'undefined') {
     return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
@@ -469,38 +467,10 @@ const MobileAppShell = ({
     };
 
     const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
-      useEffect(() => {
-        if (!isOpen || typeof document === 'undefined') return undefined;
-        document.body.classList.add('modal-open');
-        return () => {
-          document.body.classList.remove('modal-open');
-        };
-      }, [isOpen]);
-
-      if (!isOpen) return null;
-      const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-[95vw]' };
       return (
-        <div className="mobile-sheet-backdrop fixed inset-0 z-50 overflow-hidden">
-          <div className="fixed inset-0 bg-black/50" onClick={onClose}></div>
-          <div className="flex h-full items-end justify-center sm:items-center sm:p-4">
-            <div className={`mobile-sheet-panel relative flex max-h-full w-full flex-col overflow-hidden bg-white shadow-2xl ${sizes[size]} sm:max-h-[min(90dvh,56rem)]`}>
-              <div className="mobile-sheet-header flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-5">
-                <div className="min-w-0">
-                  <h2 className="text-lg font-semibold leading-tight text-gray-900 sm:text-xl">{title}</h2>
-                </div>
-                <button
-                  onClick={onClose}
-                  className="mt-[-0.125rem] inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 sm:mt-0"
-                >
-                  <Icon name="xmark" className="w-5 h-5 text-gray-500" />
-                </button>
-              </div>
-              <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
-                {children}
-              </div>
-            </div>
-          </div>
-        </div>
+        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size}>
+          {children}
+        </MobileSheet>
       );
     };
 
@@ -843,11 +813,6 @@ const MobileAppShell = ({
       const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
-      const [isMobileInstallSurface, setIsMobileInstallSurface] = useState(false);
-      const [isAndroidInstallAvailable, setIsAndroidInstallAvailable] = useState(false);
-      const [showInstallCta, setShowInstallCta] = useState(false);
-      const [showIphoneInstallModal, setShowIphoneInstallModal] = useState(false);
-      const [deferredInstallPrompt, setDeferredInstallPrompt] = useState(null);
       const [showBetaPopover, setShowBetaPopover] = useState(false);
       const [showAiHelperPopover, setShowAiHelperPopover] = useState(false);
       const [notifications, setNotifications] = useState([]);
@@ -893,87 +858,9 @@ const MobileAppShell = ({
                   : 'Team Member';
       const isCeoRole = currentRole === 'executive';
 
-      const dismissInstallCta = useCallback(() => {
-        setShowInstallCta(false);
-        if (typeof window !== 'undefined') {
-          window.localStorage.setItem(INSTALL_DISMISSED_AT_KEY, String(Date.now()));
-        }
-      }, []);
-
-      const openInstallFlow = useCallback(async () => {
-        if (isAndroidInstallAvailable && deferredInstallPrompt) {
-          try {
-            await deferredInstallPrompt.prompt();
-            const outcome = await deferredInstallPrompt.userChoice;
-            if (outcome?.outcome === 'accepted') {
-              setShowInstallCta(false);
-            } else {
-              dismissInstallCta();
-            }
-          } catch {
-            dismissInstallCta();
-          } finally {
-            setDeferredInstallPrompt(null);
-            setIsAndroidInstallAvailable(false);
-          }
-          return;
-        }
-
-        setShowInstallCta(false);
-        setShowIphoneInstallModal(true);
-      }, [deferredInstallPrompt, dismissInstallCta, isAndroidInstallAvailable]);
-
       const navigateFromUserMenu = useCallback((path) => {
         setShowUserMenu(false);
         window.location.assign(path);
-      }, []);
-
-      useEffect(() => {
-        if (typeof window === 'undefined') return undefined;
-
-        const mediaQuery = window.matchMedia('(max-width: 768px)');
-        const updateMobileState = () => {
-          setIsMobileInstallSurface(mediaQuery.matches);
-          if (!mediaQuery.matches) {
-            setShowInstallCta(false);
-            setShowIphoneInstallModal(false);
-            return;
-          }
-
-          const dismissedAtRaw = window.localStorage.getItem(INSTALL_DISMISSED_AT_KEY);
-          const dismissedAt = dismissedAtRaw ? Number(dismissedAtRaw) : 0;
-          const canShowAgain = !dismissedAt || Number.isNaN(dismissedAt) || Date.now() - dismissedAt >= INSTALL_REMIND_AFTER_MS;
-          setShowInstallCta(canShowAgain);
-        };
-
-        updateMobileState();
-        mediaQuery.addEventListener('change', updateMobileState);
-        return () => mediaQuery.removeEventListener('change', updateMobileState);
-      }, []);
-
-      useEffect(() => {
-        if (typeof window === 'undefined') return undefined;
-
-        const handleBeforeInstallPrompt = (event) => {
-          event.preventDefault();
-          setDeferredInstallPrompt(event);
-          if (window.matchMedia('(max-width: 768px)').matches) {
-            setIsAndroidInstallAvailable(true);
-          }
-        };
-
-        const handleInstalled = () => {
-          setShowInstallCta(false);
-          setDeferredInstallPrompt(null);
-          setIsAndroidInstallAvailable(false);
-        };
-
-        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-        window.addEventListener('appinstalled', handleInstalled);
-        return () => {
-          window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-          window.removeEventListener('appinstalled', handleInstalled);
-        };
       }, []);
 
       useEffect(() => {
@@ -2507,64 +2394,6 @@ const MobileAppShell = ({
             onClose={() => setShowModal({ type: null })}
             message={comingSoonMessage}
           />
-          <Modal isOpen={isMobileInstallSurface && showInstallCta} onClose={dismissInstallCta} title="Install Groundwork Pro" size="sm">
-            <div className="space-y-6 px-1 pb-1 pt-2 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-gray-950 text-white shadow-[0_20px_40px_rgba(17,24,39,0.18)]">
-                <Icon name="mobile-screen" className="text-2xl" />
-              </div>
-              <div className="space-y-2">
-                <p className="text-base leading-6 text-gray-600">Put this on your phone so you can open it like a normal app.</p>
-              </div>
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={openInstallFlow}
-                  className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-gray-950 px-5 text-base font-semibold text-white transition hover:bg-gray-800"
-                >
-                  Install Groundwork Pro
-                </button>
-                <p className="text-sm font-medium text-gray-500">Takes about 10 seconds</p>
-              </div>
-            </div>
-          </Modal>
-          <Modal isOpen={showIphoneInstallModal} onClose={() => setShowIphoneInstallModal(false)} title="Install Groundwork Pro" size="sm">
-            <div className="space-y-6 px-1 pb-2 pt-2 text-center">
-              <div className="rounded-[28px] border border-gray-200 bg-gradient-to-b from-gray-50 to-white px-5 py-7 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
-                <div className="mx-auto flex items-center justify-center gap-2.5">
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gray-950 text-white shadow-[0_14px_30px_rgba(17,24,39,0.2)]">
-                      <Icon name="ellipsis" className="text-4xl" />
-                    </div>
-                    <p className="text-sm font-semibold text-gray-700">More</p>
-                  </div>
-                  <Icon name="arrow-right" className="text-xl text-gray-400" />
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gray-950 text-white shadow-[0_14px_30px_rgba(17,24,39,0.2)]">
-                      <Icon name="share-from-square" className="text-3xl" />
-                    </div>
-                    <p className="text-sm font-semibold text-gray-700">Share</p>
-                  </div>
-                  <Icon name="arrow-right" className="text-xl text-gray-400" />
-                  <div className="flex flex-col items-center gap-2">
-                    <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gray-950 text-white shadow-[0_14px_30px_rgba(17,24,39,0.2)]">
-                      <Icon name="plus" className="text-4xl" />
-                    </div>
-                    <p className="text-sm font-semibold text-gray-700">Add</p>
-                  </div>
-                </div>
-                <div className="mt-6">
-                  <p className="text-lg font-semibold leading-7 text-gray-900">Tap … → Share → Add to Home Screen</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowIphoneInstallModal(false)}
-                className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl bg-gray-950 px-5 text-base font-semibold text-white transition hover:bg-gray-800"
-              >
-                Got it
-              </button>
-            </div>
-          </Modal>
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
             onClose={() => setShowModal({ type: null })}
@@ -5496,6 +5325,10 @@ const MobileAppShell = ({
         if (reportJobFilter === 'all') return true;
         return item.jobId && allowedJobIds.has(String(item.jobId));
       });
+      const filteredEmployees = employees.filter((employee) => {
+        if (reportJobFilter === 'all') return true;
+        return employee.jobId && allowedJobIds.has(String(employee.jobId));
+      });
       const overviewJobs = filteredJobs.filter((job) => job.status !== 'bidding');
       const overviewJobLabels = overviewJobs.map((job) => job.name.split(' ').slice(0, 2).join(' '));
       const overviewBudgetSeries = overviewJobs.map((job) => Number(job.budget || 0));
@@ -5808,11 +5641,11 @@ const MobileAppShell = ({
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">From</label>
-                <input type="date" value={reportDateFrom} onChange={(e) => setReportDateFrom(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="date" value={reportDateFrom} onChange={(e) => setReportDateFrom(e.target.value)} className="block h-11 w-full min-w-0 appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm leading-5 text-gray-900 [color-scheme:light]" />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">To</label>
-                <input type="date" value={reportDateTo} onChange={(e) => setReportDateTo(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+                <input type="date" value={reportDateTo} onChange={(e) => setReportDateTo(e.target.value)} className="block h-11 w-full min-w-0 appearance-none rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm leading-5 text-gray-900 [color-scheme:light]" />
               </div>
             </div>
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
@@ -6307,6 +6140,9 @@ const MobileAppShell = ({
           {activeTab === 'labor' && (
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-4">Labor Summary</h3>
+              {filteredEmployees.length === 0 ? (
+                <p className="mb-4 text-sm text-gray-500">No employees match the current report filters.</p>
+              ) : null}
               <Table
                 columns={[
                   { header: 'Employee', render: (row) => <span className="font-medium">{row.name}</span> },
@@ -6315,7 +6151,7 @@ const MobileAppShell = ({
                   { header: 'Status', render: (row) => <Badge className={getStatusColor(row.status)}>{row.status}</Badge> },
                   { header: 'Current Job', render: (row) => jobs.find(j => j.id === row.jobId)?.name || '-' },
                 ]}
-                data={employees}
+                data={filteredEmployees}
               />
             </Card>
           )}
@@ -6323,6 +6159,9 @@ const MobileAppShell = ({
           {activeTab === 'equipment' && (
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-4">Equipment Summary</h3>
+              {filteredEquipment.length === 0 ? (
+                <p className="mb-4 text-sm text-gray-500">No fleet vehicles match the current report filters.</p>
+              ) : null}
               <Table
                 columns={[
                   { header: 'Equipment', render: (row) => <span className="font-medium">{row.name}</span> },
@@ -7615,107 +7454,86 @@ const MobileAppShell = ({
             </Card>
           )}
 
-          {showAddModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close inventory modal" />
-              <Card className="relative z-10 max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6 dark:border-zinc-800 dark:bg-[#090909]">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">{editingId ? 'Edit Item' : 'Add Item'}</h3>
-                  <button className="text-gray-500 hover:text-gray-700 dark:text-zinc-400 dark:hover:text-zinc-200" onClick={closeModal}>
-                    <Icon name="xmark" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="md:col-span-2">
-                    <p className="text-xs text-gray-500 mb-1">Name</p>
-                    <input type="text" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Category</p>
-                    <input type="text" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Unit</p>
-                    <input type="text" value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">On Hand</p>
-                    <input type="number" value={itemForm.qtyOnHand} onChange={(e) => setItemForm({ ...itemForm, qtyOnHand: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Reserved</p>
-                    <input type="number" value={itemForm.qtyReserved} onChange={(e) => setItemForm({ ...itemForm, qtyReserved: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Reorder Point</p>
-                    <input type="number" value={itemForm.reorderPoint} onChange={(e) => setItemForm({ ...itemForm, reorderPoint: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Unit Cost</p>
-                    <input type="number" step="0.01" value={itemForm.unitCost} onChange={(e) => setItemForm({ ...itemForm, unitCost: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Location</p>
-                    <input type="text" value={itemForm.location} onChange={(e) => setItemForm({ ...itemForm, location: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Job</p>
-                    <select value={itemForm.jobId} onChange={(e) => setItemForm({ ...itemForm, jobId: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
-                      <option value="">General</option>
-                      {jobs.map(job => (
-                        <option key={job.id} value={job.id}>{job.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Status</p>
-                    <select value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
-                      <option value="active">active</option>
-                      <option value="low_stock">low_stock</option>
-                      <option value="out_of_stock">out_of_stock</option>
-                      <option value="inactive">inactive</option>
-                    </select>
-                  </div>
-                </div>
-
-                {formError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{formError}</p>}
-
-                <div className="flex justify-end gap-2 mt-6">
-                  <Button variant="secondary" onClick={closeModal}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveItem} disabled={saveLoading}>
-                    <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
-                    {editingId ? 'Save Item' : 'Create Item'}
-                  </Button>
-                </div>
-              </Card>
+          <Modal isOpen={showAddModal} onClose={closeModal} title={editingId ? 'Edit Item' : 'Add Item'} size="md">
+            <div className="grid grid-cols-1 gap-4 overflow-x-hidden md:grid-cols-2 dark:text-zinc-100">
+              <div className="md:col-span-2">
+                <p className="mb-1 text-xs text-gray-500">Name</p>
+                <input type="text" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Category</p>
+                <input type="text" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Unit</p>
+                <input type="text" value={itemForm.unit} onChange={(e) => setItemForm({ ...itemForm, unit: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">On Hand</p>
+                <input type="number" value={itemForm.qtyOnHand} onChange={(e) => setItemForm({ ...itemForm, qtyOnHand: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Reserved</p>
+                <input type="number" value={itemForm.qtyReserved} onChange={(e) => setItemForm({ ...itemForm, qtyReserved: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Reorder Point</p>
+                <input type="number" value={itemForm.reorderPoint} onChange={(e) => setItemForm({ ...itemForm, reorderPoint: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Unit Cost</p>
+                <input type="number" step="0.01" value={itemForm.unitCost} onChange={(e) => setItemForm({ ...itemForm, unitCost: Number(e.target.value) })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Location</p>
+                <input type="text" value={itemForm.location} onChange={(e) => setItemForm({ ...itemForm, location: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Job</p>
+                <select value={itemForm.jobId} onChange={(e) => setItemForm({ ...itemForm, jobId: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
+                  <option value="">General</option>
+                  {jobs.map((job) => (
+                    <option key={job.id} value={job.id}>{job.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Status</p>
+                <select value={itemForm.status} onChange={(e) => setItemForm({ ...itemForm, status: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
+                  <option value="active">active</option>
+                  <option value="low_stock">low_stock</option>
+                  <option value="out_of_stock">out_of_stock</option>
+                  <option value="inactive">inactive</option>
+                </select>
+              </div>
             </div>
-          )}
+            {formError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{formError}</p>}
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+              <Button variant="brand" onClick={handleSaveItem} disabled={saveLoading}>
+                <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                {editingId ? 'Save Item' : 'Create Item'}
+              </Button>
+            </div>
+          </Modal>
 
-          {showTxnModal && selectedItem && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeTxnModal} aria-label="Close inventory transaction modal" />
-              <Card className="relative z-10 max-h-[90vh] w-full max-w-lg overflow-y-auto p-6 dark:border-zinc-800 dark:bg-[#090909]">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">{txnType.charAt(0).toUpperCase() + txnType.slice(1)} · {selectedItem.name}</h3>
-                  <button className="text-gray-500 hover:text-gray-700 dark:text-zinc-400 dark:hover:text-zinc-200" onClick={closeTxnModal}>
-                    <Icon name="xmark" />
-                  </button>
-                </div>
-                <div className="space-y-3">
+          <Modal isOpen={Boolean(showTxnModal && selectedItem)} onClose={closeTxnModal} title={selectedItem ? `${txnType.charAt(0).toUpperCase() + txnType.slice(1)} · ${selectedItem.name}` : 'Inventory Transaction'} size="sm">
+            {selectedItem ? (
+              <>
+                <div className="space-y-3 dark:text-zinc-100">
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Quantity</p>
+                    <p className="mb-1 text-xs text-gray-500">Quantity</p>
                     <input type="number" min="0" step="0.01" value={txnForm.qty} onChange={(e) => setTxnForm((prev) => ({ ...prev, qty: Number(e.target.value) }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                   {(txnType === 'receive' || txnType === 'adjust') && (
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">Unit Cost</p>
+                      <p className="mb-1 text-xs text-gray-500">Unit Cost</p>
                       <input type="number" min="0" step="0.01" value={txnForm.unit_cost} onChange={(e) => setTxnForm((prev) => ({ ...prev, unit_cost: Number(e.target.value) }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                     </div>
                   )}
                   {txnType === 'issue' && (
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">Issue to Job (optional)</p>
+                      <p className="mb-1 text-xs text-gray-500">Issue to Job (optional)</p>
                       <select value={txnForm.job_id} onChange={(e) => setTxnForm((prev) => ({ ...prev, job_id: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
                         <option value="">No job</option>
                         {jobs.map((job) => (
@@ -7726,32 +7544,32 @@ const MobileAppShell = ({
                   )}
                   {(txnType === 'issue' || txnType === 'transfer') && (
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">From Location</p>
+                      <p className="mb-1 text-xs text-gray-500">From Location</p>
                       <input type="text" value={txnForm.from_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, from_location: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                     </div>
                   )}
                   {(txnType === 'receive' || txnType === 'transfer') && (
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">To Location</p>
+                      <p className="mb-1 text-xs text-gray-500">To Location</p>
                       <input type="text" value={txnForm.to_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, to_location: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                     </div>
                   )}
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Notes</p>
+                    <p className="mb-1 text-xs text-gray-500">Notes</p>
                     <textarea value={txnForm.notes} onChange={(e) => setTxnForm((prev) => ({ ...prev, notes: e.target.value }))} className="h-20 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
                   </div>
                 </div>
                 {txnError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{txnError}</p>}
-                <div className="flex justify-end gap-2 mt-6">
+                <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
                   <Button variant="secondary" onClick={closeTxnModal}>Cancel</Button>
                   <Button variant="brand" onClick={handleTxnSubmit} disabled={txnLoading}>
                     <Icon name={txnLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${txnLoading ? 'animate-spin' : ''}`} />
                     {txnLoading ? 'Saving...' : 'Save'}
                   </Button>
                 </div>
-              </Card>
-            </div>
-          )}
+              </>
+            ) : null}
+          </Modal>
         </div>
       );
     };
@@ -9141,103 +8959,89 @@ const MobileAppShell = ({
             )}
           </div>
 
-          {showVendorModal && (
-            <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto overscroll-contain p-3 sm:items-center sm:p-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeModal} aria-label="Close vendor modal" />
-              <Card className="relative z-10 my-4 w-full max-w-xl p-5 sm:p-6 max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">{editingVendorId ? 'Edit Vendor' : 'Add Vendor'}</h3>
-                  <button className="text-gray-500 hover:text-gray-700" onClick={closeModal}>
-                    <Icon name="xmark" />
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="md:col-span-2">
-                    <p className="text-xs text-gray-500 mb-1">Name</p>
-                    <input type="text" value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Status</p>
-                    <select value={vendorForm.status} onChange={(e) => setVendorForm({ ...vendorForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                      <option value="active">active</option>
-                      <option value="preferred">preferred</option>
-                      <option value="on_hold">on_hold</option>
-                    </select>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Category</p>
-                    <input type="text" value={vendorForm.category} onChange={(e) => setVendorForm({ ...vendorForm, category: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Contact</p>
-                    <input type="text" value={vendorForm.contact_name} onChange={(e) => setVendorForm({ ...vendorForm, contact_name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Phone</p>
-                    <input type="text" value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Email</p>
-                    <input type="email" value={vendorForm.email} onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <p className="text-xs text-gray-500 mb-1">Address</p>
-                    <input type="text" value={vendorForm.address} onChange={(e) => setVendorForm({ ...vendorForm, address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div className="md:col-span-2">
-                    <p className="text-xs text-gray-500 mb-1">Payment Terms</p>
-                    <input type="text" value={vendorForm.payment_terms} onChange={(e) => setVendorForm({ ...vendorForm, payment_terms: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Rating</p>
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={vendorForm.rating}
-                      onChange={(e) => {
-                        const parsed = Number(e.target.value);
-                        const normalized = Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 0;
-                        setVendorForm({ ...vendorForm, rating: normalized });
-                      }}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Active Orders</p>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={vendorForm.active_orders}
-                      onChange={(e) => {
-                        const parsed = Number(e.target.value);
-                        const normalized = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
-                        setVendorForm({ ...vendorForm, active_orders: normalized });
-                      }}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <p className="text-xs text-gray-500 mb-1">Notes</p>
-                    <textarea value={vendorForm.notes} onChange={(e) => setVendorForm({ ...vendorForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" />
-                  </div>
-                </div>
-
-                {formError && <p className="text-sm text-red-600 mt-4">{formError}</p>}
-
-                <div className="flex justify-end gap-2 mt-6">
-                  <Button variant="secondary" onClick={closeModal}>Cancel</Button>
-                  <Button variant="brand" onClick={handleSaveVendor} disabled={saveLoading}>
-                    <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
-                    {editingVendorId ? 'Save Vendor' : 'Create Vendor'}
-                  </Button>
-                </div>
-              </Card>
+          <Modal isOpen={showVendorModal} onClose={closeModal} title={editingVendorId ? 'Edit Vendor' : 'Add Vendor'} size="md">
+            <div className="grid grid-cols-1 gap-4 overflow-x-hidden md:grid-cols-2">
+              <div className="md:col-span-2">
+                <p className="mb-1 text-xs text-gray-500">Name</p>
+                <input type="text" value={vendorForm.name} onChange={(e) => setVendorForm({ ...vendorForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Status</p>
+                <select value={vendorForm.status} onChange={(e) => setVendorForm({ ...vendorForm, status: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                  <option value="active">active</option>
+                  <option value="preferred">preferred</option>
+                  <option value="on_hold">on_hold</option>
+                </select>
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Category</p>
+                <input type="text" value={vendorForm.category} onChange={(e) => setVendorForm({ ...vendorForm, category: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Contact</p>
+                <input type="text" value={vendorForm.contact_name} onChange={(e) => setVendorForm({ ...vendorForm, contact_name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Phone</p>
+                <input type="text" value={vendorForm.phone} onChange={(e) => setVendorForm({ ...vendorForm, phone: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Email</p>
+                <input type="email" value={vendorForm.email} onChange={(e) => setVendorForm({ ...vendorForm, email: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="md:col-span-2">
+                <p className="mb-1 text-xs text-gray-500">Address</p>
+                <input type="text" value={vendorForm.address} onChange={(e) => setVendorForm({ ...vendorForm, address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div className="md:col-span-2">
+                <p className="mb-1 text-xs text-gray-500">Payment Terms</p>
+                <input type="text" value={vendorForm.payment_terms} onChange={(e) => setVendorForm({ ...vendorForm, payment_terms: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Rating</p>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={vendorForm.rating}
+                  onChange={(e) => {
+                    const parsed = Number(e.target.value);
+                    const normalized = Number.isFinite(parsed) ? Math.max(0, Math.min(100, Math.round(parsed))) : 0;
+                    setVendorForm({ ...vendorForm, rating: normalized });
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <p className="mb-1 text-xs text-gray-500">Active Orders</p>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={vendorForm.active_orders}
+                  onChange={(e) => {
+                    const parsed = Number(e.target.value);
+                    const normalized = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+                    setVendorForm({ ...vendorForm, active_orders: normalized });
+                  }}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="md:col-span-2">
+                <p className="mb-1 text-xs text-gray-500">Notes</p>
+                <textarea value={vendorForm.notes} onChange={(e) => setVendorForm({ ...vendorForm, notes: e.target.value })} className="h-24 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
+              </div>
             </div>
-          )}
+            {formError && <p className="mt-4 text-sm text-red-600">{formError}</p>}
+            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+              <Button variant="brand" onClick={handleSaveVendor} disabled={saveLoading}>
+                <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                {editingVendorId ? 'Save Vendor' : 'Create Vendor'}
+              </Button>
+            </div>
+          </Modal>
 
           {showPoModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -11973,6 +11777,10 @@ const MobileAppShell = ({
         preop: 'medium',
         jsa: 'high',
       };
+      const activeJobs = (jobs || []).filter((job) => {
+        const status = String(job?.status || '').trim().toLowerCase();
+        return ['active', 'in_progress', 'scheduled'].includes(status);
+      });
 
       useEffect(() => {
         if (!isOpen) return;
@@ -12025,15 +11833,15 @@ const MobileAppShell = ({
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Job Site</label>
-              <select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+              <select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="block h-11 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm leading-5 text-gray-900 [color-scheme:light]">
                 <option value="">Select Job</option>
-                {jobs.filter(j => j.status === 'active').map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
+                {activeJobs.map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
               </select>
             </div>
             {form.type !== 'preop' && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Attendees</label>
-                <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 border border-gray-200 rounded-lg">
+                <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto overscroll-contain rounded-lg border border-gray-200 p-2 sm:grid-cols-2">
                   {employees
                     .filter((employee) => {
                       const accountStatus = String(employee.accountStatus || '').toLowerCase();
@@ -12041,12 +11849,12 @@ const MobileAppShell = ({
                       return accountStatus === 'active' || ['active', 'clocked-in'].includes(status);
                     })
                     .map(emp => (
-                    <label key={emp.id} className="flex items-center gap-2 text-sm">
-                      <input type="checkbox" checked={attendees.includes(emp.id)} onChange={(e) => {
+                    <label key={emp.id} className="flex min-h-[44px] items-center gap-3 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
+                      <input type="checkbox" className="h-4 w-4 shrink-0" checked={attendees.includes(emp.id)} onChange={(e) => {
                         if (e.target.checked) setAttendees(prev => [...prev, emp.id]);
                         else setAttendees(prev => prev.filter(id => id !== emp.id));
                       }} />
-                      {emp.displayName || emp.name || emp.email || 'Team Member'}
+                      <span className="min-w-0 truncate">{emp.displayName || emp.name || emp.email || 'Team Member'}</span>
                     </label>
                   ))}
                 </div>

@@ -4,6 +4,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { MobileSheet } from '@/app/components/ui/MobileSheet';
 import { EmptyState, InlineError, SkeletonBlock } from '@/app/components/ui/FeedbackBlocks';
 
 const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
@@ -93,6 +94,14 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   const [previewDocumentId, setPreviewDocumentId] = useState(null);
   const [hoveredDocumentId, setHoveredDocumentId] = useState(null);
   const [supportsHoverPreview, setSupportsHoverPreview] = useState(false);
+  const categoryOptions = [
+    ['all', 'All'],
+    ['contracts', 'Contracts'],
+    ['invoices', 'Invoices'],
+    ['compliance', 'Compliance'],
+    ['safety', 'Safety'],
+    ['photos', 'Photos'],
+  ];
 
   const formatFileSize = (value) => {
     const size = Number(value || 0);
@@ -161,25 +170,6 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
-
-  useEffect(() => {
-    if (!previewDocumentId || typeof document === 'undefined') return undefined;
-    document.body.classList.add('modal-open');
-    const appScrollContainer = document.querySelector('.mobile-app-shell__content');
-    const priorOverflow = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overflow : '';
-    const priorOverscroll = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overscrollBehavior : '';
-    if (appScrollContainer instanceof HTMLElement) {
-      appScrollContainer.style.overflow = 'hidden';
-      appScrollContainer.style.overscrollBehavior = 'none';
-    }
-    return () => {
-      document.body.classList.remove('modal-open');
-      if (appScrollContainer instanceof HTMLElement) {
-        appScrollContainer.style.overflow = priorOverflow;
-        appScrollContainer.style.overscrollBehavior = priorOverscroll;
-      }
-    };
-  }, [previewDocumentId]);
 
   const handleUpload = async (event) => {
     clearSetupRefreshSuppression?.();
@@ -349,23 +339,32 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {[
-          ['all', 'All'],
-          ['contracts', 'Contracts'],
-          ['invoices', 'Invoices'],
-          ['compliance', 'Compliance'],
-          ['safety', 'Safety'],
-          ['photos', 'Photos'],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setActiveView(key)}
-            className={`px-3 py-1.5 text-xs rounded-full border ${activeView === key ? 'bg-brand-50 border-brand-300 text-brand-700' : 'bg-white border-gray-300 text-gray-600'}`}
+      <div className="space-y-2">
+        <div className="sm:hidden">
+          <label className="mb-1 block text-xs font-medium uppercase tracking-[0.18em] text-gray-500">Category</label>
+          <select
+            value={activeView}
+            onChange={(e) => setActiveView(e.target.value)}
+            className="block h-11 w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 [color-scheme:light]"
           >
-            {label}
-          </button>
-        ))}
+            {categoryOptions.map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="hidden flex-wrap gap-2 sm:flex">
+          {categoryOptions.map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setActiveView(key)}
+              className={`rounded-full border px-3 py-1.5 text-xs ${activeView === key ? 'border-brand-300 bg-brand-50 text-brand-700' : 'border-gray-300 bg-white text-gray-600'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {!canManageDocuments && canViewDocuments && (
@@ -496,49 +495,30 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
       )}
 
       {previewDocument && (
-        <div
-          className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-black/70 p-0 sm:items-center sm:p-6"
-          onClick={() => setPreviewDocumentId(null)}
-          data-testid="documents-preview-modal"
+        <MobileSheet
+          isOpen={Boolean(previewDocument)}
+          onClose={() => setPreviewDocumentId(null)}
+          title={previewDocument.fileName || 'Untitled file'}
+          subtitle={`${getDocumentFileTypeLabel(previewDocument)} • ${formatFileSize(previewDocument.fileSize)} • ${previewDocument.createdAt ? formatDate(previewDocument.createdAt) : 'Unknown upload date'}`}
+          size="xl"
+          panelClassName="h-full max-h-full dark:bg-zinc-950 sm:h-[85vh]"
+          headerClassName="dark:border-zinc-800"
+          bodyClassName="bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60"
         >
-          <div
-            className="mobile-sheet-panel flex h-full max-h-full w-full max-w-5xl flex-col overflow-hidden bg-white shadow-2xl sm:h-[85vh] sm:rounded-3xl dark:bg-zinc-950"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mobile-sheet-header flex items-start justify-between gap-4 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-6 dark:border-zinc-800">
-              <div className="min-w-0">
-                <h3 className="text-base font-semibold text-gray-900 break-all dark:text-zinc-100">
-                  {previewDocument.fileName || 'Untitled file'}
-                </h3>
-                <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">
-                  {getDocumentFileTypeLabel(previewDocument)} • {formatFileSize(previewDocument.fileSize)} • {previewDocument.createdAt ? formatDate(previewDocument.createdAt) : 'Unknown upload date'}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {getDocumentLink(previewDocument) ? (
-                  <a
-                    href={getDocumentLink(previewDocument)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                    data-testid="documents-preview-download"
-                  >
-                    <Icon name="download" className="mr-2" />
-                    Download
-                  </a>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setPreviewDocumentId(null)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
-                  aria-label="Close preview"
-                  data-testid="documents-preview-close"
+            <div className="mb-4 flex justify-end">
+              {getDocumentLink(previewDocument) ? (
+                <a
+                  href={getDocumentLink(previewDocument)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                  data-testid="documents-preview-download"
                 >
-                  <Icon name="xmark" />
-                </button>
-              </div>
+                  <Icon name="download" className="mr-2" />
+                  Download
+                </a>
+              ) : null}
             </div>
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
               {isImageDocument(previewDocument) && getDocumentLink(previewDocument) ? (
                 <div
                   className="flex h-full min-h-full items-center justify-center overflow-auto rounded-3xl border border-gray-200 bg-white/80 p-2 shadow-inner dark:border-zinc-700 dark:bg-zinc-950/80 sm:p-4"
@@ -581,9 +561,7 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                   </div>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
+        </MobileSheet>
       )}
     </div>
   );

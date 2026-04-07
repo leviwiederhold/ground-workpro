@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react';
 import { BidShareLinkPanel } from '@/app/components/bids/BidShareLinkPanel';
+import { MobileSheet } from '@/app/components/ui/MobileSheet';
 import { EmptyState, InlineError, LoadingBlock, SkeletonBlock } from '@/app/components/ui/FeedbackBlocks';
 
 const confirmDelete = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
@@ -273,14 +274,6 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
       useEffect(() => {
         if (!selectedBid) setShowMobileDetails(false);
       }, [selectedBid]);
-
-      useEffect(() => {
-        if (!(showMobileDetails || showBidModal || showItemModal) || typeof document === 'undefined') return undefined;
-        document.body.classList.add('modal-open');
-        return () => {
-          document.body.classList.remove('modal-open');
-        };
-      }, [showBidModal, showItemModal, showMobileDetails]);
 
       useEffect(() => {
         if (!selectedBidId && bids.length > 0) {
@@ -1029,30 +1022,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           </div>
 
           {isMobile && showMobileDetails && selectedBid && (
-            <>
-              <button
-                type="button"
-                aria-label="Close bid details"
-                className="fixed inset-0 z-40 bg-black/50"
-                onClick={() => setShowMobileDetails(false)}
-              />
-              <Card className="mobile-sheet-backdrop fixed inset-0 z-50 flex flex-col overflow-hidden rounded-none p-0 sm:items-center sm:justify-center sm:bg-black/0 sm:p-4">
-                <div className="mobile-sheet-panel flex min-h-0 flex-1 flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)] sm:max-w-4xl">
-                <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-4 pb-4 sm:items-center sm:px-5">
-                  <div>
-                    <h4 className="text-lg font-bold text-gray-900">{selectedBid.projectName || selectedBid.title}</h4>
-                    <p className="text-sm text-gray-500">{getBidClient(selectedBid) || 'No client selected'}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-gray-300 text-gray-700"
-                    onClick={() => setShowMobileDetails(false)}
-                  >
-                    <Icon name="xmark" />
-                  </button>
-                </div>
-
-                <div className="mobile-sheet-body min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
+            <MobileSheet isOpen={showMobileDetails} onClose={() => setShowMobileDetails(false)} title={selectedBid.projectName || selectedBid.title} subtitle={getBidClient(selectedBid) || 'No client selected'} size="lg">
                 <div className="space-y-4">
                   <div className="flex flex-wrap gap-2">
                     <Button variant="secondary" onClick={() => openEditBid(selectedBid)}>
@@ -1108,25 +1078,12 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                     )}
                   </div>
                 </div>
-                </div>
-                </div>
-              </Card>
-            </>
+            </MobileSheet>
           )}
 
           {showBidModal && (
-            <div className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden sm:items-center sm:p-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeBidModal} aria-label="Close bid modal" />
-              <Card className="mobile-sheet-panel relative z-10 flex w-full max-w-xl flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)]">
-                <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-5 pb-4 sm:items-center sm:px-6">
-                  <h3 className="text-lg font-bold text-gray-900">{editingBidId ? 'Edit Bid' : 'Create Bid'}</h3>
-                  <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700" onClick={closeBidModal}>
-                    <Icon name="xmark" className="text-lg" />
-                  </button>
-                </div>
-
-                <div className="mobile-sheet-body space-y-3 overflow-y-auto px-5 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-6 sm:pb-6">
-                  <div className="space-y-3">
+            <MobileSheet isOpen={showBidModal} onClose={closeBidModal} title={editingBidId ? 'Edit Bid' : 'Create Bid'} size="md" bodyClassName="space-y-3">
+                  <div className="min-w-0 space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
                       <input
@@ -1257,24 +1214,12 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                       {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
                     </Button>
                   </div>
-                </div>
-              </Card>
-            </div>
+            </MobileSheet>
           )}
 
           {showItemModal && (
-            <div className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden sm:items-center sm:p-4">
-              <button className="absolute inset-0 bg-black/40" onClick={closeItemModal} aria-label="Close bid item modal" />
-              <Card className="mobile-sheet-panel relative z-10 flex w-full max-w-lg flex-col bg-white shadow-2xl sm:max-h-[min(90dvh,56rem)]">
-                <div className="mobile-sheet-header mb-0 flex items-start justify-between gap-3 border-b border-gray-200 px-5 pb-4 sm:items-center sm:px-6">
-                  <h3 className="text-lg font-bold text-gray-900">{editingItemId ? 'Edit Bid Item' : 'Add Bid Item'}</h3>
-                  <button type="button" className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700" onClick={closeItemModal}>
-                    <Icon name="xmark" className="text-lg" />
-                  </button>
-                </div>
-
-                <div className="mobile-sheet-body space-y-3 overflow-y-auto px-5 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-6 sm:pb-6">
-                  <div className="space-y-3">
+            <MobileSheet isOpen={showItemModal} onClose={closeItemModal} title={editingItemId ? 'Edit Bid Item' : 'Add Bid Item'} size="sm" bodyClassName="space-y-3">
+                  <div className="min-w-0 space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
                       <select
@@ -1333,9 +1278,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                       </Button>
                     </div>
                   </div>
-                </div>
-              </Card>
-            </div>
+            </MobileSheet>
           )}
         </div>
       );

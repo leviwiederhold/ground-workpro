@@ -171,28 +171,6 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
     loadDocuments();
   }, [loadDocuments]);
 
-<<<<<<< ours
-=======
-  useEffect(() => {
-    if (!previewDocumentId || typeof document === 'undefined') return undefined;
-    document.body.classList.add('modal-open');
-    const appScrollContainer = document.querySelector('.mobile-app-shell__content');
-    const priorOverflow = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overflow : '';
-    const priorOverscroll = appScrollContainer instanceof HTMLElement ? appScrollContainer.style.overscrollBehavior : '';
-    if (appScrollContainer instanceof HTMLElement) {
-      appScrollContainer.style.overflow = 'hidden';
-      appScrollContainer.style.overscrollBehavior = 'none';
-    }
-    return () => {
-      document.body.classList.remove('modal-open');
-      if (appScrollContainer instanceof HTMLElement) {
-        appScrollContainer.style.overflow = priorOverflow;
-        appScrollContainer.style.overscrollBehavior = priorOverscroll;
-      }
-    };
-  }, [previewDocumentId]);
-
->>>>>>> theirs
   const handleUpload = async (event) => {
     clearSetupRefreshSuppression?.();
     const file = event.target.files?.[0];
@@ -517,7 +495,6 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
       )}
 
       {previewDocument && (
-<<<<<<< ours
         <MobileSheet
           isOpen={Boolean(previewDocument)}
           onClose={() => setPreviewDocumentId(null)}
@@ -527,12 +504,6 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
           panelClassName="h-full max-h-full dark:bg-zinc-950 sm:h-[85vh]"
           headerClassName="dark:border-zinc-800"
           bodyClassName="bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60"
-=======
-        <div
-          className="mobile-sheet-backdrop fixed inset-0 z-50 flex items-end justify-center overflow-hidden bg-black/70 p-0 sm:items-center sm:p-6"
-          onClick={() => setPreviewDocumentId(null)}
-          data-testid="documents-preview-modal"
->>>>>>> theirs
         >
             <div className="mb-4 flex justify-end">
               {getDocumentLink(previewDocument) ? (
@@ -548,26 +519,6 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                 </a>
               ) : null}
             </div>
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-<<<<<<< ours
-=======
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
->>>>>>> theirs
-=======
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
->>>>>>> theirs
-=======
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
->>>>>>> theirs
-=======
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
->>>>>>> theirs
-=======
-            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
->>>>>>> theirs
               {isImageDocument(previewDocument) && getDocumentLink(previewDocument) ? (
                 <div
                   className="flex h-full min-h-full items-center justify-center overflow-auto rounded-3xl border border-gray-200 bg-white/80 p-2 shadow-inner dark:border-zinc-700 dark:bg-zinc-950/80 sm:p-4"

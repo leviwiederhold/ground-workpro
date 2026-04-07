@@ -550,6 +550,18 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
             </div>
 <<<<<<< ours
 <<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+=======
+            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
+>>>>>>> theirs
+=======
+            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
+>>>>>>> theirs
+=======
+            <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
+>>>>>>> theirs
 =======
             <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-6 dark:bg-zinc-900/60">
 >>>>>>> theirs

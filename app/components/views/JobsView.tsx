@@ -1021,6 +1021,15 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
             <div className="mobile-sheet-body min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5">
             <div className="min-w-0 space-y-4">
 <<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
 >>>>>>> theirs
 =======
 >>>>>>> theirs

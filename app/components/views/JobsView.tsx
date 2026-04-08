@@ -963,18 +963,11 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         <MobileSheet
           isOpen={showMobileDetails}
           onClose={() => setShowMobileDetails(false)}
-          title=""
+          title={selectedJob.name}
+          subtitle="Job details"
           size="lg"
-          headerClassName="mb-0"
-          bodyClassName="pt-4"
         >
           <div className="space-y-4">
-            <div className="flex items-start justify-between gap-3 border-b border-gray-200 pb-4">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-500">Job Details</p>
-                <h3 className="mt-1 min-w-0 truncate text-lg font-semibold leading-tight text-gray-900">{selectedJob.name}</h3>
-              </div>
-            </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Name</p>
                 <input type="text" value={jobForm.name} onChange={(e) => setJobForm({ ...jobForm, name: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />

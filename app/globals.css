@@ -159,11 +159,20 @@ body:has(.mobile-app-shell) {
   }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1024px) {
   input,
   select,
-  textarea {
-    font-size: 16px;
+  textarea,
+  [contenteditable="true"],
+  [role="combobox"] input,
+  [data-mobile-input="true"] {
+    font-size: 16px !important;
+    line-height: 1.35;
+  }
+
+  .mobile-app-shell__header {
+    transform: translateZ(0);
+    will-change: transform;
   }
 }
 

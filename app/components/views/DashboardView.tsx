@@ -32,6 +32,24 @@ const ACTION_ICON_BY_KEY = {
   safety_sign_off: 'shield-halved',
 };
 
+const QUICK_ACTION_MODAL_BY_KEY = {
+  add_event: { type: 'calendar-event', data: null },
+  time_clock: { type: 'time-clock', data: null },
+  check_in: { type: 'equipment-checkin', data: null },
+  daily_report: { type: 'daily-report', data: null },
+  work_order: { type: 'work-order', data: null },
+  safety_sign_off: { type: 'safety', data: null },
+};
+
+const QUICK_ACTION_MODAL_BY_HREF = {
+  'calendar-event': QUICK_ACTION_MODAL_BY_KEY.add_event,
+  'time-clock': QUICK_ACTION_MODAL_BY_KEY.time_clock,
+  'equipment-checkin': QUICK_ACTION_MODAL_BY_KEY.check_in,
+  'daily-report': QUICK_ACTION_MODAL_BY_KEY.daily_report,
+  'work-order': QUICK_ACTION_MODAL_BY_KEY.work_order,
+  safety: QUICK_ACTION_MODAL_BY_KEY.safety_sign_off,
+};
+
 export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrders, inventory, currentRole, setCurrentView, setShowModal, ui }) {
   const { StatGrid, StatCard, Card, Button, Icon, Badge, ProgressBar } = ui;
 
@@ -250,21 +268,22 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   };
 
   const runQuickAction = (action) => {
-    if (!action?.href) return;
-    const modalMap = {
-      'calendar-event': { type: 'calendar-event' },
-      'time-clock': { type: 'time-clock' },
-      'equipment-checkin': { type: 'equipment-checkin' },
-      'daily-report': { type: 'daily-report' },
-      'work-order': { type: 'work-order' },
-      safety: { type: 'safety' },
-    };
-    if (modalMap[action.href]) {
-      setShowModal(modalMap[action.href]);
+    if (!action) return;
+
+    const byKey = QUICK_ACTION_MODAL_BY_KEY[action.key];
+    const byHref = QUICK_ACTION_MODAL_BY_HREF[action.href];
+    const modalTarget = byKey || byHref;
+
+    if (modalTarget) {
+      setShowModal(modalTarget);
       return;
     }
+
+    if (!action?.href) return;
+
     if (action.href.startsWith('/')) {
       const routeMap = {
+        '/bids': 'bids',
         '/jobs': 'jobs',
         '/maintenance': 'maintenance',
         '/safety': 'safety',
@@ -272,8 +291,12 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
         '/inventory': 'inventory',
         '/schedule': 'schedule',
         '/fleet': 'fleet',
+        '/reports': 'reports',
+        '/vendors': 'vendors',
+        '/team': 'team',
       };
-      setCurrentView(routeMap[action.href] ?? 'dashboard');
+      const [path] = String(action.href).split('?');
+      setCurrentView(routeMap[path] ?? 'dashboard');
     }
   };
 
@@ -454,7 +477,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                 <Card className="p-4">
                   <h3 className="font-semibold text-gray-900 mb-4">Quick Actions</h3>
                   <div className="grid grid-cols-2 gap-2">
-                    {quickActionsSection.items.map((action) => {
+                    {quickActionsSection.items.filter((action) => Boolean(QUICK_ACTION_MODAL_BY_KEY[action.key] || QUICK_ACTION_MODAL_BY_HREF[action.href] || String(action.href || '').startsWith('/'))).map((action) => {
                       const iconName = ACTION_ICON_BY_KEY[action.key] || 'bolt';
                       const isSingleWide = quickActionsSection.items.length % 2 === 1 && quickActionsSection.items.length > 1 && action === quickActionsSection.items[quickActionsSection.items.length - 1];
                       return (

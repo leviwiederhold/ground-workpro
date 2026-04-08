@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { enqueueOutboxEvent } from "@/lib/outbox/queue";
 
 const feedbackSchema = z.object({
   feedback_type: z.enum(["bug", "feature_request", "general_feedback"]),
@@ -31,7 +33,7 @@ export async function POST(request: Request) {
     }
 
     const payload = parsed.data;
-    const insertResult = await supabase.from("feedback_submissions").insert({
+    const record = {
       company_id: companyId,
       user_id: userId,
       feedback_type: payload.feedback_type,
@@ -40,13 +42,40 @@ export async function POST(request: Request) {
       email: payload.email || null,
       page: payload.page || null,
       current_view: payload.current_view || null,
-    });
+    };
+
+    const insertResult = await supabase.from("feedback_submissions").insert(record);
 
     if (insertResult.error) {
-      return NextResponse.json(
-        { error: "Feedback could not be sent right now. Please try again." },
-        { status: 502 }
-      );
+      const admin = getSupabaseAdmin();
+
+      if (admin) {
+        const adminInsertResult = await admin.from("feedback_submissions").insert(record);
+        if (!adminInsertResult.error) {
+          return NextResponse.json({ ok: true, saved_via: "admin" });
+        }
+      }
+
+      try {
+        await enqueueOutboxEvent(supabase, {
+          companyId,
+          eventType: "feedback.submitted",
+          aggregateType: "feedback",
+          aggregateId: userId,
+          payload: {
+            ...record,
+            submitted_at: new Date().toISOString(),
+          },
+          idempotencyKey: `feedback:${companyId}:${userId}:${String(payload.page || "")}:${payload.message.slice(0, 64)}`,
+          maxAttempts: 8,
+        });
+        return NextResponse.json({ ok: true, saved_via: "outbox_fallback" });
+      } catch {
+        return NextResponse.json(
+          { error: "Feedback could not be sent right now. Please try again." },
+          { status: 502 }
+        );
+      }
     }
 
     return NextResponse.json({ ok: true });

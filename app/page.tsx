@@ -4196,7 +4196,7 @@ const MobileAppShell = ({
                 />
               )}
               <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
-                <div className="text-center mb-4">
+                <div className="relative text-center mb-4">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 overflow-hidden ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
                     {selectedEmployee.avatarUrl ? (
                       <img
@@ -4211,10 +4211,11 @@ const MobileAppShell = ({
                   {isMobileTeam && (
                     <button
                       type="button"
-                      className="rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 mb-2"
+                      aria-label="Close team member details"
+                      className="absolute right-4 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white text-xl leading-none text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
                       onClick={() => setShowTeamDetails(false)}
                     >
-                      Close
+                      <span aria-hidden="true">×</span>
                     </button>
                   )}
                   <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>

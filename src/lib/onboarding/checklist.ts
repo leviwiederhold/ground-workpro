@@ -36,6 +36,7 @@ type OnboardingChecklistRoleItemDef = OnboardingChecklistItemDef & {
   roles: AppRole[];
   requiredModule?: ModulePermissionKey;
   requiredAccess?: ModuleAccessLevel;
+  available?: boolean;
 };
 
 const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
@@ -96,6 +97,7 @@ const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
     href: "/integrations?onboarding=1",
     scope: "company",
     roles: ["admin", "pm"],
+    available: false,
   },
   {
     key: "finish_profile",
@@ -241,6 +243,7 @@ export function getOnboardingChecklistItemsForRole(
 ): OnboardingChecklistItemDef[] {
   return ONBOARDING_CHECKLIST_ITEMS_BY_ROLE
     .filter((item) => item.roles.includes(role))
+    .filter((item) => item.available !== false)
     .filter((item) => canAccessChecklistHref(role, item.href))
     .filter((item) => {
       if (!item.requiredModule) return true;

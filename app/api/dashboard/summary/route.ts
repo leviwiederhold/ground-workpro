@@ -434,7 +434,6 @@ export async function GET() {
         ],
       };
       sections.weather = weatherSection;
-      sections.equipmentLocations = { enabled: true, mode: "placeholder" };
       sections.openWorkOrders = {
         items: workOrderItems.map((item) => ({
           id: item.id,
@@ -510,7 +509,6 @@ export async function GET() {
           { key: "parts_low", label: "Parts Low", value: lowPartsCount, href: "/inventory" },
         ],
       };
-      sections.equipmentLocations = { enabled: true, mode: "placeholder" };
       sections.openWorkOrders = {
         items: workOrderItems.map((item) => ({
           id: item.id,
@@ -559,7 +557,6 @@ export async function GET() {
         ],
       };
       sections.weather = weatherSection;
-      sections.equipmentLocations = { enabled: false, mode: "placeholder" };
     }
 
     const item: DashboardSummary = {

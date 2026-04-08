@@ -150,7 +150,6 @@ export async function GET(request: Request) {
       purchaseOrdersCountResult,
       companyResult,
       profile,
-      integrationsCountResult,
       dailyReportsByUserCountResult,
       safetyLogsByUserCountResult,
     ] = await Promise.all([
@@ -240,10 +239,6 @@ export async function GET(request: Request) {
         .eq("id", companyId)
         .maybeSingle(),
       loadProfileForSetup(supabase, userId),
-      supabase
-        .from("integration_connections")
-        .select("id", { count: "exact", head: true })
-        .eq("company_id", companyId),
       supabase
         .from("daily_reports")
         .select("id", { count: "exact", head: true })
@@ -377,7 +372,6 @@ export async function GET(request: Request) {
       set_company_timezone: companyTimezoneConfigured,
       invite_teammate: employeeRows.length > 1,
       configure_permissions: employeeRows.length > 1,
-      connect_integrations: (integrationsCountResult.error ? 0 : integrationsCountResult.count ?? 0) > 0,
       finish_profile: isProfileDerivedComplete(profile, normalizeEmail(authUserResult.data?.user?.email)),
       complete_account_settings: isAccountDerivedComplete(profile),
       create_first_job: activeJobsCount > 0,
@@ -475,11 +469,6 @@ export async function GET(request: Request) {
               { key: "safety_sign_off", label: "Safety Sign-Off", href: "safety" },
             ],
           },
-        },
-        {
-          type: "equipment_locations",
-          title: "Equipment Locations - Cincinnati Area",
-          meta: { enabled: true },
         },
         {
           type: "open_work_orders",

@@ -3,7 +3,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { EmptyState, SkeletonBlock, InlineError } from '@/app/components/ui/FeedbackBlocks';
-import { ComingSoonOverlay } from '@/app/components/ui/ComingSoonOverlay';
 
 const KPI_ICON_BY_KEY = {
   active_jobs: { icon: 'briefcase', color: 'brand' },
@@ -233,7 +232,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
           '/messages': 'messages',
           '/inventory': 'inventory',
           '/finance': 'finance',
-          '/integrations': 'integrations',
         };
         if (routeMap[path]) {
           setCurrentView(routeMap[path]);
@@ -260,7 +258,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
       inventory: 'inventory',
       finance: 'finance',
       settings: 'settings',
-      integrations: 'integrations',
     };
     if (viewMap[view]) {
       setCurrentView(viewMap[view]);
@@ -316,7 +313,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const weatherCondition = weatherSection?.condition ?? weatherSection?.item?.condition;
   const weatherHighF = weatherSection?.highF ?? null;
   const weatherLowF = weatherSection?.lowF ?? null;
-  const equipmentLocationsSection = dashboardSummary?.sections?.equipmentLocations ?? primaryItems.find((item) => item.type === 'equipment_locations')?.meta;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
   const showGettingStarted = Boolean(gettingStartedSection);
   const isAdminDashboard = effectiveRole === 'admin';
@@ -517,77 +513,59 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
               )}
 
               {weatherVisible && (
-                <ComingSoonOverlay>
-                  <Card className="p-4">
-                    <h3 className="font-semibold text-gray-900 mb-4">
-                      <Icon name="cloud-sun" className="mr-2 text-blue-500" />
-                      Weather - {weatherSection.locationLabel}
-                    </h3>
-                    <div className="text-center mb-4">
-                      <div className="flex items-center justify-center gap-4">
-                        <Icon name="sun" className="text-yellow-500 text-4xl" />
-                        <div>
-                          <p className="text-4xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
-                          <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
-                          {weatherHighF !== null && weatherLowF !== null && (
-                            <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
-                          )}
-                        </div>
+                <Card className="p-4">
+                  <h3 className="font-semibold text-gray-900 mb-4">
+                    <Icon name="cloud-sun" className="mr-2 text-blue-500" />
+                    Weather - {weatherSection.locationLabel}
+                  </h3>
+                  <div className="text-center mb-4">
+                    <div className="flex items-center justify-center gap-4">
+                      <Icon name="sun" className="text-yellow-500 text-4xl" />
+                      <div>
+                        <p className="text-4xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
+                        <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
+                        {weatherHighF !== null && weatherLowF !== null && (
+                          <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
+                        )}
                       </div>
                     </div>
-                  </Card>
-                </ComingSoonOverlay>
+                  </div>
+                </Card>
               )}
             </div>
           </div>
 
-          {(equipmentLocationsSection?.enabled || openWorkOrdersSection) && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {equipmentLocationsSection?.enabled && (
-                <ComingSoonOverlay>
-                  <Card className="p-4">
-                    <h3 className="font-semibold text-gray-900 mb-4">
-                      <Icon name="map-location-dot" className="mr-2 text-brand-500" />
-                      Equipment Locations - Cincinnati Area
-                    </h3>
-                    <div className="h-[420px] rounded-lg border border-gray-200 bg-gray-50 flex items-center justify-center">
-                      <span className="text-sm text-gray-500">Location map not connected yet (deterministic placeholder)</span>
+          {openWorkOrdersSection && (
+            <div className="grid grid-cols-1 gap-6">
+              <Card className="p-0 overflow-hidden">
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-900">Open Work Orders</h3>
+                  <Button variant="ghost" size="sm" onClick={() => setCurrentView('maintenance')}>
+                    View All <Icon name="arrow-right" className="ml-1" />
+                  </Button>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {openWorkOrdersSection.items.length === 0 ? (
+                    <div className="p-4">
+                      <EmptyState testId="dashboard-workorders-empty">No open work orders.</EmptyState>
                     </div>
-                  </Card>
-                </ComingSoonOverlay>
-              )}
-
-              {openWorkOrdersSection && (
-                <Card className="p-0 overflow-hidden">
-                  <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-900">Open Work Orders</h3>
-                    <Button variant="ghost" size="sm" onClick={() => setCurrentView('maintenance')}>
-                      View All <Icon name="arrow-right" className="ml-1" />
-                    </Button>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {openWorkOrdersSection.items.length === 0 ? (
-                      <div className="p-4">
-                        <EmptyState testId="dashboard-workorders-empty">No open work orders.</EmptyState>
-                      </div>
-                    ) : (
-                      openWorkOrdersSection.items.map((wo) => (
-                        <div key={wo.id} className="p-4 hover:bg-gray-50" onClick={() => setCurrentView('maintenance')}>
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <Icon name="circle" className="text-yellow-600" />
-                                <span className="font-medium text-gray-900">{wo.title}</span>
-                              </div>
+                  ) : (
+                    openWorkOrdersSection.items.map((wo) => (
+                      <div key={wo.id} className="p-4 hover:bg-gray-50" onClick={() => setCurrentView('maintenance')}>
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <Icon name="circle" className="text-yellow-600" />
+                              <span className="font-medium text-gray-900">{wo.title}</span>
                             </div>
-                            <Badge className="bg-yellow-100 text-yellow-800">open</Badge>
                           </div>
+                          <Badge className="bg-yellow-100 text-yellow-800">open</Badge>
                         </div>
-                      ))
-                    )}
-                  </div>
-                </Card>
-              )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </Card>
             </div>
           )}
         </>
@@ -682,16 +660,14 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
               </Card>
             )}
             {weatherVisible && (
-              <ComingSoonOverlay>
-                <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">Weather - {weatherSection.locationLabel}</h3>
-                  <p className="text-3xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
-                  <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
-                  {weatherHighF !== null && weatherLowF !== null && (
-                    <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
-                  )}
-                </Card>
-              </ComingSoonOverlay>
+              <Card className="p-4">
+                <h3 className="font-semibold text-gray-900 mb-4">Weather - {weatherSection.locationLabel}</h3>
+                <p className="text-3xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
+                <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
+                {weatherHighF !== null && weatherLowF !== null && (
+                  <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
+                )}
+              </Card>
             )}
           </div>
         </div>

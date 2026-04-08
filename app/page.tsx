@@ -8,7 +8,6 @@ import dynamic from 'next/dynamic';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { StatGrid } from '@/app/components/ui/StatGrid';
 import { EmptyState, InlineError, LoadingBlock } from '@/app/components/ui/FeedbackBlocks';
-import { ComingSoonOverlay } from '@/app/components/ui/ComingSoonOverlay';
 import { MobileSheet } from '@/app/components/ui/MobileSheet';
 import {
   getSensitiveInvitePermissionGrants,
@@ -17,6 +16,7 @@ import {
 } from '@/lib/permissions/sensitivity';
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
+import { isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -56,8 +56,6 @@ const hasRecordId = (value) => {
 };
 
 const NAV_CACHE_KEY = 'groundwork.nav-cache';
-const BETA_TOOLTIP_COPY = "Groundwork Pro is currently in beta. We’re actively improving the platform based on user feedback.";
-const AI_HELPER_TOOLTIP_COPY = "Coming Soon: A built-in smart assistant that will help with scheduling, job planning, crew coordination, document help, and daily operations inside Groundwork Pro.";
 const FEEDBACK_TYPE_OPTIONS = [
   { value: 'bug', label: 'Bug' },
   { value: 'feature_request', label: 'Feature Request' },
@@ -795,8 +793,6 @@ const MobileAppShell = ({
 
     const App = ({ currentUser, onLogout }) => {
       const cachedNavState = useMemo(() => loadCachedNavState(), []);
-      const betaBadgeRef = useRef(null);
-      const aiHelperBadgeRef = useRef(null);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
         return window.localStorage.getItem('app.currentView') || 'dashboard';
@@ -805,7 +801,6 @@ const MobileAppShell = ({
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
-      const [comingSoonMessage, setComingSoonMessage] = useState('');
       const [currentRole, setCurrentRole] = useState(cachedNavState.role);
       const [currentRoleDisplay, setCurrentRoleDisplay] = useState(cachedNavState.displayRole || cachedNavState.role);
       const [serverNavItems, setServerNavItems] = useState(cachedNavState.items);
@@ -813,8 +808,6 @@ const MobileAppShell = ({
       const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
-      const [showBetaPopover, setShowBetaPopover] = useState(false);
-      const [showAiHelperPopover, setShowAiHelperPopover] = useState(false);
       const [notifications, setNotifications] = useState([]);
       const [notificationsLoading, setNotificationsLoading] = useState(false);
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
@@ -861,45 +854,6 @@ const MobileAppShell = ({
       const navigateFromUserMenu = useCallback((path) => {
         setShowUserMenu(false);
         window.location.assign(path);
-      }, []);
-
-      useEffect(() => {
-        if (!showBetaPopover) return undefined;
-
-        const handlePointerDown = (event) => {
-          if (!betaBadgeRef.current?.contains(event.target)) {
-            setShowBetaPopover(false);
-          }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('touchstart', handlePointerDown);
-        return () => {
-          document.removeEventListener('mousedown', handlePointerDown);
-          document.removeEventListener('touchstart', handlePointerDown);
-        };
-      }, [showBetaPopover]);
-
-      useEffect(() => {
-        if (!showAiHelperPopover) return undefined;
-
-        const handlePointerDown = (event) => {
-          if (!aiHelperBadgeRef.current?.contains(event.target)) {
-            setShowAiHelperPopover(false);
-          }
-        };
-
-        document.addEventListener('mousedown', handlePointerDown);
-        document.addEventListener('touchstart', handlePointerDown);
-        return () => {
-          document.removeEventListener('mousedown', handlePointerDown);
-          document.removeEventListener('touchstart', handlePointerDown);
-        };
-      }, [showAiHelperPopover]);
-
-      const openComingSoon = useCallback((message) => {
-        setComingSoonMessage(message || 'This feature is coming soon.');
-        setShowModal({ type: 'coming-soon', data: null });
       }, []);
 
       const openFeedbackModal = useCallback(() => {
@@ -1047,12 +1001,11 @@ const MobileAppShell = ({
           documents: { key: 'documents', label: 'Documents', iconKey: 'folder-open' },
           training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
           finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
-          integrations: { key: 'integrations', label: 'Integrations', iconKey: 'plug' },
           subscribe: { key: 'subscribe', label: 'Subscribe', iconKey: 'credit-card' },
           audit: { key: 'audit', label: 'Audit', iconKey: 'clipboard-list' },
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'integrations', 'subscribe', 'audit', 'documents', 'team', 'training', 'schedule'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'subscribe', 'audit', 'documents', 'team', 'training', 'schedule'],
           operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
@@ -1113,7 +1066,6 @@ const MobileAppShell = ({
           safety: 'safety',
           messages: 'messages',
           finance: 'finance',
-          integrations: 'integrations',
           team: 'team_management',
         };
         return map[String(view || '').toLowerCase()] || null;
@@ -1946,7 +1898,6 @@ const MobileAppShell = ({
           case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
           case 'audit': return <AuditView currentRole={currentRole} />;
           case 'marketing': return <MarketingView />;
-          case 'integrations': return <IntegrationsView />;
           case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} />;
           default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
         }
@@ -2028,46 +1979,6 @@ const MobileAppShell = ({
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-                  <div ref={aiHelperBadgeRef} className="group relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowAiHelperPopover((current) => !current)}
-                      className="group inline-flex h-9 w-9 items-center justify-center rounded-full border border-sky-200/80 bg-sky-50/80 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100/80 focus:outline-none focus:ring-2 focus:ring-sky-200"
-                      aria-label="AI helper coming soon"
-                      aria-expanded={showAiHelperPopover}
-                      data-testid="header-ai-helper-badge"
-                    >
-                      <Icon name="robot" className="text-sm" />
-                    </button>
-                    <div className="pointer-events-none absolute left-1/2 top-full z-30 mt-2 hidden w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-                      {AI_HELPER_TOOLTIP_COPY}
-                    </div>
-                    {showAiHelperPopover && (
-                      <div className="absolute left-1/2 top-full z-30 mt-2 w-[min(20rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:hidden">
-                        {AI_HELPER_TOOLTIP_COPY}
-                      </div>
-                    )}
-                  </div>
-                  <div ref={betaBadgeRef} className="group relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowBetaPopover((current) => !current)}
-                      className="group inline-flex items-center gap-1 rounded-full border border-amber-200/80 bg-amber-50/80 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-amber-700 transition hover:border-amber-300 hover:bg-amber-100/80 focus:outline-none focus:ring-2 focus:ring-amber-200 sm:px-2.5"
-                      aria-label="Groundwork Pro beta information"
-                      aria-expanded={showBetaPopover}
-                    >
-                      <span>BETA</span>
-                      <Icon name="circle-info" className="text-[10px] normal-case tracking-normal md:hidden" />
-                    </button>
-                    <div className="pointer-events-none absolute right-0 top-full z-30 mt-2 hidden w-72 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:block md:opacity-0 md:transition md:duration-150 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-                      {BETA_TOOLTIP_COPY}
-                    </div>
-                    {showBetaPopover && (
-                      <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-2xl border border-gray-200 bg-white p-3 text-left text-xs leading-5 text-gray-600 shadow-xl md:hidden">
-                        {BETA_TOOLTIP_COPY}
-                      </div>
-                    )}
-                  </div>
                   <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-100">
                     <Icon name={ROLES[currentRole].icon} className={ROLES[currentRole].color} />
                     <span className="text-sm font-medium text-gray-700">{roleBadgeLabel}</span>
@@ -2319,16 +2230,6 @@ const MobileAppShell = ({
                           >
                             <Icon name="gear" className="text-gray-400" /> Account Settings
                           </button>
-                          <button
-                            onClick={() => {
-                              setShowUserMenu(false);
-                              setShowInstallCta(true);
-                              setShowIphoneInstallModal(false);
-                            }}
-                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                          >
-                            <Icon name="mobile-screen" className="text-gray-400" /> Install on my phone
-                          </button>
                           {isCeoRole && (
                             <button
                               onClick={() => navigateFromUserMenu('/settings/company')}
@@ -2367,7 +2268,7 @@ const MobileAppShell = ({
               <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-900">How can we improve?</p>
-                  <p className="text-xs text-gray-500">Share beta feedback without leaving Groundwork Pro.</p>
+                  <p className="text-xs text-gray-500">Share product feedback without leaving Groundwork Pro.</p>
                 </div>
                 <button
                   type="button"
@@ -2387,12 +2288,6 @@ const MobileAppShell = ({
             isOpen={showModal.type === 'quick-actions'}
             onClose={() => setShowModal({ type: null })}
             setShowModal={setShowModal}
-            onComingSoon={openComingSoon}
-          />
-          <ComingSoonModal
-            isOpen={showModal.type === 'coming-soon'}
-            onClose={() => setShowModal({ type: null })}
-            message={comingSoonMessage}
           />
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
@@ -2565,7 +2460,7 @@ const MobileAppShell = ({
         <div className="relative">
           {mapLoadError ? (
             <div className="h-64 rounded-lg border border-gray-200 bg-gray-100 flex items-center justify-center text-sm text-gray-500">
-              Map unavailable
+              Map could not be loaded
             </div>
           ) : (
             <>
@@ -3425,17 +3320,16 @@ const MobileAppShell = ({
         { key: 'documents', label: 'Documents' },
         { key: 'training', label: 'Training' },
         { key: 'finance', label: 'Finance' },
-        { key: 'integrations', label: 'Integrations' },
         { key: 'team_management', label: 'Team Management' },
       ];
       const permissionLevels = ['none', 'view', 'edit'];
       const roleTemplateDefaults = {
-        ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', integrations: 'edit', team_management: 'edit' },
-        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'none', integrations: 'none', team_management: 'view' },
-        foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', integrations: 'none', team_management: 'none' },
-        mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'none', documents: 'none', training: 'view', finance: 'none', integrations: 'none', team_management: 'none' },
-        operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', integrations: 'none', team_management: 'none' },
-        fieldstaff: { jobs: 'none', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', integrations: 'none', team_management: 'none' },
+        ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
+        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'none', team_management: 'view' },
+        foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', team_management: 'none' },
+        mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'none', documents: 'none', training: 'view', finance: 'none', team_management: 'none' },
+        operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', team_management: 'none' },
+        fieldstaff: { jobs: 'none', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', team_management: 'none' },
       };
       const appRoleToInviteRole = (role) => {
         const normalized = String(role || '').toLowerCase();
@@ -5738,7 +5632,7 @@ const MobileAppShell = ({
                   <div className="h-64 rounded-2xl bg-white/70 p-2 dark:bg-black/20">
                     {chartsUnavailable ? (
                       <div className="flex h-full items-center justify-center rounded-xl border border-gray-200 bg-gray-100 text-sm text-gray-500 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-400">
-                        Chart unavailable
+                        Chart could not be rendered
                       </div>
                     ) : (
                       <canvas ref={chartRef}></canvas>
@@ -5759,7 +5653,7 @@ const MobileAppShell = ({
                   <div className="h-64 rounded-2xl bg-white/70 p-2 dark:bg-black/20">
                     {chartsUnavailable ? (
                       <div className="flex h-full items-center justify-center rounded-xl border border-gray-200 bg-gray-100 text-sm text-gray-500 dark:border-zinc-800 dark:bg-zinc-900/80 dark:text-zinc-400">
-                        Chart unavailable
+                        Chart could not be rendered
                       </div>
                     ) : (
                       <canvas ref={pieChartRef}></canvas>
@@ -7857,7 +7751,7 @@ const MobileAppShell = ({
                   </div>
                 ) : (
                   <div className="mb-4 flex aspect-video items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-500">
-                    Video preview unavailable
+                    Video thumbnail not available
                   </div>
                 )}
                 <h3 className="font-semibold text-gray-900 mb-2">{selectedVideo.title}</h3>
@@ -9749,7 +9643,6 @@ const MobileAppShell = ({
       const isAdmin = currentRole === 'executive';
       const [activeTab, setActiveTab] = useState('company');
       const [billingStatus, setBillingStatus] = useState(null);
-      const [integrations, setIntegrations] = useState([]);
       const [settingsLoading, setSettingsLoading] = useState(false);
       const [settingsError, setSettingsError] = useState('');
       const [pricingLoading, setPricingLoading] = useState(false);
@@ -9772,17 +9665,12 @@ const MobileAppShell = ({
           try {
             setSettingsLoading(true);
             setSettingsError('');
-            const [billingRes, integrationsRes] = await Promise.all([
-              fetch('/api/billing/status', { cache: 'no-store' }),
-              fetch('/api/integrations', { cache: 'no-store' }),
-            ]);
+            const billingRes = await fetch('/api/billing/status', { cache: 'no-store' });
             const billingPayload = await billingRes.json().catch(() => ({}));
-            const integrationsPayload = await integrationsRes.json().catch(() => ({}));
             if (!active) return;
             if (billingRes.ok) setBillingStatus(billingPayload?.item || null);
-            if (integrationsRes.ok) setIntegrations(integrationsPayload?.items || []);
-            if (!billingRes.ok && !integrationsRes.ok) {
-              setSettingsError(billingPayload?.error || integrationsPayload?.error || 'Failed to load settings data');
+            if (!billingRes.ok) {
+              setSettingsError(billingPayload?.error || 'Failed to load settings data');
             }
           } catch {
             if (active) setSettingsError('Failed to load settings data');
@@ -9853,9 +9741,6 @@ const MobileAppShell = ({
         acc[key] = (acc[key] || 0) + 1;
         return acc;
       }, {});
-
-      const connectedIntegrations = integrations.filter((item) => item.connected).length;
-
       return (
         <div className="space-y-6">
           <Tabs
@@ -9863,7 +9748,6 @@ const MobileAppShell = ({
               { id: 'company', label: 'Company', icon: 'building' },
               { id: 'users', label: 'Users & Roles', icon: 'users' },
               { id: 'billing', label: 'Billing', icon: 'credit-card' },
-              { id: 'integrations', label: 'Integrations', icon: 'plug' },
               { id: 'pricing', label: 'Pricing Defaults', icon: 'sliders' },
               { id: 'security', label: 'Security', icon: 'shield-halved' },
             ]}
@@ -9900,7 +9784,6 @@ const MobileAppShell = ({
                 <h3 className="font-semibold text-gray-900 mb-3">System Snapshot</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-gray-500">Team Members</span><span className="font-medium">{employees.length}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Connected Integrations</span><span className="font-medium">{connectedIntegrations}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Billing Active</span><span className="font-medium">{billingStatus?.is_active ? 'Yes' : 'No'}</span></div>
                 </div>
               </Card>
@@ -9953,23 +9836,6 @@ const MobileAppShell = ({
                   </div>
                 </div>
               )}
-            </Card>
-          )}
-
-          {activeTab === 'integrations' && (
-            <Card className="p-4">
-              <h3 className="font-semibold text-gray-900 mb-3">Integrations Health</h3>
-              <div className="space-y-2">
-                {(integrations || []).slice(0, 10).map((item) => (
-                  <div key={item.provider} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2">
-                    <span className="text-sm text-gray-700 capitalize">{item.provider}</span>
-                    <Badge className={item.connected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}>
-                      {item.connected ? 'Connected' : 'Not connected'}
-                    </Badge>
-                  </div>
-                ))}
-                {integrations.length === 0 && <p className="text-sm text-gray-500">No integrations configured yet.</p>}
-              </div>
             </Card>
           )}
 
@@ -10270,72 +10136,6 @@ const MobileAppShell = ({
             </div>
           )}
         </div>
-      );
-    };
-
-    // ============================================
-    // MESSAGES VIEW - Team Communication Hub
-    // ============================================
-    const IntegrationsView = () => {
-      return (
-        <ComingSoonOverlay active={true}>
-          <div className="space-y-6">
-            <Card className="overflow-hidden border border-slate-200 bg-white dark:border-zinc-800 dark:bg-[#090909]">
-              <div className="grid gap-0 lg:grid-cols-[1.2fr_0.8fr]">
-                <div className="space-y-5 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 px-6 py-8 text-white sm:px-8">
-                  <Badge className="w-fit bg-white/10 text-white ring-1 ring-white/20">Coming Soon</Badge>
-                  <div className="space-y-3">
-                    <h2 className="text-2xl font-semibold tracking-tight">Integrations are staged for the beta roadmap.</h2>
-                    <p className="max-w-2xl text-sm text-slate-200">
-                      Groundwork Pro will support accounting, telematics, payroll, and document platform connections, but setup is intentionally blocked during this beta.
-                    </p>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {[
-                      { title: 'Accounting', body: 'QuickBooks and ERP sync for costs, billing, and vendor workflows.' },
-                      { title: 'Field Systems', body: 'GPS, telematics, and time capture links for crews and equipment.' },
-                      { title: 'Documents', body: 'Secure handoff to storage, forms, and external compliance systems.' },
-                    ].map((item) => (
-                      <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                        <p className="text-sm font-medium text-white">{item.title}</p>
-                        <p className="mt-2 text-xs leading-5 text-slate-300">{item.body}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="space-y-4 bg-slate-50 px-6 py-8 dark:bg-[#050505] sm:px-8">
-                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white/80 p-5 dark:border-zinc-700 dark:bg-[#101010]">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-900 text-white dark:bg-zinc-100 dark:text-zinc-900">
-                        <Icon name="plug" className="text-lg" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-zinc-100">Beta access is disabled</p>
-                        <p className="text-xs text-slate-600 dark:text-zinc-400">Connect and disconnect controls will turn on in a later release.</p>
-                      </div>
-                    </div>
-                    <div className="mt-4 space-y-2">
-                      {['QuickBooks', 'Samsara', 'ADP', 'Procore'].map((name) => (
-                        <div key={name} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 dark:border-zinc-800">
-                          <span className="text-sm text-slate-700 dark:text-zinc-300">{name}</span>
-                          <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:bg-zinc-900 dark:text-zinc-400">
-                            blocked
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <Card className="border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
-                    <p className="text-sm font-medium">This page is intentionally non-interactive for beta.</p>
-                    <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
-                      Visibility stays in the app so teams know the module exists, but no live integration state can be changed yet.
-                    </p>
-                  </Card>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </ComingSoonOverlay>
       );
     };
 
@@ -10801,7 +10601,7 @@ const MobileAppShell = ({
     // MODALS
     // ============================================
 
-    const QuickActionsModal = ({ isOpen, onClose, setShowModal, onComingSoon }) => (
+    const QuickActionsModal = ({ isOpen, onClose, setShowModal }) => (
       <Modal isOpen={isOpen} onClose={onClose} title="Quick Actions" size="sm">
         <div className="grid grid-cols-2 gap-3">
           {[
@@ -10811,16 +10611,11 @@ const MobileAppShell = ({
             { icon: 'file-lines', label: 'Daily Report', action: 'daily-report', color: 'brand' },
             { icon: 'wrench', label: 'Work Order', action: 'work-order', color: 'yellow' },
             { icon: 'shield-halved', label: 'Safety Sign-Off', action: 'safety', color: 'red' },
-            { icon: 'camera', label: 'Photo Upload', action: 'photo', color: 'purple' },
           ].map(item => (
             <button
               key={item.action}
               onClick={() => {
                 onClose();
-                if (['equipment-checkin', 'photo'].includes(item.action)) {
-                  onComingSoon(`${item.label} is coming soon.`);
-                  return;
-                }
                 setShowModal({ type: item.action });
               }}
               className="flex flex-col items-center gap-2 p-4 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
@@ -10831,19 +10626,6 @@ const MobileAppShell = ({
               <span className="text-sm font-medium text-gray-700">{item.label}</span>
             </button>
           ))}
-        </div>
-      </Modal>
-    );
-
-    const ComingSoonModal = ({ isOpen, onClose, message }) => (
-      <Modal isOpen={isOpen} onClose={onClose} title="Coming Soon" size="sm">
-        <div className="space-y-4">
-          <p className="text-sm text-gray-700">{message || 'This feature is coming soon.'}</p>
-          <div className="flex justify-end">
-            <Button variant="brand" size="sm" onClick={onClose}>
-              Got it
-            </Button>
-          </div>
         </div>
       </Modal>
     );
@@ -12007,7 +11789,6 @@ const MobileAppShell = ({
         { glyph: 'costing', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
         { glyph: 'safety', title: 'Safety & Compliance', desc: 'Digital safety sign-offs, incident tracking, and certification management.' },
         { glyph: 'reports', title: 'Advanced Reports', desc: 'Generate insights on productivity, costs, and equipment performance.' },
-        { glyph: 'integrations', title: '40+ Integrations', desc: 'Connect QuickBooks, Samsara, Procore, and all your favorite tools.' },
       ];
 
       const testimonials = [
@@ -12018,8 +11799,8 @@ const MobileAppShell = ({
 
       const plans = [
         { name: 'Starter', price: 49, period: '/user/mo', desc: 'For small crews getting started', features: ['All core features', 'Basic scheduling', 'Equipment tracking', 'Mobile app access', 'Email support'], cta: 'Start Free Trial' },
-        { name: 'Professional', price: 79, period: '/user/mo', desc: 'For growing excavation companies', features: ['Everything in Starter', 'Advanced scheduling', 'Job costing & budgets', 'Team messaging', 'Integrations', 'Priority support'], cta: 'Start Free Trial', popular: true },
-        { name: 'Enterprise', price: 'Custom', period: '', desc: 'For large operations', features: ['Everything in Pro', 'Custom integrations', 'Dedicated account manager', 'On-site training', 'SLA guarantee', 'API access'], cta: 'Contact Sales' },
+        { name: 'Professional', price: 79, period: '/user/mo', desc: 'For growing excavation companies', features: ['Everything in Starter', 'Advanced scheduling', 'Job costing & budgets', 'Team messaging', 'Priority support'], cta: 'Start Free Trial', popular: true },
+        { name: 'Enterprise', price: 'Custom', period: '', desc: 'For large operations', features: ['Everything in Pro', 'Dedicated account manager', 'On-site training', 'SLA guarantee', 'API access'], cta: 'Contact Sales' },
       ];
 
       const handleSubmit = async (e) => {
@@ -12755,6 +12536,7 @@ const MobileAppShell = ({
     // ============================================
 	    const Root = () => {
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
+	      const [authResolved, setAuthResolved] = useState(false);
 	      const [currentUser, setCurrentUser] = useState(null);
 	      const [setupChecked, setSetupChecked] = useState(false);
 	      const [setupRefreshing, setSetupRefreshing] = useState(false);
@@ -12901,6 +12683,8 @@ const MobileAppShell = ({
 	        setSetupChecked(false);
 	      };
 
+      const nativeAppRuntime = useMemo(() => isNativeAppRuntime(), []);
+
       const handleLogout = async () => {
         try {
           if (typeof window !== 'undefined') {
@@ -12915,7 +12699,7 @@ const MobileAppShell = ({
         setIsAuthenticated(false);
         setCurrentUser(null);
         setSetupChecked(true);
-        window.location.replace('/');
+        window.location.replace(nativeAppRuntime ? '/login' : '/');
       };
 
       useEffect(() => {
@@ -12925,6 +12709,7 @@ const MobileAppShell = ({
 	        supabase.auth.getSession().then(({ data }) => {
 	          if (!isMounted) return;
 	          setIsAuthenticated(!!data.session);
+	          setAuthResolved(true);
 	          setSetupChecked(!data.session);
 	          if (data.session?.user) {
 	            hydrateCurrentUser(data.session.user).then((user) => {
@@ -12937,6 +12722,7 @@ const MobileAppShell = ({
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
           if (!isMounted) return;
           setIsAuthenticated(!!session);
+          setAuthResolved(true);
           setSetupChecked(!session);
 	          if (!session?.user) {
 	            setCurrentUser(null);
@@ -12953,6 +12739,13 @@ const MobileAppShell = ({
           authListener.subscription.unsubscribe();
         };
 	      }, [hydrateCurrentUser]);
+
+      useEffect(() => {
+        if (!authResolved || isAuthenticated || !nativeAppRuntime) return;
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.replace('/login');
+        }
+      }, [authResolved, isAuthenticated, nativeAppRuntime]);
 
       useEffect(() => {
         if (!isAuthenticated) {
@@ -12992,7 +12785,14 @@ const MobileAppShell = ({
         };
       }, [isAuthenticated, verifySetup]);
 
+      if (!authResolved) {
+        return <WorkspaceLoadingScreen />;
+      }
+
       if (!isAuthenticated) {
+        if (nativeAppRuntime) {
+          return <WorkspaceLoadingScreen />;
+        }
         return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;
       }
 

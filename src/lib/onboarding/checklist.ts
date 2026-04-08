@@ -8,7 +8,6 @@ export type OnboardingChecklistKey =
   | "set_company_timezone"
   | "invite_teammate"
   | "configure_permissions"
-  | "connect_integrations"
   | "finish_profile"
   | "complete_account_settings"
   | "create_first_job"
@@ -88,16 +87,6 @@ const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
     roles: ["admin", "pm"],
     requiredModule: "team_management",
     requiredAccess: "edit",
-  },
-  {
-    key: "connect_integrations",
-    label: "Connect integrations",
-    description: "Connect at least one integration to reduce manual work.",
-    view: "integrations",
-    href: "/integrations?onboarding=1",
-    scope: "company",
-    roles: ["admin", "pm"],
-    available: false,
   },
   {
     key: "finish_profile",

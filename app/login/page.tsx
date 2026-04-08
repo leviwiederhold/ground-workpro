@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
@@ -10,6 +10,21 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const supabase = supabaseBrowser();
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active || !data.session) return;
+      router.replace("/");
+      router.refresh();
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [router]);
 
   async function ensureTenantContext() {
     const params = new URLSearchParams(window.location.search);

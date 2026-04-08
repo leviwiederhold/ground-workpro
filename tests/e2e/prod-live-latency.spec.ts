@@ -30,7 +30,7 @@ test('prod live latency + error sweep', async ({ page }) => {
   await page.getByTestId('login-submit').click();
   await page.waitForURL('**/', { timeout: 45_000 });
 
-  const navIds = ['dashboard','schedule','jobs','team','fleet','messages','maintenance','inventory','safety','reports','bids','vendors','documents','training','finance','integrations'];
+  const navIds = ['dashboard','schedule','jobs','team','fleet','messages','maintenance','inventory','safety','reports','bids','vendors','documents','training','finance'];
   for (const id of navIds) {
     const nav = page.getByTestId(`nav-${id}`);
     if (await nav.isVisible().catch(() => false)) {

@@ -69,7 +69,6 @@ const NAV_MODULE_MAP: Partial<Record<string, ModulePermissionKey>> = {
   documents: "documents",
   training: "training",
   finance: "finance",
-  integrations: "integrations",
   team: "team_management",
 };
 

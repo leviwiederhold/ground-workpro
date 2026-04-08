@@ -27,7 +27,7 @@ export default async function BillingSettingsPage() {
 
         {!billingEnabled ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
-            <p className="font-medium">Billing is currently unavailable</p>
+            <p className="font-medium">Billing setup is required</p>
             <p className="mt-2 text-sm">
               This workspace is running with billing disabled. When you are ready to enable it,
               run <code>supabase/migrations/20260220_02_billing_companies_columns.sql</code> and set{" "}

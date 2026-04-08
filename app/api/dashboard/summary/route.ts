@@ -69,7 +69,6 @@ type DashboardSummary = {
       locationLabel: string;
       item: { tempF: number; condition: string; note?: string };
     };
-    equipmentLocations?: { enabled: boolean; mode: "placeholder" };
     openWorkOrders?: {
       items: Array<{ id: string; title: string; href: string }>;
       viewAllHref?: string;
@@ -196,7 +195,6 @@ export async function GET() {
       companyResult,
       employeesCountResult,
       profile,
-      integrationsCountResult,
       totalBidsCountResult,
       sentBidsCountResult,
       purchaseOrdersCountResult,
@@ -215,7 +213,6 @@ export async function GET() {
       companyQuery,
       employeesCountQuery,
       loadProfileForSetup(supabase, userId),
-      supabase.from("integration_connections").select("id", { count: "exact", head: true }).eq("company_id", companyId),
       supabase.from("bids").select("id", { count: "exact", head: true }).eq("company_id", companyId),
       supabase
         .from("bids")
@@ -307,7 +304,6 @@ export async function GET() {
       set_company_timezone: Boolean(String(companyProfile?.timezone ?? "").trim()),
       invite_teammate: (employeesCountResult.error ? 0 : employeesCountResult.count ?? 0) > 1,
       configure_permissions: (employeesCountResult.error ? 0 : employeesCountResult.count ?? 0) > 1,
-      connect_integrations: (integrationsCountResult.error ? 0 : integrationsCountResult.count ?? 0) > 0,
       finish_profile: isProfileDerivedComplete(profile, ""),
       complete_account_settings: isAccountDerivedComplete(profile),
       create_first_job: activeJobsCount > 0,
@@ -388,7 +384,6 @@ export async function GET() {
         ],
       };
       sections.weather = weatherSection;
-      sections.equipmentLocations = { enabled: true, mode: "placeholder" };
       sections.openWorkOrders = {
         items: workOrderItems.map((item) => ({
           id: item.id,
@@ -489,7 +484,6 @@ export async function GET() {
         ],
       };
       sections.weather = weatherSection;
-      sections.equipmentLocations = { enabled: false, mode: "placeholder" };
     }
 
     if (role === "mechanic") {

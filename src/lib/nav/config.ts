@@ -24,7 +24,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "documents", label: "Documents", href: "/documents", iconKey: "folder-open" },
   { key: "training", label: "Training", href: "/training", iconKey: "chalkboard-user" },
   { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
-  { key: "integrations", label: "Integrations", href: "/integrations", iconKey: "plug" },
   { key: "subscribe", label: "Subscribe", href: "/subscribe", iconKey: "credit-card" },
   { key: "audit", label: "Audit", href: "/audit", iconKey: "clipboard-list" },
 ];
@@ -42,7 +41,6 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "messages",
     "finance",
     "reports",
-    "integrations",
     "subscribe",
     "audit",
     "documents",
@@ -99,7 +97,6 @@ export const ROUTE_GUARDS: Record<string, AppRole[]> = {
   "/reports": ["admin", "pm", "foreman"],
   "/inventory": ["admin", "pm", "mechanic"],
   "/finance": ["admin", "pm"],
-  "/integrations": ["admin", "pm"],
   "/documents": ["admin", "pm", "foreman", "mechanic", "operator"],
   "/settings": ["admin", "pm"],
   "/subscribe": ["admin"],

@@ -307,12 +307,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const quickActionsSection = dashboardSummary?.sections?.quickActions ?? primaryItems.find((item) => item.type === 'quick_actions')?.meta;
   const gettingStartedSection = dashboardSummary?.sections?.gettingStarted ?? primaryItems.find((item) => item.type === 'getting_started')?.meta;
   const alertsSection = dashboardSummary?.sections?.alerts;
-  const weatherSection = dashboardSummary?.sections?.weather ?? dashboardSummary?.weather;
-  const weatherVisible = Boolean(weatherSection?.visible ?? weatherSection?.enabled);
-  const weatherTempF = weatherSection?.tempF ?? weatherSection?.item?.tempF;
-  const weatherCondition = weatherSection?.condition ?? weatherSection?.item?.condition;
-  const weatherHighF = weatherSection?.highF ?? null;
-  const weatherLowF = weatherSection?.lowF ?? null;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
   const showGettingStarted = Boolean(gettingStartedSection);
   const isAdminDashboard = effectiveRole === 'admin';
@@ -512,26 +506,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                 </Card>
               )}
 
-              {weatherVisible && (
-                <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">
-                    <Icon name="cloud-sun" className="mr-2 text-blue-500" />
-                    Weather - {weatherSection.locationLabel}
-                  </h3>
-                  <div className="text-center mb-4">
-                    <div className="flex items-center justify-center gap-4">
-                      <Icon name="sun" className="text-yellow-500 text-4xl" />
-                      <div>
-                        <p className="text-4xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
-                        <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
-                        {weatherHighF !== null && weatherLowF !== null && (
-                          <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              )}
             </div>
           </div>
 
@@ -657,16 +631,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                     </div>
                   ))}
                 </div>
-              </Card>
-            )}
-            {weatherVisible && (
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">Weather - {weatherSection.locationLabel}</h3>
-                <p className="text-3xl font-bold text-gray-900">{weatherTempF ?? 0}°F</p>
-                <p className="text-sm text-gray-500">{weatherCondition || 'Not connected'}</p>
-                {weatherHighF !== null && weatherLowF !== null && (
-                  <p className="text-xs text-gray-400">H {weatherHighF}° / L {weatherLowF}°</p>
-                )}
               </Card>
             )}
           </div>

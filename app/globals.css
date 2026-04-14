@@ -19,6 +19,11 @@ body {
   overscroll-behavior: none;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   min-height: 100dvh;
   overflow-x: hidden;
@@ -31,6 +36,13 @@ body {
 }
 
 body.mobile-shell-active {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100lvh;
+  height: 100vh;
+  height: 100lvh;
   overflow: hidden;
   padding-top: 0;
   padding-right: 0;
@@ -62,8 +74,10 @@ body:has(.mobile-app-shell) {
   --mobile-safe-left: var(--safe-area-left);
   --mobile-header-height: 4.5rem;
   --mobile-header-total-height: calc(var(--mobile-safe-top) + var(--mobile-header-height));
-  min-height: 100dvh;
-  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100lvh;
+  height: 100vh;
+  height: 100lvh;
   overflow: hidden;
 }
 
@@ -119,7 +133,6 @@ body:has(.mobile-app-shell) {
   align-items: flex-end;
   justify-content: center;
   overflow: hidden;
-  padding-top: var(--safe-area-top);
   padding-right: var(--safe-area-right);
   padding-bottom: var(--safe-area-bottom);
   padding-left: var(--safe-area-left);
@@ -135,7 +148,7 @@ body:has(.mobile-app-shell) {
 }
 
 .mobile-sheet-header {
-  padding-top: max(1rem, calc(var(--safe-area-top) + 0.25rem));
+  padding-top: max(0.75rem, var(--safe-area-top));
 }
 
 .mobile-sheet-body {

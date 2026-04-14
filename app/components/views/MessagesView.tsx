@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
+import { MobileSheet } from '@/app/components/ui/MobileSheet';
 
 const hasRecordId = (value) => {
   const id = value?.id;
@@ -44,6 +45,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [newIncomingCount, setNewIncomingCount] = useState(0);
   const [pendingDirectContact, setPendingDirectContact] = useState(null);
   const [forcedDirectLabels, setForcedDirectLabels] = useState({});
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const messagesEndRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
@@ -61,6 +63,15 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     if (!Array.isArray(availableUsersSeed) || availableUsersSeed.length === 0) return;
     setAvailableUsers((current) => (current.length > 0 ? current : availableUsersSeed.filter(hasUserId)));
   }, [availableUsersSeed]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const media = window.matchMedia('(max-width: 767px)');
+    const update = () => setIsMobileViewport(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
 
   const activeChannelId = String(activeChannel?.id || '');
 
@@ -865,7 +876,45 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         <div className="hidden flex-1 items-center justify-center bg-white dark:bg-[#050505] md:flex"><div className="text-center"><h3 className="mb-2 text-lg font-semibold text-gray-900 dark:text-zinc-100">Your Messages</h3></div></div>
       )}
 
-      {showNewChannel && (
+      {showNewChannel && isMobileViewport && (
+        <MobileSheet isOpen={showNewChannel} onClose={() => setShowNewChannel(false)} title="Create Group Chat" size="sm" headerVariant="form">
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Group Name (optional for direct chat)</label>
+            <input type="text" value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="e.g. field-updates" className="w-full rounded-lg border border-gray-200 px-4 py-2 focus:border-brand-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" data-testid="messages-create-channel-input" />
+            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Add Members</label>
+            <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#111111]" data-testid="messages-create-channel-members">
+              {contactOptions.map((contact) => (
+                <label key={contact.key} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={selectedNewChatUsers.includes(contact.key)}
+                    onChange={(e) =>
+                      setSelectedNewChatUsers((prev) =>
+                        e.target.checked ? [...prev, contact.key] : prev.filter((id) => id !== contact.key)
+                      )
+                    }
+                  />
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
+                    {contact.avatarUrl ? (
+                      <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
+                    ) : (
+                      initialsForName(contact.label)
+                    )}
+                  </span>
+                  <span>{contact.label}</span>
+                </label>
+              ))}
+            </div>
+            {createChannelError && <p className="text-sm text-red-600 dark:text-red-300">{createChannelError}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="secondary" onClick={() => setShowNewChannel(false)} disabled={createChannelLoading}>Cancel</Button>
+              <Button variant="brand" onClick={handleCreateChannel} disabled={createChannelLoading} data-testid="messages-create-channel-submit">{createChannelLoading ? 'Creating...' : 'Create'}</Button>
+            </div>
+          </div>
+        </MobileSheet>
+      )}
+
+      {showNewChannel && !isMobileViewport && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="mx-4 w-full max-w-md overflow-hidden rounded-xl bg-white dark:border dark:border-zinc-800 dark:bg-[#090909]">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-zinc-800">
@@ -909,7 +958,50 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         </div>
       )}
 
-      {showMembers && activeChannel && (
+      {showMembers && activeChannel && isMobileViewport && (
+        <MobileSheet isOpen={showMembers} onClose={() => setShowMembers(false)} title="Members" size="sm" headerVariant="form">
+          <div className="space-y-3" data-testid="messages-members-modal">
+            {members.map((member) => (
+              <div key={member.id} className="flex items-center justify-between border-b border-gray-100 pb-2 text-sm dark:border-zinc-800 dark:text-zinc-200">
+                <span className="inline-flex min-w-0 items-center gap-2">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
+                    {member.avatarUrl ? (
+                      <img src={member.avatarUrl} alt={member.displayName} className="h-full w-full object-cover" />
+                    ) : (
+                      initialsForName(member.displayName)
+                    )}
+                  </span>
+                  <span className="truncate">{member.displayName} {member.memberRole === 'owner' ? '(owner)' : ''}</span>
+                </span>
+                {member.memberRole !== 'owner' && <Button variant="secondary" size="sm" onClick={() => handleRemoveMember(member.userId)} data-testid={`messages-member-remove-${member.userId}`}>Remove</Button>}
+              </div>
+            ))}
+            <label className="block text-sm font-medium text-gray-700 dark:text-zinc-300">Add Members</label>
+            <div className="max-h-40 space-y-2 overflow-y-auto rounded-lg border border-gray-200 p-2 dark:border-zinc-800 dark:bg-[#111111]">
+              {availableUsers.map((user) => (
+                <label key={user.userId} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={selectedAddMembers.includes(user.userId)} onChange={(e) => setSelectedAddMembers((prev) => e.target.checked ? [...prev, user.userId] : prev.filter((id) => id !== user.userId))} />
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
+                    {user.avatarUrl ? (
+                      <img src={user.avatarUrl} alt={user.displayName} className="h-full w-full object-cover" />
+                    ) : (
+                      initialsForName(user.displayName)
+                    )}
+                  </span>
+                  <span>{user.displayName}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-between">
+              <Button variant="secondary" onClick={handleLeave} data-testid="messages-leave-chat">Leave chat</Button>
+              <Button variant="brand" onClick={handleAddMembers} data-testid="messages-add-members">Add selected</Button>
+            </div>
+            {membersError && <p className="text-sm text-red-600 dark:text-red-300">{membersError}</p>}
+          </div>
+        </MobileSheet>
+      )}
+
+      {showMembers && activeChannel && !isMobileViewport && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" data-testid="messages-members-modal">
           <div className="mx-4 w-full max-w-md overflow-hidden rounded-xl bg-white dark:border dark:border-zinc-800 dark:bg-[#090909]">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 dark:border-zinc-800">

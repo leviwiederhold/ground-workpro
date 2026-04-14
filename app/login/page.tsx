@@ -2,7 +2,9 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,10 +12,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [nativeRuntime, setNativeRuntime] = useState(false);
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
+    setNativeRuntime(isNativeAppRuntime());
 
     supabase.auth.getSession().then(({ data }) => {
       if (!active || !data.session) return;
@@ -88,10 +92,26 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-1">Login</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+          {nativeRuntime ? "Welcome to Groundwork Pro" : "Login"}
+        </h1>
         <p className="text-sm text-gray-500 mb-6">
-          Sign in with your email and password.
+          {nativeRuntime ? "Choose how you want to continue." : "Sign in with your email and password."}
         </p>
+
+        {nativeRuntime ? (
+          <div className="mb-6 grid grid-cols-2 gap-3">
+            <div className="rounded-lg border border-dark-900 bg-dark-900 px-4 py-3 text-center text-sm font-medium text-white">
+              Log In
+            </div>
+            <Link
+              href={typeof window !== "undefined" && window.location.search ? `/signup${window.location.search}` : "/signup"}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-center text-sm font-medium text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
+            >
+              Sign Up
+            </Link>
+          </div>
+        ) : null}
 
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
@@ -137,6 +157,18 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        {nativeRuntime ? null : (
+          <p className="text-sm text-gray-500 mt-5 text-center">
+            Need an account?{" "}
+            <Link
+              href={typeof window !== "undefined" && window.location.search ? `/signup${window.location.search}` : "/signup"}
+              className="text-brand-600 hover:text-brand-700 font-medium"
+            >
+              Sign up
+            </Link>
+          </p>
+        )}
       </div>
     </main>
   );

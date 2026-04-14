@@ -63,26 +63,29 @@ export function MobileSheet({
         >
           {!hideHeader ? (
             <div
-              className={`mobile-sheet-header relative flex min-h-[4.5rem] items-center justify-center border-b border-gray-200 bg-white px-4 py-3 sm:min-h-[4.75rem] sm:px-5 ${headerClassName}`.trim()}
+              className={`mobile-sheet-header border-b border-gray-200 bg-white px-4 pb-3 sm:px-5 ${headerClassName}`.trim()}
             >
-              <div className="min-w-0 text-center">
-                {title ? (
-                  <h2 className="truncate text-lg font-semibold leading-tight text-gray-900 sm:text-xl">
-                    {title}
-                  </h2>
-                ) : null}
-                {subtitle ? (
-                  <p className="mt-1 truncate text-sm leading-5 text-gray-500">{subtitle}</p>
-                ) : null}
+              <div className="grid min-h-10 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-start gap-2">
+                <span aria-hidden="true" className="block h-10 w-10" />
+                <div className="min-w-0 pt-1 text-center">
+                  {title ? (
+                    <h2 className="truncate text-lg font-semibold leading-tight text-gray-900 sm:text-xl">
+                      {title}
+                    </h2>
+                  ) : null}
+                  {subtitle ? (
+                    <p className="mt-1 truncate text-sm leading-5 text-gray-500">{subtitle}</p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center self-start justify-self-end rounded-full border border-gray-200 bg-white text-xl leading-none text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                  aria-label={closeLabel || (title ? `Close ${title}` : 'Close panel')}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="absolute right-4 top-1/2 inline-flex h-10 w-10 -translate-y-1/2 shrink-0 items-center justify-center rounded-full border border-gray-200 bg-white text-xl leading-none text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 sm:right-5"
-                aria-label={closeLabel || (title ? `Close ${title}` : 'Close panel')}
-              >
-                <span aria-hidden="true">×</span>
-              </button>
             </div>
           ) : null}
           <div

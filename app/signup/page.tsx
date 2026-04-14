@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -12,10 +13,12 @@ export default function SignupPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [nativeRuntime, setNativeRuntime] = useState(false);
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
+    setNativeRuntime(isNativeAppRuntime());
 
     supabase.auth.getSession().then(({ data }) => {
       if (!active || !data.session) return;
@@ -129,8 +132,26 @@ export default function SignupPage() {
   return (
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-1">Start your free trial</h1>
-        <p className="text-sm text-gray-500 mb-6">Create your account to get started.</p>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-1">
+          {nativeRuntime ? "Create your account" : "Start your free trial"}
+        </h1>
+        <p className="text-sm text-gray-500 mb-6">
+          {nativeRuntime ? "Choose how you want to continue." : "Create your account to get started."}
+        </p>
+
+        {nativeRuntime ? (
+          <div className="mb-6 grid grid-cols-2 gap-3">
+            <Link
+              href={typeof window !== "undefined" && window.location.search ? `/login${window.location.search}` : "/login"}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-center text-sm font-medium text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
+            >
+              Log In
+            </Link>
+            <div className="rounded-lg border border-brand-500 bg-brand-500 px-4 py-3 text-center text-sm font-medium text-white">
+              Sign Up
+            </div>
+          </div>
+        ) : null}
 
         <form onSubmit={onSubmit} className="space-y-4">
           <div>

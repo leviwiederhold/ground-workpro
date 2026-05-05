@@ -15,6 +15,7 @@ type MobileSheetProps = {
   hideHeader?: boolean;
   closeLabel?: string;
   headerVariant?: 'detail' | 'form';
+  footer?: React.ReactNode;
 };
 
 const SIZE_CLASSNAMES = {
@@ -38,6 +39,7 @@ export function MobileSheet({
   hideHeader = false,
   closeLabel,
   headerVariant = 'detail',
+  footer,
 }: MobileSheetProps) {
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return undefined;
@@ -59,15 +61,14 @@ export function MobileSheet({
       />
       <div className="relative flex h-full w-full items-end justify-center sm:items-center sm:p-4">
         <div
-          className={`mobile-sheet-panel relative flex max-h-full w-full min-w-0 flex-col overflow-x-hidden bg-white shadow-2xl ${SIZE_CLASSNAMES[size]} sm:max-h-[min(90dvh,56rem)] ${panelClassName}`.trim()}
+          className={`mobile-sheet-panel relative flex max-h-full w-full min-w-0 flex-col overflow-x-hidden border border-gray-200 bg-white shadow-2xl ${SIZE_CLASSNAMES[size]} sm:max-h-[min(90dvh,56rem)] ${panelClassName}`.trim()}
         >
           {!hideHeader ? (
             <div
-              className={`mobile-sheet-header border-b border-gray-200 bg-white px-4 pb-3 sm:px-5 ${headerClassName}`.trim()}
+              className={`mobile-sheet-header shrink-0 border-b border-gray-200 bg-white px-5 pb-4 sm:px-6 ${headerClassName}`.trim()}
             >
-              <div className="grid min-h-10 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] items-start gap-2">
-                <span aria-hidden="true" className="block h-10 w-10" />
-                <div className="min-w-0 pt-1 text-center">
+              <div className="grid min-h-10 grid-cols-[minmax(0,1fr)_2.5rem] items-start gap-4">
+                <div className="min-w-0 pt-1 pr-2 text-left">
                   {title ? (
                     <h2 className="truncate text-lg font-semibold leading-tight text-gray-900 sm:text-xl">
                       {title}
@@ -80,19 +81,26 @@ export function MobileSheet({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center self-start justify-self-end rounded-full border border-gray-200 bg-white text-xl leading-none text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center self-start justify-self-end rounded-full border border-gray-200 bg-white p-0 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
                   aria-label={closeLabel || (title ? `Close ${title}` : 'Close panel')}
                 >
-                  <span aria-hidden="true">×</span>
+                  <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M5 5l10 10M15 5L5 15" />
+                  </svg>
                 </button>
               </div>
             </div>
           ) : null}
           <div
-            className={`mobile-sheet-body min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-[max(1rem,var(--safe-area-bottom))] pt-4 sm:px-5 sm:pb-5 ${headerVariant === 'form' ? 'space-y-3' : ''} ${bodyClassName}`.trim()}
+            className={`mobile-sheet-body min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-5 py-5 sm:px-6 ${footer ? 'pb-5' : 'pb-[max(1.25rem,var(--safe-area-bottom))] sm:pb-6'} ${headerVariant === 'form' ? 'space-y-4' : ''} ${bodyClassName}`.trim()}
           >
             {children}
           </div>
+          {footer ? (
+            <div className="mobile-sheet-footer shrink-0 border-t border-gray-200 bg-white px-5 py-4 pb-[max(1rem,var(--safe-area-bottom))] sm:px-6 sm:pb-4">
+              {footer}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

@@ -1082,7 +1082,22 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           )}
 
           {showBidModal && (
-            <MobileSheet isOpen={showBidModal} onClose={closeBidModal} title={editingBidId ? 'Edit Bid' : 'Create Bid'} size="md" headerVariant="form" bodyClassName="space-y-3">
+            <MobileSheet
+              isOpen={showBidModal}
+              onClose={closeBidModal}
+              title={editingBidId ? 'Edit Bid' : 'Create Bid'}
+              size="md"
+              headerVariant="form"
+              bodyClassName="space-y-4"
+              footer={(
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading} data-testid="bids-save">
+                    {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
+                  </Button>
+                </div>
+              )}
+            >
                   <div className="min-w-0 space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Project Name</label>
@@ -1207,12 +1222,6 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                       />
                     </div>
                     {formError && <p className="text-sm text-red-600">{formError}</p>}
-                  </div>
-                  <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                    <Button variant="secondary" onClick={closeBidModal} disabled={saveLoading}>Cancel</Button>
-                    <Button variant="brand" onClick={handleSaveBid} disabled={saveLoading} data-testid="bids-save">
-                      {saveLoading ? 'Saving...' : (editingBidId ? 'Save Bid' : 'Create Bid')}
-                    </Button>
                   </div>
             </MobileSheet>
           )}

@@ -2687,6 +2687,12 @@ const MobileAppShell = ({
       }, [selectedEquipment]);
 
       useEffect(() => {
+        if (!isMobileFleet || !showFleetDetails) return undefined;
+        document.body.classList.add('modal-open');
+        return () => document.body.classList.remove('modal-open');
+      }, [isMobileFleet, showFleetDetails]);
+
+      useEffect(() => {
         if (!selectedEquipment) return;
         setEquipmentForm({
           name: selectedEquipment.name || '',
@@ -3069,27 +3075,30 @@ const MobileAppShell = ({
                   onClick={() => setShowFleetDetails(false)}
                 />
               )}
-              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto p-4` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
+              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto rounded-2xl p-0` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
+                  <div className={`${isMobileFleet ? 'sticky top-0 z-10 border-b border-gray-200 bg-white px-5 py-4' : 'mb-4'} flex items-start justify-between gap-4`}>
+                    <div className="min-w-0 pr-14">
                       <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
                       <p className="text-sm text-gray-500">{selectedEquipment.type}</p>
+                      <Badge className={`${getStatusColor(selectedEquipment.status)} mt-2`}>
+                        {selectedEquipment.status}
+                      </Badge>
                     </div>
                   {isMobileFleet && (
                     <button
                       type="button"
-                      className="rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700"
+                      className="absolute right-5 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white p-0 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
                       onClick={() => setShowFleetDetails(false)}
+                      aria-label="Close equipment details"
                     >
-                      Close
+                      <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <path d="M5 5l10 10M15 5L5 15" />
+                      </svg>
                     </button>
                   )}
-                  <Badge className={getStatusColor(selectedEquipment.status)}>
-                    {selectedEquipment.status}
-                  </Badge>
                 </div>
 
-                <div className="space-y-4">
+                <div className={`${isMobileFleet ? 'px-5 py-5' : ''} space-y-4`}>
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Name</p>
                     <input
@@ -3253,7 +3262,7 @@ const MobileAppShell = ({
                     <InlineError>{fleetItemsError}</InlineError>
                   )}
 
-                  <div className="flex gap-2 pt-4">
+                  <div className={`${isMobileFleet ? 'sticky bottom-0 -mx-5 flex-col border-t border-gray-200 bg-white px-5 py-4 pb-[max(1rem,var(--safe-area-bottom))]' : 'pt-4'} flex gap-2`}>
                     <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveEquipment} disabled={!canManageFleet || saveLoading || deleteLoading}>
                       {saveLoading ? 'Saving...' : 'Save'}
                     </Button>
@@ -4621,6 +4630,12 @@ const MobileAppShell = ({
       }, [selectedWO]);
 
       useEffect(() => {
+        if (!isMobileMaintenance || !showMaintenanceDetails) return undefined;
+        document.body.classList.add('modal-open');
+        return () => document.body.classList.remove('modal-open');
+      }, [isMobileMaintenance, showMaintenanceDetails]);
+
+      useEffect(() => {
         if (!selectedWO) return;
         setWoStatus(normalizeWoStatus(selectedWO.status || 'scheduled'));
         setWoPriority(selectedWO.priority || 'medium');
@@ -4874,27 +4889,30 @@ const MobileAppShell = ({
                   onClick={() => setShowMaintenanceDetails(false)}
                 />
               )}
-              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto rounded-2xl p-4 dark:border-zinc-800 dark:bg-[#090909]` : 'h-fit sticky top-4 p-4 dark:border-zinc-800 dark:bg-[#090909]'}>
-                <div className="flex items-start justify-between mb-4">
-                  <div>
+              <Card className={isMobileMaintenance ? `${showMaintenanceDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto rounded-2xl p-0 dark:border-zinc-800 dark:bg-[#090909]` : 'h-fit sticky top-4 p-4 dark:border-zinc-800 dark:bg-[#090909]'}>
+                <div className={`${isMobileMaintenance ? 'sticky top-0 z-10 border-b border-gray-200 bg-white px-5 py-4 dark:border-zinc-800 dark:bg-[#090909]' : 'mb-4'} flex items-start justify-between gap-4`}>
+                  <div className="min-w-0 pr-14">
                     <Badge className={`mb-2 ${selectedWO.type === 'repair' ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-200' : 'bg-slate-100 text-slate-800 dark:bg-[#111111] dark:text-zinc-200'}`}>
                       {selectedWO.type}
                     </Badge>
                     <h3 className="font-semibold text-gray-900 dark:text-zinc-100">{selectedWO.title}</h3>
+                    <Badge className={`${getStatusColor(getWoDisplayStatus(selectedWO.status))} mt-2`}>{getWoDisplayStatus(selectedWO.status)}</Badge>
                   </div>
                   {isMobileMaintenance && (
                     <button
                       type="button"
-                      className="mr-2 rounded-lg border border-gray-300 px-2 py-1 text-sm text-gray-700 dark:border-zinc-700 dark:text-zinc-200"
+                      className="absolute right-5 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-gray-200 bg-white p-0 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-300 dark:hover:bg-[#111111] dark:hover:text-zinc-100"
                       onClick={() => setShowMaintenanceDetails(false)}
+                      aria-label="Close work order details"
                     >
-                      Close
+                      <svg aria-hidden="true" viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                        <path d="M5 5l10 10M15 5L5 15" />
+                      </svg>
                     </button>
                   )}
-                  <Badge className={getStatusColor(getWoDisplayStatus(selectedWO.status))}>{getWoDisplayStatus(selectedWO.status)}</Badge>
                 </div>
 
-                <div className="space-y-4">
+                <div className={`${isMobileMaintenance ? 'px-5 py-5' : ''} space-y-4`}>
                   <div>
                     <p className="mb-1 text-xs text-gray-500 dark:text-zinc-500">Equipment</p>
                     <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{selectedEquipment?.name}</p>

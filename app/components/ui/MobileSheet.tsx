@@ -16,6 +16,7 @@ type MobileSheetProps = {
   closeLabel?: string;
   headerVariant?: 'detail' | 'form';
   footer?: React.ReactNode;
+  status?: React.ReactNode;
 };
 
 const SIZE_CLASSNAMES = {
@@ -40,6 +41,7 @@ export function MobileSheet({
   closeLabel,
   headerVariant = 'detail',
   footer,
+  status,
 }: MobileSheetProps) {
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return undefined;
@@ -59,7 +61,7 @@ export function MobileSheet({
         onClick={onClose}
         aria-label={closeLabel || (title ? `Close ${title}` : 'Close panel')}
       />
-      <div className="relative flex h-full w-full items-end justify-center sm:items-center sm:p-4">
+      <div className="relative flex min-h-0 w-full items-start justify-center sm:h-full sm:items-center sm:p-4">
         <div
           className={`mobile-sheet-panel relative flex max-h-full w-full min-w-0 flex-col overflow-x-hidden border border-gray-200 bg-white shadow-2xl ${SIZE_CLASSNAMES[size]} sm:max-h-[min(90dvh,56rem)] ${panelClassName}`.trim()}
         >
@@ -77,6 +79,7 @@ export function MobileSheet({
                   {subtitle ? (
                     <p className="mt-1 truncate text-sm leading-5 text-gray-500">{subtitle}</p>
                   ) : null}
+                  {status ? <div className="mt-2">{status}</div> : null}
                 </div>
                 <button
                   type="button"

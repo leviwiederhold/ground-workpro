@@ -464,9 +464,9 @@ const MobileAppShell = ({
       );
     };
 
-    const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
+    const Modal = ({ isOpen, onClose, title, children, size = 'md', footer }) => {
       return (
-        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size}>
+        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size} footer={footer}>
           {children}
         </MobileSheet>
       );
@@ -8006,6 +8006,7 @@ const MobileAppShell = ({
       const [selectedVendorId, setSelectedVendorId] = useState(null);
       const [showVendorModal, setShowVendorModal] = useState(false);
       const [editingVendorId, setEditingVendorId] = useState(null);
+      const [isMobileVendors, setIsMobileVendors] = useState(false);
       const [saveLoading, setSaveLoading] = useState(false);
       const [deleteLoading, setDeleteLoading] = useState(false);
       const [formError, setFormError] = useState('');
@@ -8056,6 +8057,14 @@ const MobileAppShell = ({
       const vendorOpenPOs = vendorSummary?.openPOs || [];
       const vendorDocuments = vendorSummary?.documents || [];
       const selectedPO = purchaseOrders.find((po) => String(po.id) === String(selectedPoId)) || null;
+
+      useEffect(() => {
+        const media = window.matchMedia('(max-width: 639px)');
+        const update = () => setIsMobileVendors(media.matches);
+        update();
+        media.addEventListener('change', update);
+        return () => media.removeEventListener('change', update);
+      }, []);
 
       const filteredVendors = vendors.filter(v =>
         !search ||
@@ -8872,7 +8881,21 @@ const MobileAppShell = ({
             )}
           </div>
 
-          <Modal isOpen={showVendorModal} onClose={closeModal} title={editingVendorId ? 'Edit Vendor' : 'Add Vendor'} size="md">
+          <Modal
+            isOpen={showVendorModal}
+            onClose={closeModal}
+            title={editingVendorId ? 'Edit Vendor' : 'Add Vendor'}
+            size="md"
+            footer={isMobileVendors ? (
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button variant="secondary" onClick={closeModal}>Cancel</Button>
+                <Button variant="brand" onClick={handleSaveVendor} disabled={saveLoading}>
+                  <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                  {editingVendorId ? 'Save Vendor' : 'Create Vendor'}
+                </Button>
+              </div>
+            ) : null}
+          >
             <div className="grid grid-cols-1 gap-4 overflow-x-hidden md:grid-cols-2">
               <div className="md:col-span-2">
                 <p className="mb-1 text-xs text-gray-500">Name</p>
@@ -8947,7 +8970,7 @@ const MobileAppShell = ({
               </div>
             </div>
             {formError && <p className="mt-4 text-sm text-red-600">{formError}</p>}
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+            <div className={`${isMobileVendors ? 'hidden' : 'mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end'}`}>
               <Button variant="secondary" onClick={closeModal}>Cancel</Button>
               <Button variant="brand" onClick={handleSaveVendor} disabled={saveLoading}>
                 <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />

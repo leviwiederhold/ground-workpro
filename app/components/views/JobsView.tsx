@@ -966,6 +966,17 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           title={selectedJob.name}
           subtitle="Job details"
           size="lg"
+          status={<Badge className={normalizeJobStatus(selectedJob.status) === 'completed' ? 'bg-gray-100 text-gray-700' : 'bg-emerald-100 text-emerald-700'}>{normalizeJobStatus(selectedJob.status)}</Badge>}
+          footer={(
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveJob} disabled={!canEditJobs || saveLoading || deleteLoading} data-testid="jobs-save-mobile">
+                {saveLoading ? 'Saving...' : 'Save'}
+              </Button>
+              <Button variant="danger" size="sm" className="flex-1" onClick={handleDeleteJob} disabled={!canEditJobs || saveLoading || deleteLoading} data-testid="jobs-delete-mobile">
+                {deleteLoading ? 'Deleting...' : 'Delete'}
+              </Button>
+            </div>
+          )}
         >
           <div className="space-y-4">
               <div>
@@ -1012,14 +1023,6 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
               {renderCrewAssignmentSection()}
               <AttachmentPanel entityType="job" entityId={selectedJob.id} />
               {jobActionError && <p className="text-sm text-red-600">{jobActionError}</p>}
-              <div className="flex items-center gap-2 pt-2">
-                <Button variant="brand" size="sm" onClick={handleSaveJob} disabled={!canEditJobs || saveLoading || deleteLoading} data-testid="jobs-save-mobile">
-                  {saveLoading ? 'Saving...' : 'Save'}
-                </Button>
-                <Button variant="danger" size="sm" onClick={handleDeleteJob} disabled={!canEditJobs || saveLoading || deleteLoading} data-testid="jobs-delete-mobile">
-                  {deleteLoading ? 'Deleting...' : 'Delete'}
-                </Button>
-              </div>
           </div>
         </MobileSheet>
       )}

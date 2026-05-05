@@ -39,10 +39,8 @@ body.mobile-shell-active {
   position: fixed;
   inset: 0;
   width: 100%;
-  min-height: 100vh;
-  min-height: 100lvh;
-  height: 100vh;
-  height: 100lvh;
+  min-height: 100dvh;
+  height: 100dvh;
   overflow: hidden;
   padding-top: 0;
   padding-right: 0;
@@ -74,10 +72,8 @@ body:has(.mobile-app-shell) {
   --mobile-safe-left: var(--safe-area-left);
   --mobile-header-height: 4.5rem;
   --mobile-header-total-height: calc(var(--mobile-safe-top) + var(--mobile-header-height));
-  min-height: 100vh;
-  min-height: 100lvh;
-  height: 100vh;
-  height: 100lvh;
+  min-height: 100dvh;
+  height: 100dvh;
   overflow: hidden;
 }
 
@@ -87,6 +83,8 @@ body:has(.mobile-app-shell) {
   left: 0;
   right: 0;
   height: var(--mobile-header-total-height);
+  min-height: var(--mobile-header-total-height);
+  max-height: var(--mobile-header-total-height);
   padding-top: var(--mobile-safe-top);
   padding-right: var(--mobile-safe-right);
   padding-left: var(--mobile-safe-left);
@@ -95,6 +93,8 @@ body:has(.mobile-app-shell) {
 
 .mobile-app-shell__header-inner {
   height: var(--mobile-header-height);
+  min-height: var(--mobile-header-height);
+  max-height: var(--mobile-header-height);
 }
 
 .mobile-app-shell__drawer {
@@ -130,9 +130,10 @@ body:has(.mobile-app-shell) {
 
 .mobile-sheet-backdrop {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: center;
   overflow: hidden;
+  padding-top: calc(var(--mobile-header-total-height, var(--safe-area-top)) + 0.75rem);
   padding-right: var(--safe-area-right);
   padding-bottom: var(--safe-area-bottom);
   padding-left: var(--safe-area-left);
@@ -140,11 +141,12 @@ body:has(.mobile-app-shell) {
 
 .mobile-sheet-panel {
   width: 100%;
+  max-width: calc(100vw - 1.5rem);
   min-height: 0;
-  max-height: 100%;
+  max-height: calc(100dvh - var(--mobile-header-total-height, var(--safe-area-top)) - var(--safe-area-bottom) - 1.5rem);
   overflow: hidden;
   overflow-x: hidden;
-  border-radius: 1.5rem 1.5rem 0 0;
+  border-radius: 1rem;
 }
 
 .mobile-sheet-header {
@@ -158,12 +160,25 @@ body:has(.mobile-app-shell) {
   overflow-x: hidden;
 }
 
+.mobile-sheet-body input,
+.mobile-sheet-body select,
+.mobile-sheet-body textarea {
+  max-width: 100%;
+}
+
 @media (min-width: 640px) {
   .mobile-app-shell {
     --mobile-header-height: 5rem;
   }
 
+  .mobile-sheet-backdrop {
+    align-items: center;
+    padding-top: 0;
+  }
+
   .mobile-sheet-panel {
+    max-width: 100%;
+    max-height: 100%;
     border-radius: 1.5rem;
   }
 

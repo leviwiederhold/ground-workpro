@@ -1227,7 +1227,22 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
           )}
 
           {showItemModal && (
-            <MobileSheet isOpen={showItemModal} onClose={closeItemModal} title={editingItemId ? 'Edit Bid Item' : 'Add Bid Item'} size="sm" headerVariant="form" bodyClassName="space-y-3">
+            <MobileSheet
+              isOpen={showItemModal}
+              onClose={closeItemModal}
+              title={editingItemId ? 'Edit Bid Item' : 'Add Bid Item'}
+              size="sm"
+              headerVariant="form"
+              bodyClassName="space-y-3"
+              footer={(
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
+                  <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading} data-testid="bids-item-save">
+                    {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
+                  </Button>
+                </div>
+              )}
+            >
                   <div className="min-w-0 space-y-3">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
@@ -1280,12 +1295,6 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
                       </div>
                     </div>
                     {itemError && <p className="text-sm text-red-600">{itemError}</p>}
-                    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                      <Button variant="secondary" onClick={closeItemModal} disabled={itemSaveLoading}>Cancel</Button>
-                      <Button variant="brand" onClick={handleSaveItem} disabled={itemSaveLoading} data-testid="bids-item-save">
-                        {itemSaveLoading ? 'Saving...' : (editingItemId ? 'Save Item' : 'Add Item')}
-                      </Button>
-                    </div>
                   </div>
             </MobileSheet>
           )}

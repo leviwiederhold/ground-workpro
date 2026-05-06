@@ -33,7 +33,7 @@ function toTenantErrorResponse(error: TenantResolverError) {
 export async function POST(request: Request) {
   try {
     try {
-      await requireRole(["admin", "pm", "foreman", "mechanic", "operator"]);
+      await requireRole(["admin", "pm"]);
     } catch {
       return forbidden();
     }
@@ -41,6 +41,14 @@ export async function POST(request: Request) {
     const parsedBody = completeSchema.safeParse(await request.json());
     if (!parsedBody.success) {
       return validationError(toValidationDetails(parsedBody.error));
+    }
+    if (parsedBody.data.completed) {
+      return validationError([
+        {
+          path: "completed",
+          message: "Training completion is awarded only by validated video progress.",
+        },
+      ]);
     }
 
     const { supabase, companyId, userId } = await getCompanyId();

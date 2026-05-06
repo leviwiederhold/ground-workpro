@@ -5,6 +5,11 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import {
+  getRoleScopedJobIds,
+  resolveMembershipRole,
+  shouldRestrictJobsToAssignedJobs,
+} from "@/lib/jobs/roleScope";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
 
@@ -38,6 +43,8 @@ const mapAttachment = (row: any, companyId?: string) => {
     bucket: row.storage_bucket ?? row.bucket ?? "attachments",
     path: row.storage_path ?? row.path ?? row.file_path ?? "",
     fileSize: normalizeNumber(row.file_size ?? row.fileSize),
+    jobId: normalizeId(row.job_id ?? row.jobId),
+    job_id: normalizeId(row.job_id ?? row.jobId),
     createdAt: row.created_at ?? row.createdAt ?? "",
   };
 };
@@ -45,6 +52,7 @@ const mapAttachment = (row: any, companyId?: string) => {
 const jsonUploadSchema = z.object({
   entity_type: entityTypeSchema,
   entity_id: z.union([z.number(), z.string()]).optional(),
+  job_id: z.union([z.number(), z.string()]).nullable().optional(),
   file_name: z.string().min(1),
   content_type: z.string().optional(),
   file_base64: z.string().min(1),
@@ -148,12 +156,40 @@ async function assertEntityOwnership(
   return { ok: true };
 }
 
+async function assertDocumentJobAccess(
+  supabase: any,
+  companyId: string,
+  userId: string,
+  jobId: string | number | null
+) {
+  if (jobId === null) return { ok: true };
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("id", jobId)
+    .limit(1);
+  if (error || !data?.length) return { ok: false, status: 404, error: "Job not found" };
+
+  const role = await resolveMembershipRole(supabase, companyId, userId);
+  const scopedJobIds = role && shouldRestrictJobsToAssignedJobs(role)
+    ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+    : null;
+  if (scopedJobIds && !scopedJobIds.some((scopedJobId) => String(scopedJobId) === String(jobId))) {
+    return { ok: false, status: 403, error: "Forbidden" };
+  }
+
+  return { ok: true };
+}
+
 export async function GET(request: Request) {
   try {
     const { page, pageSize, from, to } = getPaginationFromUrl(request.url, { defaultPageSize: 50, maxPageSize: 200 });
     const { searchParams } = new URL(request.url);
     const entityTypeValue = searchParams.get("entity_type");
     const entityIdValue = searchParams.get("entity_id");
+    const jobIdValue = normalizeId(searchParams.get("job_id"));
 
     if (!entityTypeValue) {
       return NextResponse.json({ error: "entity_type is required" }, { status: 400 });
@@ -164,7 +200,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Invalid entity_type" }, { status: 400 });
     }
 
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
 
     if (entityTypeParsed.data === "document") {
@@ -172,6 +208,10 @@ export async function GET(request: Request) {
         await requireModuleAccess("documents", "view");
       } catch {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const jobAccess = await assertDocumentJobAccess(supabase, companyId, userId, jobIdValue);
+      if (!jobAccess.ok) {
+        return NextResponse.json({ error: jobAccess.error }, { status: jobAccess.status });
       }
     }
 
@@ -182,6 +222,19 @@ export async function GET(request: Request) {
 
     if (entityTypeParsed.data === "document") {
       query = query.eq("entity_id", companyId).in("entity_type", ["document", "work_order"]);
+      if (jobIdValue !== null) {
+        query = query.eq("job_id", jobIdValue);
+      } else {
+        const role = await resolveMembershipRole(supabase, companyId, userId);
+        const scopedJobIds = role && shouldRestrictJobsToAssignedJobs(role)
+          ? await getRoleScopedJobIds(supabase, companyId, userId, role)
+          : null;
+        if (scopedJobIds) {
+          query = scopedJobIds.length
+            ? query.or(`job_id.is.null,job_id.in.(${scopedJobIds.join(",")})`)
+            : query.is("job_id", null);
+        }
+      }
     } else {
       if (!entityIdValue) {
         return NextResponse.json(
@@ -247,6 +300,7 @@ export async function POST(request: Request) {
 
     let entityType: "job" | "daily_report" | "work_order" | "document" | "vendor";
     let entityId: string | number | null;
+    let jobId: string | number | null = null;
     let fileName: string;
     let contentType: string;
     let fileBytes: Uint8Array;
@@ -260,6 +314,7 @@ export async function POST(request: Request) {
       }
       entityType = entityTypeParsed.data;
       entityId = entityType === "document" ? companyId : normalizeId(formData.get("entity_id"));
+      jobId = entityType === "document" ? normalizeId(formData.get("job_id")) : null;
       const file = formData.get("file");
       if (!(file instanceof File)) {
         return NextResponse.json({ error: "file is required" }, { status: 400 });
@@ -283,6 +338,7 @@ export async function POST(request: Request) {
       }
       entityType = parsed.data.entity_type;
       entityId = entityType === "document" ? companyId : normalizeId(parsed.data.entity_id);
+      jobId = entityType === "document" ? normalizeId(parsed.data.job_id) : null;
       if (entityType !== "document" && entityId === null) {
         return NextResponse.json({ error: "entity_id is required" }, { status: 400 });
       }
@@ -307,6 +363,12 @@ export async function POST(request: Request) {
     const ownership = await assertEntityOwnership(supabase, companyId, entityType, entityId);
     if (!ownership.ok) {
       return NextResponse.json({ error: ownership.error }, { status: 404 });
+    }
+    if (entityType === "document") {
+      const jobAccess = await assertDocumentJobAccess(supabase, companyId, userId, jobId);
+      if (!jobAccess.ok) {
+        return NextResponse.json({ error: jobAccess.error }, { status: jobAccess.status });
+      }
     }
 
     const safeFileName = sanitizeFileName(fileName);
@@ -333,6 +395,7 @@ export async function POST(request: Request) {
       storage_bucket: bucket,
       storage_path: path,
       file_size: fileBytes.byteLength,
+      job_id: jobId,
       uploaded_by: userId,
     };
 

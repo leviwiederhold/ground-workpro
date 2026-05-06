@@ -86,6 +86,53 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
     return buckets;
   }, [weekDateKeys]);
 
+  const mergeEventIntoBuckets = useCallback((currentBuckets, event) => {
+    if (!event?.id) return currentBuckets;
+    const nextBuckets = {};
+    for (const [dateKey, items] of Object.entries(currentBuckets || {})) {
+      nextBuckets[dateKey] = (items || []).filter((item) => String(item.id) !== String(event.id));
+    }
+    const eventBuckets = bucketEventsByWeekDate([event]);
+    for (const [dateKey, items] of Object.entries(eventBuckets)) {
+      nextBuckets[dateKey] = [...(nextBuckets[dateKey] || []), ...items];
+    }
+    return nextBuckets;
+  }, [bucketEventsByWeekDate]);
+
+  const removeEventFromBuckets = useCallback((currentBuckets, eventId) => {
+    const nextBuckets = {};
+    for (const [dateKey, items] of Object.entries(currentBuckets || {})) {
+      const filteredItems = (items || []).filter((item) => String(item.id) !== String(eventId));
+      if (filteredItems.length > 0) nextBuckets[dateKey] = filteredItems;
+    }
+    return nextBuckets;
+  }, []);
+
+  const replaceEventInBuckets = useCallback((currentBuckets, temporaryId, savedEvent) => {
+    const withoutTemporary = removeEventFromBuckets(currentBuckets, temporaryId);
+    return mergeEventIntoBuckets(withoutTemporary, savedEvent);
+  }, [mergeEventIntoBuckets, removeEventFromBuckets]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleOptimisticCalendarEvent = (event) => {
+      const detail = event.detail || {};
+      if (detail.action === 'add' && detail.event) {
+        setEventsByDate((current) => mergeEventIntoBuckets(current, detail.event));
+      }
+      if (detail.action === 'replace' && detail.temporaryId && detail.event) {
+        setEventsByDate((current) => replaceEventInBuckets(current, detail.temporaryId, detail.event));
+      }
+      if (detail.action === 'remove' && detail.temporaryId) {
+        setEventsByDate((current) => removeEventFromBuckets(current, detail.temporaryId));
+      }
+    };
+
+    window.addEventListener('groundwork:calendar-event', handleOptimisticCalendarEvent);
+    return () => window.removeEventListener('groundwork:calendar-event', handleOptimisticCalendarEvent);
+  }, [mergeEventIntoBuckets, removeEventFromBuckets, replaceEventInBuckets]);
+
   useEffect(() => {
     if (weekDateKeys.includes(selectedDateKey)) return;
     setSelectedDateKey(weekDateKeys[0]);
@@ -671,7 +718,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                       setShowModal({ type: 'calendar-event', data: item.data });
                     }
                   }}
-                  className="flex w-full items-start gap-3 rounded-3xl bg-gray-50 px-4 py-4 text-left transition hover:bg-gray-100"
+                  className={`flex w-full items-start gap-3 rounded-3xl bg-gray-50 px-4 py-4 text-left transition hover:bg-gray-100 ${item.data?.optimistic ? 'opacity-75' : ''}`}
                 >
                   <div className={`mt-0.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${item.accent}`}>
                     {item.meta}
@@ -679,6 +726,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                   <div className="min-w-0 flex-1">
                     <p className="text-base font-semibold text-gray-900">{item.title}</p>
                     <p className="mt-1 text-sm text-gray-500">{item.subtitle}</p>
+                    {item.data?.optimistic && <p className="mt-1 text-xs text-gray-400">Saving...</p>}
                   </div>
                   {item.kind === 'event' && <Icon name="chevron-right" className="mt-1 text-xs text-gray-400" />}
                 </button>
@@ -828,7 +876,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                             data-testid={`schedule-time-event-${event.id}`}
                             aria-label={`Schedule event ${event.title}`}
                             draggable
-                            className={`absolute z-20 rounded-md border px-2 py-1 text-left shadow-sm hover:brightness-95 ${getEventTypeClasses(event.eventType).chip}`}
+                            className={`absolute z-20 rounded-md border px-2 py-1 text-left shadow-sm hover:brightness-95 ${getEventTypeClasses(event.eventType).chip} ${event.optimistic ? 'opacity-75' : ''}`}
                             style={{
                               top: `${blockStyle.topPx}px`,
                               height: `${blockStyle.heightPx}px`,
@@ -849,6 +897,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                             <div className="text-[10px] opacity-80 truncate">
                               {new Date(event.startsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })} - {new Date(event.endsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                             </div>
+                            {event.optimistic && <div className="text-[10px] opacity-70 truncate">Saving...</div>}
                           </button>
                         );
                       })}

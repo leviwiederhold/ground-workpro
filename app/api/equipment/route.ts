@@ -18,6 +18,7 @@ const equipmentStatusSchema = z.enum(["active", "idle", "maintenance"]);
 
 const createEquipmentSchema = z.object({
   name: z.string().min(1),
+  vin: z.string().trim().max(64).optional(),
   type: z.string().default("Equipment").optional(),
   status: equipmentStatusSchema.default("active").optional(),
   hours: z.number().nonnegative().default(0).optional(),
@@ -77,6 +78,7 @@ function buildEquipmentNotes(plainNotes: string, meta: EquipmentNotesMeta): stri
 const mapEquipment = (row: any) => ({
   id: row.id,
   name: row.name ?? "",
+  vin: row.vin ?? row.vin_number ?? "",
   type: row.type ?? "Equipment",
   status: row.status ?? "active",
   jobId:
@@ -237,6 +239,8 @@ export async function POST(request: Request) {
     const basePayload = {
       company_id: companyId,
       name: payload.name,
+      vin: payload.vin || null,
+      vin_number: payload.vin || null,
       type: payload.type ?? "Equipment",
       hours: payload.hours ?? 0,
       hour_meter: payload.hours ?? 0,

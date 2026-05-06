@@ -248,6 +248,7 @@ export async function GET(request: Request) {
         return {
           id: equipmentId,
           name: String(row.name ?? ""),
+          vin: String(row.vin ?? row.vin_number ?? ""),
           typeLabel: String(row.type ?? "Equipment"),
           derivedStatus,
           currentJob: currentJobId

@@ -115,6 +115,11 @@ body.native-app-runtime .mobile-app-shell {
   padding-top: 0.75rem;
 }
 
+body.ios-app-runtime .mobile-app-shell__drawer-nav button {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
 .mobile-app-shell__main {
   min-width: 0;
   flex: 1 1 auto;

@@ -90,7 +90,8 @@ type CourseRow = {
 function normalizeCourse(
   row: CourseRow,
   assignedEmployeeIds: string[],
-  completedEmployeeIds: string[]
+  completedEmployeeIds: string[],
+  videoProgress: Array<Record<string, unknown>> = []
 ) {
   return {
     id: row.id,
@@ -104,6 +105,7 @@ function normalizeCourse(
     notes: row.notes || "",
     assignedEmployeeIds,
     completedEmployeeIds,
+    videoProgress,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -131,7 +133,7 @@ export async function GET() {
       return okItems([]);
     }
 
-    const [assignmentsResult, progressResult] = await Promise.all([
+    const [assignmentsResult, progressResult, videoProgressResult] = await Promise.all([
       supabase
         .from("training_assignments")
         .select("course_id, employee_id")
@@ -143,6 +145,11 @@ export async function GET() {
         .eq("company_id", companyId)
         .in("course_id", courseIds)
         .not("completed_at", "is", null),
+      supabase
+        .from("training_video_progress")
+        .select("training_video_id, user_id, watched_seconds, duration_seconds, completion_percent, completed_at")
+        .eq("company_id", companyId)
+        .in("training_video_id", courseIds),
     ]);
 
     if (assignmentsResult.error && !isMissingTableError(assignmentsResult.error.message, "training_assignments")) {
@@ -150,6 +157,9 @@ export async function GET() {
     }
     if (progressResult.error && !isMissingTableError(progressResult.error.message, "training_progress")) {
       return serverError(progressResult.error.message);
+    }
+    if (videoProgressResult.error && !isMissingTableError(videoProgressResult.error.message, "training_video_progress")) {
+      return serverError(videoProgressResult.error.message);
     }
 
     const assignedByCourse = new Map<string, string[]>();
@@ -168,11 +178,27 @@ export async function GET() {
       completedByCourse.set(courseId, current);
     }
 
+    const videoProgressByCourse = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of videoProgressResult.data ?? []) {
+      const courseId = String(row.training_video_id);
+      const current = videoProgressByCourse.get(courseId) ?? [];
+      current.push({
+        userId: String(row.user_id),
+        watchedSeconds: Number(row.watched_seconds ?? 0),
+        durationSeconds: Number(row.duration_seconds ?? 0),
+        completionPercent: Number(row.completion_percent ?? 0),
+        completedAt: row.completed_at ?? null,
+        completed: Boolean(row.completed_at),
+      });
+      videoProgressByCourse.set(courseId, current);
+    }
+
     const items = (courses as CourseRow[]).map((course) =>
       normalizeCourse(
         course,
         Array.from(new Set(assignedByCourse.get(String(course.id)) ?? [])),
-        Array.from(new Set(completedByCourse.get(String(course.id)) ?? []))
+        Array.from(new Set(completedByCourse.get(String(course.id)) ?? [])),
+        videoProgressByCourse.get(String(course.id)) ?? []
       )
     );
 

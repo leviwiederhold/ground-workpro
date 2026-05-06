@@ -11,6 +11,7 @@ const equipmentStatusSchema = z.enum(["active", "idle", "maintenance"]);
 const updateEquipmentSchema = z
   .object({
     name: z.string().min(1).optional(),
+    vin: z.string().trim().max(64).nullable().optional(),
     type: z.string().optional(),
     status: equipmentStatusSchema.optional(),
     hours: z.number().nonnegative().optional(),
@@ -73,6 +74,7 @@ function buildEquipmentNotes(plainNotes: string, meta: EquipmentNotesMeta): stri
 const mapEquipment = (row: any) => ({
   id: row.id,
   name: row.name ?? "",
+  vin: row.vin ?? row.vin_number ?? "",
   type: row.type ?? "Equipment",
   status: row.status ?? "active",
   jobId:
@@ -248,6 +250,11 @@ export async function PATCH(
 
     const updatePayload: Record<string, unknown> = {};
     if (payload.name !== undefined) updatePayload.name = payload.name;
+    if (payload.vin !== undefined) {
+      const normalizedVin = payload.vin?.trim() || null;
+      updatePayload.vin = normalizedVin;
+      updatePayload.vin_number = normalizedVin;
+    }
     if (payload.type !== undefined) updatePayload.type = payload.type;
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.hours !== undefined) {

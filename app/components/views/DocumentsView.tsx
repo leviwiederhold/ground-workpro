@@ -3,7 +3,7 @@
 // @ts-nocheck
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MobileSheet } from '@/app/components/ui/MobileSheet';
 import { EmptyState, InlineError, SkeletonBlock } from '@/app/components/ui/FeedbackBlocks';
 
@@ -65,7 +65,7 @@ const getDocumentIconName = (doc) => {
   return 'file-lines';
 };
 
-export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
+export function DocumentsView({ currentRole, moduleAccess = {}, ui, jobs = [] }) {
   const {
     SearchInput,
     Button,
@@ -89,6 +89,8 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [activeView, setActiveView] = useState('all');
+  const [selectedJobFilter, setSelectedJobFilter] = useState('all');
+  const [uploadJobId, setUploadJobId] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
   const [selectedDocumentId, setSelectedDocumentId] = useState(null);
   const [previewDocumentId, setPreviewDocumentId] = useState(null);
@@ -112,6 +114,32 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
   };
 
   const normalizeText = (value) => String(value || '').trim().toLowerCase();
+  const normalizeId = (value) => String(value ?? '').trim();
+
+  const jobOptions = useMemo(
+    () =>
+      (jobs || [])
+        .map((job) => ({
+          id: normalizeId(job.id),
+          label: String(job.name || job.client || job.siteAddress || job.address || 'Untitled job').trim(),
+        }))
+        .filter((job) => job.id)
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [jobs]
+  );
+
+  const jobById = useMemo(() => {
+    const next = new Map();
+    jobOptions.forEach((job) => next.set(job.id, job));
+    return next;
+  }, [jobOptions]);
+
+  const getDocumentJobId = (doc) => normalizeId(doc.jobId ?? doc.job_id);
+  const getDocumentJobLabel = (doc) => {
+    const jobId = getDocumentJobId(doc);
+    if (!jobId) return 'No job';
+    return jobById.get(jobId)?.label || 'Linked job';
+  };
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -183,6 +211,9 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
       const formData = new FormData();
       formData.append('entity_type', 'document');
       formData.append('file', file);
+      if (uploadJobId !== 'all') {
+        formData.append('job_id', uploadJobId);
+      }
 
       const response = await fetch('/api/attachments', {
         method: 'POST',
@@ -256,8 +287,10 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
       if (query) {
         const fileName = String(doc.fileName || '').toLowerCase();
         const contentType = String(doc.contentType || '').toLowerCase();
-        if (!fileName.includes(query) && !contentType.includes(query)) return false;
+        const jobLabel = getDocumentJobLabel(doc).toLowerCase();
+        if (!fileName.includes(query) && !contentType.includes(query) && !jobLabel.includes(query)) return false;
       }
+      if (selectedJobFilter !== 'all' && getDocumentJobId(doc) !== selectedJobFilter) return false;
       if (activeView === 'all') return true;
       return classifyDocument(doc) === activeView;
     })
@@ -307,16 +340,45 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
           value={search}
           onChange={setSearch}
         />
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <select
+            className="text-sm border border-gray-300 rounded-lg px-3 py-2"
+            value={selectedJobFilter}
+            onChange={(e) => setSelectedJobFilter(e.target.value)}
+            aria-label="Filter documents by job"
+          >
+            <option value="all">All Jobs</option>
+            {jobOptions.map((job) => (
+              <option key={job.id} value={job.id}>
+                {job.label}
+              </option>
+            ))}
+          </select>
           <select
             className="text-sm border border-gray-300 rounded-lg px-3 py-2"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
+            aria-label="Sort documents"
           >
             <option value="newest">Newest</option>
             <option value="name">Name</option>
             <option value="size">Size</option>
           </select>
+          {canManageDocuments && (
+            <select
+              className="text-sm border border-gray-300 rounded-lg px-3 py-2"
+              value={uploadJobId}
+              onChange={(e) => setUploadJobId(e.target.value)}
+              aria-label="Upload document job"
+            >
+              <option value="all">Upload: No Job</option>
+              {jobOptions.map((job) => (
+                <option key={job.id} value={job.id}>
+                  Upload: {job.label}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -409,6 +471,9 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                       <p className="text-xs text-gray-500 mt-1 break-all">
                         {doc.contentType || 'file'} • {formatFileSize(doc.fileSize)} • {doc.createdAt ? formatDate(doc.createdAt) : '-'}
                       </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Job: {getDocumentJobLabel(doc)}
+                      </p>
                     </div>
                     <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
                       {classifyDocument(doc)}
@@ -445,6 +510,7 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui }) {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Category</span><span className="text-gray-900 capitalize">{classifyDocument(selectedDocument)}</span></div>
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Type</span><span className="text-gray-900 break-all">{getDocumentFileTypeLabel(selectedDocument)}</span></div>
+                  <div className="flex justify-between gap-3"><span className="text-gray-500">Job</span><span className="text-right text-gray-900">{getDocumentJobLabel(selectedDocument)}</span></div>
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Size</span><span className="text-gray-900">{formatFileSize(selectedDocument.fileSize)}</span></div>
                   <div className="flex justify-between gap-3"><span className="text-gray-500">Uploaded</span><span className="text-gray-900">{selectedDocument.createdAt ? formatDate(selectedDocument.createdAt) : '-'}</span></div>
                 </div>

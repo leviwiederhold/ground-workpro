@@ -25,7 +25,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "training", label: "Training", href: "/training", iconKey: "chalkboard-user" },
   { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
   { key: "subscribe", label: "Subscribe", href: "/subscribe", iconKey: "credit-card" },
-  { key: "audit", label: "Audit", href: "/audit", iconKey: "clipboard-list" },
 ];
 
 export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
@@ -42,7 +41,6 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "finance",
     "reports",
     "subscribe",
-    "audit",
     "documents",
     "team",
     "training",
@@ -100,7 +98,6 @@ export const ROUTE_GUARDS: Record<string, AppRole[]> = {
   "/documents": ["admin", "pm", "foreman", "mechanic", "operator"],
   "/settings": ["admin", "pm"],
   "/subscribe": ["admin"],
-  "/audit": ["admin", "pm"],
 };
 
 export function toNavItems(role: AppRole): NavItem[] {

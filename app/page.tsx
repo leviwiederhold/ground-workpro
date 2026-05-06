@@ -17,6 +17,7 @@ import {
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
+import { OnboardingGate, isNativeOnboardingComplete } from '@/app/components/OnboardingGate';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -39,6 +40,23 @@ const JobsView = dynamic(
 
 const confirmDestructiveAction = (targetLabel) =>
   window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
+
+const isIosNativeAppRuntime = () => {
+  if (typeof window === 'undefined' || !isNativeAppRuntime()) return false;
+  const candidate = window;
+  try {
+    if (typeof candidate.Capacitor?.getPlatform === 'function') {
+      return String(candidate.Capacitor.getPlatform()).toLowerCase() === 'ios';
+    }
+  } catch {
+    // Fall through to the user-agent heuristic.
+  }
+  const userAgent = String(window.navigator?.userAgent ?? '').toLowerCase();
+  return userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod');
+};
+
+const canRoleGiveFinalSafetySignOff = (role) =>
+  ['executive', 'operations', 'admin', 'pm'].includes(String(role || '').toLowerCase());
 
 const pickDisplayName = ({ fullName, displayName, email }) => {
   const normalizedFullName = String(fullName ?? '').trim();
@@ -145,9 +163,13 @@ const MobileAppShell = ({
     if (isNativeAppRuntime()) {
       document.body.classList.add('native-app-runtime');
     }
+    if (isIosNativeAppRuntime()) {
+      document.body.classList.add('ios-app-runtime');
+    }
     return () => {
       document.body.classList.remove('mobile-shell-active');
       document.body.classList.remove('native-app-runtime');
+      document.body.classList.remove('ios-app-runtime');
     };
   }, []);
 
@@ -803,6 +825,7 @@ const MobileAppShell = ({
       });
       const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+      const [pressedNavId, setPressedNavId] = useState(null);
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [currentRole, setCurrentRole] = useState(cachedNavState.role);
@@ -817,6 +840,7 @@ const MobileAppShell = ({
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
+      const iosAppRuntime = useMemo(() => isIosNativeAppRuntime(), []);
       const resolvedUserDisplayName = pickDisplayName({
         fullName: currentUser?.fullName ?? currentUser?.name,
         displayName: currentUser?.displayName,
@@ -1006,10 +1030,9 @@ const MobileAppShell = ({
           training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
           finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
           subscribe: { key: 'subscribe', label: 'Subscribe', iconKey: 'credit-card' },
-          audit: { key: 'audit', label: 'Audit', iconKey: 'clipboard-list' },
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'subscribe', 'audit', 'documents', 'team', 'training', 'schedule'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'subscribe', 'documents', 'team', 'training', 'schedule'],
           operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
@@ -1194,12 +1217,15 @@ const MobileAppShell = ({
         title: course.title,
         category: course.category || 'General',
         duration: `${Number(course.durationMinutes || 0)} min`,
+        durationMinutes: Number(course.durationMinutes || 0),
+        rawVideoUrl: course.videoUrl || '',
         videoUrl: toYouTubeEmbedUrl(course.videoUrl || ''),
         thumbnail: deriveYouTubeThumbnail(course.videoUrl || '', course.thumbnailUrl || ''),
         required: Boolean(course.required),
         dueDate: course.dueDate || null,
         completedBy: (course.completedEmployeeIds || []).map((value) => String(value)),
         assignedEmployeeIds: (course.assignedEmployeeIds || []).map((value) => String(value)),
+        videoProgress: course.videoProgress || [],
       }), []);
 
       const loadTraining = useCallback(async () => {
@@ -1775,6 +1801,10 @@ const MobileAppShell = ({
       }));
 
       useEffect(() => {
+        setPressedNavId(null);
+      }, [currentView, mobileSidebarOpen]);
+
+      useEffect(() => {
         if (!navLoaded) return;
         if (navItems.length === 0) {
           if (currentView !== 'dashboard') setCurrentView('dashboard');
@@ -1892,7 +1922,7 @@ const MobileAppShell = ({
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} companyMembers={companyMembers} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} trainingLoading={trainingLoading} trainingError={trainingError} onRefreshTraining={loadTraining} />;
-          case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} safetyLogs={safetyLogs} safetyLogsLoading={safetyLogsLoading} safetyLogsError={safetyLogsError} onDeleteSafetyLog={handleDeleteSafetyLog} deleteLoadingId={safetyDeleteLoadingId} moduleAccess={moduleAccess} />;
+          case 'safety': return <SafetyView employees={employees} setShowModal={setShowModal} safetyLogs={safetyLogs} safetyLogsLoading={safetyLogsLoading} safetyLogsError={safetyLogsError} onDeleteSafetyLog={handleDeleteSafetyLog} deleteLoadingId={safetyDeleteLoadingId} moduleAccess={moduleAccess} currentRole={currentRole} />;
           case 'bids': return <BidsView bids={bids} bidsLoading={bidsLoading} setBids={setBids} jobs={jobs} ui={bidsViewUi} currentRole={currentRole} />;
           case 'vendors': return <VendorsView vendors={vendors} vendorsLoading={vendorsLoading} setVendors={setVendors} jobs={jobs} inventory={inventory} />;
           case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
@@ -1900,9 +1930,8 @@ const MobileAppShell = ({
           case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'subscribe': return <SubscribeView employees={employees} currentRole={currentRole} />;
           case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
-          case 'audit': return <AuditView currentRole={currentRole} />;
           case 'marketing': return <MarketingView />;
-          case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} />;
+          case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} jobs={jobs} />;
           default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
         }
       };
@@ -1930,28 +1959,55 @@ const MobileAppShell = ({
             </div>
 
             <nav className="mobile-app-shell__drawer-nav flex-1 space-y-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
-              {navItems.map(item => (
-                <button
-                  key={item.id}
-                  data-testid={`nav-${item.id}`}
-                  onClick={() => {
-                    setCurrentView(item.id);
-                    setMobileSidebarOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                    currentView === item.id
-                      ? 'bg-brand-500 text-white'
-                      : 'text-gray-300 hover:bg-dark-700 hover:text-white'
-                  }`}
-                >
-                  <Icon name={item.icon} className="text-lg w-5" />
-                  {!sidebarCollapsed && (
-                    <>
-                      <span className="flex-1 text-left text-sm">{item.label}</span>
-                    </>
-                  )}
-                </button>
-              ))}
+              {navItems.map(item => {
+                const isPressed = iosAppRuntime && pressedNavId === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    data-testid={`nav-${item.id}`}
+                    onPointerDown={() => {
+                      if (iosAppRuntime) setPressedNavId(item.id);
+                    }}
+                    onPointerUp={() => {
+                      if (iosAppRuntime) setPressedNavId(null);
+                    }}
+                    onPointerCancel={() => {
+                      if (iosAppRuntime) setPressedNavId(null);
+                    }}
+                    onPointerLeave={() => {
+                      if (iosAppRuntime) setPressedNavId(null);
+                    }}
+                    onTouchStart={() => {
+                      if (iosAppRuntime) setPressedNavId(item.id);
+                    }}
+                    onTouchEnd={() => {
+                      if (iosAppRuntime) setPressedNavId(null);
+                    }}
+                    onTouchCancel={() => {
+                      if (iosAppRuntime) setPressedNavId(null);
+                    }}
+                    onClick={() => {
+                      setCurrentView(item.id);
+                      setMobileSidebarOpen(false);
+                      setPressedNavId(null);
+                    }}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                      isPressed
+                        ? 'bg-dark-700 text-white'
+                        : currentView === item.id
+                          ? 'bg-brand-500 text-white'
+                          : 'text-gray-300 hover:bg-dark-700 hover:text-white'
+                    }`}
+                  >
+                    <Icon name={item.icon} className="text-lg w-5" />
+                    {!sidebarCollapsed && (
+                      <>
+                        <span className="flex-1 text-left text-sm">{item.label}</span>
+                      </>
+                    )}
+                  </button>
+                );
+              })}
             </nav>
 
             <div className="p-2 border-t border-dark-700 hidden lg:block">
@@ -2292,6 +2348,7 @@ const MobileAppShell = ({
             isOpen={showModal.type === 'quick-actions'}
             onClose={() => setShowModal({ type: null })}
             setShowModal={setShowModal}
+            canFinalSafetySignOff={canRoleGiveFinalSafetySignOff(currentRole)}
           />
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
@@ -2305,7 +2362,7 @@ const MobileAppShell = ({
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} companyMembers={companyMembers} setWorkOrders={setWorkOrders} data={showModal.data} />
-          <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} onSubmitSafetyLog={handleCreateSafetyLog} submitLoading={safetyCreateLoading} />
+          <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} onSubmitSafetyLog={handleCreateSafetyLog} submitLoading={safetyCreateLoading} canFinalSafetySignOff={canRoleGiveFinalSafetySignOff(currentRole)} />
           <Modal isOpen={showModal.type === 'feedback'} onClose={closeFeedbackModal} title="Send feedback" size="sm">
             <form onSubmit={handleFeedbackSubmit} className="space-y-4">
               <div className="space-y-2">
@@ -2486,17 +2543,81 @@ const MobileAppShell = ({
     // ============================================
     // ============================================
     const FleetView = ({ equipment, equipmentLoading, setEquipment, jobs, workOrders, setShowModal, moduleAccess = {} }) => {
-      const EQUIPMENT_TYPE_OPTIONS = useMemo(
+      const EQUIPMENT_TYPE_GROUPS = useMemo(
         () => [
-          'Excavator',
-          'Dozer',
-          'Haul Truck',
-          'Backhoe',
-          'Loader',
-          'Grader',
-          'Compactor',
+          {
+            label: 'Heavy Equipment',
+            options: [
+              'Excavator',
+              'Mini Excavator',
+              'Compact Track Loader',
+              'Skid Steer',
+              'Backhoe',
+              'Dozer',
+              'Wheel Loader',
+              'Motor Grader',
+              'Scraper',
+              'Trencher',
+            ],
+          },
+          {
+            label: 'Trucks',
+            options: [
+              'Dump Truck',
+              'Haul Truck',
+              'Semi Truck',
+              'Service Truck',
+              'Pickup Truck',
+              'Water Truck',
+              'Fuel Truck',
+            ],
+          },
+          {
+            label: 'Compaction',
+            options: [
+              'Sheepsfoot Roller',
+              'Smooth Drum Roller',
+              'Plate Compactor',
+              'Jumping Jack/Rammer',
+            ],
+          },
+          {
+            label: 'Support Equipment',
+            options: [
+              'Light Plant',
+              'Generator',
+              'Air Compressor',
+              'Pump',
+              'Trailer',
+            ],
+          },
+          {
+            label: 'Attachments',
+            options: [
+              'Bucket',
+              'Hydraulic Hammer',
+              'Auger',
+              'Grapple',
+              'Forks',
+              'Trencher Attachment',
+              'Brush Cutter',
+              'Plate Compactor Attachment',
+            ],
+          },
+          {
+            label: 'Other',
+            options: [
+              'Attachment',
+              'Tool',
+              'Other / Misc',
+            ],
+          },
         ],
         []
+      );
+      const EQUIPMENT_TYPE_OPTIONS = useMemo(
+        () => EQUIPMENT_TYPE_GROUPS.flatMap((group) => group.options),
+        [EQUIPMENT_TYPE_GROUPS]
       );
       const [filter, setFilter] = useState('all');
       const [selectedEquipmentId, setSelectedEquipmentId] = useState(null);
@@ -2506,6 +2627,7 @@ const MobileAppShell = ({
       const [fleetItemsError, setFleetItemsError] = useState('');
       const [equipmentForm, setEquipmentForm] = useState({
         name: '',
+        vin: '',
         type: '',
         status: 'active',
         hours: 0,
@@ -2524,6 +2646,28 @@ const MobileAppShell = ({
       const [isMobileFleet, setIsMobileFleet] = useState(false);
       const [showFleetDetails, setShowFleetDetails] = useState(false);
       const canManageFleet = String(moduleAccess?.fleet || 'none') === 'edit';
+      const getDefaultEquipmentName = useCallback((type) => {
+        const cleanType = String(type || '').trim();
+        if (cleanType === 'Other / Misc') return 'New Misc Item';
+        return cleanType ? `New ${cleanType}` : 'New Equipment';
+      }, []);
+      const isGeneratedEquipmentName = useCallback((name) => {
+        const cleanName = String(name || '').trim();
+        if (!cleanName) return true;
+        if (/^New Equipment(?:\s+\d+)?$/i.test(cleanName)) return true;
+        return EQUIPMENT_TYPE_OPTIONS.some((type) => cleanName === getDefaultEquipmentName(type));
+      }, [EQUIPMENT_TYPE_OPTIONS, getDefaultEquipmentName]);
+      const applyEquipmentType = useCallback((nextType, nextSelectedOption = nextType) => {
+        setSelectedTypeOption(nextSelectedOption);
+        setEquipmentForm((prev) => {
+          const shouldUpdateName = isGeneratedEquipmentName(prev.name);
+          return {
+            ...prev,
+            type: nextType,
+            name: shouldUpdateName ? getDefaultEquipmentName(nextType) : prev.name,
+          };
+        });
+      }, [getDefaultEquipmentName, isGeneratedEquipmentName]);
       const mapEquipmentSeedToFleetItem = useCallback((row) => {
         const normalizedStatus = String(row?.status || 'active').toLowerCase();
         const currentJob = row?.jobId
@@ -2531,6 +2675,7 @@ const MobileAppShell = ({
           : null;
         return {
           ...row,
+          vin: row?.vin || '',
           hours: Number(row?.hours || 0),
           nextService: Number(row?.nextService || 0),
           fuelLevel: Number(row?.fuelLevel ?? 100),
@@ -2700,6 +2845,7 @@ const MobileAppShell = ({
         if (!selectedEquipment) return;
         setEquipmentForm({
           name: selectedEquipment.name || '',
+          vin: selectedEquipment.vin || '',
           type: selectedEquipment.type || '',
           status: selectedEquipment.status || 'active',
           hours: Number(selectedEquipment.hours || 0),
@@ -2715,7 +2861,7 @@ const MobileAppShell = ({
           setSelectedTypeOption(existingType);
           setCustomTypeInput('');
         } else if (existingType) {
-          setSelectedTypeOption('Custom / Misc');
+          setSelectedTypeOption('__custom');
           setCustomTypeInput(existingType);
         } else {
           setSelectedTypeOption('Excavator');
@@ -2739,11 +2885,12 @@ const MobileAppShell = ({
           return;
         }
         const tempId = `temp-equipment-${Date.now()}`;
-        const baseCount = equipment.length + 1;
+        const defaultType = 'Excavator';
         const optimisticEquipment = {
           id: tempId,
-          name: `New Equipment ${baseCount}`,
-          type: 'Equipment',
+          name: getDefaultEquipmentName(defaultType),
+          vin: '',
+          type: defaultType,
           status: 'active',
           hours: 0,
           nextService: 0,
@@ -2763,7 +2910,8 @@ const MobileAppShell = ({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               name: optimisticEquipment.name,
-              type: 'Equipment',
+              vin: optimisticEquipment.vin,
+              type: optimisticEquipment.type,
               status: 'active',
               hours: 0,
               nextService: 0,
@@ -2818,6 +2966,7 @@ const MobileAppShell = ({
         try {
           const updates = {};
           if (equipmentForm.name !== (selectedEquipment.name || '')) updates.name = equipmentForm.name;
+          if (equipmentForm.vin !== (selectedEquipment.vin || '')) updates.vin = equipmentForm.vin;
           if (equipmentForm.type !== (selectedEquipment.type || '')) updates.type = equipmentForm.type;
           if (equipmentForm.status !== (selectedEquipment.status || 'active')) updates.status = equipmentForm.status;
           if (Number(equipmentForm.hours) !== Number(selectedEquipment.hours || 0)) updates.hours = Number(equipmentForm.hours);
@@ -3114,29 +3263,47 @@ const MobileAppShell = ({
                   </div>
 
                   <div>
+                    <p className="text-xs text-gray-500 mb-1">VIN</p>
+                    <input
+                      type="text"
+                      value={equipmentForm.vin}
+                      onChange={(e) => setEquipmentForm({ ...equipmentForm, vin: e.target.value })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm uppercase"
+                      placeholder="Optional"
+                    />
+                    {selectedEquipment.vin && (
+                      <p className="mt-1 break-all text-xs text-gray-500">Current VIN: {selectedEquipment.vin}</p>
+                    )}
+                  </div>
+
+                  <div>
                     <p className="text-xs text-gray-500 mb-1">Type</p>
                     <select
                       value={selectedTypeOption}
                       onChange={(e) => {
                         const next = e.target.value;
-                        setSelectedTypeOption(next);
-                        if (next !== 'Custom / Misc') {
+                        if (next !== '__custom') {
                           setCustomTypeInput('');
-                          setEquipmentForm({ ...equipmentForm, type: next });
+                          applyEquipmentType(next);
                         } else {
-                          setEquipmentForm({ ...equipmentForm, type: customTypeInput || '' });
+                          setSelectedTypeOption(next);
+                          setEquipmentForm((prev) => ({ ...prev, type: customTypeInput || '' }));
                         }
                       }}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
                     >
-                      {EQUIPMENT_TYPE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
+                      {EQUIPMENT_TYPE_GROUPS.map((group) => (
+                        <optgroup key={group.label} label={group.label}>
+                          {group.options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
-                      <option value="Custom / Misc">Custom / Misc</option>
+                      <option value="__custom">Custom Type</option>
                     </select>
-                    {selectedTypeOption === 'Custom / Misc' && (
+                    {selectedTypeOption === '__custom' && (
                       <input
                         type="text"
                         value={customTypeInput}
@@ -3145,7 +3312,7 @@ const MobileAppShell = ({
                           setCustomTypeInput(value);
                           setEquipmentForm({ ...equipmentForm, type: value });
                         }}
-                        placeholder="e.g. Four Wheeler"
+                        placeholder="Existing or custom type"
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-2"
                       />
                     )}
@@ -6473,6 +6640,7 @@ const MobileAppShell = ({
       onDeleteSafetyLog,
       deleteLoadingId,
       moduleAccess = {},
+      currentRole,
     }) => {
       const [deleteError, setDeleteError] = useState('');
       const [summary, setSummary] = useState({ openHazards: 0, overdueActions: 0, highSeverity7d: 0, closedThisWeek: 0 });
@@ -6487,6 +6655,7 @@ const MobileAppShell = ({
       const [newTalk, setNewTalk] = useState({ topic: '', summary: '', occurred_on: new Date().toISOString().slice(0, 10), attendee_employee_ids: [] });
       const [submitLoading, setSubmitLoading] = useState(false);
       const canEditSafety = String(moduleAccess?.safety || 'none') === 'edit';
+      const canFinalSafetySignOff = canRoleGiveFinalSafetySignOff(currentRole);
 
       const loadSafetySummary = useCallback(async () => {
         try {
@@ -6686,7 +6855,7 @@ const MobileAppShell = ({
           </StatGrid>
 
           <div className="flex justify-end">
-            <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })} data-testid="safety-open-create" disabled={!canEditSafety}>
+            <Button variant="brand" onClick={() => setShowModal({ type: 'safety' })} data-testid="safety-open-create" disabled={!canEditSafety || !canFinalSafetySignOff}>
               <Icon name="plus" className="mr-2" /> New Safety Log
             </Button>
           </div>
@@ -7494,6 +7663,258 @@ const MobileAppShell = ({
     // ============================================
     // TRAINING VIEW (with Video Lessons)
     // ============================================
+    const mergeWatchedSegments = (segments) => {
+      const sorted = (segments || [])
+        .filter((segment) => Number(segment?.end) > Number(segment?.start))
+        .map((segment) => ({ start: Number(segment.start), end: Number(segment.end) }))
+        .sort((a, b) => a.start - b.start);
+      const merged = [];
+      sorted.forEach((segment) => {
+        const previous = merged[merged.length - 1];
+        if (!previous || segment.start > previous.end + 0.5) {
+          merged.push({ ...segment });
+        } else {
+          previous.end = Math.max(previous.end, segment.end);
+        }
+      });
+      return merged;
+    };
+
+    const TrainingVideoProgressPlayer = ({ course, Icon, ProgressBar, onProgressSaved }) => {
+      const videoRef = useRef(null);
+      const youtubeContainerRef = useRef(null);
+      const youtubePlayerRef = useRef(null);
+      const pollRef = useRef(null);
+      const lastTimeRef = useRef(null);
+      const segmentsRef = useRef([]);
+      const [progress, setProgress] = useState({
+        watchedSeconds: 0,
+        durationSeconds: 0,
+        completionPercent: 0,
+        completed: false,
+        lastPositionSeconds: 0,
+      });
+      const directVideoUrl = String(course?.rawVideoUrl || course?.videoUrl || '').trim();
+      const isYouTube = /youtube\.com|youtu\.be/.test(directVideoUrl);
+      const canUseNativeVideo = directVideoUrl && !isYouTube;
+
+      const computeLocalProgress = useCallback((segments, durationSeconds) => {
+        const watchedSeconds = mergeWatchedSegments(segments).reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0);
+        const completionPercent = durationSeconds > 0 ? Math.min(100, Math.round((watchedSeconds / durationSeconds) * 1000) / 10) : 0;
+        return { watchedSeconds, completionPercent };
+      }, []);
+
+      const saveProgress = useCallback(async (extra = {}) => {
+        if (!course?.id) return;
+        const durationSeconds = Number(extra.durationSeconds ?? progress.durationSeconds ?? 0);
+        const lastPositionSeconds = Number(extra.lastPositionSeconds ?? progress.lastPositionSeconds ?? 0);
+        const segments = mergeWatchedSegments(segmentsRef.current);
+        const local = computeLocalProgress(segments, durationSeconds);
+        setProgress((prev) => ({
+          ...prev,
+          ...local,
+          durationSeconds,
+          lastPositionSeconds,
+          completed: local.completionPercent >= 75,
+        }));
+        try {
+          const response = await fetch('/api/training/video-progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              courseId: course.id,
+              watchedSegments: segments,
+              durationSeconds,
+              lastPositionSeconds,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (response.ok && payload?.item) {
+            setProgress({
+              watchedSeconds: Number(payload.item.watchedSeconds || 0),
+              durationSeconds: Number(payload.item.durationSeconds || durationSeconds || 0),
+              completionPercent: Number(payload.item.completionPercent || 0),
+              completed: Boolean(payload.item.completed),
+              lastPositionSeconds: Number(payload.item.lastPositionSeconds || lastPositionSeconds || 0),
+            });
+            if (payload.item.completed) onProgressSaved?.();
+          }
+        } catch {
+          // Progress is best-effort and retried on pause/end.
+        }
+      }, [computeLocalProgress, course?.id, onProgressSaved, progress.durationSeconds, progress.lastPositionSeconds]);
+
+      const recordSample = useCallback((currentTime, durationSeconds) => {
+        const previousTime = lastTimeRef.current;
+        if (Number.isFinite(previousTime) && currentTime > previousTime && currentTime - previousTime <= 2.5) {
+          segmentsRef.current = mergeWatchedSegments([...segmentsRef.current, { start: previousTime, end: currentTime }]);
+          const local = computeLocalProgress(segmentsRef.current, durationSeconds);
+          setProgress((prev) => ({
+            ...prev,
+            ...local,
+            durationSeconds,
+            lastPositionSeconds: currentTime,
+            completed: local.completionPercent >= 75,
+          }));
+        }
+        lastTimeRef.current = currentTime;
+      }, [computeLocalProgress]);
+
+      useEffect(() => {
+        let cancelled = false;
+        segmentsRef.current = [];
+        lastTimeRef.current = null;
+        setProgress({ watchedSeconds: 0, durationSeconds: 0, completionPercent: 0, completed: false, lastPositionSeconds: 0 });
+        if (!course?.id) return;
+        fetch(`/api/training/video-progress?courseId=${encodeURIComponent(course.id)}`, { cache: 'no-store' })
+          .then((response) => response.json())
+          .then((payload) => {
+            if (cancelled || !payload?.item) return;
+            segmentsRef.current = mergeWatchedSegments(payload.item.watchedSegments || []);
+            setProgress({
+              watchedSeconds: Number(payload.item.watchedSeconds || 0),
+              durationSeconds: Number(payload.item.durationSeconds || 0),
+              completionPercent: Number(payload.item.completionPercent || 0),
+              completed: Boolean(payload.item.completed),
+              lastPositionSeconds: Number(payload.item.lastPositionSeconds || 0),
+            });
+          })
+          .catch(() => {});
+        return () => {
+          cancelled = true;
+        };
+      }, [course?.id]);
+
+      useEffect(() => {
+        if (!canUseNativeVideo) return;
+        const node = videoRef.current;
+        if (!node) return;
+        const onTimeUpdate = () => recordSample(node.currentTime, node.duration || progress.durationSeconds || 0);
+        const onLoadedMetadata = () => {
+          if (progress.lastPositionSeconds > 1 && progress.lastPositionSeconds < node.duration - 3) {
+            node.currentTime = progress.lastPositionSeconds;
+          }
+          setProgress((prev) => ({ ...prev, durationSeconds: node.duration || prev.durationSeconds }));
+        };
+        const onPauseOrEnd = () => saveProgress({ durationSeconds: node.duration || progress.durationSeconds || 0, lastPositionSeconds: node.currentTime || 0 });
+        node.addEventListener('timeupdate', onTimeUpdate);
+        node.addEventListener('loadedmetadata', onLoadedMetadata);
+        node.addEventListener('pause', onPauseOrEnd);
+        node.addEventListener('ended', onPauseOrEnd);
+        return () => {
+          node.removeEventListener('timeupdate', onTimeUpdate);
+          node.removeEventListener('loadedmetadata', onLoadedMetadata);
+          node.removeEventListener('pause', onPauseOrEnd);
+          node.removeEventListener('ended', onPauseOrEnd);
+        };
+      }, [canUseNativeVideo, progress.durationSeconds, progress.lastPositionSeconds, recordSample, saveProgress]);
+
+      useEffect(() => {
+        if (!isYouTube || !youtubeContainerRef.current) return;
+        let cancelled = false;
+        const ensureApi = () =>
+          new Promise((resolve) => {
+            if (window.YT?.Player) {
+              resolve(window.YT);
+              return;
+            }
+            const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+            window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+            if (!existing) {
+              const script = document.createElement('script');
+              script.src = 'https://www.youtube.com/iframe_api';
+              document.body.appendChild(script);
+            }
+          });
+        const videoId = getYouTubeVideoId(directVideoUrl);
+        if (!videoId) return;
+        ensureApi().then((YT) => {
+          if (cancelled || !youtubeContainerRef.current) return;
+          youtubeContainerRef.current.innerHTML = '';
+          youtubePlayerRef.current = new YT.Player(youtubeContainerRef.current, {
+            videoId,
+            playerVars: { rel: 0, modestbranding: 1, playsinline: 1 },
+            events: {
+              onReady: (event) => {
+                const durationSeconds = Number(event.target.getDuration?.() || progress.durationSeconds || Number(course.durationMinutes || 0) * 60 || 0);
+                setProgress((prev) => ({ ...prev, durationSeconds }));
+                if (progress.lastPositionSeconds > 1 && progress.lastPositionSeconds < durationSeconds - 3) {
+                  event.target.seekTo(progress.lastPositionSeconds, true);
+                }
+              },
+              onStateChange: (event) => {
+                const YTState = window.YT?.PlayerState || {};
+                window.clearInterval(pollRef.current);
+                if (event.data === YTState.PLAYING) {
+                  pollRef.current = window.setInterval(() => {
+                    const player = youtubePlayerRef.current;
+                    if (!player?.getCurrentTime) return;
+                    const currentTime = Number(player.getCurrentTime() || 0);
+                    const durationSeconds = Number(player.getDuration?.() || progress.durationSeconds || Number(course.durationMinutes || 0) * 60 || 0);
+                    recordSample(currentTime, durationSeconds);
+                  }, 1000);
+                }
+                if (event.data === YTState.PAUSED || event.data === YTState.ENDED) {
+                  const player = youtubePlayerRef.current;
+                  saveProgress({
+                    durationSeconds: Number(player?.getDuration?.() || progress.durationSeconds || Number(course.durationMinutes || 0) * 60 || 0),
+                    lastPositionSeconds: Number(player?.getCurrentTime?.() || 0),
+                  });
+                }
+              },
+            },
+          });
+        });
+        return () => {
+          cancelled = true;
+          window.clearInterval(pollRef.current);
+          youtubePlayerRef.current?.destroy?.();
+          youtubePlayerRef.current = null;
+        };
+      }, [course.durationMinutes, directVideoUrl, isYouTube, progress.durationSeconds, progress.lastPositionSeconds, recordSample, saveProgress]);
+
+      useEffect(() => {
+        const id = window.setInterval(() => {
+          const nativeVideo = videoRef.current;
+          if (nativeVideo && !nativeVideo.paused) {
+            saveProgress({ durationSeconds: nativeVideo.duration || progress.durationSeconds || 0, lastPositionSeconds: nativeVideo.currentTime || 0 });
+          } else if (youtubePlayerRef.current?.getPlayerState?.() === window.YT?.PlayerState?.PLAYING) {
+            saveProgress({
+              durationSeconds: Number(youtubePlayerRef.current.getDuration?.() || progress.durationSeconds || Number(course.durationMinutes || 0) * 60 || 0),
+              lastPositionSeconds: Number(youtubePlayerRef.current.getCurrentTime?.() || 0),
+            });
+          }
+        }, 15000);
+        return () => window.clearInterval(id);
+      }, [course.durationMinutes, progress.durationSeconds, saveProgress]);
+
+      return (
+        <div className="mb-4">
+          <div className="aspect-video bg-black rounded-lg overflow-hidden">
+            {canUseNativeVideo ? (
+              <video ref={videoRef} src={directVideoUrl} className="h-full w-full" controls playsInline />
+            ) : isYouTube ? (
+              <div ref={youtubeContainerRef} className="h-full w-full" />
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-gray-300">
+                Video URL not available
+              </div>
+            )}
+          </div>
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-2 flex items-center justify-between text-xs text-gray-600">
+              <span>My watch progress</span>
+              <span>{progress.completionPercent.toFixed(1)}%</span>
+            </div>
+            <ProgressBar value={progress.completionPercent} color={progress.completed ? 'green' : 'brand'} size="sm" />
+            <p className="mt-2 text-xs text-gray-500">
+              Completion credit unlocks after 75% unique watch time. Skipped sections are not counted.
+            </p>
+          </div>
+        </div>
+      );
+    };
+
     const TrainingView = ({ trainingData, setTrainingData, employees, setShowModal, trainingLoading, trainingError, onRefreshTraining }) => {
       const [filter, setFilter] = useState('all');
       const [selectedVideoId, setSelectedVideoId] = useState(null);
@@ -7758,15 +8179,12 @@ const MobileAppShell = ({
             ) : selectedVideo ? (
               <Card className="p-4 h-fit sticky top-4">
                 {selectedVideo.videoUrl ? (
-                  <div className="aspect-video mb-4 bg-black rounded-lg overflow-hidden">
-                    <iframe
-                      src={selectedVideo.videoUrl}
-                      className="w-full h-full"
-                      frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    ></iframe>
-                  </div>
+                  <TrainingVideoProgressPlayer
+                    course={selectedVideo}
+                    Icon={Icon}
+                    ProgressBar={ProgressBar}
+                    onProgressSaved={onRefreshTraining}
+                  />
                 ) : selectedVideo.thumbnail ? (
                   <div className="aspect-video mb-4 overflow-hidden rounded-lg bg-gray-100">
                     <img src={selectedVideo.thumbnail} alt={selectedVideo.title} className="h-full w-full object-cover" />
@@ -7815,7 +8233,7 @@ const MobileAppShell = ({
                 </div>
 
                 <div className="space-y-2 mb-3">
-                  <p className="text-xs text-gray-500">Mark Completion</p>
+                  <p className="text-xs text-gray-500">Reset Completion</p>
                   <select
                     value={completeEmployeeId}
                     onChange={(event) => setCompleteEmployeeId(event.target.value)}
@@ -7828,10 +8246,7 @@ const MobileAppShell = ({
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button variant="brand" onClick={() => handleMarkComplete(true)} disabled={saveLoading || !completeEmployeeId}>
-                    <Icon name="check" className="mr-2" />Complete
-                  </Button>
+                <div className="grid grid-cols-1 gap-2">
                   <Button variant="secondary" onClick={() => handleMarkComplete(false)} disabled={saveLoading || !completeEmployeeId}>
                     <Icon name="rotate-left" className="mr-2" />Reset
                   </Button>
@@ -9047,120 +9462,6 @@ const MobileAppShell = ({
     // FINANCE VIEW (QBO Integration Placeholder)
     // ============================================
     const FinanceView = ({ jobs = [], bids = [], vendors = [], inventory = [], workOrders = [], moduleAccess = {} }) => {
-      const financeAccess = String(moduleAccess?.finance || 'none');
-      const canViewPricingSettings = financeAccess === 'view' || financeAccess === 'edit';
-      const canEditPricingSettings = financeAccess === 'edit';
-      const [pricingLoading, setPricingLoading] = useState(true);
-      const [pricingSaving, setPricingSaving] = useState(false);
-      const [pricingError, setPricingError] = useState('');
-      const [pricingSuccess, setPricingSuccess] = useState('');
-      const [pricingSettings, setPricingSettings] = useState({
-        operator_labor_rate: 0,
-        labor_burden_percent: 0,
-        hauling_rate_per_hour: 0,
-        dump_fee_per_load: 0,
-        target_margin_percent: 0,
-        contingency_percent: 0,
-        markup_percent: 0,
-      });
-
-      useEffect(() => {
-        if (!canViewPricingSettings) {
-          setPricingLoading(false);
-          setPricingError('');
-          return () => {};
-        }
-
-        let isMounted = true;
-
-        const loadPricingSettings = async () => {
-          try {
-            setPricingLoading(true);
-            const response = await fetch('/api/pricing-settings', { cache: 'no-store' });
-            const payload = await response.json();
-            if (!response.ok) {
-              throw new Error(payload?.error || 'Failed to load pricing settings');
-            }
-
-            if (isMounted && payload?.pricing_settings) {
-              setPricingSettings({
-                operator_labor_rate: Number(payload.pricing_settings.operator_labor_rate) || 0,
-                labor_burden_percent: Number(payload.pricing_settings.labor_burden_percent) || 0,
-                hauling_rate_per_hour: Number(payload.pricing_settings.hauling_rate_per_hour) || 0,
-                dump_fee_per_load: Number(payload.pricing_settings.dump_fee_per_load) || 0,
-                target_margin_percent: Number(payload.pricing_settings.target_margin_percent) || 0,
-                contingency_percent: Number(payload.pricing_settings.contingency_percent) || 0,
-                markup_percent: Number(payload.pricing_settings.markup_percent) || 0,
-              });
-            }
-          } catch (error) {
-            if (isMounted) {
-              setPricingError(error instanceof Error ? error.message : 'Failed to load pricing settings');
-            }
-          } finally {
-            if (isMounted) {
-              setPricingLoading(false);
-            }
-          }
-        };
-
-        loadPricingSettings();
-        return () => {
-          isMounted = false;
-        };
-      }, [canViewPricingSettings]);
-
-      const handleSavePricingSettings = async () => {
-        try {
-          setPricingSaving(true);
-          setPricingError('');
-          setPricingSuccess('');
-
-          const response = await fetch('/api/pricing-settings', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              operator_labor_rate: Number(pricingSettings.operator_labor_rate) || 0,
-              labor_burden_percent: Number(pricingSettings.labor_burden_percent) || 0,
-              hauling_rate_per_hour: Number(pricingSettings.hauling_rate_per_hour) || 0,
-              dump_fee_per_load: Number(pricingSettings.dump_fee_per_load) || 0,
-              target_margin_percent: Number(pricingSettings.target_margin_percent) || 0,
-              contingency_percent: Number(pricingSettings.contingency_percent) || 0,
-              markup_percent: Number(pricingSettings.markup_percent) || 0,
-            }),
-          });
-
-          const raw = await response.text();
-          let payload = null;
-          try {
-            payload = raw ? JSON.parse(raw) : null;
-          } catch {
-            payload = null;
-          }
-
-          if (!response.ok || !payload?.pricing_settings) {
-            setPricingError(payload?.error || raw || 'Failed to save pricing settings');
-            setPricingSaving(false);
-            return;
-          }
-
-          setPricingSettings({
-            operator_labor_rate: Number(payload.pricing_settings.operator_labor_rate) || 0,
-            labor_burden_percent: Number(payload.pricing_settings.labor_burden_percent) || 0,
-            hauling_rate_per_hour: Number(payload.pricing_settings.hauling_rate_per_hour) || 0,
-            dump_fee_per_load: Number(payload.pricing_settings.dump_fee_per_load) || 0,
-            target_margin_percent: Number(payload.pricing_settings.target_margin_percent) || 0,
-            contingency_percent: Number(payload.pricing_settings.contingency_percent) || 0,
-            markup_percent: Number(payload.pricing_settings.markup_percent) || 0,
-          });
-          setPricingSuccess('Pricing settings saved.');
-        } catch {
-          setPricingError('Failed to save pricing settings');
-        } finally {
-          setPricingSaving(false);
-        }
-      };
-
       const activeJobs = jobs.filter((job) => String(job?.status || "").toLowerCase() !== "completed");
       const completedJobs = jobs.filter((job) => String(job?.status || "").toLowerCase() === "completed");
       const totalPipelineValue = bids.reduce((sum, bid) => sum + Number(bid?.total || 0), 0);
@@ -9376,112 +9677,6 @@ const MobileAppShell = ({
             )}
           </Card>
 
-          {canViewPricingSettings && (
-          <Card className="p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-gray-900">
-                <Icon name="sliders" className="mr-2 text-brand-500" />
-                Pricing Settings
-              </h3>
-              <Button variant="brand" size="sm" onClick={handleSavePricingSettings} disabled={!canEditPricingSettings || pricingSaving || pricingLoading}>
-                <Icon name={pricingSaving ? 'spinner' : 'floppy-disk'} className={`mr-2 ${pricingSaving ? 'animate-spin' : ''}`} />
-                {pricingSaving ? 'Saving...' : 'Save Rates'}
-              </Button>
-            </div>
-            {pricingLoading ? (
-              <p className="text-sm text-gray-500">Loading pricing settings...</p>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Operator Labor Rate</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.operator_labor_rate}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, operator_labor_rate: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Labor Burden %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.labor_burden_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, labor_burden_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Hauling Rate / Hour</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.hauling_rate_per_hour}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, hauling_rate_per_hour: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Dump Fee / Load</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.dump_fee_per_load}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, dump_fee_per_load: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Target Margin %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.target_margin_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, target_margin_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Contingency %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.contingency_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, contingency_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Markup %</p>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={pricingSettings.markup_percent}
-                    onChange={(e) => setPricingSettings({ ...pricingSettings, markup_percent: Number(e.target.value) || 0 })}
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                    disabled={!canEditPricingSettings}
-                  />
-                </div>
-              </div>
-            )}
-            {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
-            {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
-          </Card>
-          )}
         </div>
       );
     };
@@ -10646,7 +10841,7 @@ const MobileAppShell = ({
     // MODALS
     // ============================================
 
-    const QuickActionsModal = ({ isOpen, onClose, setShowModal }) => (
+    const QuickActionsModal = ({ isOpen, onClose, setShowModal, canFinalSafetySignOff }) => (
       <Modal isOpen={isOpen} onClose={onClose} title="Quick Actions" size="sm">
         <div className="grid grid-cols-2 gap-3">
           {[
@@ -10656,7 +10851,7 @@ const MobileAppShell = ({
             { icon: 'file-lines', label: 'Daily Report', action: 'daily-report', color: 'brand' },
             { icon: 'wrench', label: 'Work Order', action: 'work-order', color: 'yellow' },
             { icon: 'shield-halved', label: 'Safety Sign-Off', action: 'safety', color: 'red' },
-          ].map(item => (
+          ].filter((item) => item.action !== 'safety' || canFinalSafetySignOff).map(item => (
             <button
               key={item.action}
               onClick={() => {
@@ -10825,8 +11020,14 @@ const MobileAppShell = ({
         .map((id) => members.find((member) => String(member.userId) === String(id)))
         .filter(Boolean);
 
+      const dispatchCalendarEventUpdate = (detail) => {
+        if (typeof window === 'undefined') return;
+        window.dispatchEvent(new CustomEvent('groundwork:calendar-event', { detail }));
+      };
+
       const handleSubmit = async () => {
         if (!title.trim()) return;
+        let temporaryEventId = null;
         try {
           setSaving(true);
           setError('');
@@ -10851,6 +11052,23 @@ const MobileAppShell = ({
               externalContact: attendee.contact || undefined,
             })),
           ];
+          const optimisticEvent = !isEditMode
+            ? {
+                id: `temp-calendar-event-${Date.now()}`,
+                title: title.trim(),
+                startsAt: parsedStart.toISOString(),
+                endsAt: parsedEnd.toISOString(),
+                locationText,
+                eventType,
+                visibility,
+                attendeesCount: attendees.length,
+                optimistic: true,
+              }
+            : null;
+          if (optimisticEvent) {
+            temporaryEventId = optimisticEvent.id;
+            dispatchCalendarEventUpdate({ action: 'add', event: optimisticEvent });
+          }
           const eventUrl = isEditMode ? `/api/calendar/events/${initialData.id}` : '/api/calendar/events';
           const response = await fetch(eventUrl, {
             method: isEditMode ? 'PATCH' : 'POST',
@@ -10868,17 +11086,25 @@ const MobileAppShell = ({
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) {
+            if (temporaryEventId) {
+              dispatchCalendarEventUpdate({ action: 'remove', temporaryId: temporaryEventId });
+            }
             setError(payload?.error || 'Failed to create event');
             return;
           }
+          if (!isEditMode && temporaryEventId && payload?.item) {
+            dispatchCalendarEventUpdate({ action: 'replace', temporaryId: temporaryEventId, event: payload.item });
+          }
           if (Array.isArray(payload?.warnings) && payload.warnings.length > 0) {
             setWarning(payload.warnings.join(' '));
-            return;
           }
           reset();
-          if (typeof onCreated === 'function') onCreated();
+          if (isEditMode && typeof onCreated === 'function') onCreated();
           onClose();
         } catch {
+          if (temporaryEventId) {
+            dispatchCalendarEventUpdate({ action: 'remove', temporaryId: temporaryEventId });
+          }
           setError(isEditMode ? 'Failed to update event' : 'Failed to create event');
         } finally {
           setSaving(false);
@@ -11241,41 +11467,102 @@ const MobileAppShell = ({
     };
 
     const EquipmentCheckInModal = ({ isOpen, onClose, equipment, setEquipment, employees, jobs }) => {
-      const [form, setForm] = useState({ equipmentId: '', jobId: '', hoursWorked: '', meterReading: '', fuelLevel: '', condition: 'good', operator: '', notes: '' });
+      const [form, setForm] = useState({ equipmentId: '', jobId: '', hoursWorked: '', meterReading: '', fuelLevel: '', condition: 'good', operator: '', notes: '', action: 'checkout' });
+      const [submitLoading, setSubmitLoading] = useState(false);
+      const [submitError, setSubmitError] = useState('');
+      const activeJobsForCheckout = (jobs || []).filter((job) => {
+        const status = String(job?.status || '').toLowerCase();
+        return !['completed', 'complete', 'canceled', 'cancelled', 'closed'].includes(status);
+      });
+      const eligibleOperators = (employees || []).filter((employee) => {
+        const role = String(employee?.role || '').toLowerCase();
+        return role.includes('operator') || role.includes('laborer') || role.includes('labourer') || role.includes('field');
+      });
 
-      const handleSubmit = () => {
+      const handleSubmit = async () => {
         if (!form.equipmentId) return;
-        setEquipment(prev => prev.map(eq =>
-          eq.id === Number(form.equipmentId)
-            ? { ...eq, hours: Number(form.meterReading) || eq.hours, fuelLevel: Number(form.fuelLevel) || eq.fuelLevel, jobId: Number(form.jobId) || eq.jobId }
-            : eq
-        ));
-        onClose();
+        if (form.action === 'checkout' && !form.jobId) {
+          setSubmitError('Select a job before checking out equipment.');
+          return;
+        }
+        if (form.action === 'checkout' && !form.operator) {
+          setSubmitError('Select an operator before checking out equipment.');
+          return;
+        }
+
+        setSubmitLoading(true);
+        setSubmitError('');
+        try {
+          const response = await fetch(`/api/equipment/${encodeURIComponent(String(form.equipmentId))}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: form.action === 'checkout' ? 'active' : 'idle',
+              jobId: form.action === 'checkout' ? form.jobId : null,
+              ...(form.meterReading ? { hours: Number(form.meterReading) || 0 } : {}),
+              ...(form.fuelLevel ? { fuelLevel: Number(form.fuelLevel) || 0 } : {}),
+              lastUpdate: new Date().toISOString(),
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.equipment) {
+            setSubmitError(payload?.error || 'Failed to update equipment');
+            return;
+          }
+          setEquipment(prev => prev.map(eq =>
+            String(eq.id) === String(form.equipmentId)
+              ? { ...eq, ...payload.equipment, operatorId: form.action === 'checkout' ? form.operator : null }
+              : eq
+          ));
+          onClose();
+        } catch {
+          setSubmitError('Failed to update equipment');
+        } finally {
+          setSubmitLoading(false);
+        }
       };
 
       return (
         <Modal isOpen={isOpen} onClose={onClose} title="Equipment Check-In" size="md">
-          <div className="space-y-4">
+            <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Action</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ['checkout', 'Check Out'],
+                  ['checkin', 'Check In'],
+                ].map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm({ ...form, action: value })}
+                    className={`rounded-lg border px-3 py-2 text-sm font-medium ${form.action === value ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-gray-300 bg-white text-gray-700'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Equipment</label>
               <select value={form.equipmentId} onChange={(e) => setForm({ ...form, equipmentId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
                 <option value="">Select Equipment</option>
-                {equipment.map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
-              </select>
+                  {(equipment || []).map(eq => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+                </select>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Job Site</label>
-                <select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2" disabled={form.action === 'checkin'}>
                   <option value="">Select Job</option>
-                  {jobs.filter(j => j.status === 'active').map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
+                  {activeJobsForCheckout.map(job => <option key={job.id} value={job.id}>{job.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Operator</label>
-                <select value={form.operator} onChange={(e) => setForm({ ...form, operator: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                <select value={form.operator} onChange={(e) => setForm({ ...form, operator: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2" disabled={form.action === 'checkin'}>
                   <option value="">Select Operator</option>
-                  {employees.filter(e => e.role === 'Equipment Operator').map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                  {eligibleOperators.map(emp => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
                 </select>
               </div>
             </div>
@@ -11308,9 +11595,12 @@ const MobileAppShell = ({
               <label className="block text-sm font-medium text-gray-700 mb-1">Notes / Issues</label>
               <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Any issues or notes..." />
             </div>
+            {submitError && <p className="text-sm text-red-600">{submitError}</p>}
             <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={onClose}>Cancel</Button>
-              <Button variant="brand" onClick={handleSubmit}>Submit Check-In</Button>
+              <Button variant="secondary" onClick={onClose} disabled={submitLoading}>Cancel</Button>
+              <Button variant="brand" onClick={handleSubmit} disabled={submitLoading || !form.equipmentId}>
+                {submitLoading ? 'Saving...' : form.action === 'checkout' ? 'Check Out Equipment' : 'Check In Equipment'}
+              </Button>
             </div>
           </div>
         </Modal>
@@ -11589,7 +11879,7 @@ const MobileAppShell = ({
       );
     };
 
-    const SafetyModal = ({ isOpen, onClose, employees, jobs, onSubmitSafetyLog, submitLoading }) => {
+    const SafetyModal = ({ isOpen, onClose, employees, jobs, onSubmitSafetyLog, submitLoading, canFinalSafetySignOff }) => {
       const [form, setForm] = useState({ type: 'toolbox', topic: '', jobId: '', notes: '' });
       const [attendees, setAttendees] = useState([]);
       const [submitError, setSubmitError] = useState('');
@@ -11619,6 +11909,10 @@ const MobileAppShell = ({
 
       const handleSubmit = async () => {
         setSubmitError('');
+        if (!canFinalSafetySignOff) {
+          setSubmitError('Only manager/admin roles can submit final safety sign-off.');
+          return;
+        }
         if (!form.topic) {
           setSubmitError('Topic is required');
           return;
@@ -11641,6 +11935,11 @@ const MobileAppShell = ({
       return (
         <Modal isOpen={isOpen} onClose={onClose} title="Safety Sign-Off" size="md">
           <div className="space-y-4">
+            {!canFinalSafetySignOff && (
+              <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+                Only manager/admin roles can submit final safety sign-off.
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Type</label>
               <div className="flex gap-4">
@@ -11694,7 +11993,7 @@ const MobileAppShell = ({
             </div>
             <div className="flex justify-end gap-3">
               <Button variant="secondary" onClick={onClose} disabled={submitLoading}>Cancel</Button>
-              <Button variant="brand" onClick={handleSubmit} disabled={submitLoading} data-testid="safety-submit">
+              <Button variant="brand" onClick={handleSubmit} disabled={submitLoading || !canFinalSafetySignOff} data-testid="safety-submit">
                 {submitLoading ? 'Saving...' : 'Submit Sign-Off'}
               </Button>
             </div>
@@ -12729,6 +13028,9 @@ const MobileAppShell = ({
 	      };
 
       const nativeAppRuntime = useMemo(() => isNativeAppRuntime(), []);
+      const [nativeOnboardingComplete, setNativeOnboardingComplete] = useState(() =>
+        nativeAppRuntime ? isNativeOnboardingComplete() : true
+      );
 
       const handleLogout = async () => {
         try {
@@ -12786,11 +13088,17 @@ const MobileAppShell = ({
 	      }, [hydrateCurrentUser]);
 
       useEffect(() => {
+        if (!nativeAppRuntime || typeof window === 'undefined') return;
+        setNativeOnboardingComplete(isNativeOnboardingComplete());
+      }, [nativeAppRuntime]);
+
+      useEffect(() => {
         if (!authResolved || isAuthenticated || !nativeAppRuntime) return;
+        if (!nativeOnboardingComplete) return;
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.replace('/login');
         }
-      }, [authResolved, isAuthenticated, nativeAppRuntime]);
+      }, [authResolved, isAuthenticated, nativeAppRuntime, nativeOnboardingComplete]);
 
       useEffect(() => {
         if (!isAuthenticated) {
@@ -12836,6 +13144,20 @@ const MobileAppShell = ({
 
       if (!isAuthenticated) {
         if (nativeAppRuntime) {
+          if (!nativeOnboardingComplete) {
+            return (
+              <OnboardingGate
+                onLogin={(payload) => {
+                  setNativeOnboardingComplete(true);
+                  handleLogin(payload);
+                }}
+                onSignup={(payload) => {
+                  setNativeOnboardingComplete(true);
+                  handleSignup(payload);
+                }}
+              />
+            );
+          }
           return <WorkspaceLoadingScreen />;
         }
         return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;

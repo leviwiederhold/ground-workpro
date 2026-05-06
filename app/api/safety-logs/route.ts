@@ -17,6 +17,8 @@ const createSafetyLogSchema = z.object({
   job_id: z.union([z.string(), z.number()]).nullable().optional(),
 });
 
+const SAFETY_SIGN_OFF_ROLES = new Set(["admin", "pm"]);
+
 type ValidationIssue = {
   path: Array<string | number>;
   message: string;
@@ -232,15 +234,14 @@ export async function POST(request: Request) {
     if (!role) {
       return forbidden();
     }
+    if (!SAFETY_SIGN_OFF_ROLES.has(role)) {
+      return forbidden();
+    }
 
     const jobId =
       parsedBody.data.job_id === null || parsedBody.data.job_id === undefined || parsedBody.data.job_id === ""
         ? null
         : String(parsedBody.data.job_id);
-
-    if ((role === "foreman" || role === "operator") && !jobId) {
-      return validationError([{ path: "job_id", message: "job_id is required" }]);
-    }
 
     if (jobId) {
       const { data: jobRows, error: jobError } = await supabase
@@ -251,13 +252,6 @@ export async function POST(request: Request) {
         .limit(1);
       if (jobError || !jobRows?.length) {
         return notFound("Job not found");
-      }
-    }
-
-    if ((role === "foreman" || role === "operator") && jobId) {
-      const scopedJobIds = await getRoleScopedJobIds(supabase, companyId, userId, role);
-      if (!scopedJobIds?.includes(String(jobId))) {
-        return forbidden();
       }
     }
 

@@ -142,8 +142,12 @@ const MobileAppShell = ({
   useEffect(() => {
     if (typeof document === 'undefined') return undefined;
     document.body.classList.add('mobile-shell-active');
+    if (isNativeAppRuntime()) {
+      document.body.classList.add('native-app-runtime');
+    }
     return () => {
       document.body.classList.remove('mobile-shell-active');
+      document.body.classList.remove('native-app-runtime');
     };
   }, []);
 

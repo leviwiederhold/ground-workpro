@@ -77,6 +77,10 @@ body:has(.mobile-app-shell) {
   overflow: hidden;
 }
 
+body.native-app-runtime .mobile-app-shell {
+  --mobile-safe-top: 0px;
+}
+
 .mobile-app-shell__header {
   position: fixed;
   top: 0;

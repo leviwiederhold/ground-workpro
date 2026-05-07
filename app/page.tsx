@@ -825,7 +825,6 @@ const MobileAppShell = ({
       });
       const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-      const [pressedNavId, setPressedNavId] = useState(null);
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [currentRole, setCurrentRole] = useState(cachedNavState.role);
@@ -840,11 +839,6 @@ const MobileAppShell = ({
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
-      const iosAppRuntime = useMemo(() => isIosNativeAppRuntime(), []);
-      const setPressedNavItem = useCallback((itemId) => {
-        if (!iosAppRuntime) return;
-        setPressedNavId(itemId ? String(itemId) : null);
-      }, [iosAppRuntime]);
       const resolvedUserDisplayName = pickDisplayName({
         fullName: currentUser?.fullName ?? currentUser?.name,
         displayName: currentUser?.displayName,
@@ -1805,10 +1799,6 @@ const MobileAppShell = ({
       }));
 
       useEffect(() => {
-        setPressedNavId(null);
-      }, [currentView, mobileSidebarOpen]);
-
-      useEffect(() => {
         if (!navLoaded) return;
         if (navItems.length === 0) {
           if (currentView !== 'dashboard') setCurrentView('dashboard');
@@ -1965,47 +1955,21 @@ const MobileAppShell = ({
             <nav className="mobile-app-shell__drawer-nav flex-1 space-y-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
               {navItems.map(item => {
                 const navId = String(item.id);
-                const isPressed = iosAppRuntime && pressedNavId === navId;
                 return (
                   <button
                     key={navId}
                     type="button"
                     data-testid={`nav-${navId}`}
                     data-nav-id={navId}
-                    data-ios-pressed={isPressed ? 'true' : 'false'}
                     data-active-route={currentView === navId ? 'true' : 'false'}
-                    onPointerDown={(event) => {
-                      setPressedNavItem(event.currentTarget.dataset.navId);
-                    }}
-                    onPointerUp={() => {
-                      setPressedNavItem(null);
-                    }}
-                    onPointerCancel={() => {
-                      setPressedNavItem(null);
-                    }}
-                    onPointerLeave={() => {
-                      setPressedNavItem(null);
-                    }}
-                    onTouchStart={(event) => {
-                      setPressedNavItem(event.currentTarget.dataset.navId);
-                    }}
-                    onTouchEnd={() => {
-                      setPressedNavItem(null);
-                    }}
-                    onTouchCancel={() => {
-                      setPressedNavItem(null);
-                    }}
                     onClick={() => {
                       setCurrentView(navId);
                       setMobileSidebarOpen(false);
-                      setPressedNavItem(null);
                     }}
                     className={`mobile-app-shell__drawer-nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                      isPressed
-                        ? 'bg-dark-700 text-white'
-                        : currentView === navId
-                          ? 'bg-brand-500 text-white'
-                          : 'text-gray-300 hover:bg-dark-700 hover:text-white'
+                      currentView === navId
+                        ? 'bg-brand-500 text-white'
+                        : 'text-gray-300 hover:bg-dark-700 hover:text-white'
                     }`}
                   >
                     <Icon name={item.icon} className="text-lg w-5" />

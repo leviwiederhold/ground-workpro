@@ -3,8 +3,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
-const ONBOARDING_COMPLETE_KEY = "groundwork.nativeOnboardingComplete";
-
 type AuthPayload = {
   email: string;
   password: string;
@@ -67,16 +65,6 @@ function extractInviteToken(value: string) {
   }
 }
 
-export function isNativeOnboardingComplete() {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "1";
-}
-
-export function markNativeOnboardingComplete() {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(ONBOARDING_COMPLETE_KEY, "1");
-}
-
 export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
   const [screen, setScreen] = useState<"carousel" | "role" | "employer-auth" | "employee-invite">("carousel");
   const [slide, setSlide] = useState(0);
@@ -94,7 +82,6 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
   }, []);
 
   const goTo = (next: typeof screen) => {
-    if (next === "employer-auth" || next === "employee-invite") markNativeOnboardingComplete();
     setError("");
     setScreen(next);
   };
@@ -170,7 +157,6 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
       if (!response.ok || !payload?.item?.valid) {
         throw new Error(payload?.error || "Invalid invite code");
       }
-      markNativeOnboardingComplete();
       window.location.href = `/signup?invite=1&token=${encodeURIComponent(token)}`;
     } catch (inviteError) {
       setError(inviteError instanceof Error ? inviteError.message : "Invalid invite code");

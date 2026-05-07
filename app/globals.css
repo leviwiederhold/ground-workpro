@@ -115,9 +115,32 @@ body.native-app-runtime .mobile-app-shell {
   padding-top: 0.75rem;
 }
 
-body.ios-app-runtime .mobile-app-shell__drawer-nav button {
+body.ios-app-runtime .mobile-app-shell__drawer-nav button,
+body.ios-app-runtime .mobile-app-shell__drawer-nav button * {
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+body.ios-app-runtime .mobile-app-shell__drawer-nav button {
   touch-action: manipulation;
+}
+
+body.ios-app-runtime .mobile-app-shell__drawer-nav-item:hover {
+  background: transparent;
+  color: rgb(209 213 219);
+}
+
+body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-active-route="true"],
+body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-active-route="true"]:hover {
+  background: rgb(249 115 22);
+  color: #fff;
+}
+
+body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"],
+body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"]:hover {
+  background: rgb(55 65 81);
+  color: #fff;
 }
 
 .mobile-app-shell__main {

@@ -17,7 +17,7 @@ import {
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
-import { OnboardingGate, isNativeOnboardingComplete } from '@/app/components/OnboardingGate';
+import { OnboardingGate } from '@/app/components/OnboardingGate';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -841,6 +841,10 @@ const MobileAppShell = ({
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
       const iosAppRuntime = useMemo(() => isIosNativeAppRuntime(), []);
+      const setPressedNavItem = useCallback((itemId) => {
+        if (!iosAppRuntime) return;
+        setPressedNavId(itemId ? String(itemId) : null);
+      }, [iosAppRuntime]);
       const resolvedUserDisplayName = pickDisplayName({
         fullName: currentUser?.fullName ?? currentUser?.name,
         displayName: currentUser?.displayName,
@@ -1960,41 +1964,46 @@ const MobileAppShell = ({
 
             <nav className="mobile-app-shell__drawer-nav flex-1 space-y-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
               {navItems.map(item => {
-                const isPressed = iosAppRuntime && pressedNavId === item.id;
+                const navId = String(item.id);
+                const isPressed = iosAppRuntime && pressedNavId === navId;
                 return (
                   <button
-                    key={item.id}
-                    data-testid={`nav-${item.id}`}
-                    onPointerDown={() => {
-                      if (iosAppRuntime) setPressedNavId(item.id);
+                    key={navId}
+                    type="button"
+                    data-testid={`nav-${navId}`}
+                    data-nav-id={navId}
+                    data-ios-pressed={isPressed ? 'true' : 'false'}
+                    data-active-route={currentView === navId ? 'true' : 'false'}
+                    onPointerDown={(event) => {
+                      setPressedNavItem(event.currentTarget.dataset.navId);
                     }}
                     onPointerUp={() => {
-                      if (iosAppRuntime) setPressedNavId(null);
+                      setPressedNavItem(null);
                     }}
                     onPointerCancel={() => {
-                      if (iosAppRuntime) setPressedNavId(null);
+                      setPressedNavItem(null);
                     }}
                     onPointerLeave={() => {
-                      if (iosAppRuntime) setPressedNavId(null);
+                      setPressedNavItem(null);
                     }}
-                    onTouchStart={() => {
-                      if (iosAppRuntime) setPressedNavId(item.id);
+                    onTouchStart={(event) => {
+                      setPressedNavItem(event.currentTarget.dataset.navId);
                     }}
                     onTouchEnd={() => {
-                      if (iosAppRuntime) setPressedNavId(null);
+                      setPressedNavItem(null);
                     }}
                     onTouchCancel={() => {
-                      if (iosAppRuntime) setPressedNavId(null);
+                      setPressedNavItem(null);
                     }}
                     onClick={() => {
-                      setCurrentView(item.id);
+                      setCurrentView(navId);
                       setMobileSidebarOpen(false);
-                      setPressedNavId(null);
+                      setPressedNavItem(null);
                     }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
+                    className={`mobile-app-shell__drawer-nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                       isPressed
                         ? 'bg-dark-700 text-white'
-                        : currentView === item.id
+                        : currentView === navId
                           ? 'bg-brand-500 text-white'
                           : 'text-gray-300 hover:bg-dark-700 hover:text-white'
                     }`}
@@ -13028,9 +13037,6 @@ const MobileAppShell = ({
 	      };
 
       const nativeAppRuntime = useMemo(() => isNativeAppRuntime(), []);
-      const [nativeOnboardingComplete, setNativeOnboardingComplete] = useState(() =>
-        nativeAppRuntime ? isNativeOnboardingComplete() : true
-      );
 
       const handleLogout = async () => {
         try {
@@ -13046,7 +13052,7 @@ const MobileAppShell = ({
         setIsAuthenticated(false);
         setCurrentUser(null);
         setSetupChecked(true);
-        window.location.replace(nativeAppRuntime ? '/login' : '/');
+        window.location.replace('/');
       };
 
       useEffect(() => {
@@ -13088,17 +13094,11 @@ const MobileAppShell = ({
 	      }, [hydrateCurrentUser]);
 
       useEffect(() => {
-        if (!nativeAppRuntime || typeof window === 'undefined') return;
-        setNativeOnboardingComplete(isNativeOnboardingComplete());
-      }, [nativeAppRuntime]);
-
-      useEffect(() => {
         if (!authResolved || isAuthenticated || !nativeAppRuntime) return;
-        if (!nativeOnboardingComplete) return;
-        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
-          window.location.replace('/login');
+        if (typeof window !== 'undefined' && window.location.pathname === '/login') {
+          window.history.replaceState(null, '', '/');
         }
-      }, [authResolved, isAuthenticated, nativeAppRuntime, nativeOnboardingComplete]);
+      }, [authResolved, isAuthenticated, nativeAppRuntime]);
 
       useEffect(() => {
         if (!isAuthenticated) {
@@ -13144,21 +13144,7 @@ const MobileAppShell = ({
 
       if (!isAuthenticated) {
         if (nativeAppRuntime) {
-          if (!nativeOnboardingComplete) {
-            return (
-              <OnboardingGate
-                onLogin={(payload) => {
-                  setNativeOnboardingComplete(true);
-                  handleLogin(payload);
-                }}
-                onSignup={(payload) => {
-                  setNativeOnboardingComplete(true);
-                  handleSignup(payload);
-                }}
-              />
-            );
-          }
-          return <WorkspaceLoadingScreen />;
+          return <OnboardingGate onLogin={handleLogin} onSignup={handleSignup} />;
         }
         return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;
       }

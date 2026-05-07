@@ -18,20 +18,12 @@ export default function SignupPage() {
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
-    const isNative = isNativeAppRuntime();
-    setNativeRuntime(isNative);
+    setNativeRuntime(isNativeAppRuntime());
 
     supabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      if (data.session) {
-        router.replace("/");
-        router.refresh();
-        return;
-      }
-      const params = new URLSearchParams(window.location.search);
-      if (isNative && params.get("invite") !== "1") {
-        router.replace("/");
-      }
+      if (!active || !data.session) return;
+      router.replace("/");
+      router.refresh();
     });
 
     return () => {

@@ -19,8 +19,23 @@ export function ThemeInitializer() {
   useEffect(() => {
     let cancelled = false;
     const isPublicPath = isPublicThemePath(pathname);
-    const forcePublicTheme =
-      typeof window !== "undefined" && window.sessionStorage.getItem(FORCE_PUBLIC_THEME_SESSION_KEY) === "1";
+    const readForcePublicTheme = () => {
+      if (typeof window === "undefined") return false;
+      try {
+        return window.sessionStorage.getItem(FORCE_PUBLIC_THEME_SESSION_KEY) === "1";
+      } catch {
+        return false;
+      }
+    };
+    const clearForcePublicTheme = () => {
+      if (typeof window === "undefined") return;
+      try {
+        window.sessionStorage.removeItem(FORCE_PUBLIC_THEME_SESSION_KEY);
+      } catch {
+        // Storage can be unavailable in locked-down WebViews or privacy modes.
+      }
+    };
+    const forcePublicTheme = readForcePublicTheme();
 
     const applyStored = () => {
       const stored = loadStoredAppearancePreference();
@@ -71,9 +86,7 @@ export function ThemeInitializer() {
       return;
     }
 
-    if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem(FORCE_PUBLIC_THEME_SESSION_KEY);
-    }
+    clearForcePublicTheme();
 
     applyStored();
     void syncFromAccountSettings();

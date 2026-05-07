@@ -74,6 +74,38 @@ const hasRecordId = (value) => {
 };
 
 const NAV_CACHE_KEY = 'groundwork.nav-cache';
+const safeLocalStorageGet = (key, fallback = null) => {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    return window.localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+};
+const safeLocalStorageSet = (key, value) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in locked-down WebViews or privacy modes.
+  }
+};
+const safeLocalStorageRemove = (key) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Storage can be unavailable in locked-down WebViews or privacy modes.
+  }
+};
+const safeSessionStorageSet = (key, value) => {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // Storage can be unavailable in locked-down WebViews or privacy modes.
+  }
+};
 const FEEDBACK_TYPE_OPTIONS = [
   { value: 'bug', label: 'Bug' },
   { value: 'feature_request', label: 'Feature Request' },
@@ -84,7 +116,7 @@ const loadCachedNavState = () => {
     return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
   }
   try {
-    const raw = window.localStorage.getItem(NAV_CACHE_KEY);
+    const raw = safeLocalStorageGet(NAV_CACHE_KEY);
     if (!raw) return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
     const parsed = JSON.parse(raw);
     return {
@@ -821,10 +853,11 @@ const MobileAppShell = ({
       const cachedNavState = useMemo(() => loadCachedNavState(), []);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
-        return window.localStorage.getItem('app.currentView') || 'dashboard';
+        return safeLocalStorageGet('app.currentView', 'dashboard') || 'dashboard';
       });
       const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
       const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+      const [pressedNavId, setPressedNavId] = useState(null);
       const [selectedJob, setSelectedJob] = useState(null);
       const [showModal, setShowModal] = useState({ type: null, data: null });
       const [currentRole, setCurrentRole] = useState(cachedNavState.role);
@@ -839,6 +872,11 @@ const MobileAppShell = ({
       const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
+      const iosAppRuntime = useMemo(() => isIosNativeAppRuntime(), []);
+      const setPressedNavItem = useCallback((itemId) => {
+        if (!iosAppRuntime) return;
+        setPressedNavId(itemId ? String(itemId) : null);
+      }, [iosAppRuntime]);
       const resolvedUserDisplayName = pickDisplayName({
         fullName: currentUser?.fullName ?? currentUser?.name,
         displayName: currentUser?.displayName,
@@ -1058,17 +1096,15 @@ const MobileAppShell = ({
           setServerNavItems(resolvedItems);
           const resolvedModuleAccess = payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {};
           setModuleAccess(resolvedModuleAccess);
-          if (typeof window !== 'undefined') {
-            window.localStorage.setItem(
-              NAV_CACHE_KEY,
-              JSON.stringify({
-                role: uiRole,
-                displayRole: uiDisplayRole,
-                items: resolvedItems,
-                moduleAccess: resolvedModuleAccess,
-              })
-            );
-          }
+          safeLocalStorageSet(
+            NAV_CACHE_KEY,
+            JSON.stringify({
+              role: uiRole,
+              displayRole: uiDisplayRole,
+              items: resolvedItems,
+              moduleAccess: resolvedModuleAccess,
+            })
+          );
         } catch {
           setServerNavItems(fallbackNavByRole(currentRole));
           setModuleAccess({});
@@ -1799,6 +1835,10 @@ const MobileAppShell = ({
       }));
 
       useEffect(() => {
+        setPressedNavId(null);
+      }, [currentView, mobileSidebarOpen]);
+
+      useEffect(() => {
         if (!navLoaded) return;
         if (navItems.length === 0) {
           if (currentView !== 'dashboard') setCurrentView('dashboard');
@@ -1810,8 +1850,7 @@ const MobileAppShell = ({
       }, [navItems, currentView, navLoaded]);
 
       useEffect(() => {
-        if (typeof window === 'undefined') return;
-        window.localStorage.setItem('app.currentView', currentView);
+        safeLocalStorageSet('app.currentView', currentView);
       }, [currentView]);
 
       useEffect(() => {
@@ -1955,21 +1994,47 @@ const MobileAppShell = ({
             <nav className="mobile-app-shell__drawer-nav flex-1 space-y-1 overflow-y-auto px-2 pb-2 scrollbar-thin">
               {navItems.map(item => {
                 const navId = String(item.id);
+                const isPressed = iosAppRuntime && pressedNavId === navId;
                 return (
                   <button
                     key={navId}
                     type="button"
                     data-testid={`nav-${navId}`}
                     data-nav-id={navId}
+                    data-ios-pressed={isPressed ? 'true' : 'false'}
                     data-active-route={currentView === navId ? 'true' : 'false'}
+                    onPointerDown={(event) => {
+                      setPressedNavItem(event.currentTarget.dataset.navId);
+                    }}
+                    onPointerUp={() => {
+                      setPressedNavItem(null);
+                    }}
+                    onPointerCancel={() => {
+                      setPressedNavItem(null);
+                    }}
+                    onPointerLeave={() => {
+                      setPressedNavItem(null);
+                    }}
+                    onTouchStart={(event) => {
+                      setPressedNavItem(event.currentTarget.dataset.navId);
+                    }}
+                    onTouchEnd={() => {
+                      setPressedNavItem(null);
+                    }}
+                    onTouchCancel={() => {
+                      setPressedNavItem(null);
+                    }}
                     onClick={() => {
                       setCurrentView(navId);
                       setMobileSidebarOpen(false);
+                      setPressedNavItem(null);
                     }}
                     className={`mobile-app-shell__drawer-nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
-                      currentView === navId
-                        ? 'bg-brand-500 text-white'
-                        : 'text-gray-300 hover:bg-dark-700 hover:text-white'
+                      isPressed
+                        ? 'bg-dark-700 text-white'
+                        : currentView === navId
+                          ? 'bg-brand-500 text-white'
+                          : 'text-gray-300 hover:bg-dark-700 hover:text-white'
                     }`}
                   >
                     <Icon name={item.icon} className="text-lg w-5" />
@@ -5469,21 +5534,18 @@ const MobileAppShell = ({
       }, []);
 
       useEffect(() => {
-        if (typeof window === 'undefined') return;
-        const saved = window.localStorage.getItem('reports.defaultPreset');
+        const saved = safeLocalStorageGet('reports.defaultPreset');
         if (saved === 'ceo_weekly' || saved === 'ops_review') {
           applyPreset(saved);
         }
       }, [applyPreset]);
 
       const saveDefaultPreset = () => {
-        if (typeof window === 'undefined') return;
-        window.localStorage.setItem('reports.defaultPreset', activeReportPreset === 'custom' ? 'ceo_weekly' : activeReportPreset);
+        safeLocalStorageSet('reports.defaultPreset', activeReportPreset === 'custom' ? 'ceo_weekly' : activeReportPreset);
       };
 
       const clearDefaultPreset = () => {
-        if (typeof window === 'undefined') return;
-        window.localStorage.removeItem('reports.defaultPreset');
+        safeLocalStorageRemove('reports.defaultPreset');
       };
 
       useEffect(() => {
@@ -10897,7 +10959,7 @@ const MobileAppShell = ({
       useEffect(() => {
         if (!isOpen || typeof window === 'undefined') return;
         try {
-          const raw = window.localStorage.getItem('calendar.favoriteMemberIds');
+          const raw = safeLocalStorageGet('calendar.favoriteMemberIds');
           const parsed = raw ? JSON.parse(raw) : [];
           if (Array.isArray(parsed)) {
             setFavoriteMemberIds(parsed.map((id) => String(id)));
@@ -10942,7 +11004,7 @@ const MobileAppShell = ({
       const persistFavorites = (next) => {
         setFavoriteMemberIds(next);
         if (typeof window !== 'undefined') {
-          window.localStorage.setItem('calendar.favoriteMemberIds', JSON.stringify(next));
+          safeLocalStorageSet('calendar.favoriteMemberIds', JSON.stringify(next));
         }
       };
 
@@ -13005,8 +13067,8 @@ const MobileAppShell = ({
       const handleLogout = async () => {
         try {
           if (typeof window !== 'undefined') {
-            window.sessionStorage.setItem(FORCE_PUBLIC_THEME_SESSION_KEY, '1');
-            window.localStorage.removeItem('app.currentView');
+            safeSessionStorageSet(FORCE_PUBLIC_THEME_SESSION_KEY, '1');
+            safeLocalStorageRemove('app.currentView');
           }
           applyAppearancePreference('light');
           await fetch('/api/logout', { method: 'POST' }).catch(() => null);

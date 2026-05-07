@@ -53,6 +53,7 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   const requestIdRef = useRef(0);
   const dayStripRef = useRef(null);
   const initialMobileScrollDoneRef = useRef(false);
+  const mobileDateSelectionInFlightRef = useRef(false);
 
   useEffect(() => {
     employeesRef.current = employees;
@@ -134,11 +135,13 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
   }, [mergeEventIntoBuckets, removeEventFromBuckets, replaceEventInBuckets]);
 
   useEffect(() => {
+    if (mobileDateSelectionInFlightRef.current) {
+      mobileDateSelectionInFlightRef.current = false;
+      return;
+    }
     if (weekDateKeys.includes(selectedDateKey)) return;
-    const selected = new Date(`${selectedDateKey}T12:00:00`);
-    if (Number.isNaN(selected.getTime())) return;
-    setCurrentWeek(getWeekOffsetForDate(selected));
-  }, [getWeekOffsetForDate, selectedDateKey, weekDateKeys]);
+    setSelectedDateKey(weekDateKeys[0]);
+  }, [selectedDateKey, weekDateKeys]);
 
   const loadWeekAssignments = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -355,12 +358,14 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
 
   const handleSelectMobileDate = useCallback((date) => {
     const dateKey = asDateKey(date);
+    mobileDateSelectionInFlightRef.current = true;
     setSelectedDateKey(dateKey);
     setCurrentWeek(getWeekOffsetForDate(date));
   }, [getWeekOffsetForDate]);
 
   const handleSelectMobileDateKey = useCallback((dateKey) => {
     const nextDate = new Date(`${dateKey}T12:00:00`);
+    mobileDateSelectionInFlightRef.current = true;
     setSelectedDateKey(dateKey);
     setCurrentWeek(getWeekOffsetForDate(nextDate));
   }, [getWeekOffsetForDate]);
@@ -660,8 +665,24 @@ export function ScheduleView({ equipment, employees, scheduleData, setScheduleDa
                   <button
                     key={day.dateKey}
                     type="button"
+                    onPointerDown={(event) => {
+                      event.currentTarget.dataset.touching = 'true';
+                    }}
+                    onPointerUp={(event) => {
+                      event.preventDefault();
+                      handleSelectMobileDateKey(event.currentTarget.dataset.dateKey || day.dateKey);
+                      delete event.currentTarget.dataset.touching;
+                    }}
+                    onPointerCancel={(event) => {
+                      delete event.currentTarget.dataset.touching;
+                    }}
+                    onTouchEnd={(event) => {
+                      handleSelectMobileDateKey(event.currentTarget.dataset.dateKey || day.dateKey);
+                      delete event.currentTarget.dataset.touching;
+                    }}
                     onClick={(event) => {
                       event.preventDefault();
+                      if (event.currentTarget.dataset.touching === 'true') return;
                       handleSelectMobileDateKey(event.currentTarget.dataset.dateKey || day.dateKey);
                     }}
                     data-testid={`schedule-mobile-day-${day.dateKey}`}

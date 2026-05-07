@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { autoCloseStaleTimeEntries } from "@/src/lib/time-clock/autoClose";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import {
   calculateWindowHours,
@@ -21,6 +22,8 @@ export async function GET() {
     const weekStart = startOfUtcWeek(now);
     const queryStart = new Date(weekStart.getTime() - 24 * 60 * 60 * 1000).toISOString();
     const weekStartIso = weekStart.toISOString();
+
+    await autoCloseStaleTimeEntries({ supabase, companyId, userId });
 
     const entriesResult = await supabase
       .from("time_entries")

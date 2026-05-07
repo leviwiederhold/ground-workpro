@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { autoCloseStaleTimeEntries } from "@/src/lib/time-clock/autoClose";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +7,8 @@ export const dynamic = "force-dynamic";
 export async function POST() {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
+
+    await autoCloseStaleTimeEntries({ supabase, companyId, userId });
 
     let activeShiftResult = await supabase
       .from("time_entries")

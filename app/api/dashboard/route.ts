@@ -460,14 +460,27 @@ export async function GET(request: Request) {
           type: "quick_actions",
           title: "Quick Actions",
           meta: {
-            items: [
-              { key: "add_event", label: "Add Event", href: "calendar-event" },
-              { key: "time_clock", label: "Time Clock", href: "time-clock" },
-              { key: "check_in", label: "Check-In", href: "equipment-checkin" },
-              { key: "daily_report", label: "Daily Report", href: "daily-report" },
-              { key: "work_order", label: "Work Order", href: "work-order" },
-              { key: "safety_sign_off", label: "Safety Sign-Off", href: "safety" },
-            ],
+            items:
+              role === "admin" || role === "pm"
+                ? [
+                    { key: "time_clock", label: "Clock In / Out", href: "time-clock" },
+                    { key: "add_event", label: "Add Event", href: "calendar-event" },
+                    { key: "add_job", label: "Add Job", href: "/jobs" },
+                    { key: "add_equipment", label: "Add Equipment", href: "/fleet" },
+                    { key: "create_bid", label: "Create Bid", href: "/bids" },
+                    { key: "invite_employee", label: "Invite Employee", href: "/team" },
+                  ]
+                : role === "foreman"
+                  ? [
+                      { key: "time_clock", label: "Clock In / Out", href: "time-clock" },
+                      { key: "add_event", label: "Add Event", href: "calendar-event" },
+                      { key: "work_order", label: "Maintenance Work Order", href: "work-order" },
+                      { key: "job_progress", label: "Update Job Progress", href: "/jobs" },
+                    ]
+                  : [
+                      { key: "time_clock", label: "Clock In / Out", href: "time-clock" },
+                      { key: "my_jobs", label: "My Assigned Job", href: "/schedule" },
+                    ],
           },
         },
         {

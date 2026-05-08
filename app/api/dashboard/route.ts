@@ -80,6 +80,50 @@ function toError(error: unknown) {
 
 const normalizeEmail = (email: string | null | undefined) => String(email ?? "").trim().toLowerCase();
 
+function getQuickActionsForRole(role: AppRole) {
+  const common = [{ key: "time_clock", label: "Clock In / Out", href: "time-clock" }];
+
+  if (role === "admin" || role === "pm") {
+    return [
+      ...common,
+      { key: "add_event", label: "Add Event", href: "calendar-event" },
+      { key: "daily_report", label: "Daily Report", href: "daily-report" },
+      { key: "work_order", label: "Work Order", href: "work-order" },
+      { key: "create_bid", label: "Create Bid", href: "/bids" },
+      { key: "invite_employee", label: "Invite Employee", href: "/team" },
+    ];
+  }
+
+  if (role === "foreman") {
+    return [
+      ...common,
+      { key: "add_event", label: "Add Event", href: "calendar-event" },
+      { key: "daily_report", label: "Daily Report", href: "daily-report" },
+      { key: "work_order", label: "Work Order", href: "work-order" },
+      { key: "safety_sign_off", label: "Safety Sign-Off", href: "safety" },
+      { key: "job_progress", label: "Update Job Progress", href: "/jobs" },
+    ];
+  }
+
+  if (role === "mechanic") {
+    return [
+      ...common,
+      { key: "work_order", label: "Work Order", href: "work-order" },
+      { key: "check_in", label: "Equipment Check-In", href: "equipment-checkin" },
+      { key: "parts_low", label: "Parts Inventory", href: "/inventory" },
+      { key: "safety_sign_off", label: "Safety Report", href: "safety" },
+    ];
+  }
+
+  return [
+    ...common,
+    { key: "my_jobs", label: "My Schedule", href: "/schedule" },
+    { key: "daily_report", label: "Daily Report", href: "daily-report" },
+    { key: "safety_sign_off", label: "Safety Report", href: "safety" },
+    { key: "messages", label: "Message Team", href: "/messages" },
+  ];
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -460,27 +504,7 @@ export async function GET(request: Request) {
           type: "quick_actions",
           title: "Quick Actions",
           meta: {
-            items:
-              role === "admin" || role === "pm"
-                ? [
-                    { key: "time_clock", label: "Clock In / Out", href: "time-clock" },
-                    { key: "add_event", label: "Add Event", href: "calendar-event" },
-                    { key: "add_job", label: "Add Job", href: "/jobs" },
-                    { key: "add_equipment", label: "Add Equipment", href: "/fleet" },
-                    { key: "create_bid", label: "Create Bid", href: "/bids" },
-                    { key: "invite_employee", label: "Invite Employee", href: "/team" },
-                  ]
-                : role === "foreman"
-                  ? [
-                      { key: "time_clock", label: "Clock In / Out", href: "time-clock" },
-                      { key: "add_event", label: "Add Event", href: "calendar-event" },
-                      { key: "work_order", label: "Maintenance Work Order", href: "work-order" },
-                      { key: "job_progress", label: "Update Job Progress", href: "/jobs" },
-                    ]
-                  : [
-                      { key: "time_clock", label: "Clock In / Out", href: "time-clock" },
-                      { key: "my_jobs", label: "My Assigned Job", href: "/schedule" },
-                    ],
+            items: getQuickActionsForRole(role),
           },
         },
         {
@@ -520,6 +544,13 @@ export async function GET(request: Request) {
             completedCount: checklistItems.filter((item) => item.completed).length,
             totalCount: checklistItems.length,
             dismissed: onboardingDismissed,
+          },
+        },
+        {
+          type: "quick_actions",
+          title: "Quick Actions",
+          meta: {
+            items: getQuickActionsForRole(role),
           },
         },
         {
@@ -573,21 +604,30 @@ export async function GET(request: Request) {
         .slice(0, 5);
       const visibleWorkOrders = myWorkOrders.length > 0 ? myWorkOrders : workOrderTopFive;
 
-      primary.push({
-        type: "open_work_orders",
-        title: "Open work orders assigned to me",
-        subtitle: "Top 5",
-        href: "/maintenance",
-        meta: {
-          items: visibleWorkOrders.map((row) => ({
-            id: String(row.id),
-            title: String(row.title ?? "Work Order"),
-            priority: String(row.priority ?? "normal"),
-            status: String(row.status ?? "open"),
-            equipment: row.equipment_id ? String(equipmentById.get(String(row.equipment_id))?.name ?? "") : "",
-          })),
+      primary.push(
+        {
+          type: "quick_actions",
+          title: "Quick Actions",
+          meta: {
+            items: getQuickActionsForRole(role),
+          },
         },
-      });
+        {
+          type: "open_work_orders",
+          title: "Open work orders assigned to me",
+          subtitle: "Top 5",
+          href: "/maintenance",
+          meta: {
+            items: visibleWorkOrders.map((row) => ({
+              id: String(row.id),
+              title: String(row.title ?? "Work Order"),
+              priority: String(row.priority ?? "normal"),
+              status: String(row.status ?? "open"),
+              equipment: row.equipment_id ? String(equipmentById.get(String(row.equipment_id))?.name ?? "") : "",
+            })),
+          },
+        }
+      );
       primary.push({
         type: "equipment_out_of_service",
         title: "Equipment out of service",
@@ -613,6 +653,13 @@ export async function GET(request: Request) {
       const submittedToday = reportsToday.some((row) => String(row.submitted_by ?? "") === String(userId));
 
       primary.push(
+        {
+          type: "quick_actions",
+          title: "Quick Actions",
+          meta: {
+            items: getQuickActionsForRole(role),
+          },
+        },
         {
           type: "today_jobs",
           title: "Today’s jobs I’m on",
@@ -645,6 +692,13 @@ export async function GET(request: Request) {
       const equipmentBooked = assignmentRowsToday.filter((row) => row.equipment_id).length;
 
       primary.push(
+        {
+          type: "quick_actions",
+          title: "Quick Actions",
+          meta: {
+            items: getQuickActionsForRole(role),
+          },
+        },
         {
           type: "staffing_gaps",
           title: "Staffing gaps",

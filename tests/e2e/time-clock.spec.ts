@@ -1,5 +1,14 @@
-import { expect, test, type APIRequestContext } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import { loginViaUI } from "./helpers";
+
+const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:3000";
+
+async function setRole(page: Page, role: "admin" | "pm" | "foreman" | "mechanic" | "operator") {
+  const response = await page.request.post("/api/test/set-role", { data: { role }, timeout: 30_000 });
+  const body = await response.text();
+  expect(response.status(), body).toBe(200);
+  await page.context().addCookies([{ name: "e2e_role", value: role, url: BASE_URL }]);
+}
 
 async function getTimeClockStatus(request: APIRequestContext) {
   const response = await request.get("/api/time-clock", { timeout: 30_000 });
@@ -76,5 +85,23 @@ test.describe("time clock", () => {
     const response = await page.request.post("/api/time-clock/clock-out", { timeout: 30_000 });
     const body = await response.text();
     expect(response.status(), body).toBe(409);
+  });
+
+  test("manager payroll endpoint summarizes persisted time entries", async ({ page }) => {
+    await loginViaUI(page);
+    await setRole(page, "admin");
+
+    const ensureClockIn = await page.request.post("/api/time-clock/clock-in", { timeout: 30_000 });
+    expect([200, 409]).toContain(ensureClockIn.status());
+
+    const payrollResponse = await page.request.get("/api/hours-payroll?range=week", { timeout: 30_000 });
+    const payrollBody = await payrollResponse.text();
+    expect(payrollResponse.status(), payrollBody).toBe(200);
+    const payroll = JSON.parse(payrollBody)?.item ?? {};
+
+    expect(typeof payroll.totalEstimatedPayroll).toBe("number");
+    expect(typeof payroll.activeEmployees).toBe("number");
+    expect(Array.isArray(payroll.employees)).toBe(true);
+    expect(Array.isArray(payroll.entries)).toBe(true);
   });
 });

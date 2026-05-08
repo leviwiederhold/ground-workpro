@@ -181,6 +181,10 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    if (payload.hourlyRate !== undefined && actorRole !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     if (payload.role !== undefined && existingRole === "admin" && normalizeRoleValue(payload.role) !== "admin") {
       return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
     }

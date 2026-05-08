@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { getEffectiveRole } from "@/lib/auth/effectiveRole";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const toNum = (v: unknown) => {
   const n = Number(v ?? 0);
@@ -12,8 +12,13 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export async function GET() {
   try {
-    const role = await getEffectiveRole();
-    if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    let role = "";
+    try {
+      const access = await requireRole(["admin", "pm"]);
+      role = access.role;
+    } catch {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const { supabase, companyId } = await getCompanyId();
     const bidsRes = await supabase
@@ -47,15 +52,14 @@ export async function GET() {
     // Keep analytics deterministic and fast in v1; margin detail is populated from version snapshots in handoff.
     const avgEstimatedMargin = 0;
 
-    const visible = role === "admin" || role === "pm";
     return NextResponse.json({
       item: {
-        visible,
+        visible: true,
         role,
-        pipeline_value: visible ? round2(pipelineValue) : 0,
-        win_rate_percent: visible ? winRate : 0,
-        avg_estimated_margin_percent: visible ? avgEstimatedMargin : 0,
-        avg_cycle_time_days: visible ? cycleDays : 0,
+        pipeline_value: round2(pipelineValue),
+        win_rate_percent: winRate,
+        avg_estimated_margin_percent: avgEstimatedMargin,
+        avg_cycle_time_days: cycleDays,
         counts: {
           opportunities: rows.length,
           open: pipelineRows.length,

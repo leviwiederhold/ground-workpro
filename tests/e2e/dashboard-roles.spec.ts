@@ -62,3 +62,19 @@ test('mechanic dashboard shows open work orders and weather', async ({ page }) =
   await expect(page.getByTestId('stat-card-open_work_orders')).toBeVisible();
   await expect(page.getByText('Weather - Cincinnati')).toBeVisible();
 });
+
+test('every role gets time clock quick action with role-specific actions', async ({ page }) => {
+  await loginViaUI(page);
+
+  for (const role of ['admin', 'pm', 'foreman', 'mechanic', 'operator'] as Role[]) {
+    await setRole(page, role);
+    const response = await page.request.get('/api/dashboard', { timeout: 30_000 });
+    const body = await response.text();
+    expect(response.status(), body).toBe(200);
+    const primaryItems = JSON.parse(body)?.item?.sections?.primary?.items ?? [];
+    const quickActions = primaryItems.find((item: { type?: string }) => item.type === 'quick_actions')?.meta?.items ?? [];
+    const keys = quickActions.map((action: { key?: string }) => String(action.key ?? ''));
+    expect(keys).toContain('time_clock');
+    expect(keys.length).toBeGreaterThan(1);
+  }
+});

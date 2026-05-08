@@ -133,7 +133,7 @@ const loadCachedNavState = () => {
 
 const WorkspaceLoadingScreen = () => (
   <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 transition-colors dark:bg-[#050505] dark:text-gray-100">
-    <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-md items-center justify-center">
+    <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-md items-center justify-center">
       <div className="w-full overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-xl shadow-black/5 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40">
         <div className="relative overflow-hidden bg-gradient-to-br from-brand-500 via-brand-600 to-sky-600 px-6 pb-16 pt-8 text-white">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.22),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.18),transparent_34%)]" />
@@ -3266,7 +3266,7 @@ const MobileAppShell = ({
                   onClick={() => setShowFleetDetails(false)}
                 />
               )}
-              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto rounded-2xl p-0` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
+              <Card className={isMobileFleet ? `${showFleetDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto rounded-2xl p-0` : 'self-start rounded-2xl border border-gray-200 p-4 shadow-sm sticky top-4 max-h-[calc(100dvh-140px)] overflow-y-auto'}>
                   <div className={`${isMobileFleet ? 'sticky top-0 z-10 border-b border-gray-200 bg-white px-5 py-4' : 'mb-4'} flex items-start justify-between gap-4`}>
                     <div className="min-w-0 pr-14">
                       <h3 className="font-semibold text-gray-900">{selectedEquipment.name}</h3>
@@ -4307,7 +4307,7 @@ const MobileAppShell = ({
                   onClick={() => setShowTeamDetails(false)}
                 />
               )}
-              <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto'}>
+              <Card className={isMobileTeam ? `${showTeamDetails ? 'fixed inset-x-3 top-[calc(var(--mobile-header-total-height)+0.75rem)] bottom-[calc(var(--mobile-safe-bottom)+0.75rem)] z-50' : 'hidden'} overflow-y-auto p-4` : 'p-4 h-fit sticky top-4 max-h-[calc(100dvh-140px)] overflow-y-auto'}>
                 <div className="relative text-center mb-4">
                   <div className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-medium mx-auto mb-3 overflow-hidden ${getContactCircleColor(selectedEmployee.id || selectedEmployee.name)}`}>
                     {selectedEmployee.avatarUrl ? (
@@ -9057,7 +9057,7 @@ const MobileAppShell = ({
             </div>
 
             {selectedVendor ? (
-              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
+              <Card className="p-4 h-fit sticky top-4 max-h-[calc(100dvh-140px)] overflow-y-auto">
                 <div className="text-center mb-4">
                   <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3">
                     <Icon name="building" className="text-gray-500 text-2xl" />

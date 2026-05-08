@@ -27,8 +27,14 @@ const ACTION_ICON_BY_KEY = {
   time_clock: 'clock',
   check_in: 'clipboard-check',
   daily_report: 'file-lines',
-  work_order: 'wrench',
-  safety_sign_off: 'shield-halved',
+  work_order: 'screwdriver-wrench',
+  safety_sign_off: 'helmet-safety',
+  create_bid: 'file-contract',
+  invite_employee: 'user-plus',
+  job_progress: 'bars-progress',
+  my_jobs: 'calendar-day',
+  messages: 'comments',
+  parts_low: 'boxes-stacked',
 };
 
 const QUICK_ACTION_MODAL_BY_KEY = {
@@ -49,12 +55,45 @@ const QUICK_ACTION_MODAL_BY_HREF = {
   safety: QUICK_ACTION_MODAL_BY_KEY.safety_sign_off,
 };
 
+function QuickActionsCard({ section, Button, Icon, runQuickAction }) {
+  if (!section) return null;
+  const visibleActions = (section.items || []).filter((action) => Boolean(QUICK_ACTION_MODAL_BY_KEY[action.key] || QUICK_ACTION_MODAL_BY_HREF[action.href] || String(action.href || '').startsWith('/')));
+  if (visibleActions.length === 0) return null;
+
+  return (
+    <CardShell title="Quick Actions">
+      <div className="grid grid-cols-2 gap-2">
+        {visibleActions.map((action) => {
+          const iconName = ACTION_ICON_BY_KEY[action.key] || 'bolt';
+          const isSingleWide = visibleActions.length % 2 === 1 && visibleActions.length > 1 && action === visibleActions[visibleActions.length - 1];
+          return (
+            <Button key={action.key} variant="secondary" size="sm" className={`justify-start ${isSingleWide ? 'col-span-2' : ''}`} onClick={() => runQuickAction(action)} data-testid={`quick-action-${action.key}`}>
+              <Icon name={iconName} className="mr-2 text-brand-500" /> {action.label}
+            </Button>
+          );
+        })}
+      </div>
+    </CardShell>
+  );
+}
+
+function CardShell({ title, children }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      <h3 className="mb-4 font-semibold text-gray-900">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
 export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrders, inventory, currentRole, setCurrentView, setShowModal, ui }) {
   const { StatGrid, StatCard, Card, Button, Icon, Badge, ProgressBar } = ui;
 
   const [dashboardSummary, setDashboardSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState('');
+  const [payrollSummary, setPayrollSummary] = useState(null);
+  const [payrollError, setPayrollError] = useState('');
 
   const [onboardingItems, setOnboardingItems] = useState([]);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
@@ -118,6 +157,34 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   useEffect(() => {
     loadDashboardSummary();
   }, [loadDashboardSummary]);
+
+  useEffect(() => {
+    if (!['admin', 'pm'].includes(String(effectiveRole || ''))) {
+      setPayrollSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadPayrollSummary = async () => {
+      setPayrollError('');
+      try {
+        const response = await fetch('/api/hours-payroll?range=week', { cache: 'no-store' });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setPayrollError(payload?.error || 'Failed to load estimated payroll.');
+          return;
+        }
+        if (!cancelled) setPayrollSummary(payload?.item ?? null);
+      } catch {
+        if (!cancelled) setPayrollError('Failed to load estimated payroll.');
+      }
+    };
+
+    loadPayrollSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveRole]);
 
   const completeChecklistItem = async (key, completed) => {
     setOnboardingSavingKey(key);
@@ -197,6 +264,8 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
       '/team': 'team',
       '/schedule': 'schedule',
       '/bids': 'bids',
+      '/reports': 'reports',
+      '/vendors': 'vendors',
     };
     setCurrentView(routeMap[path] ?? 'dashboard');
   };
@@ -310,6 +379,13 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
   const showGettingStarted = Boolean(gettingStartedSection);
   const isAdminDashboard = effectiveRole === 'admin';
+  const isManagerDashboard = effectiveRole === 'admin' || effectiveRole === 'pm';
+  const estimatedPayrollLabel = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(Number(payrollSummary?.totalEstimatedPayroll || 0));
 
   const rolePrimaryItems = !isAdminDashboard
     ? primaryItems.filter((item) => !['active_jobs', 'quick_actions', 'getting_started', 'equipment_locations', 'open_work_orders'].includes(item.type))
@@ -471,12 +547,39 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                       const iconName = ACTION_ICON_BY_KEY[action.key] || 'bolt';
                       const isSingleWide = quickActionsSection.items.length % 2 === 1 && quickActionsSection.items.length > 1 && action === quickActionsSection.items[quickActionsSection.items.length - 1];
                       return (
-                        <Button key={action.key} variant="secondary" size="sm" className={`justify-start ${isSingleWide ? 'col-span-2' : ''}`} onClick={() => runQuickAction(action)}>
+                        <Button key={action.key} variant="secondary" size="sm" className={`justify-start ${isSingleWide ? 'col-span-2' : ''}`} onClick={() => runQuickAction(action)} data-testid={`quick-action-${action.key}`}>
                           <Icon name={iconName} className="mr-2 text-brand-500" /> {action.label}
                         </Button>
                       );
                     })}
                   </div>
+                </Card>
+              )}
+
+              {isManagerDashboard && (
+                <Card className="p-4">
+                  <h3 className="font-semibold text-gray-900 mb-4">Estimated Payroll</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-gray-200 p-3">
+                      <p className="text-xs text-gray-500">This Week</p>
+                      <p className="text-2xl font-semibold text-gray-900" data-testid="estimated-payroll-total">{estimatedPayrollLabel}</p>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 p-3">
+                      <p className="text-xs text-gray-500">Active Now</p>
+                      <p className="text-2xl font-semibold text-gray-900">{Number(payrollSummary?.activeEmployees || 0)}</p>
+                    </div>
+                  </div>
+                  {Array.isArray(payrollSummary?.employees) && payrollSummary.employees.length > 0 && (
+                    <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">
+                      {payrollSummary.employees.slice(0, 5).map((employee) => (
+                        <div key={employee.userId || employee.name} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 text-sm">
+                          <span className="min-w-0 truncate text-gray-900">{employee.name}</span>
+                          <span className="shrink-0 text-gray-600">{Number(employee.hours || 0).toFixed(2)}h</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {payrollError && <p className="mt-2 text-sm text-red-600">{payrollError}</p>}
                 </Card>
               )}
 
@@ -578,6 +681,22 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
             ))}
           </div>
           <div className="space-y-6">
+            {quickActionsSection && (
+              <Card className="p-4">
+                <h3 className="font-semibold text-gray-900 mb-4">Quick Actions</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {quickActionsSection.items.filter((action) => Boolean(QUICK_ACTION_MODAL_BY_KEY[action.key] || QUICK_ACTION_MODAL_BY_HREF[action.href] || String(action.href || '').startsWith('/'))).map((action) => {
+                    const iconName = ACTION_ICON_BY_KEY[action.key] || 'bolt';
+                    const isSingleWide = quickActionsSection.items.length % 2 === 1 && quickActionsSection.items.length > 1 && action === quickActionsSection.items[quickActionsSection.items.length - 1];
+                    return (
+                      <Button key={action.key} variant="secondary" size="sm" className={`justify-start ${isSingleWide ? 'col-span-2' : ''}`} onClick={() => runQuickAction(action)} data-testid={`quick-action-${action.key}`}>
+                        <Icon name={iconName} className="mr-2 text-brand-500" /> {action.label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
             {showGettingStarted && (
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-3">

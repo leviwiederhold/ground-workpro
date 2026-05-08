@@ -208,8 +208,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    let actorRole = "";
     try {
-      await requireModuleAccess("safety", "edit");
+      const access = await requireModuleAccess("safety", "edit");
+      actorRole = access.role;
     } catch {
       return forbidden();
     }
@@ -230,11 +232,7 @@ export async function POST(request: Request) {
     }
 
     const { supabase, companyId, userId } = await getCompanyId();
-    const role = await resolveMembershipRole(supabase, companyId, userId);
-    if (!role) {
-      return forbidden();
-    }
-    if (!SAFETY_SIGN_OFF_ROLES.has(role)) {
+    if (!SAFETY_SIGN_OFF_ROLES.has(actorRole)) {
       return forbidden();
     }
 

@@ -651,8 +651,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   };
 
   return (
-    <div className="h-[calc(100dvh-170px)] min-h-[560px] md:min-h-[700px] flex rounded-xl overflow-hidden border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-zinc-800 dark:bg-[#050505] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)]">
-      <div className={`w-full md:w-80 bg-white border-r border-gray-200 dark:border-zinc-800 dark:bg-[#090909] flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`}>
+    <div className="flex h-[calc(100dvh-var(--mobile-header-total-height)-var(--mobile-safe-bottom)-1.5rem)] min-h-0 w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-zinc-800 dark:bg-[#050505] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)] md:h-[calc(100dvh-170px)] md:min-h-[700px]" data-testid="messages-root">
+      <div className={`min-w-0 w-full md:w-80 md:shrink-0 bg-white border-r border-gray-200 dark:border-zinc-800 dark:bg-[#090909] flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`} data-testid="messages-sidebar">
         <div className="space-y-3 border-b border-gray-200 p-4 dark:border-zinc-800">
           <div className="flex items-center justify-between">
             <h3 className="font-semibold tracking-wide text-gray-900 dark:text-zinc-100">Messages</h3>
@@ -674,7 +674,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 overflow-y-auto">
             {channelsLoading ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">Loading channels...</div> : filteredChannels.length === 0 ? <div className="px-4 py-3 text-sm text-gray-500 dark:text-zinc-400">No channels yet.</div> : filteredChannels.map((channel) => (
-              <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-zinc-900 dark:hover:bg-[#131313] ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white dark:bg-brand-600' : ''}`} data-testid={`messages-channel-${channel.id}`}>
+              <button key={channel.id} onClick={() => { setActiveChannel(channel); setMessagesError(''); }} className={`w-full min-w-0 border-b border-gray-100 px-4 py-3 text-left hover:bg-gray-50 dark:border-zinc-900 dark:hover:bg-[#131313] ${activeChannel?.id === channel.id ? 'bg-brand-500 text-white dark:bg-brand-600' : ''}`} data-testid={`messages-channel-${channel.id}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className={`truncate text-sm font-medium ${activeChannel?.id === channel.id ? 'text-white' : 'text-gray-900 dark:text-zinc-100'}`}>
                     {getChannelDisplayName(channel)}
@@ -715,11 +715,12 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                   key={`contact-${contact.key}`}
                   type="button"
                   onClick={() => startDirectChat(contact)}
-                  className={`flex w-full items-center justify-between rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-[#131313] ${
+                  className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-[#131313] ${
                     isActiveDirect ? 'border border-brand-200 bg-brand-50 dark:border-brand-900/60 dark:bg-brand-950/30' : ''
                   }`}
+                  data-testid={`messages-contact-${contact.key}`}
                 >
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[11px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                       {contact.avatarUrl ? (
                         <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
@@ -732,7 +733,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                     <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{preview}</p>
                     </div>
                   </div>
-                  <span className="text-[10px] text-gray-500 dark:text-zinc-500">Chat</span>
+                  <span className="shrink-0 text-[10px] text-gray-500 dark:text-zinc-500">Chat</span>
                 </button>
               )})}
             </div>
@@ -741,12 +742,12 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       </div>
 
       {activeChannel ? (
-        <div className="flex flex-1 flex-col bg-white dark:bg-[#050505]">
-          <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-[#090909] sm:px-6">
-            <div className="flex items-center gap-3 min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#050505]" data-testid="messages-thread">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <button
                 type="button"
-                className="rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
+                className="shrink-0 rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
                 onClick={() => {
                   setActiveChannel(null);
                   setPendingDirectContact(null);
@@ -767,17 +768,19 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                   )}
                 </span>
               )}
-              <div className="min-w-0">
-              <h3 className="font-semibold text-gray-900 dark:text-zinc-100" data-testid="messages-active-channel">
+              <div className="min-w-0 flex-1">
+              <h3 className="truncate font-semibold text-gray-900 dark:text-zinc-100" data-testid="messages-active-channel">
                 {getChannelDisplayName(activeChannel)}
               </h3>
               <p className="text-xs text-gray-500 dark:text-zinc-400">{activeChannel.message_count || 0} messages</p>
               </div>
             </div>
-            <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
+            <div className="shrink-0">
+              <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
+            </div>
           </div>
 
-          <div className="flex-1 space-y-3 overflow-y-auto bg-gray-50/40 p-4 dark:bg-[#050505] sm:p-6">
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6">
             {messagesLoading ? <div className="text-sm text-gray-500 dark:text-zinc-400">Loading messages...</div> : messagesError ? <div className="text-sm text-red-500 dark:text-red-300">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500 dark:text-zinc-400">No messages yet.</div> : messages.map((msg, index) => {
               const isMine = myUserId && String(msg.sender_user_id || '') === String(myUserId);
               const dayKey = getMessageDayKey(msg.created_at);
@@ -793,7 +796,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                     </div>
                   )}
                   <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
-                    <div className={`flex max-w-[80%] ${isMine ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
+                    <div className={`flex max-w-[min(82%,36rem)] min-w-0 ${isMine ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
                       {isGroupChannel(activeChannel) && !isMine && (
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                           {msg.sender_avatar_url ? (
@@ -803,13 +806,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                           )}
                         </span>
                       )}
-                    <div className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                    <div className={`flex min-w-0 flex-col ${isMine ? 'items-end' : 'items-start'}`}>
                     {isGroupChannel(activeChannel) && (
                       <p className={`mb-1 px-1 text-[11px] font-semibold ${isMine ? 'text-gray-500 dark:text-zinc-400' : 'text-gray-600 dark:text-zinc-300'}`}>
                         {msg.sender_display_name || (isMine ? 'You' : 'Team Member')}
                       </p>
                     )}
-                    <div className={`rounded-2xl px-4 py-2.5 ${
+                    <div className={`max-w-full rounded-2xl px-4 py-2.5 ${
                       isMine
                         ? 'rounded-br-md bg-brand-600 text-white dark:bg-brand-500'
                         : 'rounded-bl-md border border-zinc-800 bg-[#111111] text-zinc-100'
@@ -826,12 +829,12 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             <div ref={messagesEndRef} />
           </div>
 
-          <div className="border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
-            <div className="flex items-end gap-3">
-              <div className="flex-1 relative">
+          <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+            <div className="flex min-w-0 items-end gap-2 sm:gap-3">
+              <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -840,31 +843,31 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           </div>
         </div>
       ) : pendingDirectContact ? (
-        <div className="flex flex-1 flex-col bg-white dark:bg-[#050505]">
-          <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-4 dark:border-zinc-800 dark:bg-[#090909] sm:px-6">
-            <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#050505]" data-testid="messages-thread">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <button
                 type="button"
-                className="rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
+                className="shrink-0 rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
                 onClick={() => setPendingDirectContact(null)}
               >
                 Back
               </button>
-              <div>
-              <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Message {pendingDirectContact.label}</h3>
+              <div className="min-w-0 flex-1">
+              <h3 className="truncate font-semibold text-gray-900 dark:text-zinc-100">Message {pendingDirectContact.label}</h3>
               <p className="text-xs text-gray-500 dark:text-zinc-400">No messages yet</p>
               </div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto bg-gray-50/40 p-4 dark:bg-[#050505] sm:p-6">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6">
             <div className="text-sm text-gray-500 dark:text-zinc-400">Send the first message to start this chat.</div>
           </div>
-          <div className="border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
-            <div className="flex items-end gap-3">
-              <div className="flex-1 relative">
+          <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+            <div className="flex min-w-0 items-end gap-2 sm:gap-3">
+              <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -901,7 +904,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                       initialsForName(contact.label)
                     )}
                   </span>
-                  <span>{contact.label}</span>
+                  <span className="min-w-0 truncate">{contact.label}</span>
                 </label>
               ))}
             </div>
@@ -944,7 +947,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                         initialsForName(contact.label)
                       )}
                     </span>
-                    <span>{contact.label}</span>
+                    <span className="min-w-0 truncate">{contact.label}</span>
                   </label>
                 ))}
               </div>
@@ -988,7 +991,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                       initialsForName(user.displayName)
                     )}
                   </span>
-                  <span>{user.displayName}</span>
+                  <span className="min-w-0 truncate">{user.displayName}</span>
                 </label>
               ))}
             </div>
@@ -1036,7 +1039,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                         initialsForName(user.displayName)
                       )}
                     </span>
-                    <span>{user.displayName}</span>
+                    <span className="min-w-0 truncate">{user.displayName}</span>
                   </label>
                 ))}
               </div>

@@ -804,7 +804,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
         {/* Job Detail Panel */}
         {!isMobile && (selectedJob ? (
-          <Card className="p-4 h-fit sticky top-4 max-h-[calc(100vh-140px)] overflow-y-auto">
+          <Card className="p-4 h-fit sticky top-4 max-h-[calc(100dvh-140px)] overflow-y-auto">
             <h3 className="font-semibold text-gray-900 mb-4">{selectedJob.name}</h3>
 
             <div className="space-y-4">

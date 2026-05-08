@@ -136,8 +136,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    let actorRole = "";
     try {
-      await requireModuleAccess("team_management", "edit");
+      const access = await requireModuleAccess("team_management", "edit");
+      actorRole = access.role;
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -159,6 +161,9 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
+    if (payload.hourlyRate !== undefined && payload.hourlyRate > 0 && actorRole !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
     const basePayload = {
       company_id: companyId,

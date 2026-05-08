@@ -72,11 +72,18 @@ async function getMobileShellMetrics(page: Page) {
     }
 
     const shellStyles = getComputedStyle(shell);
+    const bodyStyles = getComputedStyle(document.body);
     const scrollStyles = getComputedStyle(scrollRegion);
     const drawerStyles = getComputedStyle(drawer);
     const brandStyles = getComputedStyle(drawerBrand);
+    const shellRect = shell.getBoundingClientRect();
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
 
     return {
+      bodyPaddingTop: Math.round(parseFloat(bodyStyles.paddingTop) || 0),
+      bodyPaddingBottom: Math.round(parseFloat(bodyStyles.paddingBottom) || 0),
+      shellHeight: Math.round(shellRect.height),
+      viewportHeight: Math.round(viewportHeight),
       safeTop: Math.round(parseFloat(shellStyles.getPropertyValue('--mobile-safe-top')) || 0),
       headerTop: Math.round(header.getBoundingClientRect().top),
       headerHeight: Math.round(header.getBoundingClientRect().height),
@@ -132,6 +139,9 @@ test('mobile app shell keeps a stable top offset through scroll, drawer, and nav
   await dismissInstallPromptIfVisible(page);
 
   const initial = await getMobileShellMetrics(page);
+  expect(initial.bodyPaddingTop).toBe(0);
+  expect(initial.bodyPaddingBottom).toBe(0);
+  expect(initial.shellHeight).toBeGreaterThanOrEqual(initial.viewportHeight - 1);
   expect(initial.headerTop).toBe(0);
   expect(initial.headerHeight).toBeGreaterThan(0);
   expect(initial.scrollPaddingTop).toBe(initial.headerHeight);
@@ -144,6 +154,9 @@ test('mobile app shell keeps a stable top offset through scroll, drawer, and nav
   });
 
   const afterScroll = await getMobileShellMetrics(page);
+  expect(afterScroll.bodyPaddingTop).toBe(0);
+  expect(afterScroll.bodyPaddingBottom).toBe(0);
+  expect(afterScroll.shellHeight).toBeGreaterThanOrEqual(afterScroll.viewportHeight - 1);
   expect(afterScroll.headerTop).toBe(initial.headerTop);
   expect(afterScroll.headerHeight).toBe(initial.headerHeight);
   expect(afterScroll.scrollPaddingTop).toBe(initial.scrollPaddingTop);
@@ -182,4 +195,50 @@ test('mobile app shell keeps a stable top offset through scroll, drawer, and nav
   expect(Number(drawerReopen.firstNavTop)).toBeGreaterThan(drawerReopen.safeTop + 40);
 
   await closeSidebar(page);
+});
+
+test('iOS native header metrics match mobile web header metrics', async ({ browser, baseURL }) => {
+  const webContext = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const webPage = await webContext.newPage();
+  await loginViaUI(webPage);
+  await webPage.goto('/');
+  await expect(webPage.getByTestId('dashboard-header')).toBeVisible();
+  await dismissInstallPromptIfVisible(webPage);
+  const webMetrics = await getMobileShellMetrics(webPage);
+  await webContext.close();
+
+  const nativeContext = await browser.newContext({
+    baseURL,
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await nativeContext.addInitScript(() => {
+    Object.defineProperty(window, 'Capacitor', {
+      value: {
+        isNativePlatform: () => true,
+        getPlatform: () => 'ios',
+      },
+      configurable: true,
+    });
+  });
+  const nativePage = await nativeContext.newPage();
+  await loginViaUI(nativePage);
+  await nativePage.goto('/');
+  await expect(nativePage.getByTestId('dashboard-header')).toBeVisible();
+  await dismissInstallPromptIfVisible(nativePage);
+  const nativeMetrics = await getMobileShellMetrics(nativePage);
+
+  expect(nativeMetrics.safeTop).toBe(0);
+  expect(nativeMetrics.headerTop).toBe(webMetrics.headerTop);
+  expect(nativeMetrics.headerHeight).toBe(webMetrics.headerHeight);
+  expect(nativeMetrics.scrollPaddingTop).toBe(webMetrics.scrollPaddingTop);
+  expect(nativeMetrics.drawerPaddingTop).toBe(webMetrics.drawerPaddingTop);
+
+  await nativeContext.close();
 });

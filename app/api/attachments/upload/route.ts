@@ -4,6 +4,10 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { requireActiveSubscription } from "@/lib/billing/requireActiveSubscription";
+import {
+  sanitizeAttachmentFileName,
+  validateAttachmentMetadata,
+} from "@/src/lib/attachments/security";
 
 const allowedEntityTypes = ["job", "daily_report", "work_order", "document", "vendor"] as const;
 type EntityType = (typeof allowedEntityTypes)[number];
@@ -20,13 +24,6 @@ const normalizeNumber = (value: unknown) => {
   const parsed = Number(value);
   return Number.isNaN(parsed) ? null : parsed;
 };
-
-const sanitizeFileName = (value: string) =>
-  value
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 180);
 
 const normalizeEntityIdForPath = (id: unknown) => {
   if (typeof id === "number") return String(id);
@@ -183,9 +180,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: ownership.error }, { status: 404 });
     }
 
-    const safeFileName = sanitizeFileName(file.name || "upload.bin");
-    const contentType = file.type || "application/octet-stream";
     const fileBytes = new Uint8Array(await file.arrayBuffer());
+    const validation = validateAttachmentMetadata({
+      fileName: file.name || "upload.bin",
+      contentType: file.type || "application/octet-stream",
+      sizeBytes: fileBytes.byteLength,
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+    const safeFileName = sanitizeAttachmentFileName(validation.safeFileName);
+    const contentType = validation.contentType;
     const bucket = getBucketForEntityType(entityType);
     const pathEntityScope = entityType === "document" ? "company" : normalizeEntityIdForPath(entityId);
     const path = `${companyId}/${entityType}/${pathEntityScope}/${crypto.randomUUID()}_${safeFileName}`;

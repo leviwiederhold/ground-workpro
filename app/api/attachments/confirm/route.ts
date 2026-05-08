@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import {
+  assertCompanyScopedStoragePath,
+  fileSizeSchema,
+  sanitizeAttachmentFileName,
+  validateAttachmentMetadata,
+} from "@/src/lib/attachments/security";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
 
@@ -12,8 +18,8 @@ const confirmSchema = z.object({
   bucket: z.string().min(1),
   path: z.string().min(1),
   file_name: z.string().min(1),
-  content_type: z.string().default("application/octet-stream").optional(),
-  file_size: z.union([z.number(), z.string()]).nullable().optional(),
+  content_type: z.string().min(1),
+  file_size: fileSizeSchema,
 });
 
 const normalizeId = (id: unknown) => {
@@ -88,19 +94,30 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
+    if (!assertCompanyScopedStoragePath(companyId, payload.path)) {
+      return NextResponse.json({ error: "Storage path is outside company scope" }, { status: 403 });
+    }
+    const validation = validateAttachmentMetadata({
+      fileName: payload.file_name,
+      contentType: payload.content_type,
+      sizeBytes: payload.file_size,
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
 
     const insertPayload = {
       company_id: companyId,
       entity_type: payload.entity_type,
       entity_id: normalizeId(payload.entity_id),
-      file_name: payload.file_name,
-      content_type: payload.content_type ?? "application/octet-stream",
+      file_name: sanitizeAttachmentFileName(validation.safeFileName),
+      content_type: validation.contentType,
       bucket: payload.bucket,
       path: payload.path,
       file_path: payload.path,
       storage_bucket: payload.bucket,
       storage_path: payload.path,
-      file_size: normalizeNumber(payload.file_size),
+      file_size: validation.sizeBytes,
       uploaded_by: userId,
     };
 

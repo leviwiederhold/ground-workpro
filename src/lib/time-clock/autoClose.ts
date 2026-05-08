@@ -19,6 +19,9 @@ export async function autoCloseStaleTimeEntries({ supabase, companyId, userId }:
   if (stale.error || !stale.data?.length) return;
   for (const row of stale.data as Array<{id:string;clock_in_at:string}>) {
     const clockOutAt = new Date(new Date(row.clock_in_at).getTime() + maxMs).toISOString();
-    await supabase.from("time_entries").update({ clock_out_at: clockOutAt, duration_minutes: calculateDurationMinutes(row.clock_in_at, clockOutAt), status: "auto_closed" }).eq("id", row.id).is("clock_out_at", null);
+    const update = await supabase.from("time_entries").update({ clock_out_at: clockOutAt, duration_minutes: calculateDurationMinutes(row.clock_in_at, clockOutAt), status: "auto_closed" }).eq("id", row.id).is("clock_out_at", null);
+    if (update.error && /duration_minutes|status|schema cache|column/i.test(update.error.message || "")) {
+      await supabase.from("time_entries").update({ clock_out_at: clockOutAt }).eq("id", row.id).is("clock_out_at", null);
+    }
   }
 }

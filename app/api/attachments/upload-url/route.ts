@@ -3,6 +3,12 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireRole } from "@/lib/auth/requireRole";
+import {
+  fileSizeSchema,
+  getServerAttachmentBucket,
+  sanitizeAttachmentFileName,
+  validateAttachmentMetadata,
+} from "@/src/lib/attachments/security";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
 
@@ -10,26 +16,15 @@ const uploadUrlSchema = z.object({
   entity_type: entityTypeSchema,
   entity_id: z.union([z.number(), z.string()]),
   file_name: z.string().min(1),
-  content_type: z.string().default("application/octet-stream").optional(),
+  content_type: z.string().min(1),
+  file_size: fileSizeSchema,
 });
-
-const sanitizeFileName = (value: string) =>
-  value
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 180);
 
 const normalizeEntityId = (id: unknown) => {
   if (typeof id === "number") return String(id);
   if (typeof id === "string") return id.trim();
   return String(id);
 };
-
-const getAttachmentsBucket = () =>
-  process.env.SUPABASE_ATTACHMENTS_BUCKET ||
-  process.env.NEXT_PUBLIC_SUPABASE_ATTACHMENTS_BUCKET ||
-  "attachments";
 
 export async function POST(request: Request) {
   try {
@@ -62,8 +57,16 @@ export async function POST(request: Request) {
     const { supabase, companyId } = await getCompanyId();
     const supabaseAdmin = getSupabaseAdmin();
     const payload = parsed.data;
-    const bucket = getAttachmentsBucket();
-    const safeFileName = sanitizeFileName(payload.file_name);
+    const validation = validateAttachmentMetadata({
+      fileName: payload.file_name,
+      contentType: payload.content_type,
+      sizeBytes: payload.file_size,
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+    const bucket = getServerAttachmentBucket();
+    const safeFileName = sanitizeAttachmentFileName(validation.safeFileName);
     const entityId = normalizeEntityId(payload.entity_id);
     const path = `${companyId}/${payload.entity_type}/${entityId}/${Date.now()}-${safeFileName}`;
 
@@ -102,7 +105,8 @@ export async function POST(request: Request) {
       path,
       signedUploadUrl: data.signedUrl,
       token: data.token ?? null,
-      contentType: payload.content_type ?? "application/octet-stream",
+      contentType: validation.contentType,
+      maxSizeBytes: validation.sizeBytes,
     });
   } catch (error) {
     if (error instanceof TenantResolverError) {

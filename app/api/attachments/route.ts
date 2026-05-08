@@ -10,6 +10,10 @@ import {
   resolveMembershipRole,
   shouldRestrictJobsToAssignedJobs,
 } from "@/lib/jobs/roleScope";
+import {
+  sanitizeAttachmentFileName,
+  validateAttachmentMetadata,
+} from "@/src/lib/attachments/security";
 
 const entityTypeSchema = z.enum(["job", "daily_report", "work_order", "document", "vendor"]);
 
@@ -57,13 +61,6 @@ const jsonUploadSchema = z.object({
   content_type: z.string().optional(),
   file_base64: z.string().min(1),
 });
-
-const sanitizeFileName = (value: string) =>
-  value
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_")
-    .slice(0, 180);
 
 const getBucketForEntityType = (entityType: "job" | "daily_report" | "work_order" | "document" | "vendor") => {
   if (entityType === "job") return "job-photos";
@@ -371,7 +368,17 @@ export async function POST(request: Request) {
       }
     }
 
-    const safeFileName = sanitizeFileName(fileName);
+    const validation = validateAttachmentMetadata({
+      fileName,
+      contentType,
+      sizeBytes: fileBytes.byteLength,
+    });
+    if (!validation.ok) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
+    }
+
+    const safeFileName = sanitizeAttachmentFileName(validation.safeFileName);
+    contentType = validation.contentType;
     const bucket = getBucketForEntityType(entityType);
     const pathEntityScope = entityType === "document" ? "company" : normalizeEntityIdForPath(entityId);
     const path = `${companyId}/${entityType}/${pathEntityScope}/${Date.now()}-${safeFileName}`;

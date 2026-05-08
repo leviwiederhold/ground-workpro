@@ -5,6 +5,7 @@ import { getJobCostSummary } from "@/lib/job-costing/getJobCostSummary";
 import { getBidSummaryData } from "@/lib/bids/getBidSummaryData";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
+import { requireRole } from "@/lib/auth/requireRole";
 
 const paramsSchema = z.object({
   id: z.string().uuid(),
@@ -83,6 +84,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    try {
+      await requireRole(["admin", "pm"]);
+    } catch {
+      return forbidden();
+    }
+
     const routeParams = await params;
     const parsed = paramsSchema.safeParse(routeParams);
     if (!parsed.success) {

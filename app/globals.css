@@ -15,37 +15,35 @@
 html,
 body {
   width: 100%;
+  max-width: 100%;
   min-height: 100%;
+  margin: 0;
+  padding: 0;
   overscroll-behavior: none;
+  overflow-x: hidden;
 }
 
 html {
+  min-height: 100svh;
+  min-height: 100dvh;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
 
 body {
+  min-height: 100svh;
   min-height: 100dvh;
-  overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-top: var(--safe-area-top);
-  padding-right: var(--safe-area-right);
-  padding-bottom: var(--safe-area-bottom);
-  padding-left: var(--safe-area-left);
 }
 
 body.mobile-shell-active {
   position: fixed;
   inset: 0;
   width: 100%;
+  min-height: 100svh;
   min-height: 100dvh;
-  height: 100dvh;
   overflow: hidden;
-  padding-top: 0;
-  padding-right: 0;
-  padding-bottom: 0;
-  padding-left: 0;
 }
 
 body.modal-open {
@@ -54,15 +52,23 @@ body.modal-open {
 }
 
 .app-shell {
+  min-height: calc(100svh - var(--safe-area-top) - var(--safe-area-bottom));
   min-height: calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom));
+  padding-top: var(--safe-area-top);
+  padding-right: var(--safe-area-right);
+  padding-bottom: var(--safe-area-bottom);
+  padding-left: var(--safe-area-left);
+}
+
+#__next,
+.app-root {
+  width: 100%;
+  min-height: 100svh;
+  min-height: 100dvh;
 }
 
 body:has(.mobile-app-shell) {
   overflow: hidden;
-  padding-top: 0;
-  padding-right: 0;
-  padding-bottom: 0;
-  padding-left: 0;
 }
 
 .mobile-app-shell {
@@ -72,7 +78,10 @@ body:has(.mobile-app-shell) {
   --mobile-safe-left: var(--safe-area-left);
   --mobile-header-height: 4.5rem;
   --mobile-header-total-height: calc(var(--mobile-safe-top) + var(--mobile-header-height));
+  width: 100%;
+  min-height: 100svh;
   min-height: 100dvh;
+  height: 100svh;
   height: 100dvh;
   overflow: hidden;
 }
@@ -175,6 +184,7 @@ body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"]
   width: 100%;
   max-width: calc(100vw - 1.5rem);
   min-height: 0;
+  max-height: calc(100svh - var(--mobile-header-total-height, var(--safe-area-top)) - var(--safe-area-bottom) - 1.5rem);
   max-height: calc(100dvh - var(--mobile-header-total-height, var(--safe-area-top)) - var(--safe-area-bottom) - 1.5rem);
   overflow: hidden;
   overflow-x: hidden;
@@ -216,6 +226,18 @@ body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"]
 
   .mobile-sheet-header {
     padding-top: 1rem;
+  }
+}
+
+@layer utilities {
+  .min-h-screen {
+    min-height: 100svh;
+    min-height: 100dvh;
+  }
+
+  .h-screen {
+    height: 100svh;
+    height: 100dvh;
   }
 }
 

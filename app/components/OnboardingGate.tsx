@@ -86,6 +86,16 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
     setScreen(next);
   };
 
+  const goToLogin = () => {
+    setAuthMode("login");
+    goTo("employer-auth");
+  };
+
+  const goToEmployerSignup = () => {
+    setAuthMode("signup");
+    goTo("employer-auth");
+  };
+
   const nextSlide = () => {
     if (slide < features.length - 1) {
       setSlide((current) => current + 1);
@@ -112,7 +122,6 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
         const result = await supabase.auth.signInWithPassword({ email, password });
         if (result.error) throw new Error(result.error.message);
         await supabase.auth.getSession();
-        await bootstrapEmployer();
         onLogin({ email, password, company });
         return;
       }
@@ -174,17 +183,17 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
         body.native-onboarding-open { overflow: hidden; background: #000; }
         .gw-onboarding * { box-sizing: border-box; margin: 0; padding: 0; }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-        .gw-onboarding { position: fixed; inset: 0; z-index: 9999; background: #000; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; min-height: 100dvh; height: 100dvh; overflow: hidden; }
-        .gw-onboarding .phone-frame { width: 100%; min-height: 100dvh; background: #0a0a0a; overflow: hidden; position: relative; color: #e5e5e5; }
+        .gw-onboarding { position: fixed; inset: 0; z-index: 9999; background: #000; color: #e5e5e5; font-family: inherit; min-height: 100svh; min-height: 100dvh; height: 100svh; height: 100dvh; overflow: hidden; }
+        .gw-onboarding .phone-frame { width: 100%; min-height: 100svh; min-height: 100dvh; background: #0a0a0a; overflow: hidden; position: relative; color: #e5e5e5; }
         .gw-onboarding .phone-notch { display: none; }
-        .gw-onboarding .screen { padding: max(env(safe-area-inset-top), 0px) 28px max(36px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; min-height: 100dvh; height: 100dvh; animation: fadeUp 0.35s ease-out; overflow-y: auto; overscroll-behavior: contain; }
+        .gw-onboarding .screen { padding: max(env(safe-area-inset-top), 0px) 28px max(36px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; min-height: 100svh; min-height: 100dvh; height: 100svh; height: 100dvh; animation: fadeUp 0.35s ease-out; overflow-y: auto; overscroll-behavior: contain; }
         .gw-onboarding .screen[hidden] { display: none !important; }
         .gw-onboarding .skip-btn { text-align: right; padding: 16px 0 0; font-size: 13px; color: #555; cursor: pointer; background: none; border: none; font-family: inherit; }
         .gw-onboarding .skip-btn:hover { color: #999; }
         .gw-onboarding .feature-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
         .gw-onboarding .feature-icon { width: 100px; height: 100px; border-radius: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 28px; }
         .gw-onboarding .feature-icon svg { display: block; margin: 0 auto; }
-        .gw-onboarding .feature-title { font-size: 24px; font-weight: 600; color: #f5f5f5; margin-bottom: 10px; }
+        .gw-onboarding .feature-title { font-family: "Dozer", sans-serif; font-size: 24px; font-weight: 600; color: #f5f5f5; margin-bottom: 10px; letter-spacing: 0.02em; }
         .gw-onboarding .feature-desc { font-size: 15px; color: #777; line-height: 1.6; max-width: 290px; margin: 0 auto; }
         .gw-onboarding .dots { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }
         .gw-onboarding .dot { width: 8px; height: 8px; border-radius: 4px; background: #2a2a2a; border: none; cursor: pointer; transition: all 0.3s; padding: 0; }
@@ -195,7 +204,7 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
         .gw-onboarding .logo-area { display: flex; flex-direction: column; align-items: center; margin-bottom: 12px; }
         .gw-onboarding .logo-icon { width: 60px; height: 60px; border-radius: 18px; background: #f97316; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
         .gw-onboarding .logo-icon svg { display: block; margin: 0 auto; }
-        .gw-onboarding .logo-text { font-size: 24px; font-weight: 700; letter-spacing: 0.08em; color: #f5f5f5; }
+        .gw-onboarding .logo-text { font-family: "Dozer", sans-serif; font-size: 24px; font-weight: 700; letter-spacing: 0.08em; color: #f5f5f5; }
         .gw-onboarding .logo-text span { color: #f97316; }
         .gw-onboarding .subtitle { font-size: 14px; color: #555; margin-bottom: 40px; }
         .gw-onboarding .role-card { width: 100%; padding: 20px; border-radius: 18px; border: 2px solid #1e1e1e; background: #111; cursor: pointer; text-align: left; display: flex; gap: 16px; align-items: flex-start; margin-bottom: 14px; transition: border-color 0.2s, box-shadow 0.2s; font-family: inherit; }
@@ -219,7 +228,8 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
         .gw-onboarding .form-input::placeholder { color: #444; }
         .gw-onboarding .form-input.blue:focus { border-color: #0ea5e9; box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.12); }
         .gw-onboarding .invite-icon { width: 92px; height: 92px; border-radius: 28px; background: #082338; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; }
-        .gw-onboarding .invite-title { font-size: 24px; font-weight: 600; color: #f5f5f5; margin-bottom: 8px; text-align: center; }
+        .gw-onboarding .auth-title,
+        .gw-onboarding .invite-title { font-family: "Dozer", sans-serif; font-size: 24px; font-weight: 600; color: #f5f5f5; margin-bottom: 8px; text-align: center; letter-spacing: 0.02em; }
         .gw-onboarding .invite-desc { font-size: 13px; color: #666; line-height: 1.6; text-align: center; max-width: 290px; margin: 0 auto 28px; }
         .gw-onboarding .divider { display: flex; align-items: center; gap: 14px; margin: 28px 0; }
         .gw-onboarding .divider-line { flex: 1; height: 1px; background: #1e1e1e; }
@@ -230,6 +240,8 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
         .gw-onboarding .info-desc { font-size: 12px; color: #666; line-height: 1.5; }
         .gw-onboarding .btn-disabled { opacity: 0.35; cursor: not-allowed; }
         .gw-onboarding .form-error { margin-top: 12px; color: #fb7185; font-size: 13px; line-height: 1.4; }
+        .gw-onboarding .secondary-link { width: 100%; margin-top: 14px; border: none; background: transparent; color: #f97316; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; text-align: center; }
+        .gw-onboarding .secondary-link:hover { color: #fb923c; }
       `}</style>
       <div className="phone-frame">
         <div className="phone-notch" />
@@ -261,13 +273,16 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
             </div>
             <div className="subtitle">How are you using Groundwork Pro?</div>
             <div style={{ width: "100%" }}>
-              <button className="role-card" onClick={() => goTo("employer-auth")}>
+              <button className="role-card" onClick={goToEmployerSignup}>
                 <div className="role-icon employer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 21V9h6v12"/><path d="M3 9h18"/></svg></div>
                 <div><div className="role-title">I&apos;m an employer</div><div className="role-desc">Set up your company, manage jobs, crews, and equipment. Invite your team to join.</div></div>
               </button>
               <button className="role-card employee" onClick={() => goTo("employee-invite")}>
                 <div className="role-icon employee"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2L3 7v5c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V7l-9-5z"/><path d="M12 11v4"/><circle cx="12" cy="8" r="1"/></svg></div>
                 <div><div className="role-title">I&apos;m an employee</div><div className="role-desc">Join your company&apos;s workspace. You&apos;ll need an invite from your employer.</div></div>
+              </button>
+              <button className="secondary-link" onClick={goToLogin} data-testid="onboarding-existing-login">
+                Already have an account? Sign In
               </button>
             </div>
           </div>
@@ -279,8 +294,12 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
             <div style={{ textAlign: "center", marginBottom: 32 }}>
               <div className="logo-icon" style={{ margin: "0 auto 14px" }}><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 3L2 12h3v8h14v-8h3L12 3z" fill="white" stroke="white" strokeWidth="1.5" strokeLinejoin="round"/></svg></div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: "#f5f5f5", marginBottom: 4 }}>Create your company</div>
-              <div style={{ fontSize: 13, color: "#666" }}>Get started with your free trial.</div>
+              <div className="auth-title" style={{ fontSize: 20, marginBottom: 4 }}>
+                {authMode === "signup" ? "Create your company" : "Sign in to Groundwork Pro"}
+              </div>
+              <div style={{ fontSize: 13, color: "#666" }}>
+                {authMode === "signup" ? "Get started with your free trial." : "Use your existing employee or company account."}
+              </div>
             </div>
             <div className="nav-tabs">
               <button className={`nav-tab${authMode === "signup" ? " active" : ""}`} onClick={() => setAuthMode("signup")}>Sign up</button>
@@ -294,10 +313,10 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
                 </>
               )}
               <label className="form-label">Email</label>
-              <input className="form-input" type="email" placeholder="you@company.com" value={email} onChange={(event) => setEmail(event.target.value)} required />
+              <input className="form-input" type="email" placeholder="you@company.com" value={email} onChange={(event) => setEmail(event.target.value)} required data-testid="onboarding-login-email" />
               <label className="form-label">Password</label>
-              <input className="form-input" type="password" placeholder={authMode === "signup" ? "Create a password" : "Password"} value={password} onChange={(event) => setPassword(event.target.value)} required />
-              <button className="primary-btn" style={{ marginTop: 4 }} disabled={loading}>{loading ? "Please wait..." : authMode === "signup" ? "Create account" : "Sign in"}</button>
+              <input className="form-input" type="password" placeholder={authMode === "signup" ? "Create a password" : "Password"} value={password} onChange={(event) => setPassword(event.target.value)} required data-testid="onboarding-login-password" />
+              <button className="primary-btn" style={{ marginTop: 4 }} disabled={loading} data-testid="onboarding-auth-submit">{loading ? "Please wait..." : authMode === "signup" ? "Create account" : "Sign in"}</button>
               {error && <div className="form-error">{error}</div>}
             </form>
           </div>
@@ -320,6 +339,9 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
               <div className="info-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
               <div><div className="info-title">Don&apos;t have an invite?</div><div className="info-desc">Ask your employer or supervisor to send you one from their Groundwork Pro dashboard under <strong style={{ color: "#aaa" }}>Team → Invite member</strong>.</div></div>
             </div>
+            <button className="secondary-link" onClick={goToLogin}>
+              Already have an account? Sign In
+            </button>
           </div>
         </div>
       </div>

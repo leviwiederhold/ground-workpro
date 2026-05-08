@@ -74,3 +74,20 @@ test('messages direct threads are company scoped and sendable across roles', asy
   });
   expect(operatorSendRes.status()).toBe(201);
 });
+
+test('foreman can see company members available for messaging', async ({ page }) => {
+  await setRole(page, 'foreman');
+
+  const membersRes = await page.request.get('/api/company-members?excludeSelf=1');
+  const membersBody = await membersRes.text();
+  expect(membersRes.status(), membersBody).toBe(200);
+  const members = (JSON.parse(membersBody)?.items ?? []) as Array<{ userId?: string; displayName?: string; role?: string }>;
+  expect(Array.isArray(members)).toBe(true);
+
+  const usersRes = await page.request.get('/api/messages/users');
+  const usersBody = await usersRes.text();
+  expect(usersRes.status(), usersBody).toBe(200);
+  const users = (JSON.parse(usersBody)?.items ?? []) as Array<{ userId?: string; displayName?: string; role?: string }>;
+  expect(Array.isArray(users)).toBe(true);
+  expect(users.length).toBe(members.filter((member) => member.userId).length);
+});

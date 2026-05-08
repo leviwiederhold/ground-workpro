@@ -43,7 +43,7 @@ export async function POST() {
     }
 
     const clockOutAt = new Date().toISOString();
-    const updateResult = await supabase
+    let updateResult = await supabase
       .from("time_entries")
       .update({ clock_out_at: clockOutAt, duration_minutes: calculateDurationMinutes(activeShiftResult.data.clock_in_at, clockOutAt), status: "completed" })
       .eq("company_id", companyId)
@@ -52,6 +52,18 @@ export async function POST() {
       .is("clock_out_at", null)
       .select("id, clock_in_at, clock_out_at")
       .maybeSingle();
+
+    if (updateResult.error && /duration_minutes|status|schema cache|column/i.test(updateResult.error.message || "")) {
+      updateResult = await supabase
+        .from("time_entries")
+        .update({ clock_out_at: clockOutAt })
+        .eq("company_id", companyId)
+        .eq("user_id", userId)
+        .eq("id", activeShiftResult.data.id)
+        .is("clock_out_at", null)
+        .select("id, clock_in_at, clock_out_at")
+        .maybeSingle();
+    }
 
     if (updateResult.error) {
       return NextResponse.json({ error: updateResult.error.message }, { status: 400 });

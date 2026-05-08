@@ -501,7 +501,13 @@ export async function GET() {
         dismissed: onboardingDismissed,
       };
       sections.quickActions = {
-        items: [{ key: "work_order", label: "Work Order", href: "work-order" }],
+        items: [
+          { key: "time_clock", label: "Time Clock", href: "time-clock" },
+          { key: "work_order", label: "Work Order", href: "work-order" },
+          { key: "check_in", label: "Equipment Check-In", href: "equipment-checkin" },
+          { key: "parts_low", label: "Parts Inventory", href: "/inventory" },
+          { key: "safety_sign_off", label: "Safety Report", href: "safety" },
+        ],
       };
       sections.alerts = {
         items: [

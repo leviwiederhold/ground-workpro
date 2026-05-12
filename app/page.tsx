@@ -17,7 +17,6 @@ import {
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
-import { OnboardingGate } from '@/app/components/OnboardingGate';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -12895,6 +12894,7 @@ const MobileAppShell = ({
 	      const [currentUser, setCurrentUser] = useState(null);
 	      const [setupChecked, setSetupChecked] = useState(false);
 	      const [setupRefreshing, setSetupRefreshing] = useState(false);
+	      const [startupError, setStartupError] = useState<string | null>(null);
 	      const setupCheckInFlightRef = useRef(false);
 	      const hydrateCurrentUser = useCallback(async (sessionUser) => {
 	        const supabase = supabaseBrowser();
@@ -13038,8 +13038,6 @@ const MobileAppShell = ({
 	        setSetupChecked(false);
 	      };
 
-      const nativeAppRuntime = useMemo(() => isNativeAppRuntime(), []);
-
       const handleLogout = async () => {
         try {
           if (typeof window !== 'undefined') {
@@ -13079,6 +13077,7 @@ const MobileAppShell = ({
 	        }).catch((error) => {
 	          if (!isMounted) return;
 	          console.error('[startup] Failed to resolve session on app launch', error);
+	          setStartupError('Failed to initialize session.');
 	          setIsAuthenticated(false);
 	          setAuthResolved(true);
 	          setSetupChecked(true);
@@ -13109,12 +13108,16 @@ const MobileAppShell = ({
         };
 	      }, [hydrateCurrentUser]);
 
+
       useEffect(() => {
-        if (!authResolved || isAuthenticated || !nativeAppRuntime) return;
-        if (typeof window !== 'undefined' && window.location.pathname === '/login') {
-          window.history.replaceState(null, '', '/');
+        if (!authResolved || isAuthenticated) return;
+        if (typeof window === 'undefined') return;
+        const path = window.location.pathname;
+        const isAuthPath = path === '/login' || path === '/signup';
+        if (!isAuthPath) {
+          window.location.replace('/login');
         }
-      }, [authResolved, isAuthenticated, nativeAppRuntime]);
+      }, [authResolved, isAuthenticated]);
 
       useEffect(() => {
         if (!isAuthenticated) {
@@ -13159,10 +13162,10 @@ const MobileAppShell = ({
       }
 
       if (!isAuthenticated) {
-        if (nativeAppRuntime) {
-          return <OnboardingGate onLogin={handleLogin} onSignup={handleSignup} />;
+        if (startupError) {
+          return <WorkspaceLoadingScreen />;
         }
-        return <LandingPage onLogin={handleLogin} onSignup={handleSignup} />;
+        return <WorkspaceLoadingScreen />;
       }
 
       if (!setupChecked || setupRefreshing) {

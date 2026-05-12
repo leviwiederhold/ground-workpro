@@ -13067,11 +13067,21 @@ const MobileAppShell = ({
 	          setAuthResolved(true);
 	          setSetupChecked(!data.session);
 	          if (data.session?.user) {
-	            hydrateCurrentUser(data.session.user).then((user) => {
-	              if (!isMounted) return;
-	              setCurrentUser(user);
-	            });
+	            hydrateCurrentUser(data.session.user)
+	              .then((user) => {
+	                if (!isMounted) return;
+	                setCurrentUser(user);
+	              })
+	              .catch((error) => {
+	                console.error('[startup] Failed to hydrate current user from initial session', error);
+	              });
 	          }
+	        }).catch((error) => {
+	          if (!isMounted) return;
+	          console.error('[startup] Failed to resolve session on app launch', error);
+	          setIsAuthenticated(false);
+	          setAuthResolved(true);
+	          setSetupChecked(true);
 	        });
 
         const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -13083,10 +13093,14 @@ const MobileAppShell = ({
 	            setCurrentUser(null);
 	            return;
 	          }
-	          hydrateCurrentUser(session.user).then((user) => {
-	            if (!isMounted) return;
-	            setCurrentUser(user);
-	          });
+	          hydrateCurrentUser(session.user)
+	            .then((user) => {
+	              if (!isMounted) return;
+	              setCurrentUser(user);
+	            })
+	            .catch((error) => {
+	              console.error('[startup] Failed to hydrate current user after auth state change', error);
+	            });
 	        });
 
         return () => {
@@ -13167,7 +13181,7 @@ export default function Page() {
   }, []);
 
   if (!mounted) {
-    return null;
+    return <WorkspaceLoadingScreen />;
   }
 
   return <Root />;

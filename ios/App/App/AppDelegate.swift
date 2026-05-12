@@ -7,6 +7,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
     private let appBackgroundColor = UIColor(red: 249.0 / 255.0, green: 250.0 / 255.0, blue: 251.0 / 255.0, alpha: 1)
+    private var didInstallNativeMarker = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         window?.backgroundColor = appBackgroundColor
@@ -63,6 +64,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         if let webView = view as? WKWebView {
+            installNativeMarker(in: webView)
             webView.isOpaque = false
             webView.backgroundColor = appBackgroundColor
             webView.scrollView.backgroundColor = appBackgroundColor
@@ -72,6 +74,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         view.subviews.forEach { configureWebView(in: $0) }
+    }
+
+    private func installNativeMarker(in webView: WKWebView) {
+        guard !didInstallNativeMarker else {
+            return
+        }
+
+        didInstallNativeMarker = true
+        let source = """
+        window.__GROUNDWORK_NATIVE_APP__ = true;
+        window.__GROUNDWORK_NATIVE_PLATFORM__ = 'ios';
+        try { window.localStorage.setItem('groundwork.nativeApp', '1'); } catch (error) {}
+        """
+        let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        webView.configuration.userContentController.addUserScript(script)
+        webView.evaluateJavaScript(source, completionHandler: nil)
     }
 
 }

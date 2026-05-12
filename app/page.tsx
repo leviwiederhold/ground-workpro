@@ -12919,6 +12919,8 @@ const MobileAppShell = ({
 	    const Root = () => {
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
 	      const [authResolved, setAuthResolved] = useState(false);
+	      const [nativeRuntime, setNativeRuntime] = useState(false);
+	      const [nativeRuntimeResolved, setNativeRuntimeResolved] = useState(false);
 	      const [currentUser, setCurrentUser] = useState(null);
 	      const [setupChecked, setSetupChecked] = useState(false);
 	      const [setupRefreshing, setSetupRefreshing] = useState(false);
@@ -13066,6 +13068,11 @@ const MobileAppShell = ({
 	        setSetupChecked(false);
 	      };
 
+      useEffect(() => {
+        setNativeRuntime(isNativeAppRuntime());
+        setNativeRuntimeResolved(true);
+      }, []);
+
       const handleLogout = async () => {
         try {
           if (typeof window !== 'undefined') {
@@ -13175,7 +13182,7 @@ const MobileAppShell = ({
         };
       }, [isAuthenticated, verifySetup]);
 
-      if (!authResolved) {
+      if (!authResolved || !nativeRuntimeResolved) {
         return <WorkspaceLoadingScreen />;
       }
 
@@ -13192,7 +13199,11 @@ const MobileAppShell = ({
             />
           );
         }
-        return <OnboardingGate onLogin={handleLogin} onSignup={handleSignup} />;
+        return nativeRuntime ? (
+          <OnboardingGate onLogin={handleLogin} onSignup={handleSignup} />
+        ) : (
+          <LandingPage onLogin={handleLogin} onSignup={handleSignup} />
+        );
       }
 
       if (!setupChecked || setupRefreshing) {

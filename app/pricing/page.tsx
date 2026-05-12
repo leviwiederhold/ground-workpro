@@ -1,5 +1,9 @@
+"use client";
+
 import { MarketingChrome } from "@/app/components/marketing/MarketingChrome";
+import { isIosNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 import Link from "next/link";
+import { useEffect, useState } from "react";
 
 const plans = [
   {
@@ -24,6 +28,30 @@ const plans = [
 ];
 
 export default function PricingPage() {
+  const [mounted, setMounted] = useState(false);
+  const [iosAppRuntime, setIosAppRuntime] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    setIosAppRuntime(isIosNativeAppRuntime());
+  }, []);
+
+  if (!mounted) return null;
+
+  if (iosAppRuntime) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-6">
+        <div className="mx-auto max-w-lg rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-gray-900">Company Workspace</h1>
+          <p className="mt-2 text-sm text-gray-600">Advanced company administration is available on the web portal.</p>
+          <Link href="/" className="mt-5 inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
+            Return to Groundwork Pro
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <MarketingChrome
       title="Pricing"

@@ -298,7 +298,7 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
                 {authMode === "signup" ? "Create your company" : "Sign in to Groundwork Pro"}
               </div>
               <div style={{ fontSize: 13, color: "#666" }}>
-                {authMode === "signup" ? "Get started with your free trial." : "Use your existing employee or company account."}
+                {authMode === "signup" ? "Create your company workspace." : "Use your existing employee or company account."}
               </div>
             </div>
             <div className="nav-tabs">

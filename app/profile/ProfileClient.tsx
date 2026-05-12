@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -62,6 +62,8 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
   const searchParams = useSearchParams();
   const isOnboarding = searchParams.get("onboarding") === "1";
   const backHref = isOnboarding ? "/setup" : "/";
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const libraryInputRef = useRef<HTMLInputElement | null>(null);
   const [form, setForm] = useState<ProfileForm>({
     full_name: sanitizeProfileFullName(identity.fullName, identity.email),
     email: identity.email || "",
@@ -89,6 +91,11 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
     [form.email, form.full_name]
   );
 
+  const setAvatarError = (message: string) => {
+    setFieldErrors((prev) => ({ ...prev, avatar_url: message }));
+    setError(message);
+  };
+
   const handleAvatarUpload = async (file: File | null) => {
     if (!file) return;
     setFieldErrors((prev) => {
@@ -96,25 +103,69 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
       delete next.avatar_url;
       return next;
     });
-    if (!ALLOWED_AVATAR_TYPES.has(String(file.type).toLowerCase())) {
-      setFieldErrors((prev) => ({ ...prev, avatar_url: "Only PNG, JPEG, WEBP, or SVG avatars are supported." }));
-      setError("Please fix the highlighted fields.");
-      return;
+    try {
+      if (!ALLOWED_AVATAR_TYPES.has(String(file.type).toLowerCase())) {
+        setAvatarError("Only PNG, JPEG, WEBP, or SVG avatars are supported.");
+        return;
+      }
+      if (file.size > MAX_AVATAR_SIZE_BYTES) {
+        setAvatarError("Avatar file must be 2MB or smaller.");
+        return;
+      }
+      const dataUrl = await toDataUrl(file);
+      const decodedSize = getDecodedDataUrlSize(dataUrl);
+      if (decodedSize !== null && decodedSize > MAX_AVATAR_SIZE_BYTES) {
+        setAvatarError("Avatar file must be 2MB or smaller.");
+        return;
+      }
+      setForm((prev) => ({ ...prev, avatar_url: dataUrl }));
+      setError("");
+    } catch {
+      setAvatarError("We could not load that photo. Please try again or choose another image.");
     }
-    if (file.size > MAX_AVATAR_SIZE_BYTES) {
-      setFieldErrors((prev) => ({ ...prev, avatar_url: "Avatar file must be 2MB or smaller." }));
-      setError("Please fix the highlighted fields.");
-      return;
+  };
+
+  const openPhotoLibrary = () => {
+    try {
+      libraryInputRef.current?.click();
+    } catch {
+      setAvatarError("We could not open your photo library. Please try again.");
     }
-    const dataUrl = await toDataUrl(file);
-    const decodedSize = getDecodedDataUrlSize(dataUrl);
-    if (decodedSize !== null && decodedSize > MAX_AVATAR_SIZE_BYTES) {
-      setFieldErrors((prev) => ({ ...prev, avatar_url: "Avatar file must be 2MB or smaller." }));
-      setError("Please fix the highlighted fields.");
-      return;
+  };
+
+  const handleTakePhoto = async () => {
+    setStatus("");
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      delete next.avatar_url;
+      return next;
+    });
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        openPhotoLibrary();
+        return;
+      }
+
+      let stream: MediaStream | null = null;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      } catch (permissionError) {
+        const name = permissionError instanceof DOMException ? permissionError.name : "";
+        if (name === "NotAllowedError" || name === "SecurityError") {
+          setAvatarError("Camera access is blocked. Allow camera access in Settings or choose a photo from your library.");
+          return;
+        }
+        openPhotoLibrary();
+        return;
+      } finally {
+        stream?.getTracks().forEach((track) => track.stop());
+      }
+
+      cameraInputRef.current?.click();
+    } catch {
+      setAvatarError("We could not open the camera. Please choose a photo from your library.");
+      openPhotoLibrary();
     }
-    setForm((prev) => ({ ...prev, avatar_url: dataUrl }));
-    setError("");
   };
 
   const handleSave = async () => {
@@ -223,17 +274,47 @@ export function ProfileClient({ identity }: { identity: CurrentUserIdentityLite 
               )}
             </div>
             <div className="space-y-2">
-              <label className="inline-flex cursor-pointer items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
-                Upload profile photo
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={() => {
+                    void handleTakePhoto();
+                  }}
+                >
+                  Take Photo
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  onClick={openPhotoLibrary}
+                >
+                  Choose Photo
+                </button>
                 <input
+                  ref={cameraInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="image/png,image/jpeg,image/jpg,image/webp"
+                  capture="environment"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    event.target.value = "";
+                    void handleAvatarUpload(file);
+                  }}
+                />
+                <input
+                  ref={libraryInputRef}
                   type="file"
                   className="hidden"
                   accept="image/png,image/jpeg,image/jpg,image/webp,image/svg+xml"
                   onChange={(event) => {
-                    void handleAvatarUpload(event.target.files?.[0] ?? null);
+                    const file = event.target.files?.[0] ?? null;
+                    event.target.value = "";
+                    void handleAvatarUpload(file);
                   }}
                 />
-              </label>
+              </div>
               {fieldErrors.avatar_url ? <p className="text-xs text-red-600">{fieldErrors.avatar_url}</p> : null}
               {form.avatar_url && (
                 <button

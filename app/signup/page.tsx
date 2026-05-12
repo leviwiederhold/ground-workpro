@@ -133,7 +133,7 @@ export default function SignupPage() {
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-          {nativeRuntime ? "Create your account" : "Start your free trial"}
+          Create your account
         </h1>
         <p className="text-sm text-gray-500 mb-6">
           {nativeRuntime ? "Choose how you want to continue." : "Create your account to get started."}

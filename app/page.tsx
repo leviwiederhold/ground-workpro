@@ -16,7 +16,7 @@ import {
 } from '@/lib/permissions/sensitivity';
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
-import { isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
+import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
 
 const DashboardView = dynamic(
@@ -40,20 +40,6 @@ const JobsView = dynamic(
 
 const confirmDestructiveAction = (targetLabel) =>
   window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
-
-const isIosNativeAppRuntime = () => {
-  if (typeof window === 'undefined' || !isNativeAppRuntime()) return false;
-  const candidate = window;
-  try {
-    if (typeof candidate.Capacitor?.getPlatform === 'function') {
-      return String(candidate.Capacitor.getPlatform()).toLowerCase() === 'ios';
-    }
-  } catch {
-    // Fall through to the user-agent heuristic.
-  }
-  const userAgent = String(window.navigator?.userAgent ?? '').toLowerCase();
-  return userAgent.includes('iphone') || userAgent.includes('ipad') || userAgent.includes('ipod');
-};
 
 const canRoleGiveFinalSafetySignOff = (role) =>
   ['executive', 'operations', 'admin', 'pm'].includes(String(role || '').toLowerCase());
@@ -1075,7 +1061,11 @@ const MobileAppShell = ({
           operator: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
           field: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
         };
-        return (byRole[String(role || 'executive')] || byRole.executive).map((key) => navLibrary[key]).filter(Boolean);
+        const keys = byRole[String(role || 'executive')] || byRole.executive;
+        return keys
+          .filter((key) => !(key === 'subscribe' && isIosNativeAppRuntime()))
+          .map((key) => navLibrary[key])
+          .filter(Boolean);
       }, []);
 
       const loadNav = useCallback(async () => {
@@ -1828,11 +1818,13 @@ const MobileAppShell = ({
         setHeaderDateLabel(getUtcDateLabel());
       }, []);
 
-      const navItems = serverNavItems.map((item) => ({
-        id: item.key,
-        icon: item.iconKey || 'circle',
-        label: item.label,
-      }));
+      const navItems = serverNavItems
+        .filter((item) => !(iosAppRuntime && item.key === 'subscribe'))
+        .map((item) => ({
+          id: item.key,
+          icon: item.iconKey || 'circle',
+          label: item.label,
+        }));
 
       useEffect(() => {
         setPressedNavId(null);
@@ -1961,7 +1953,16 @@ const MobileAppShell = ({
           case 'reports': return <ReportsView jobs={jobs} equipment={equipment} employees={employees} dailyReports={dailyReports} dailyReportsLoading={dailyReportsLoading} setDailyReports={setDailyReports} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
           case 'costing': return <JobCostingView jobs={jobs} costCodes={costCodes} costCodesLoading={costCodesLoading} setCostCodes={setCostCodes} moduleAccess={moduleAccess} />;
           case 'finance': return <FinanceView jobs={jobs} bids={bids} vendors={vendors} inventory={inventory} workOrders={workOrders} currentRole={currentRole} moduleAccess={moduleAccess} />;
-          case 'subscribe': return <SubscribeView employees={employees} currentRole={currentRole} />;
+          case 'subscribe':
+            if (isIosNativeAppRuntime()) {
+              return (
+                <Card className="p-6">
+                  <h3 className="font-semibold text-gray-900 mb-2">Company Workspace</h3>
+                  <p className="text-sm text-gray-600">Manage your company workspace on the web portal.</p>
+                </Card>
+              );
+            }
+            return <SubscribeView employees={employees} currentRole={currentRole} />;
           case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
           case 'marketing': return <MarketingView />;
           case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} jobs={jobs} />;
@@ -2336,7 +2337,7 @@ const MobileAppShell = ({
                               <Icon name="building" className="text-gray-400" /> Company Settings
                             </button>
                           )}
-                          {isCeoRole && (
+                          {isCeoRole && !isIosNativeAppRuntime() && (
                             <button
                               onClick={() => navigateFromUserMenu('/settings/billing')}
                               className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -9720,6 +9721,7 @@ const MobileAppShell = ({
     // SUBSCRIBE VIEW
     // ============================================
     const SubscribeView = ({ employees = [], currentRole }) => {
+      const isIosApp = useMemo(() => isIosNativeAppRuntime(), []);
       const isAdmin = currentRole === 'executive';
       const [billingStatus, setBillingStatus] = useState(null);
       const [loading, setLoading] = useState(false);
@@ -9746,6 +9748,7 @@ const MobileAppShell = ({
           try {
             setLoading(true);
             setError('');
+            if (isIosApp) return;
             const response = await fetch('/api/billing/status', { cache: 'no-store' });
             const payload = await response.json().catch(() => ({}));
             if (!active) return;
@@ -9768,7 +9771,7 @@ const MobileAppShell = ({
         return () => {
           active = false;
         };
-      }, []);
+      }, [isIosApp]);
 
       const handleBillingAction = async (path) => {
         try {
@@ -9793,6 +9796,15 @@ const MobileAppShell = ({
           setActionLoading('');
         }
       };
+
+      if (isIosApp) {
+        return (
+          <Card className="p-6">
+            <h3 className="font-semibold text-gray-900 mb-2">Company Workspace</h3>
+            <p className="text-sm text-gray-600">Manage your company workspace on the web portal.</p>
+          </Card>
+        );
+      }
 
       if (!isAdmin) {
         return (
@@ -9915,6 +9927,7 @@ const MobileAppShell = ({
     // SETTINGS VIEW
     // ============================================
     const SettingsView = ({ employees = [], currentUser, currentRole }) => {
+      const isIosApp = useMemo(() => isIosNativeAppRuntime(), []);
       const isAdmin = currentRole === 'executive';
       const [activeTab, setActiveTab] = useState('company');
       const [billingStatus, setBillingStatus] = useState(null);
@@ -9940,6 +9953,7 @@ const MobileAppShell = ({
           try {
             setSettingsLoading(true);
             setSettingsError('');
+            if (isIosApp) return;
             const billingRes = await fetch('/api/billing/status', { cache: 'no-store' });
             const billingPayload = await billingRes.json().catch(() => ({}));
             if (!active) return;
@@ -9957,7 +9971,7 @@ const MobileAppShell = ({
         return () => {
           active = false;
         };
-      }, []);
+      }, [isIosApp]);
 
       useEffect(() => {
         let active = true;
@@ -10022,8 +10036,8 @@ const MobileAppShell = ({
             tabs={[
               { id: 'company', label: 'Company', icon: 'building' },
               { id: 'users', label: 'Users & Roles', icon: 'users' },
-              { id: 'billing', label: 'Billing', icon: 'credit-card' },
-              { id: 'pricing', label: 'Pricing Defaults', icon: 'sliders' },
+              ...(isIosApp ? [] : [{ id: 'billing', label: 'Billing', icon: 'credit-card' }]),
+              { id: 'pricing', label: 'Cost Defaults', icon: 'sliders' },
               { id: 'security', label: 'Security', icon: 'shield-halved' },
             ]}
             activeTab={activeTab}
@@ -10059,7 +10073,7 @@ const MobileAppShell = ({
                 <h3 className="font-semibold text-gray-900 mb-3">System Snapshot</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-gray-500">Team Members</span><span className="font-medium">{employees.length}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Billing Active</span><span className="font-medium">{billingStatus?.is_active ? 'Yes' : 'No'}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">Workspace Status</span><span className="font-medium">{isIosApp ? 'Active' : billingStatus?.is_active ? 'Active' : 'Pending'}</span></div>
                 </div>
               </Card>
             </div>
@@ -10117,7 +10131,7 @@ const MobileAppShell = ({
           {activeTab === 'pricing' && (
             <Card className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-gray-900">Pricing Defaults</h3>
+                <h3 className="font-semibold text-gray-900">Cost Defaults</h3>
                 <Button variant="brand" size="sm" onClick={savePricingSettings} disabled={!isAdmin || pricingSaving || pricingLoading}>
                   {pricingSaving ? 'Saving...' : 'Save'}
                 </Button>
@@ -10146,7 +10160,7 @@ const MobileAppShell = ({
               </div>
               {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
               {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
-              {!isAdmin && <p className="text-xs text-gray-500 mt-3">Read-only. Only CEO/admin can save pricing defaults.</p>}
+              {!isAdmin && <p className="text-xs text-gray-500 mt-3">Read-only. Only CEO/admin can save cost defaults.</p>}
             </Card>
           )}
 

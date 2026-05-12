@@ -1,6 +1,6 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-const liveUrl = String(process.env.CAPACITOR_SERVER_URL ?? "").trim();
+const liveUrl = String(process.env.CAPACITOR_SERVER_URL ?? "https://ground-workpro.vercel.app").trim();
 const liveUrlHost = liveUrl ? new URL(liveUrl).host : null;
 
 const config: CapacitorConfig = {

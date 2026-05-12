@@ -7,9 +7,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
     private let appBackgroundColor = UIColor(red: 249.0 / 255.0, green: 250.0 / 255.0, blue: 251.0 / 255.0, alpha: 1)
+    private let productionAppURL = URL(string: "https://ground-workpro.vercel.app/?gw_native=1")!
     private var didInstallNativeMarker = false
+    private var didLoadProductionAppURL = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        clearWebViewAssetCache()
         window?.backgroundColor = appBackgroundColor
         DispatchQueue.main.async { [weak self] in
             self?.configureWebViewBackground()
@@ -65,6 +68,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         if let webView = view as? WKWebView {
             installNativeMarker(in: webView)
+            loadProductionAppIfNeeded(in: webView)
             webView.isOpaque = false
             webView.backgroundColor = appBackgroundColor
             webView.scrollView.backgroundColor = appBackgroundColor
@@ -90,6 +94,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         webView.configuration.userContentController.addUserScript(script)
         webView.evaluateJavaScript(source, completionHandler: nil)
+    }
+
+    private func loadProductionAppIfNeeded(in webView: WKWebView) {
+        guard !didLoadProductionAppURL else {
+            return
+        }
+
+        if webView.url?.host == productionAppURL.host {
+            didLoadProductionAppURL = true
+            return
+        }
+
+        didLoadProductionAppURL = true
+        webView.stopLoading()
+        webView.load(URLRequest(url: productionAppURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+    }
+
+    private func clearWebViewAssetCache() {
+        let cacheTypes: Set<String> = [
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache
+        ]
+        WKWebsiteDataStore.default().removeData(ofTypes: cacheTypes, modifiedSince: Date(timeIntervalSince1970: 0), completionHandler: {})
     }
 
 }

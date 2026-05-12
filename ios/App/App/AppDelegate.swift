@@ -1,13 +1,18 @@
 import UIKit
+import WebKit
 import Capacitor
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
+    private let appBackgroundColor = UIColor(red: 249.0 / 255.0, green: 250.0 / 255.0, blue: 251.0 / 255.0, alpha: 1)
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        window?.backgroundColor = appBackgroundColor
+        DispatchQueue.main.async { [weak self] in
+            self?.configureWebViewBackground()
+        }
         return true
     }
 
@@ -26,7 +31,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        configureWebViewBackground()
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -44,6 +49,29 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Feel free to add additional processing here, but if you want the App API to support
         // tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
+    }
+
+    private func configureWebViewBackground() {
+        window?.backgroundColor = appBackgroundColor
+        window?.rootViewController?.view.backgroundColor = appBackgroundColor
+        configureWebView(in: window?.rootViewController?.view)
+    }
+
+    private func configureWebView(in view: UIView?) {
+        guard let view = view else {
+            return
+        }
+
+        if let webView = view as? WKWebView {
+            webView.isOpaque = false
+            webView.backgroundColor = appBackgroundColor
+            webView.scrollView.backgroundColor = appBackgroundColor
+            webView.scrollView.contentInsetAdjustmentBehavior = .never
+            webView.scrollView.contentInset = .zero
+            webView.scrollView.scrollIndicatorInsets = .zero
+        }
+
+        view.subviews.forEach { configureWebView(in: $0) }
     }
 
 }

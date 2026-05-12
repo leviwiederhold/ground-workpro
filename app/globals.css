@@ -115,11 +115,15 @@ body:has(.mobile-app-shell) {
 }
 
 .mobile-app-shell__drawer {
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  height: -webkit-fill-available;
   min-height: 100vh;
   min-height: 100svh;
   min-height: 100dvh;
   min-height: -webkit-fill-available;
-  background: #111827;
+  overflow: hidden;
   padding-top: var(--mobile-safe-top);
   padding-right: var(--mobile-safe-right);
   padding-left: var(--mobile-safe-left);
@@ -130,8 +134,11 @@ body:has(.mobile-app-shell) {
 }
 
 .mobile-app-shell__drawer-nav {
+  min-height: 0;
   padding-top: 0.75rem;
-  padding-bottom: max(0.75rem, var(--mobile-safe-bottom));
+  padding-bottom: calc(0.75rem + var(--mobile-safe-bottom));
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
 }
 
 body.ios-app-runtime .mobile-app-shell__drawer-nav button,

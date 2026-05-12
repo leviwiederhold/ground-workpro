@@ -9564,44 +9564,6 @@ const MobileAppShell = ({
 
       return (
         <div className="space-y-6">
-          <Card className="overflow-hidden border-0 bg-gradient-to-br from-slate-900 via-blue-900 to-blue-700 p-5 text-white shadow-lg shadow-blue-900/20 sm:p-6">
-            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-              <div className="flex items-start gap-4">
-                <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-white/12 ring-1 ring-white/15 backdrop-blur">
-                  <Icon name="building-columns" className="text-2xl" />
-                </div>
-                <div className="space-y-2">
-                  <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-100">
-                    <Icon name="sparkles" className="text-[10px]" />
-                    Finance Sync
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold">Accounting Integration</h3>
-                    <p className="max-w-xl text-sm text-blue-100 sm:text-base">Connect your accounting stack to keep job costs, vendor spend, and reconciliations aligned without leaving Groundwork Pro.</p>
-                  </div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <button
-                  className="flex items-center justify-center gap-2 rounded-xl bg-white/12 px-4 py-3 text-sm font-semibold text-white opacity-70 ring-1 ring-white/15 transition-colors"
-                  disabled
-                >
-                  <Icon name="link" /> Connect QuickBooks
-                </button>
-                <button
-                  className="flex items-center justify-center gap-2 rounded-xl bg-white/12 px-4 py-3 text-sm font-semibold text-white opacity-70 ring-1 ring-white/15 transition-colors"
-                  disabled
-                >
-                  <Icon name="rotate" /> Sync Now
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-blue-100 ring-1 ring-white/10">
-              <Icon name="circle-info" className="text-[11px]" />
-              Not configured yet
-            </div>
-          </Card>
-
           <Card className="p-4">
             <h3 className="font-semibold text-gray-900 mb-2">
               <Icon name="chart-line" className="mr-2 text-brand-500" />

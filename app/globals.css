@@ -44,6 +44,7 @@ body.mobile-shell-active {
   min-height: 100svh;
   min-height: 100dvh;
   overflow: hidden;
+  background: #f9fafb;
 }
 
 body.modal-open {
@@ -78,13 +79,15 @@ body:has(.mobile-app-shell) {
   --mobile-safe-left: var(--safe-area-left);
   --mobile-header-height: 4.5rem;
   --mobile-header-total-height: calc(var(--mobile-safe-top) + var(--mobile-header-height));
-  position: relative;
+  position: fixed;
+  inset: 0;
   width: 100%;
   min-height: 100svh;
   min-height: 100dvh;
-  height: 100svh;
-  height: 100dvh;
+  min-height: -webkit-fill-available;
+  height: auto;
   overflow: hidden;
+  background: #f9fafb;
 }
 
 .mobile-app-shell__header {

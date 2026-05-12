@@ -23,7 +23,7 @@ const features = [
     bg: 'linear-gradient(135deg, #f97316, #ea580c)',
   },
   {
-    icon: '<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="13" width="7" height="7" rx="1.5"/><circle cx="5.5" cy="16.5" r="2"/><path d="M9 14h2"/><path d="M5.5 13V9.5a2.5 2.5 0 012.5-2.5h8a2.5 2.5 0 012.5 2.5V13"/><rect x="15" y="5" width="5" height="15" rx="1.5"/><path d="M17.5 8h0M17.5 11h0"/></svg>',
+    icon: '<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17V8a2 2 0 0 1 2-2h9v11"/><path d="M14 10h3.5l3.5 4v3h-3"/><path d="M14 17H9"/><circle cx="6.5" cy="17" r="2"/><circle cx="18" cy="17" r="2"/><path d="M6 10h4"/></svg>',
     title: 'Fleet management',
     desc: 'Track every machine from yard to jobsite. Maintenance, assignments, and utilization in real time.',
     bg: 'linear-gradient(135deg, #f59e0b, #ea580c)',
@@ -192,7 +192,7 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
         .gw-onboarding .skip-btn:hover { color: #999; }
         .gw-onboarding .feature-area { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
         .gw-onboarding .feature-icon { width: 100px; height: 100px; border-radius: 28px; display: flex; align-items: center; justify-content: center; margin: 0 auto 28px; }
-        .gw-onboarding .feature-icon svg { display: block; margin: 0 auto; }
+        .gw-onboarding .feature-icon svg { display: block; width: 42px; height: 42px; margin: 0 auto; overflow: visible; vector-effect: non-scaling-stroke; }
         .gw-onboarding .feature-title { font-family: "Dozer", sans-serif; font-size: 24px; font-weight: 600; color: #f5f5f5; margin-bottom: 10px; letter-spacing: 0.02em; }
         .gw-onboarding .feature-desc { font-size: 15px; color: #777; line-height: 1.6; max-width: 290px; margin: 0 auto; }
         .gw-onboarding .dots { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }

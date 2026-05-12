@@ -17,6 +17,7 @@ import {
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
+import { OnboardingGate } from '@/app/components/OnboardingGate';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -161,6 +162,33 @@ const WorkspaceLoadingScreen = () => (
             ))}
           </div>
         </div>
+      </div>
+    </div>
+  </main>
+);
+
+const WorkspaceStartupErrorScreen = ({ message, onRetry }) => (
+  <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 dark:bg-[#050505] dark:text-gray-100">
+    <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-md items-center justify-center">
+      <div className="w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-300">
+            <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold">Groundwork Pro could not start</h1>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+              {message || 'The app hit an unexpected startup issue. Please retry.'}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-5 w-full rounded-lg bg-dark-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-dark-800"
+        >
+          Retry
+        </button>
       </div>
     </div>
   </main>
@@ -13110,16 +13138,6 @@ const MobileAppShell = ({
 
 
       useEffect(() => {
-        if (!authResolved || isAuthenticated) return;
-        if (typeof window === 'undefined') return;
-        const path = window.location.pathname;
-        const isAuthPath = path === '/login' || path === '/signup';
-        if (!isAuthPath) {
-          window.location.replace('/login');
-        }
-      }, [authResolved, isAuthenticated]);
-
-      useEffect(() => {
         if (!isAuthenticated) {
           setSetupChecked(true);
           return;
@@ -13163,9 +13181,18 @@ const MobileAppShell = ({
 
       if (!isAuthenticated) {
         if (startupError) {
-          return <WorkspaceLoadingScreen />;
+          return (
+            <WorkspaceStartupErrorScreen
+              message={startupError}
+              onRetry={() => {
+                setStartupError(null);
+                setAuthResolved(false);
+                window.location.reload();
+              }}
+            />
+          );
         }
-        return <WorkspaceLoadingScreen />;
+        return <OnboardingGate onLogin={handleLogin} onSignup={handleSignup} />;
       }
 
       if (!setupChecked || setupRefreshing) {

@@ -117,15 +117,18 @@ body:has(.mobile-app-shell) {
 .mobile-app-shell__drawer {
   height: 100vh;
   height: 100svh;
-  height: 100dvh;
   height: -webkit-fill-available;
+  height: 100dvh;
   min-height: 100vh;
   min-height: 100svh;
-  min-height: 100dvh;
   min-height: -webkit-fill-available;
+  min-height: 100dvh;
+  max-height: 100dvh;
   overflow: hidden;
+  overflow-x: hidden;
   padding-top: var(--mobile-safe-top);
   padding-right: var(--mobile-safe-right);
+  padding-bottom: var(--mobile-safe-bottom);
   padding-left: var(--mobile-safe-left);
 }
 
@@ -196,8 +199,8 @@ body.ios-app-runtime .mobile-app-shell,
 body.ios-app-runtime .mobile-app-shell__drawer {
   height: 100vh;
   height: 100svh;
-  height: 100dvh;
   height: -webkit-fill-available;
+  height: 100dvh;
 }
 
 .mobile-sheet-backdrop {

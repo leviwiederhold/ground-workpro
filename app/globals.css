@@ -21,6 +21,7 @@ body {
   padding: 0;
   overscroll-behavior: none;
   overflow-x: hidden;
+  background: #f9fafb;
 }
 
 html {
@@ -85,7 +86,10 @@ body:has(.mobile-app-shell) {
   min-height: 100svh;
   min-height: 100dvh;
   min-height: -webkit-fill-available;
-  height: auto;
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  height: -webkit-fill-available;
   overflow: hidden;
   background: #f9fafb;
 }
@@ -111,6 +115,11 @@ body:has(.mobile-app-shell) {
 }
 
 .mobile-app-shell__drawer {
+  min-height: 100vh;
+  min-height: 100svh;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+  background: #111827;
   padding-top: var(--mobile-safe-top);
   padding-right: var(--mobile-safe-right);
   padding-left: var(--mobile-safe-left);
@@ -122,6 +131,7 @@ body:has(.mobile-app-shell) {
 
 .mobile-app-shell__drawer-nav {
   padding-top: 0.75rem;
+  padding-bottom: max(0.75rem, var(--mobile-safe-bottom));
 }
 
 body.ios-app-runtime .mobile-app-shell__drawer-nav button,
@@ -168,11 +178,19 @@ body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"]
   height: 100%;
   min-height: 0;
   flex: 1 1 auto;
-  padding-bottom: max(1rem, var(--mobile-safe-bottom));
+  padding-bottom: calc(1rem + var(--mobile-safe-bottom));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+body.ios-app-runtime .mobile-app-shell,
+body.ios-app-runtime .mobile-app-shell__drawer {
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  height: -webkit-fill-available;
 }
 
 .mobile-sheet-backdrop {

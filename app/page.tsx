@@ -12053,13 +12053,18 @@ const MobileAppShell = ({
       const [authLoading, setAuthLoading] = useState(false);
 
       useEffect(() => {
-        if (typeof document === 'undefined') return;
-        document.body.classList.remove(
-          'mobile-shell-active',
-          'native-app-runtime',
-          'ios-app-runtime',
-          'modal-open'
-        );
+        if (typeof document === 'undefined') return undefined;
+
+        const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
+        const previousBodyOverscroll = document.body.style.overscrollBehavior;
+
+        document.documentElement.style.overscrollBehavior = 'auto';
+        document.body.style.overscrollBehavior = 'auto';
+
+        return () => {
+          document.documentElement.style.overscrollBehavior = previousHtmlOverscroll;
+          document.body.style.overscrollBehavior = previousBodyOverscroll;
+        };
       }, []);
 
       // =====================================================

@@ -12052,6 +12052,16 @@ const MobileAppShell = ({
       const [authNotice, setAuthNotice] = useState('');
       const [authLoading, setAuthLoading] = useState(false);
 
+      useEffect(() => {
+        if (typeof document === 'undefined') return;
+        document.body.classList.remove(
+          'mobile-shell-active',
+          'native-app-runtime',
+          'ios-app-runtime',
+          'modal-open'
+        );
+      }, []);
+
       // =====================================================
       // IMAGE CONFIGURATION - UPDATE THESE WITH YOUR PHOTOS
       // =====================================================

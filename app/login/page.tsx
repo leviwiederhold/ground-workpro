@@ -104,12 +104,9 @@ export default function LoginPage() {
             <div className="rounded-lg border border-dark-900 bg-dark-900 px-4 py-3 text-center text-sm font-medium text-white">
               Log In
             </div>
-            <Link
-              href={typeof window !== "undefined" && window.location.search ? `/signup${window.location.search}` : "/signup"}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-center text-sm font-medium text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
-            >
-              Sign Up
-            </Link>
+            <div className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-center text-sm font-medium text-gray-700">
+              Company Access
+            </div>
           </div>
         ) : null}
 
@@ -169,6 +166,13 @@ export default function LoginPage() {
             </Link>
           </p>
         )}
+
+        {nativeRuntime ? (
+          <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+            <p className="font-medium text-gray-800">Already part of a company? Sign in</p>
+            <p className="mt-1">Need access? Contact your company administrator for an invitation.</p>
+          </div>
+        ) : null}
       </div>
     </main>
   );

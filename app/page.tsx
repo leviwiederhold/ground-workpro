@@ -13215,7 +13215,7 @@ const MobileAppShell = ({
           );
         }
         return nativeRuntime ? (
-          <OnboardingGate onLogin={handleLogin} onSignup={handleSignup} />
+          <OnboardingGate onLogin={handleLogin} />
         ) : (
           <LandingPage onLogin={handleLogin} onSignup={handleSignup} />
         );

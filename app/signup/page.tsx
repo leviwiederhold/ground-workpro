@@ -14,11 +14,14 @@ export default function SignupPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [nativeRuntime, setNativeRuntime] = useState(false);
+  const [inviteMode, setInviteMode] = useState(false);
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
+    const params = new URLSearchParams(window.location.search);
     setNativeRuntime(isNativeAppRuntime());
+    setInviteMode(params.get("invite") === "1");
 
     supabase.auth.getSession().then(({ data }) => {
       if (!active || !data.session) return;
@@ -68,6 +71,11 @@ export default function SignupPage() {
     const supabase = supabaseBrowser();
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const inviteMode = params?.get("invite") === "1";
+    if (nativeRuntime && !inviteMode) {
+      setError("Already part of a company? Sign in or contact your company administrator.");
+      setLoading(false);
+      return;
+    }
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -133,10 +141,14 @@ export default function SignupPage() {
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-          Create your account
+          {nativeRuntime && !inviteMode ? "Already part of a company?" : "Create your account"}
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          {nativeRuntime ? "Choose how you want to continue." : "Create your account to get started."}
+          {nativeRuntime && !inviteMode
+            ? "Sign in with your company account. If you need access, contact your company administrator."
+            : nativeRuntime
+              ? "Create your account from your company invitation."
+              : "Create your account to get started."}
         </p>
 
         {nativeRuntime ? (
@@ -148,11 +160,17 @@ export default function SignupPage() {
               Log In
             </Link>
             <div className="rounded-lg border border-brand-500 bg-brand-500 px-4 py-3 text-center text-sm font-medium text-white">
-              Sign Up
+              {inviteMode ? "Join Invite" : "Company Access"}
             </div>
           </div>
         ) : null}
 
+        {nativeRuntime && !inviteMode ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            <p className="font-medium">Contact your company administrator</p>
+            <p className="mt-1">New company signup is available on the Groundwork Pro website. The iOS app supports existing users and invited team members.</p>
+          </div>
+        ) : (
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
@@ -187,6 +205,7 @@ export default function SignupPage() {
             {loading ? "Creating account..." : "Create account"}
           </button>
         </form>
+        )}
 
         <p className="text-sm text-gray-500 mt-5 text-center">
           Already registered?{" "}

@@ -12,7 +12,6 @@ type AuthPayload = {
 
 type OnboardingGateProps = {
   onLogin: (payload: AuthPayload) => void;
-  onSignup: (payload: AuthPayload) => void;
 };
 
 const features = [
@@ -65,11 +64,9 @@ function extractInviteToken(value: string) {
   }
 }
 
-export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
-  const [screen, setScreen] = useState<"carousel" | "role" | "employer-auth" | "employee-invite">("carousel");
+export function OnboardingGate({ onLogin }: OnboardingGateProps) {
+  const [screen, setScreen] = useState<"carousel" | "role" | "employer-auth" | "employee-invite" | "company-access">("carousel");
   const [slide, setSlide] = useState(0);
-  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
-  const [company, setCompany] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [inviteValue, setInviteValue] = useState("");
@@ -87,12 +84,6 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
   };
 
   const goToLogin = () => {
-    setAuthMode("login");
-    goTo("employer-auth");
-  };
-
-  const goToEmployerSignup = () => {
-    setAuthMode("signup");
     goTo("employer-auth");
   };
 
@@ -104,46 +95,16 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
     }
   };
 
-  const bootstrapEmployer = async () => {
-    const response = await fetch("/api/bootstrap", { method: "POST" });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}));
-      throw new Error(payload?.error || "Failed to initialize company");
-    }
-  };
-
   const submitEmployerAuth = async (event: FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setError("");
     const supabase = supabaseBrowser();
     try {
-      if (authMode === "login") {
-        const result = await supabase.auth.signInWithPassword({ email, password });
-        if (result.error) throw new Error(result.error.message);
-        await supabase.auth.getSession();
-        onLogin({ email, password, company });
-        return;
-      }
-
-      const result = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            company_name: company.trim() || undefined,
-            company: company.trim() || undefined,
-          },
-        },
-      });
+      const result = await supabase.auth.signInWithPassword({ email, password });
       if (result.error) throw new Error(result.error.message);
-      if (result.data?.session) {
-        await supabase.auth.getSession();
-        await bootstrapEmployer();
-        onSignup({ email, password, company });
-        return;
-      }
-      setError("Check your email to confirm your account, then log in.");
+      await supabase.auth.getSession();
+      onLogin({ email, password });
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : "Authentication failed");
     } finally {
@@ -273,9 +234,9 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
             </div>
             <div className="subtitle">How are you using Groundwork Pro?</div>
             <div style={{ width: "100%" }}>
-              <button className="role-card" onClick={goToEmployerSignup}>
+              <button className="role-card" onClick={() => goTo("company-access")}>
                 <div className="role-icon employer"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 21V9h6v12"/><path d="M3 9h18"/></svg></div>
-                <div><div className="role-title">I&apos;m an employer</div><div className="role-desc">Set up your company, manage jobs, crews, and equipment. Invite your team to join.</div></div>
+                <div><div className="role-title">Already part of a company?</div><div className="role-desc">Sign in with your company account. New company signup is available on the web.</div></div>
               </button>
               <button className="role-card employee" onClick={() => goTo("employee-invite")}>
                 <div className="role-icon employee"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2L3 7v5c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V7l-9-5z"/><path d="M12 11v4"/><circle cx="12" cy="8" r="1"/></svg></div>
@@ -289,34 +250,45 @@ export function OnboardingGate({ onLogin, onSignup }: OnboardingGateProps) {
           <div className="footer-hint">You can change your role later in settings.</div>
         </div>
 
+        <div className="screen" hidden={screen !== "company-access"}>
+          <button className="back-btn" onClick={() => goTo("role")}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back</button>
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+            <div className="logo-icon" style={{ margin: "0 auto 18px" }}><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 3L2 12h3v8h14v-8h3L12 3z" fill="white" stroke="white" strokeWidth="1.5" strokeLinejoin="round"/></svg></div>
+            <div className="auth-title">Already part of a company?</div>
+            <div className="invite-desc">Sign in with your existing company account. If your company uses Groundwork Pro and you do not have access, contact your company administrator.</div>
+            <div style={{ width: "100%" }}>
+              <button className="primary-btn" onClick={goToLogin}>Sign in</button>
+              <button className="secondary-link" onClick={() => goTo("employee-invite")}>I have an invitation</button>
+            </div>
+            <div className="info-box" style={{ width: "100%", marginTop: 24 }}>
+              <div className="info-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
+              <div><div className="info-title">Contact your company administrator</div><div className="info-desc">Company signup and subscription setup are handled on the Groundwork Pro website.</div></div>
+            </div>
+          </div>
+        </div>
+
         <div className="screen" hidden={screen !== "employer-auth"}>
           <button className="back-btn" onClick={() => goTo("role")}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back</button>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center" }}>
             <div style={{ textAlign: "center", marginBottom: 32 }}>
               <div className="logo-icon" style={{ margin: "0 auto 14px" }}><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 3L2 12h3v8h14v-8h3L12 3z" fill="white" stroke="white" strokeWidth="1.5" strokeLinejoin="round"/></svg></div>
               <div className="auth-title" style={{ fontSize: 20, marginBottom: 4 }}>
-                {authMode === "signup" ? "Create your company" : "Sign in to Groundwork Pro"}
+                Sign in to Groundwork Pro
               </div>
               <div style={{ fontSize: 13, color: "#666" }}>
-                {authMode === "signup" ? "Create your company workspace." : "Use your existing employee or company account."}
+                Use your existing employee or company account.
               </div>
             </div>
             <div className="nav-tabs">
-              <button className={`nav-tab${authMode === "signup" ? " active" : ""}`} onClick={() => setAuthMode("signup")}>Sign up</button>
-              <button className={`nav-tab${authMode === "login" ? " active" : ""}`} onClick={() => setAuthMode("login")}>Log in</button>
+              <button className="nav-tab active" type="button">Log in</button>
+              <button className="nav-tab" type="button" onClick={() => goTo("employee-invite")}>Join invite</button>
             </div>
             <form onSubmit={submitEmployerAuth}>
-              {authMode === "signup" && (
-                <>
-                  <label className="form-label">Company name</label>
-                  <input className="form-input" placeholder="e.g. Smith Excavation LLC" value={company} onChange={(event) => setCompany(event.target.value)} required />
-                </>
-              )}
               <label className="form-label">Email</label>
               <input className="form-input" type="email" placeholder="you@company.com" value={email} onChange={(event) => setEmail(event.target.value)} required data-testid="onboarding-login-email" />
               <label className="form-label">Password</label>
-              <input className="form-input" type="password" placeholder={authMode === "signup" ? "Create a password" : "Password"} value={password} onChange={(event) => setPassword(event.target.value)} required data-testid="onboarding-login-password" />
-              <button className="primary-btn" style={{ marginTop: 4 }} disabled={loading} data-testid="onboarding-auth-submit">{loading ? "Please wait..." : authMode === "signup" ? "Create account" : "Sign in"}</button>
+              <input className="form-input" type="password" placeholder="Password" value={password} onChange={(event) => setPassword(event.target.value)} required data-testid="onboarding-login-password" />
+              <button className="primary-btn" style={{ marginTop: 4 }} disabled={loading} data-testid="onboarding-auth-submit">{loading ? "Please wait..." : "Sign in"}</button>
               {error && <div className="form-error">{error}</div>}
             </form>
           </div>

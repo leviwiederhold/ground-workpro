@@ -8,6 +8,15 @@ import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 
 const GROUNDWORK_WEB_URL = "https://ground-workpro.com";
 
+/**
+ * Opens the Groundwork Pro public website in the device's default external
+ * browser. In Capacitor, window.open(url, '_system') bypasses the in-app
+ * WebView and launches Safari (iOS) or the default browser (Android).
+ */
+function openExternalWebsite() {
+  window.open(GROUNDWORK_WEB_URL, "_system");
+}
+
 /** Shown only in the native app when the signed-in user has no company workspace. */
 function NativeNoWorkspaceScreen() {
   return (
@@ -21,13 +30,14 @@ function NativeNoWorkspaceScreen() {
           Company setup and workspace creation are completed on the Groundwork Pro website.
           Once your company workspace is created, you can sign into the mobile app.
         </p>
-        <a
-          href={GROUNDWORK_WEB_URL}
+        <button
+          type="button"
+          onClick={openExternalWebsite}
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 active:bg-brand-700"
         >
           <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
           Open Website
-        </a>
+        </button>
       </div>
     </main>
   );

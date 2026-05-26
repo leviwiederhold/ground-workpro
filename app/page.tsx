@@ -2039,13 +2039,14 @@ const MobileAppShell = ({
                 Company setup and workspace creation are completed on the Groundwork Pro website.
                 Once your company workspace is created, you can sign into the mobile app.
               </p>
-              <a
-                href="https://ground-workpro.com"
+              <button
+                type="button"
+                onClick={() => window.open("https://ground-workpro.com", "_system")}
                 className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-3 text-sm font-semibold text-white"
               >
                 <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
                 Open Website
-              </a>
+              </button>
             </div>
           );
         }

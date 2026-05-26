@@ -17,6 +17,7 @@ import {
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
+import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
 
 const DashboardView = dynamic(
@@ -2018,14 +2019,9 @@ const MobileAppShell = ({
       };
 
       const renderView = () => {
-        // Gate: show spinner while entitlement is loading (all users).
+        // Gate: show branded loader while entitlement is loading (all users).
         if (!subscriptionGate.loaded) {
-          return (
-            <Card className="p-8 text-center text-gray-600">
-              <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-              <div>Loading your workspace...</div>
-            </Card>
-          );
+          return <ExcavatorLoader />;
         }
         // Gate: native app user has no company workspace — redirect to web.
         if (subscriptionGate.noWorkspace && iosAppRuntime) {

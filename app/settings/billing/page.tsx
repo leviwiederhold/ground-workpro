@@ -12,9 +12,6 @@ type BillingStatus = {
   is_active: boolean;
 };
 
-type MemberCount = {
-  active: number;
-};
 
 const PRICE_PER_SEAT = 49.99;
 
@@ -77,7 +74,7 @@ export default function BillingSettingsPage() {
       try {
         const [statusRes, membersRes] = await Promise.all([
           fetch("/api/billing/status", { cache: "no-store" }),
-          fetch("/api/company-members", { cache: "no-store" }),
+          fetch("/api/company-members?excludeSelf=0", { cache: "no-store" }),
         ]);
 
         if (statusRes.ok) {
@@ -89,8 +86,12 @@ export default function BillingSettingsPage() {
 
         if (membersRes.ok) {
           const payload = await membersRes.json();
-          const members: unknown[] = payload?.items ?? payload?.data ?? [];
-          setMemberCount(Array.isArray(members) ? members.length : null);
+          // items from company-members are already filtered (inactive excluded, self included via excludeSelf=0)
+          const members: Array<{ status?: string }> = payload?.items ?? payload?.data ?? [];
+          const activeCount = Array.isArray(members)
+            ? members.filter((m) => (m?.status ?? "active") !== "inactive").length
+            : 0;
+          setMemberCount(Math.max(1, activeCount));
         }
       } catch {
         setError("Failed to load billing information.");

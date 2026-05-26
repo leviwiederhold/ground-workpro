@@ -330,10 +330,22 @@ export default function LoginPage() {
         )}
 
         {nativeRuntime ? (
-          <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-            <p className="font-medium text-gray-800">Already part of a company? Sign in</p>
-            <p className="mt-1">Need access? Contact your company administrator for an invitation.</p>
-          </div>
+          <>
+            <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+              <p className="font-medium text-gray-800">Already part of a company? Sign in</p>
+              <p className="mt-1">Need access? Contact your company administrator for an invitation.</p>
+            </div>
+            <div className="mt-4 text-center">
+              <p className="text-xs text-gray-400 mb-1">Need a company workspace?</p>
+              <button
+                type="button"
+                onClick={openExternalWebsite}
+                className="text-sm text-gray-500 hover:text-gray-700 active:text-gray-900"
+              >
+                Open website →
+              </button>
+            </div>
+          </>
         ) : null}
       </div>
     </main>

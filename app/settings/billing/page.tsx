@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { isIosNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 
 type BillingStatus = {
   plan_type: string;
@@ -64,8 +65,14 @@ export default function BillingSettingsPage() {
   const [portalLoading, setPortalLoading] = useState(false);
   const [portalError, setPortalError] = useState("");
   const [error, setError] = useState("");
+  const [isNative, setIsNative] = useState(false);
 
   useEffect(() => {
+    setIsNative(isIosNativeAppRuntime());
+  }, []);
+
+  useEffect(() => {
+    if (isNative) return;
     async function load() {
       try {
         const [statusRes, membersRes] = await Promise.all([
@@ -92,7 +99,7 @@ export default function BillingSettingsPage() {
       }
     }
     load();
-  }, []);
+  }, [isNative]);
 
   async function handleManageBilling() {
     setPortalLoading(true);
@@ -114,6 +121,23 @@ export default function BillingSettingsPage() {
     } finally {
       setPortalLoading(false);
     }
+  }
+
+  // Native iOS app must not expose billing/payment UI per App Store guidelines.
+  if (isNative) {
+    return (
+      <main className="min-h-screen bg-gray-50 p-6">
+        <div className="mx-auto max-w-lg rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-gray-900">Company Administration</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Company administration is managed on the web dashboard.
+          </p>
+          <Link href="/" className="mt-5 inline-flex rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white">
+            Return to Dashboard
+          </Link>
+        </div>
+      </main>
+    );
   }
 
   const seats = memberCount ?? 0;

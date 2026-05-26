@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/ceoGuard";
 import { upsertProfileColumns } from "@/lib/user/profileRecord";
 import { sanitizeProfileFullName } from "@/lib/user/profileFields";
+import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
@@ -440,6 +441,18 @@ export async function POST(request: Request) {
       if (tokenUse.error) {
         return NextResponse.json({ error: tokenUse.error.message }, { status: 400 });
       }
+    }
+
+    // Sync Stripe subscription quantity — seat count increased by 1.
+    // Non-fatal: if Stripe isn't configured or the company has no subscription yet,
+    // we still let the employee in. Errors are logged server-side.
+    try {
+      const syncResult = await syncStripeQuantityForCompany(String(invitationData.company_id));
+      if (!syncResult.synced) {
+        console.warn("[invite/accept] stripe quantity not synced:", syncResult.reason);
+      }
+    } catch (syncErr) {
+      console.error("[invite/accept] stripe quantity sync error:", syncErr instanceof Error ? syncErr.message : syncErr);
     }
 
     return NextResponse.json({

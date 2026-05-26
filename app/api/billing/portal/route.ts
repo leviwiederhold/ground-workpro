@@ -6,6 +6,17 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
 
+function isNativeRequest(request: Request): boolean {
+  const nativeHeader = request.headers.get("x-groundwork-native");
+  const platformHeader = request.headers.get("x-groundwork-platform");
+  const userAgent = request.headers.get("user-agent") ?? "";
+  return (
+    nativeHeader === "1" ||
+    String(platformHeader ?? "").toLowerCase() === "ios" ||
+    /Capacitor|GroundworkProNative/i.test(userAgent)
+  );
+}
+
 export const runtime = "nodejs";
 
 const FALLBACK_SITE_URL = "https://ground-workpro.vercel.app";
@@ -28,6 +39,11 @@ export async function POST(request: Request) {
   if (rateLimited) return rateLimited;
 
   try {
+    // Native iOS app must not access Stripe portal per App Store guidelines.
+    if (isNativeRequest(request)) {
+      return errorResponse("Billing portal is not available in the native app", 403);
+    }
+
     try {
       await requireRole(["admin"]);
     } catch {

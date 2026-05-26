@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -389,6 +390,18 @@ export async function PATCH(
       return NextResponse.json({ error: "Employee update returned no row" }, { status: 500 });
     }
 
+    // When a member is deactivated, sync the Stripe seat count down.
+    if (payload.status === "inactive") {
+      try {
+        const syncResult = await syncStripeQuantityForCompany(companyId);
+        if (!syncResult.synced) {
+          console.warn("[employees/PATCH] stripe quantity not synced after deactivation:", syncResult.reason);
+        }
+      } catch (syncErr) {
+        console.error("[employees/PATCH] stripe quantity sync error:", syncErr instanceof Error ? syncErr.message : syncErr);
+      }
+    }
+
     return NextResponse.json({ employee });
   } catch (error) {
     if (error instanceof TenantResolverError) {
@@ -456,6 +469,16 @@ export async function DELETE(
       if (permissionsDelete.error && !/column .*user_id.* does not exist|Could not find the 'user_id' column/i.test(permissionsDelete.error.message || "")) {
         return NextResponse.json({ error: permissionsDelete.error.message }, { status: 400 });
       }
+    }
+
+    // Employee removed — sync Stripe seat count down.
+    try {
+      const syncResult = await syncStripeQuantityForCompany(companyId);
+      if (!syncResult.synced) {
+        console.warn("[employees/DELETE] stripe quantity not synced:", syncResult.reason);
+      }
+    } catch (syncErr) {
+      console.error("[employees/DELETE] stripe quantity sync error:", syncErr instanceof Error ? syncErr.message : syncErr);
     }
 
     return NextResponse.json({ success: true });

@@ -3628,6 +3628,7 @@ const MobileAppShell = ({
       const [employeeSaveLoading, setEmployeeSaveLoading] = useState(false);
       const [employeeDeleteLoading, setEmployeeDeleteLoading] = useState(false);
       const [inviteFeedback, setInviteFeedback] = useState('');
+      const [showNativeAdminModal, setShowNativeAdminModal] = useState(false);
       const permissionModules = [
         { key: 'jobs', label: 'Jobs' },
         { key: 'fleet', label: 'Fleet' },
@@ -3862,6 +3863,11 @@ const MobileAppShell = ({
 
       const handleCreateEmployee = async () => {
         if (!canManageTeamProfiles) return;
+        // Native iOS app: team/seat management must happen on the web dashboard.
+        if (iosAppRuntime) {
+          setShowNativeAdminModal(true);
+          return;
+        }
         setEmployeeActionError('');
         setInviteFeedback('');
         setShowSensitiveInviteConfirm(false);
@@ -4803,26 +4809,57 @@ const MobileAppShell = ({
           <Modal
             isOpen={showSeatCostWarning}
             onClose={() => setShowSeatCostWarning(false)}
-            title="Seat Cost Confirmation"
+            title="Adding a Team Member"
             size="sm"
           >
             <div className="space-y-4">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-                <p className="text-sm font-medium text-amber-900">Adding a billable seat</p>
+                <p className="text-sm font-medium text-amber-900">Confirm team invite</p>
                 <p className="mt-1 text-sm text-amber-800">
-                  Adding this team member will increase your subscription by{' '}
-                  <span className="font-semibold">$49.99/month</span> once your trial ends.
+                  When this team member accepts, your subscription will add one active seat.
                 </p>
               </div>
               <p className="text-xs text-gray-500">
-                Employee invite links do not start a new Stripe subscription — only your company subscription is charged.
+                Active seat billing is managed on the Billing page. Pending invites do not count until accepted.
               </p>
               <div className="flex justify-end gap-2 pt-1">
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowSeatCostWarning(false)}>
                   Cancel
                 </Button>
                 <Button type="button" variant="brand" size="sm" onClick={handleConfirmSeatCostWarning} disabled={inviteSaveLoading}>
-                  {inviteSaveLoading ? 'Saving...' : 'Confirm & Add'}
+                  {inviteSaveLoading ? 'Saving...' : 'Confirm & Send Invite'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={showNativeAdminModal}
+            onClose={() => setShowNativeAdminModal(false)}
+            title="Web Dashboard Required"
+            size="sm"
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                Team administration is managed on the web dashboard.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowNativeAdminModal(false)}>
+                  Dismiss
+                </Button>
+                <Button
+                  type="button"
+                  variant="brand"
+                  size="sm"
+                  onClick={() => {
+                    const url = typeof window !== 'undefined'
+                      ? window.location.origin.replace(/^groundworkpro:\/\//, 'https://ground-workpro.vercel.app')
+                      : 'https://ground-workpro.vercel.app';
+                    window.open(url, '_blank');
+                    setShowNativeAdminModal(false);
+                  }}
+                >
+                  Open Web Dashboard
                 </Button>
               </div>
             </div>

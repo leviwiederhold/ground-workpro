@@ -13097,7 +13097,7 @@ const MobileAppShell = ({
     // ============================================
     // ROOT - Authentication Wrapper
     // ============================================
-	    const Root = () => {
+	    const Root = ({ onReady }: { onReady?: () => void }) => {
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
 	      const [authResolved, setAuthResolved] = useState(false);
 	      const [nativeRuntime, setNativeRuntime] = useState(false);
@@ -13364,7 +13364,7 @@ const MobileAppShell = ({
       }, [isAuthenticated, verifySetup]);
 
       if (!authResolved || !nativeRuntimeResolved) {
-        return <ExcavatorLoader />;
+        return null;
       }
 
       if (!isAuthenticated) {
@@ -13388,23 +13388,45 @@ const MobileAppShell = ({
       }
 
       if (!setupChecked || setupRefreshing) {
-        return <ExcavatorLoader />;
+        return null;
       }
 
+      // All startup conditions met — signal the Page-level overlay to exit.
+      onReady?.();
       return <App currentUser={currentUser} onLogout={handleLogout} />;
     };
 
 
 export default function Page() {
-  const [mounted, setMounted] = useState(false);
+  const [mounted,  setMounted]  = useState(false);
+  const [appReady, setAppReady] = useState(false);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  useEffect(() => { setMounted(true); }, []);
 
-  if (!mounted) {
-    return <ExcavatorLoader />;
-  }
+  return (
+    <>
+      {/*
+       * Render Root immediately once JS is hydrated.
+       * The ExcavatorLoader overlay below hides it until startup is done.
+       * This keeps ONE loader instance alive for the entire startup sequence
+       * (auth check + setup check) so the animation never restarts mid-flow.
+       */}
+      {mounted && (
+        <Root
+          onReady={() => setAppReady(true)}
+        />
+      )}
 
-  return <Root />;
+      {/*
+       * Single persistent loader overlay.
+       * show=false once Root signals onReady().
+       * minimumDurationMs ensures the animation completes at least once for
+       * all important flows: app open, sign-in, sign-up, checkout return, etc.
+       */}
+      <ExcavatorLoader
+        show={!appReady}
+        minimumDurationMs={1500}
+      />
+    </>
+  );
 }

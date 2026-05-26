@@ -118,46 +118,72 @@ const STYLES = `
 // ─── Props ───────────────────────────────────────────────────────────────────
 interface ExcavatorLoaderProps {
   /**
-   * Controls visibility. Set to `false` once data is ready to trigger a smooth
-   * exit. Default: `true` (show and auto-exit after ~2.9 s).
+   * Controls visibility. Set to `false` once data is ready.
+   * The loader will not exit until BOTH `show === false` AND
+   * `minimumDurationMs` has elapsed since mount.
+   * Default: `true`.
    */
   show?: boolean;
-  /** Called once the exit animation fully completes. */
+  /**
+   * Minimum time (ms) the loader stays visible, even if `show` goes false
+   * earlier. Ensures the animation completes at least once for important flows.
+   * Default: 0 (exit as soon as `show` is false).
+   */
+  minimumDurationMs?: number;
+  /** Called once the exit fade fully completes. */
   onComplete?: () => void;
   /**
-   * `overlay` — fixed full-screen dark overlay (default, for page transitions).
-   * `inline`  — centered block inside the current layout flow.
+   * `overlay` — fixed full-screen dark overlay (default).
+   * `inline`  — centered block inside layout flow.
    */
   mode?: 'overlay' | 'inline';
+  /** Optional status text rendered below the animation. */
+  message?: string;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function ExcavatorLoader({
   show = true,
+  minimumDurationMs = 0,
   onComplete,
   mode = 'overlay',
+  message,
 }: ExcavatorLoaderProps) {
-  const [exiting, setExiting] = useState(false);
-  const [gone,    setGone]    = useState(false);
-  const exitedRef = useRef(false);
+  const [exiting, setExiting]   = useState(false);
+  const [gone,    setGone]      = useState(false);
+  const exitedRef   = useRef(false);
+  const mountedAtMs = useRef(Date.now());
+  const minTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function triggerExit() {
     if (exitedRef.current) return;
     exitedRef.current = true;
+    if (minTimerRef.current) clearTimeout(minTimerRef.current);
     setExiting(true);
     setTimeout(() => { setGone(true); onComplete?.(); }, 440);
   }
 
-  // Auto-exit after maximum safe duration
+  // Hard cap — never block longer than 3.5 s regardless of minimumDurationMs
   useEffect(() => {
-    const t = setTimeout(triggerExit, 2900);
+    const t = setTimeout(triggerExit, Math.max(minimumDurationMs + 440, 3500));
     return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Exit when caller signals ready
+  // Exit when caller signals ready — but honour minimum duration first
   useEffect(() => {
-    if (!show) triggerExit();
+    if (!show) {
+      const elapsed   = Date.now() - mountedAtMs.current;
+      const remaining = minimumDurationMs - elapsed;
+      if (remaining <= 0) {
+        triggerExit();
+      } else {
+        minTimerRef.current = setTimeout(triggerExit, remaining);
+      }
+    }
+    return () => {
+      if (minTimerRef.current) clearTimeout(minTimerRef.current);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [show]);
 
@@ -408,6 +434,20 @@ export default function ExcavatorLoader({
         {/* ══ / Excavator ═══════════════════════════════════════════════ */}
 
       </svg>
+
+      {/* Optional status message */}
+      {message && (
+        <p style={{
+          marginTop: 24,
+          fontSize: 12,
+          fontFamily: '-apple-system,BlinkMacSystemFont,system-ui,sans-serif',
+          color: 'rgba(255,255,255,0.4)',
+          letterSpacing: '0.08em',
+          textTransform: 'uppercase',
+        }}>
+          {message}
+        </p>
+      )}
     </>
   );
 

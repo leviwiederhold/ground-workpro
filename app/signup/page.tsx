@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
-import ExcavatorLoader from "@/components/loading/ExcavatorLoader";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -266,11 +265,6 @@ export default function SignupPage() {
     } finally {
       setLoading(false);
     }
-  }
-
-  // Branded loader during account creation / redirect.
-  if (loading) {
-    return <ExcavatorLoader />;
   }
 
   return (

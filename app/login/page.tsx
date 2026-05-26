@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
-import ExcavatorLoader from "@/components/loading/ExcavatorLoader";
 
 const GROUNDWORK_WEB_URL = "https://ground-workpro.com";
 
@@ -238,11 +237,6 @@ export default function LoginPage() {
   // Native app — no workspace found after authentication.
   if (showNoWorkspace) {
     return <NativeNoWorkspaceScreen />;
-  }
-
-  // Show branded loader during auth redirect (sign-in submitted, pending redirect).
-  if (loading) {
-    return <ExcavatorLoader />;
   }
 
   return (

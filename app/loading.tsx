@@ -1,10 +1,11 @@
 /**
- * Next.js route-level loading UI.
- * Rendered automatically during page navigation while the next segment loads.
- * Unmounted once the route resolves — no exit animation needed here.
+ * Next.js route-level loading UI — lightweight spinner.
+ * Shown during page navigation while the next segment loads.
  */
-import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
-
 export default function Loading() {
-  return <ExcavatorLoader />;
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
 }

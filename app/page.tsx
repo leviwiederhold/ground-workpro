@@ -936,20 +936,17 @@ const MobileAppShell = ({
       useEffect(() => {
         let active = true;
         const loadSubscriptionGate = async () => {
-          if (iosAppRuntime || currentRole !== 'executive') {
-            setSubscriptionGate({ loaded: true, active: true, error: '' });
-            return;
-          }
-
+          // Always check entitlement — native app still enforces company status,
+          // it just doesn't show billing UI. Only skip for non-CEO web users who
+          // are never shown the gate UI regardless of the result.
           try {
             setSubscriptionGate((prev) => ({ ...prev, loaded: false, error: '' }));
             const response = await fetch('/api/billing/status', { cache: 'no-store' });
             const payload = await response.json().catch(() => ({}));
             if (!active) return;
             if (!response.ok) {
-              // On a transient API failure let the user through optimistically rather
-              // than blocking them from their own workspace. The gate will re-check
-              // on the next role change or page refresh.
+              // Transient API failure — let the user through optimistically. The
+              // gate will re-check on the next role change or page refresh.
               setSubscriptionGate({
                 loaded: true,
                 active: true,
@@ -964,7 +961,7 @@ const MobileAppShell = ({
             });
           } catch {
             if (active) {
-              // Network failure — let the user through optimistically.
+              // Network failure — optimistic pass-through.
               setSubscriptionGate({
                 loaded: true,
                 active: true,
@@ -2008,7 +2005,8 @@ const MobileAppShell = ({
       };
 
       const renderView = () => {
-        if (!iosAppRuntime && currentRole === 'executive' && !subscriptionGate.loaded) {
+        // Gate: show spinner while entitlement is loading (all users).
+        if (!subscriptionGate.loaded) {
           return (
             <Card className="p-8 text-center text-gray-600">
               <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -2016,18 +2014,30 @@ const MobileAppShell = ({
             </Card>
           );
         }
-        if (!iosAppRuntime && currentRole === 'executive' && subscriptionGate.loaded && !subscriptionGate.active) {
+        // Gate: company account inactive — block all users.
+        if (!subscriptionGate.active) {
+          // Web CEO: show billing action so they can fix it.
+          if (!iosAppRuntime && currentRole === 'executive') {
+            return (
+              <div className="space-y-4">
+                <Card className="p-4 border-amber-200 bg-amber-50 text-amber-900">
+                  <p className="font-medium">Subscription required</p>
+                  <p className="mt-1 text-sm">
+                    An active subscription is required to access the workspace.
+                  </p>
+                </Card>
+                <SubscribeView employees={employees} currentRole={currentRole} />
+              </div>
+            );
+          }
+          // Everyone else (native app or non-CEO web): neutral copy — no billing mention.
           return (
-            <div className="space-y-4">
-              <Card className="p-4 border-amber-200 bg-amber-50 text-amber-900">
-                <p className="font-medium">Start your trial to enter the workspace</p>
-                <p className="mt-1 text-sm">
-                  Groundwork Pro requires an active or trialing subscription for owner workspaces.
-                </p>
-                {subscriptionGate.error && <p className="mt-2 text-sm">{subscriptionGate.error}</p>}
-              </Card>
-              <SubscribeView employees={employees} currentRole={currentRole} />
-            </div>
+            <Card className="p-8 text-center text-gray-600">
+              <div className="text-lg font-semibold text-gray-800 mb-2">Account Unavailable</div>
+              <div className="text-sm">
+                Your company account needs attention. Please contact your company administrator.
+              </div>
+            </Card>
           );
         }
         const moduleKey = moduleForView(currentView);

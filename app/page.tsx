@@ -118,55 +118,7 @@ const loadCachedNavState = () => {
   }
 };
 
-const WorkspaceLoadingScreen = () => (
-  <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 transition-colors dark:bg-[#050505] dark:text-gray-100">
-    <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-md items-center justify-center">
-      <div className="w-full overflow-hidden rounded-[28px] border border-gray-200 bg-white shadow-xl shadow-black/5 dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-black/40">
-        <div className="relative overflow-hidden bg-gradient-to-br from-brand-500 via-brand-600 to-sky-600 px-6 pb-16 pt-8 text-white">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.22),transparent_36%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.18),transparent_34%)]" />
-          <div className="relative flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/16 ring-1 ring-white/25 backdrop-blur">
-              <i className="fa-solid fa-mountain text-lg" aria-hidden="true" />
-            </div>
-            <div>
-              <p className="font-dozer text-xl tracking-[0.16em]">GROUNDWORK</p>
-              <p className="text-xs font-semibold uppercase tracking-[0.45em] text-white/75">Pro</p>
-            </div>
-          </div>
-          <div className="relative mt-8 space-y-3">
-            <div className="flex items-center gap-3 text-sm text-white/90">
-              <span className="inline-flex h-2.5 w-2.5 animate-pulse rounded-full bg-white" />
-              Preparing your workspace...
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-white/20">
-              <div className="h-full w-1/2 animate-[pulse_1.4s_ease-in-out_infinite] rounded-full bg-white/90" />
-            </div>
-          </div>
-        </div>
-        <div className="space-y-4 px-6 py-6">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 animate-pulse rounded-2xl bg-brand-50 dark:bg-brand-500/10" />
-            <div className="flex-1 space-y-2">
-              <div className="h-3 w-24 animate-pulse rounded-full bg-gray-200 dark:bg-zinc-800" />
-              <div className="h-3 w-40 animate-pulse rounded-full bg-gray-100 dark:bg-zinc-900" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <div
-                key={index}
-                className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-zinc-800 dark:bg-zinc-900/80"
-              >
-                <div className="h-3 w-14 animate-pulse rounded-full bg-gray-200 dark:bg-zinc-800" />
-                <div className="mt-3 h-6 w-12 animate-pulse rounded-full bg-gray-300/80 dark:bg-zinc-700" />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  </main>
-);
+// WorkspaceLoadingScreen removed — replaced by ExcavatorLoader (see import above).
 
 const WorkspaceStartupErrorScreen = ({ message, onRetry }) => (
   <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 dark:bg-[#050505] dark:text-gray-100">
@@ -2019,9 +1971,14 @@ const MobileAppShell = ({
       };
 
       const renderView = () => {
-        // Gate: show branded loader while entitlement is loading (all users).
+        // Gate: lightweight spinner while entitlement check resolves post-auth.
         if (!subscriptionGate.loaded) {
-          return <ExcavatorLoader />;
+          return (
+            <Card className="p-8 text-center text-gray-600">
+              <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <div>Loading your workspace...</div>
+            </Card>
+          );
         }
         // Gate: native app user has no company workspace — redirect to web.
         if (subscriptionGate.noWorkspace && iosAppRuntime) {
@@ -13407,7 +13364,7 @@ const MobileAppShell = ({
       }, [isAuthenticated, verifySetup]);
 
       if (!authResolved || !nativeRuntimeResolved) {
-        return <WorkspaceLoadingScreen />;
+        return <ExcavatorLoader />;
       }
 
       if (!isAuthenticated) {
@@ -13431,7 +13388,7 @@ const MobileAppShell = ({
       }
 
       if (!setupChecked || setupRefreshing) {
-        return <WorkspaceLoadingScreen />;
+        return <ExcavatorLoader />;
       }
 
       return <App currentUser={currentUser} onLogout={handleLogout} />;
@@ -13446,7 +13403,7 @@ export default function Page() {
   }, []);
 
   if (!mounted) {
-    return <WorkspaceLoadingScreen />;
+    return <ExcavatorLoader />;
   }
 
   return <Root />;

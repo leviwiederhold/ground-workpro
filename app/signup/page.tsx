@@ -235,7 +235,16 @@ export default function SignupPage() {
       }
 
       if (signUpResult.hasSession) {
-        await supabase.auth.getSession();
+        // Server-side signup sets cookies but the browser Supabase client uses
+        // localStorage. Explicitly sign in on the browser client so localStorage
+        // is populated before we navigate away to Stripe — otherwise the session
+        // is lost when Stripe redirects back and billing/success finds no session.
+        const { error: browserSignInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (browserSignInError) {
+          // Non-fatal fallback: getSession reads whatever is available (may work
+          // via cookie sync on some platforms).
+          await supabase.auth.getSession();
+        }
         await ensureTenantContext();
         if (checkoutComplete && !inviteMode) {
           router.replace("/");

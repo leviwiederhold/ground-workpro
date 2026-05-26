@@ -151,16 +151,22 @@ export default function LoginPage() {
   return (
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+        {checkoutSuccess && !nativeRuntime && (
+          <div className="flex items-center gap-2 mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+            <i className="fa-solid fa-circle-check text-green-600 text-sm" />
+            <span className="text-sm font-medium text-green-800">Payment successful — workspace is ready</span>
+          </div>
+        )}
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-          {nativeRuntime ? "Welcome to Groundwork Pro" : "Login"}
+          {nativeRuntime ? "Welcome to Groundwork Pro" : checkoutSuccess ? "Sign in to continue" : "Login"}
         </h1>
         <p className="text-sm text-gray-500 mb-6">
           {nativeRuntime
             ? "Choose how you want to continue."
             : trialMode
-              ? "Sign in to start or resume Stripe Checkout."
+              ? "Sign in to start your free trial."
               : checkoutSuccess
-                ? "Sign in to finish checkout and enter your dashboard."
+                ? "Your payment was successful! Sign in to enter your workspace."
               : "Sign in with your email and password."}
         </p>
 

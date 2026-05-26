@@ -14,8 +14,10 @@ export async function GET(request: Request) {
   if (rateLimited) return rateLimited;
 
   try {
-    const { supabase, companyId } = await getCompanyId();
+    const { supabase, companyId, userId } = await getCompanyId();
+    console.log("[billing/status] userId:", userId, "companyId:", companyId);
     const status = await getCompanyBillingStatus(supabase, companyId);
+    console.log("[billing/status] subscription_status:", status.subscription_status, "is_active:", status.is_active, "plan_type:", status.plan_type);
 
     return okItem(status);
   } catch (error) {

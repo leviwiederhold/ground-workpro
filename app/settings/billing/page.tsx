@@ -1,52 +1,245 @@
-import { requireRole } from "@/lib/auth/requireRole";
-import { redirect } from "next/navigation";
-import { isBillingEnabled } from "@/lib/billing/isBillingEnabled";
-import { isStripeConfigured } from "@/lib/billing/isStripeConfigured";
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 
-export default async function BillingSettingsPage() {
+type BillingStatus = {
+  plan_type: string;
+  subscription_status: string;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  is_active: boolean;
+};
+
+type MemberCount = {
+  active: number;
+};
+
+const PRICE_PER_SEAT = 49.99;
+
+function fmt(dateStr: string | null | undefined): string {
+  if (!dateStr) return "Not available";
   try {
-    await requireRole(["admin"]);
+    return new Date(dateStr).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
   } catch {
-    redirect("/");
+    return "Not available";
+  }
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    trialing: { label: "Trialing", cls: "bg-blue-100 text-blue-800" },
+    active: { label: "Active", cls: "bg-green-100 text-green-800" },
+    past_due: { label: "Past Due", cls: "bg-red-100 text-red-800" },
+    canceled: { label: "Canceled", cls: "bg-gray-100 text-gray-700" },
+    unpaid: { label: "Unpaid", cls: "bg-red-100 text-red-800" },
+    incomplete: { label: "Incomplete", cls: "bg-amber-100 text-amber-800" },
+    inactive: { label: "Inactive", cls: "bg-gray-100 text-gray-700" },
+  };
+  const { label, cls } = map[status] ?? { label: status, cls: "bg-gray-100 text-gray-700" };
+  return (
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
+      <span className="text-sm text-gray-500">{label}</span>
+      <span className="text-sm font-medium text-gray-900">{value}</span>
+    </div>
+  );
+}
+
+export default function BillingSettingsPage() {
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
+  const [memberCount, setMemberCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [portalError, setPortalError] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [statusRes, membersRes] = await Promise.all([
+          fetch("/api/billing/status", { cache: "no-store" }),
+          fetch("/api/company-members", { cache: "no-store" }),
+        ]);
+
+        if (statusRes.ok) {
+          const payload = await statusRes.json();
+          setBilling(payload?.item ?? null);
+        } else {
+          setError("Failed to load billing status.");
+        }
+
+        if (membersRes.ok) {
+          const payload = await membersRes.json();
+          const members: unknown[] = payload?.items ?? payload?.data ?? [];
+          setMemberCount(Array.isArray(members) ? members.length : null);
+        }
+      } catch {
+        setError("Failed to load billing information.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
+
+  async function handleManageBilling() {
+    setPortalLoading(true);
+    setPortalError("");
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST" });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPortalError(payload?.error || "Failed to open billing portal.");
+        return;
+      }
+      if (payload?.url) {
+        window.location.href = payload.url;
+      } else {
+        setPortalError("No portal URL returned.");
+      }
+    } catch {
+      setPortalError("Failed to open billing portal.");
+    } finally {
+      setPortalLoading(false);
+    }
   }
 
-  const billingEnabled = isBillingEnabled();
-  const stripeConfigured = isStripeConfigured();
+  const seats = memberCount ?? 0;
+  const estimatedMonthly = seats * PRICE_PER_SEAT;
+
+  const statusLower = billing?.subscription_status ?? "inactive";
+  const isTrialing = statusLower === "trialing";
+  const isCanceled = statusLower === "canceled" || statusLower === "inactive";
 
   return (
     <main className="min-h-screen bg-gray-50 p-6">
-      <div className="mx-auto max-w-2xl rounded-xl border border-gray-200 bg-white p-6 shadow-sm space-y-4">
-        <Link href="/" className="inline-flex items-center text-sm font-medium text-brand-600 hover:text-brand-700">
-          ← Back to Dashboard
-        </Link>
-        <h1 className="text-2xl font-semibold text-gray-900">Billing</h1>
-        <p className="text-sm text-gray-600">
-          Manage subscription and billing access for your company.
-        </p>
+      <div className="mx-auto max-w-2xl space-y-6">
+        {/* Header */}
+        <div>
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700"
+          >
+            <i className="fa-solid fa-arrow-left text-xs" />
+            Back to Dashboard
+          </Link>
+          <h1 className="mt-3 text-2xl font-semibold text-gray-900">Billing</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Manage your Groundwork Pro subscription and billing details.
+          </p>
+        </div>
 
-        {!billingEnabled ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
-            <p className="font-medium">Billing setup is required</p>
-            <p className="mt-2 text-sm">
-              This workspace is running with billing disabled. When you are ready to enable it,
-              run <code>supabase/migrations/20260220_02_billing_companies_columns.sql</code> and set{" "}
-              <code>BILLING_ENABLED=true</code>.
-            </p>
-          </div>
-        ) : !stripeConfigured ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
-            <p className="font-medium">Stripe not configured</p>
-            <p className="mt-2 text-sm">
-              Add <code>STRIPE_SECRET_KEY</code> and <code>STRIPE_WEBHOOK_SECRET</code> to your environment.
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-gray-700">
-            <p className="font-medium">Billing scaffold ready</p>
-            <p className="mt-2 text-sm">Checkout and portal routes are stubbed and ready for Stripe wiring.</p>
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {error}
           </div>
         )}
+
+        {/* Subscription card */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+            <h2 className="text-base font-semibold text-gray-900">Subscription</h2>
+            {!loading && billing && <StatusBadge status={statusLower} />}
+          </div>
+
+          {loading ? (
+            <div className="px-6 py-8 text-center text-sm text-gray-500">
+              <div className="mx-auto mb-3 h-5 w-5 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+              Loading billing details…
+            </div>
+          ) : (
+            <div className="px-6 py-2">
+              <Row label="Plan" value="Groundwork Pro" />
+              <Row label="Status" value={<StatusBadge status={statusLower} />} />
+              <Row label="Price" value="$49.99 / active member / month" />
+              {isTrialing && (
+                <Row
+                  label="Trial ends"
+                  value={fmt(billing?.trial_ends_at)}
+                />
+              )}
+              {!isCanceled && !isTrialing && (
+                <Row
+                  label="Next renewal"
+                  value={fmt(billing?.current_period_end)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Seat usage card */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-6 py-4">
+            <h2 className="text-base font-semibold text-gray-900">Seat Usage</h2>
+          </div>
+          <div className="px-6 py-2">
+            <Row
+              label="Active billable members"
+              value={loading ? "—" : memberCount !== null ? memberCount.toString() : "Not available"}
+            />
+            <Row
+              label="Price per member"
+              value={`$${PRICE_PER_SEAT.toFixed(2)} / month`}
+            />
+            <Row
+              label="Estimated monthly total"
+              value={
+                loading || memberCount === null
+                  ? "—"
+                  : `$${estimatedMonthly.toFixed(2)} / month`
+              }
+            />
+          </div>
+          <p className="px-6 pb-4 text-xs text-gray-400">
+            Billed based on active members at the end of each billing period.
+          </p>
+        </div>
+
+        {/* Manage billing */}
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="border-b border-gray-100 px-6 py-4">
+            <h2 className="text-base font-semibold text-gray-900">Manage Billing</h2>
+          </div>
+          <div className="px-6 py-5 space-y-3">
+            <p className="text-sm text-gray-600">
+              Update your payment method, download invoices, or cancel your subscription
+              through the Stripe customer portal.
+            </p>
+            {portalError && (
+              <p className="text-sm text-red-600">{portalError}</p>
+            )}
+            <button
+              onClick={handleManageBilling}
+              disabled={portalLoading || loading}
+              className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {portalLoading ? (
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Opening portal…
+                </>
+              ) : (
+                <>
+                  <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
+                  Manage Billing
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
     </main>
   );

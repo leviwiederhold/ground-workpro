@@ -886,6 +886,11 @@ const MobileAppShell = ({
       const [notificationFilter, setNotificationFilter] = useState('all');
       const [headerDateLabel, setHeaderDateLabel] = useState('');
       const iosAppRuntime = useMemo(() => isIosNativeAppRuntime(), []);
+      const [subscriptionGate, setSubscriptionGate] = useState({
+        loaded: false,
+        active: true,
+        error: '',
+      });
       const setPressedNavItem = useCallback((itemId) => {
         if (!iosAppRuntime) return;
         setPressedNavId(itemId ? String(itemId) : null);
@@ -927,6 +932,55 @@ const MobileAppShell = ({
                   ? 'Operator'
                   : 'Team Member';
       const isCeoRole = currentRole === 'executive';
+
+      useEffect(() => {
+        let active = true;
+        const loadSubscriptionGate = async () => {
+          if (iosAppRuntime || currentRole !== 'executive') {
+            setSubscriptionGate({ loaded: true, active: true, error: '' });
+            return;
+          }
+
+          try {
+            setSubscriptionGate((prev) => ({ ...prev, loaded: false, error: '' }));
+            const response = await fetch('/api/billing/status', { cache: 'no-store' });
+            const payload = await response.json().catch(() => ({}));
+            if (!active) return;
+            if (!response.ok) {
+              // On a transient API failure let the user through optimistically rather
+              // than blocking them from their own workspace. The gate will re-check
+              // on the next role change or page refresh.
+              setSubscriptionGate({
+                loaded: true,
+                active: true,
+                error: payload?.error || 'Failed to load subscription status',
+              });
+              return;
+            }
+            setSubscriptionGate({
+              loaded: true,
+              active: Boolean(payload?.item?.is_active),
+              error: '',
+            });
+          } catch {
+            if (active) {
+              // Network failure — let the user through optimistically.
+              setSubscriptionGate({
+                loaded: true,
+                active: true,
+                error: 'Failed to load subscription status',
+              });
+            }
+          }
+        };
+
+        loadSubscriptionGate();
+        return () => {
+          active = false;
+        };
+      }, [currentRole, iosAppRuntime]);
+
+      // Subscribe view removed from nav — inactive billing state is shown inline by renderView.
 
       const navigateFromUserMenu = useCallback((path) => {
         setShowUserMenu(false);
@@ -1078,10 +1132,10 @@ const MobileAppShell = ({
           documents: { key: 'documents', label: 'Documents', iconKey: 'folder-open' },
           training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
           finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
-          subscribe: { key: 'subscribe', label: 'Subscribe', iconKey: 'credit-card' },
+          // subscribe intentionally omitted — billing accessed via profile dropdown
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'subscribe', 'documents', 'team', 'training', 'schedule'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule'],
           operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
@@ -1090,7 +1144,6 @@ const MobileAppShell = ({
         };
         const keys = byRole[String(role || 'executive')] || byRole.executive;
         return keys
-          .filter((key) => !(key === 'subscribe' && isIosNativeAppRuntime()))
           .map((key) => navLibrary[key])
           .filter(Boolean);
       }, []);
@@ -1955,6 +2008,28 @@ const MobileAppShell = ({
       };
 
       const renderView = () => {
+        if (!iosAppRuntime && currentRole === 'executive' && !subscriptionGate.loaded) {
+          return (
+            <Card className="p-8 text-center text-gray-600">
+              <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+              <div>Loading your workspace...</div>
+            </Card>
+          );
+        }
+        if (!iosAppRuntime && currentRole === 'executive' && subscriptionGate.loaded && !subscriptionGate.active) {
+          return (
+            <div className="space-y-4">
+              <Card className="p-4 border-amber-200 bg-amber-50 text-amber-900">
+                <p className="font-medium">Start your trial to enter the workspace</p>
+                <p className="mt-1 text-sm">
+                  Groundwork Pro requires an active or trialing subscription for owner workspaces.
+                </p>
+                {subscriptionGate.error && <p className="mt-2 text-sm">{subscriptionGate.error}</p>}
+              </Card>
+              <SubscribeView employees={employees} currentRole={currentRole} />
+            </div>
+          );
+        }
         const moduleKey = moduleForView(currentView);
         if (moduleKey && !canViewModule(moduleKey)) {
           return (
@@ -3593,6 +3668,7 @@ const MobileAppShell = ({
       const [pendingInviteError, setPendingInviteError] = useState('');
       const [permissionModalMode, setPermissionModalMode] = useState('invite-create');
       const [showSensitiveInviteConfirm, setShowSensitiveInviteConfirm] = useState(false);
+      const [showSeatCostWarning, setShowSeatCostWarning] = useState(false);
       const [inviteForm, setInviteForm] = useState({
         id: '',
         full_name: '',
@@ -3789,6 +3865,7 @@ const MobileAppShell = ({
         setEmployeeActionError('');
         setInviteFeedback('');
         setShowSensitiveInviteConfirm(false);
+        setShowSeatCostWarning(false);
         setPermissionModalMode('invite-create');
         setInviteForm({ id: '', full_name: '', email: '', role: 'operator', invite_url: '' });
         setPermissionForm({ ...roleTemplateDefaults.operator });
@@ -4009,6 +4086,20 @@ const MobileAppShell = ({
           setInviteFeedback('Name, email, role, and permissions are required.');
           return;
         }
+        // Show seat cost warning only for new invites (not edits — edits don't add seats).
+        if (permissionModalMode === 'invite-create') {
+          setShowSeatCostWarning(true);
+          return;
+        }
+        if (sensitivePermissionGrants.length > 0) {
+          setShowSensitiveInviteConfirm(true);
+          return;
+        }
+        await executeSaveInvite();
+      };
+
+      const handleConfirmSeatCostWarning = async () => {
+        setShowSeatCostWarning(false);
         if (sensitivePermissionGrants.length > 0) {
           setShowSensitiveInviteConfirm(true);
           return;
@@ -4704,6 +4795,34 @@ const MobileAppShell = ({
                   onClick={permissionModalMode === 'member-edit' ? handleSaveMemberPermissions : handleSaveInvite}
                 >
                   {inviteSaveLoading ? 'Saving...' : permissionModalMode === 'member-edit' ? 'Save Permissions' : 'Save & Generate Link'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={showSeatCostWarning}
+            onClose={() => setShowSeatCostWarning(false)}
+            title="Seat Cost Confirmation"
+            size="sm"
+          >
+            <div className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-medium text-amber-900">Adding a billable seat</p>
+                <p className="mt-1 text-sm text-amber-800">
+                  Adding this team member will increase your subscription by{' '}
+                  <span className="font-semibold">$49.99/month</span> once your trial ends.
+                </p>
+              </div>
+              <p className="text-xs text-gray-500">
+                Employee invite links do not start a new Stripe subscription — only your company subscription is charged.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowSeatCostWarning(false)}>
+                  Cancel
+                </Button>
+                <Button type="button" variant="brand" size="sm" onClick={handleConfirmSeatCostWarning} disabled={inviteSaveLoading}>
+                  {inviteSaveLoading ? 'Saving...' : 'Confirm & Add'}
                 </Button>
               </div>
             </div>
@@ -9717,19 +9836,15 @@ const MobileAppShell = ({
       const [error, setError] = useState('');
       const [actionLoading, setActionLoading] = useState('');
       const [actionMessage, setActionMessage] = useState('');
-      const [selectedPlan, setSelectedPlan] = useState('starter');
-
-      const pricingByPlan = {
-        starter: { label: 'Starter', seatPrice: 49 },
-        professional: { label: 'Professional', seatPrice: 79 },
-      };
+      const plan = { key: 'groundwork_pro', label: 'Groundwork Pro', price: 49.99 };
 
       const billableEmployees = (employees || []).filter((employee) => String(employee?.status || '').toLowerCase() !== 'inactive');
+      // Owner/CEO counts as seat 1; each active employee is an additional seat.
       const seatCount = Math.max(1, Number(billableEmployees.length || 0));
-      const currentPlanKey = String(billingStatus?.plan_type || selectedPlan || 'starter');
-      const selectedSeatPrice = pricingByPlan[selectedPlan]?.seatPrice || pricingByPlan.starter.seatPrice;
-      const currentSeatPrice = pricingByPlan[currentPlanKey]?.seatPrice || selectedSeatPrice;
+      const currentSeatPrice = plan.price; // $49.99 per active member/month
       const estimatedMonthly = seatCount * currentSeatPrice;
+      // TODO: sync Stripe subscription quantity to seatCount via stripe.subscriptions.update({ quantity: seatCount })
+      // when a member is added or deactivated. Not implemented yet — base subscription works correctly.
 
       useEffect(() => {
         let active = true;
@@ -9746,10 +9861,6 @@ const MobileAppShell = ({
               return;
             }
             setBillingStatus(payload?.item || null);
-            const loadedPlan = String(payload?.item?.plan_type || '');
-            if (loadedPlan && pricingByPlan[loadedPlan]) {
-              setSelectedPlan(loadedPlan);
-            }
           } catch {
             if (active) setError('Failed to load subscription status');
           } finally {
@@ -9774,9 +9885,13 @@ const MobileAppShell = ({
             setError(reason);
             return;
           }
+          if (path.includes('/checkout') && payload?.url) {
+            window.location.href = payload.url;
+            return;
+          }
           setActionMessage(
             path.includes('/checkout')
-              ? 'Checkout session requested. Once Stripe is configured, this will redirect to checkout.'
+              ? 'Checkout session requested.'
               : 'Billing portal requested. Once Stripe is configured, this will open customer billing portal.'
           );
         } catch {
@@ -9845,19 +9960,16 @@ const MobileAppShell = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <p className="text-xs text-gray-500 mb-1">Plan</p>
-                <select
-                  value={selectedPlan}
-                  onChange={(e) => setSelectedPlan(e.target.value)}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                >
-                  <option value="starter">Starter - $49 / user / mo</option>
-                  <option value="professional">Professional - $79 / user / mo</option>
-                </select>
+                <input
+                  value={`${plan.label} - $49.99 / seat / month`}
+                  readOnly
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
+                />
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Current Plan Type</p>
                 <input
-                  value={String(billingStatus?.plan_type || 'starter')}
+                  value={String(billingStatus?.plan_type || plan.key)}
                   readOnly
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-50"
                 />
@@ -9881,10 +9993,9 @@ const MobileAppShell = ({
             </div>
             <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
               <p className="text-xs text-gray-600">
-                Billing model: <span className="font-medium text-gray-800">per employee seat</span>. Billable seats are active team members.
-                Current estimate: <span className="font-semibold text-gray-900">{seatCount}</span> seats ×
-                <span className="font-semibold text-gray-900"> {formatCurrency(currentSeatPrice)}</span> ={' '}
-                <span className="font-semibold text-gray-900">{formatCurrency(estimatedMonthly)}/mo</span>.
+                Billing model: <span className="font-medium text-gray-800">$49.99 / active member / month</span>.
+                {seatCount} active seat{seatCount !== 1 ? 's' : ''} × $49.99 = <span className="font-semibold text-gray-900">{formatCurrency(estimatedMonthly)}/mo</span>.
+                Stripe quantity sync is on the roadmap (TODO).
               </p>
             </div>
             <div className="flex gap-2 mt-5">
@@ -9894,7 +10005,7 @@ const MobileAppShell = ({
                 disabled={actionLoading === '/api/billing/checkout'}
               >
                 <Icon name={actionLoading === '/api/billing/checkout' ? 'spinner' : 'credit-card'} className={`mr-2 ${actionLoading === '/api/billing/checkout' ? 'animate-spin' : ''}`} />
-                Start Seat Subscription
+                Start 7-Day Free Trial
               </Button>
               <Button
                 variant="secondary"
@@ -10093,12 +10204,12 @@ const MobileAppShell = ({
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-3">Billing & Subscription</h3>
               {settingsLoading ? (
-                <p className="text-sm text-gray-500">Loading billing status...</p>
+                <p className="text-sm text-gray-500">Loading...</p>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                   <div className="rounded-lg border border-gray-200 p-3">
                     <p className="text-xs text-gray-500">Plan</p>
-                    <p className="font-medium">{String(billingStatus?.plan_type || 'starter')}</p>
+                    <p className="font-medium">{String(billingStatus?.plan_type || 'groundwork_pro')}</p>
                   </div>
                   <div className="rounded-lg border border-gray-200 p-3">
                     <p className="text-xs text-gray-500">Subscription Status</p>
@@ -12051,9 +12162,11 @@ const MobileAppShell = ({
       const [authError, setAuthError] = useState('');
       const [authNotice, setAuthNotice] = useState('');
       const [authLoading, setAuthLoading] = useState(false);
+      const [iosAppRuntime, setIosAppRuntime] = useState(false);
 
       useEffect(() => {
         if (typeof document === 'undefined') return undefined;
+        setIosAppRuntime(isIosNativeAppRuntime());
 
         const previousHtmlOverscroll = document.documentElement.style.overscrollBehavior;
         const previousBodyOverscroll = document.body.style.overscrollBehavior;
@@ -12195,10 +12308,15 @@ const MobileAppShell = ({
       ];
 
       const plans = [
-        { name: 'Starter', price: 49, period: '/user/mo', desc: 'For small crews getting started', features: ['All core features', 'Basic scheduling', 'Equipment tracking', 'Mobile app access', 'Email support'], cta: 'Start Free Trial' },
-        { name: 'Professional', price: 79, period: '/user/mo', desc: 'For growing excavation companies', features: ['Everything in Starter', 'Advanced scheduling', 'Job costing & budgets', 'Team messaging', 'Priority support'], cta: 'Start Free Trial', popular: true },
-        { name: 'Enterprise', price: 'Custom', period: '', desc: 'For large operations', features: ['Everything in Pro', 'Dedicated account manager', 'On-site training', 'SLA guarantee', 'API access'], cta: 'Contact Sales' },
+        { name: 'Groundwork Pro', price: 49, period: '/month', desc: 'One plan for excavation crews getting started', features: ['All core features', 'Basic scheduling', 'Equipment tracking', 'Mobile app access', '7-Day Free Trial'], cta: 'Start 7-Day Free Trial', popular: true },
       ];
+
+      const startTrialCheckout = async () => {
+        if (iosAppRuntime) return;
+        setAuthError('');
+        setAuthNotice('');
+        window.location.href = '/signup?trial=1';
+      };
 
       const handleSubmit = async (e) => {
         e.preventDefault();
@@ -12340,12 +12458,15 @@ const MobileAppShell = ({
                   >
                     Log In
                   </button>
-                  <button
-                    onClick={() => { window.location.href = '/signup'; }}
-                    className="hidden sm:inline-flex px-5 py-2.5 bg-brand-500 text-white font-medium rounded-lg hover:bg-brand-600 transition-colors whitespace-nowrap"
-                  >
-                    Start Free Trial
-                  </button>
+                  {!iosAppRuntime && (
+                    <button
+                      onClick={startTrialCheckout}
+                      disabled={authLoading}
+                      className="hidden sm:inline-flex px-5 py-2.5 bg-brand-500 text-white font-medium rounded-lg hover:bg-brand-600 transition-colors whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {authLoading ? 'Opening Checkout...' : 'Start Free Trial'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -12395,19 +12516,22 @@ const MobileAppShell = ({
                   Manage crews, track equipment, schedule jobs, and control costs—all from one powerful platform built specifically for excavation and grading contractors.
                 </p>
                 <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:gap-4">
-                  <button
-                    onClick={() => { window.location.href = '/signup'; }}
-                    className="flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-6 py-3.5 font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:scale-105 hover:bg-brand-600 sm:px-8 sm:py-4"
-                  >
-                    Start Free Trial
-                    <Icon name="arrow-right" />
-                  </button>
+                  {!iosAppRuntime && (
+                    <button
+                      onClick={startTrialCheckout}
+                      disabled={authLoading}
+                      className="flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-6 py-3.5 font-semibold text-white shadow-lg shadow-brand-500/30 transition-all hover:scale-105 hover:bg-brand-600 sm:px-8 sm:py-4 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {authLoading ? 'Opening Checkout...' : 'Start Free Trial'}
+                      <Icon name="arrow-right" />
+                    </button>
+                  )}
                   <button className="flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-6 py-3.5 font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 sm:px-8 sm:py-4">
                     <Icon name="play-circle" />
                     Watch Demo
                   </button>
                 </div>
-                <p className="mt-6 text-sm text-gray-500">14-day free trial. No credit card required.</p>
+                <p className="mt-6 text-sm text-gray-500">7-day free trial. Card required to start.</p>
 
                 {/* Trust badges */}
                 <div className="mt-8 grid grid-cols-1 gap-3 border-t border-gray-200 pt-6 sm:mt-10 sm:grid-cols-3 sm:gap-6 sm:pt-10">
@@ -12671,7 +12795,7 @@ const MobileAppShell = ({
                 <h2 className="text-4xl font-bold text-gray-900 mb-4">Simple, Transparent Pricing</h2>
                 <p className="text-xl text-gray-600">Start free, upgrade as you grow. No hidden fees.</p>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+              <div className="mx-auto grid max-w-md grid-cols-1 gap-8">
                 {plans.map((plan, i) => (
                   <div key={i} className={`p-8 rounded-2xl ${plan.popular ? 'bg-dark-900 text-white ring-4 ring-brand-500 scale-105' : 'bg-white border border-gray-200'}`}>
                     {plan.popular && (
@@ -12693,16 +12817,19 @@ const MobileAppShell = ({
                         </li>
                       ))}
                     </ul>
-                    <button
-                      onClick={() => { window.location.href = '/signup'; }}
-                      className={`w-full py-3 font-semibold rounded-lg transition-colors ${
-                        plan.popular
-                          ? 'bg-brand-500 text-white hover:bg-brand-600'
-                          : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
-                      }`}
-                    >
-                      {plan.cta}
-                    </button>
+                    {!iosAppRuntime && (
+                      <button
+                        onClick={startTrialCheckout}
+                        disabled={authLoading}
+                        className={`w-full py-3 font-semibold rounded-lg transition-colors ${
+                          plan.popular
+                            ? 'bg-brand-500 text-white hover:bg-brand-600'
+                            : 'bg-gray-100 text-gray-900 hover:bg-gray-200'
+                        } disabled:cursor-not-allowed disabled:opacity-70`}
+                      >
+                        {authLoading ? 'Opening Checkout...' : plan.cta}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -12723,12 +12850,15 @@ const MobileAppShell = ({
             <div className="max-w-4xl mx-auto text-center relative z-10">
               <h2 className="text-4xl font-bold text-white mb-6">Ready to Transform Your Operation?</h2>
               <p className="text-xl text-brand-100 mb-10">Join 500+ excavation companies already using Groundwork Pro to streamline their business.</p>
-              <button
-                onClick={() => { window.location.href = '/signup'; }}
-                className="px-10 py-4 bg-white text-brand-600 font-bold rounded-xl hover:bg-gray-100 transition-colors shadow-lg"
-              >
-                Start Your Free Trial
-              </button>
+              {!iosAppRuntime && (
+                <button
+                  onClick={startTrialCheckout}
+                  disabled={authLoading}
+                  className="px-10 py-4 bg-white text-brand-600 font-bold rounded-xl hover:bg-gray-100 transition-colors shadow-lg disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {authLoading ? 'Opening Checkout...' : 'Start Your Free Trial'}
+                </button>
+              )}
             </div>
           </section>
 
@@ -12802,7 +12932,7 @@ const MobileAppShell = ({
                       {authMode === 'login' ? 'Welcome back' : 'Start your free trial'}
                     </h2>
                     <p className="text-gray-500 mt-1">
-                      {authMode === 'login' ? 'Sign in to your account' : '14 days free. No credit card required.'}
+                      {authMode === 'login' ? 'Sign in to your account' : 'Create your account after starting checkout.'}
                     </p>
                   </div>
 

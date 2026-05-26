@@ -13,14 +13,50 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [nativeRuntime, setNativeRuntime] = useState(false);
+  const [trialMode, setTrialMode] = useState(false);
+  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+  const [signupHref, setSignupHref] = useState("/signup");
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
+    const params = new URLSearchParams(window.location.search);
+    // Never carry checkout/session_id params into the signup link — a user arriving
+    // at /login?checkout=success has already paid and should log in, not re-sign-up.
+    const rawParams = new URLSearchParams(window.location.search);
+    rawParams.delete("checkout");
+    rawParams.delete("session_id");
+    const filteredSearch = rawParams.toString();
+    setSignupHref(filteredSearch ? `/signup?${filteredSearch}` : "/signup");
+    const shouldStartTrial = params.get("trial") === "1";
+    const hasCheckoutSuccess = params.get("checkout") === "success";
+    setTrialMode(shouldStartTrial);
+    setCheckoutSuccess(hasCheckoutSuccess);
     setNativeRuntime(isNativeAppRuntime());
 
     supabase.auth.getSession().then(({ data }) => {
       if (!active || !data.session) return;
+      if (hasCheckoutSuccess) {
+        ensureTenantContext()
+          .then(() => {
+            router.replace("/");
+            router.refresh();
+          })
+          .catch((checkoutError) => {
+            if (!active) return;
+            setError(checkoutError instanceof Error ? checkoutError.message : "Unable to finish checkout setup");
+          });
+        return;
+      }
+      if (shouldStartTrial) {
+        ensureTenantContext()
+          .then(() => startStripeCheckout())
+          .catch((checkoutError) => {
+            if (!active) return;
+            setError(checkoutError instanceof Error ? checkoutError.message : "Unable to start checkout");
+          });
+        return;
+      }
       router.replace("/");
       router.refresh();
     });
@@ -37,6 +73,7 @@ export default function LoginPage() {
     const inviteEmail = params.get("email") || undefined;
     const inviteEmployeeId = params.get("employeeId") || undefined;
     const inviteToken = params.get("token") || undefined;
+    const stripeSessionId = params.get("session_id") || undefined;
 
     if (invite) {
       const accept = await fetch("/api/invite/accept", {
@@ -51,11 +88,24 @@ export default function LoginPage() {
       return;
     }
 
-    const bootstrap = await fetch("/api/bootstrap", { method: "POST" });
+    const bootstrap = await fetch("/api/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stripeSessionId }),
+    });
     if (!bootstrap.ok) {
       const payload = await bootstrap.json().catch(() => ({}));
       throw new Error(payload?.error || "Failed to initialize company");
     }
+  }
+
+  async function startStripeCheckout() {
+    const response = await fetch("/api/billing/checkout", { method: "POST" });
+    const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!response.ok || !payload.url) {
+      throw new Error(payload.error || "Unable to start checkout");
+    }
+    window.location.href = payload.url;
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -78,6 +128,15 @@ export default function LoginPage() {
       // Ensure session cookies are in place before redirecting.
       await supabase.auth.getSession();
       await ensureTenantContext();
+      if (checkoutSuccess) {
+        router.replace("/");
+        router.refresh();
+        return;
+      }
+      if (trialMode && !nativeRuntime) {
+        await startStripeCheckout();
+        return;
+      }
       router.replace("/");
       router.refresh();
     } catch (submitError) {
@@ -96,7 +155,13 @@ export default function LoginPage() {
           {nativeRuntime ? "Welcome to Groundwork Pro" : "Login"}
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          {nativeRuntime ? "Choose how you want to continue." : "Sign in with your email and password."}
+          {nativeRuntime
+            ? "Choose how you want to continue."
+            : trialMode
+              ? "Sign in to start or resume Stripe Checkout."
+              : checkoutSuccess
+                ? "Sign in to finish checkout and enter your dashboard."
+              : "Sign in with your email and password."}
         </p>
 
         {nativeRuntime ? (
@@ -159,7 +224,7 @@ export default function LoginPage() {
           <p className="text-sm text-gray-500 mt-5 text-center">
             Need an account?{" "}
             <Link
-              href={typeof window !== "undefined" && window.location.search ? `/signup${window.location.search}` : "/signup"}
+              href={signupHref}
               className="text-brand-600 hover:text-brand-700 font-medium"
             >
               Sign up

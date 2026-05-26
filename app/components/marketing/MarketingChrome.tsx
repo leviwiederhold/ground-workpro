@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { StartTrialButton } from "@/app/components/marketing/StartTrialButton";
 
 type MarketingChromeProps = {
   title: string;
@@ -30,7 +31,10 @@ export function MarketingChrome({ title, subtitle, children }: MarketingChromePr
             </nav>
             <div className="flex items-center gap-2">
               <Link href="/login" className="px-4 py-2 text-sm text-gray-700 hover:text-gray-900">Log In</Link>
-              <Link href="/signup" className="px-4 py-2 text-sm bg-brand-500 text-white rounded-lg hover:bg-brand-600">Start Free Trial</Link>
+              <StartTrialButton
+                label="Start Free Trial"
+                className="px-4 py-2 text-sm bg-brand-500 text-white rounded-lg hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-70"
+              />
             </div>
           </div>
         </div>

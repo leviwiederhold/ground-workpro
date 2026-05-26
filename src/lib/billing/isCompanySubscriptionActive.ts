@@ -48,7 +48,7 @@ export async function getCompanyBillingStatus(
   const subscriptionStatus = String(data?.subscription_status ?? "inactive").toLowerCase();
 
   return {
-    plan_type: String(data?.plan_type ?? "starter"),
+    plan_type: String(data?.plan_type ?? "groundwork_pro"),
     subscription_status: subscriptionStatus,
     trial_ends_at: data?.trial_ends_at ?? null,
     current_period_end: data?.current_period_end ?? null,

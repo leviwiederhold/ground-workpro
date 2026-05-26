@@ -15,16 +15,48 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [inviteMode, setInviteMode] = useState(false);
+  const [trialMode, setTrialMode] = useState(false);
+  const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+  const [loginHref, setLoginHref] = useState("/login");
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
     const params = new URLSearchParams(window.location.search);
+    setLoginHref(window.location.search ? `/login${window.location.search}` : "/login");
     setNativeRuntime(isNativeAppRuntime());
-    setInviteMode(params.get("invite") === "1");
+    const hasInvite = params.get("invite") === "1";
+    setInviteMode(hasInvite);
+    const hasCheckoutSuccess = params.get("checkout") === "success";
+    setCheckoutSuccess(hasCheckoutSuccess);
+    const shouldStartTrial = !hasInvite && !hasCheckoutSuccess;
+    setTrialMode(shouldStartTrial);
 
     supabase.auth.getSession().then(({ data }) => {
-      if (!active || !data.session) return;
+      if (!active) return;
+      if (!data.session) {
+        if (hasCheckoutSuccess) {
+          const sessionId = params.get("session_id");
+          router.replace(`/login?checkout=success${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`);
+        }
+        return;
+      }
+      if (hasCheckoutSuccess) {
+        // billing/success already updated the DB; go straight to the dashboard.
+        // Never stay on /signup after a completed Stripe checkout.
+        router.replace("/");
+        router.refresh();
+        return;
+      }
+      if (shouldStartTrial) {
+        ensureTenantContext()
+          .then(() => startStripeCheckout())
+          .catch((checkoutError) => {
+            if (!active) return;
+            setError(checkoutError instanceof Error ? checkoutError.message : "Unable to start checkout");
+          });
+        return;
+      }
       router.replace("/");
       router.refresh();
     });
@@ -41,6 +73,7 @@ export default function SignupPage() {
     const inviteEmail = params.get("email") || undefined;
     const inviteEmployeeId = params.get("employeeId") || undefined;
     const inviteToken = params.get("token") || undefined;
+    const stripeSessionId = params.get("session_id") || undefined;
 
     if (invite) {
       const accept = await fetch("/api/invite/accept", {
@@ -55,11 +88,47 @@ export default function SignupPage() {
       return;
     }
 
-    const bootstrap = await fetch("/api/bootstrap", { method: "POST" });
+    const bootstrap = await fetch("/api/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stripeSessionId }),
+    });
     if (!bootstrap.ok) {
       const payload = await bootstrap.json().catch(() => ({}));
       throw new Error(payload?.error || "Failed to initialize company");
     }
+  }
+
+  async function startStripeCheckout() {
+    const response = await fetch("/api/billing/checkout", { method: "POST" });
+    const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+    if (!response.ok || !payload.url) {
+      throw new Error(payload.error || "Unable to start checkout");
+    }
+    window.location.href = payload.url;
+  }
+
+  async function signUpWithServer() {
+    const response = await fetch("/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      item?: { existingAccount?: boolean; authError?: string | null; hasSession?: boolean; identityCount?: number };
+      error?: string;
+    };
+
+    if (!response.ok) {
+      throw new Error(payload.error || "Failed to create account");
+    }
+
+    return {
+      existingAccount: Boolean(payload.item?.existingAccount),
+      authError: payload.item?.authError ?? null,
+      hasSession: Boolean(payload.item?.hasSession),
+      identityCount: typeof payload.item?.identityCount === "number" ? payload.item.identityCount : 1,
+    };
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -71,19 +140,20 @@ export default function SignupPage() {
     const supabase = supabaseBrowser();
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const inviteMode = params?.get("invite") === "1";
+    const checkoutComplete = params?.get("checkout") === "success";
+    const ownerSignupRequiresCheckout = !inviteMode && !checkoutComplete;
     if (nativeRuntime && !inviteMode) {
       setError("Already part of a company? Sign in or contact your company administrator.");
       setLoading(false);
       return;
     }
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
-      if (signUpError) {
-        const normalized = signUpError.message.toLowerCase();
+      let signUpResult: { existingAccount: boolean; authError: string | null; hasSession: boolean; identityCount: number };
+      try {
+        signUpResult = await signUpWithServer();
+      } catch (signUpError) {
+        const message = signUpError instanceof Error ? signUpError.message : "Failed to create account";
+        const normalized = message.toLowerCase();
         if (normalized.includes("already") || normalized.includes("exists") || normalized.includes("registered")) {
           if (inviteMode) {
             const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
@@ -97,15 +167,38 @@ export default function SignupPage() {
             setError("This invite email already has an account. Sign in with the existing password to accept the invite.");
             return;
           }
+          if (ownerSignupRequiresCheckout) {
+            const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+            if (!signInError) {
+              await supabase.auth.getSession();
+              await ensureTenantContext();
+              await startStripeCheckout();
+              return;
+            }
+          }
+          if (checkoutComplete) {
+            const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+            if (!signInError) {
+              await supabase.auth.getSession();
+              await ensureTenantContext();
+              router.replace("/");
+              router.refresh();
+              return;
+            }
+          }
           setError("This email is already registered. Please log in.");
           return;
         }
-        setError(signUpError.message);
+        setError(message);
         return;
       }
 
-      const identityCount = Array.isArray(data?.user?.identities) ? data.user.identities.length : 1;
-      if (data?.user && identityCount === 0) {
+      if (signUpResult.authError) {
+        setError(signUpResult.authError);
+        return;
+      }
+
+      if (signUpResult.existingAccount || signUpResult.identityCount === 0) {
         if (inviteMode) {
           const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
           if (!signInError) {
@@ -118,13 +211,41 @@ export default function SignupPage() {
           setError("This invite email already has an account. Sign in with the existing password to accept the invite.");
           return;
         }
+        if (ownerSignupRequiresCheckout) {
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (!signInError) {
+            await supabase.auth.getSession();
+            await ensureTenantContext();
+            await startStripeCheckout();
+            return;
+          }
+        }
+        if (checkoutComplete) {
+          const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+          if (!signInError) {
+            await supabase.auth.getSession();
+            await ensureTenantContext();
+            router.replace("/");
+            router.refresh();
+            return;
+          }
+        }
         setError("This email is already registered. Please log in.");
         return;
       }
 
-      if (data?.session) {
+      if (signUpResult.hasSession) {
         await supabase.auth.getSession();
         await ensureTenantContext();
+        if (checkoutComplete && !inviteMode) {
+          router.replace("/");
+          router.refresh();
+          return;
+        }
+        if (ownerSignupRequiresCheckout) {
+          await startStripeCheckout();
+          return;
+        }
         router.replace("/");
         router.refresh();
         return;
@@ -148,13 +269,27 @@ export default function SignupPage() {
             ? "Sign in with your company account. If you need access, contact your company administrator."
             : nativeRuntime
               ? "Create your account from your company invitation."
-              : "Create your account to get started."}
+              : checkoutSuccess
+                ? "Your trial has started. Create your account to finish setup."
+              : trialMode
+                ? "Create your account first, then start your 7-day trial."
+                : "Create your account to get started."}
         </p>
+
+        {checkoutSuccess && !inviteMode && !nativeRuntime ? (
+          <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
+            Stripe Checkout is complete. Create your account and company workspace to enter Groundwork Pro.
+          </div>
+        ) : trialMode && !inviteMode && !nativeRuntime ? (
+          <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm text-brand-800">
+            Create your account and company workspace. Stripe Checkout opens next.
+          </div>
+        ) : null}
 
         {nativeRuntime ? (
           <div className="mb-6 grid grid-cols-2 gap-3">
             <Link
-              href={typeof window !== "undefined" && window.location.search ? `/login${window.location.search}` : "/login"}
+              href={loginHref}
               className="rounded-lg border border-gray-300 bg-white px-4 py-3 text-center text-sm font-medium text-gray-700 transition hover:border-gray-400 hover:bg-gray-50"
             >
               Log In
@@ -202,7 +337,13 @@ export default function SignupPage() {
             disabled={loading}
             className="w-full bg-brand-500 hover:bg-brand-600 text-white rounded-lg py-2.5 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {loading ? "Creating account..." : "Create account"}
+            {loading
+              ? "Creating account..."
+              : checkoutSuccess && !inviteMode
+                ? "Create account and finish setup"
+                : trialMode && !inviteMode
+                  ? "Create account and start trial"
+                  : "Create account"}
           </button>
         </form>
         )}
@@ -210,7 +351,7 @@ export default function SignupPage() {
         <p className="text-sm text-gray-500 mt-5 text-center">
           Already registered?{" "}
           <Link
-            href={typeof window !== "undefined" && window.location.search ? `/login${window.location.search}` : "/login"}
+            href={loginHref}
             className="text-brand-600 hover:text-brand-700 font-medium"
           >
             Log in

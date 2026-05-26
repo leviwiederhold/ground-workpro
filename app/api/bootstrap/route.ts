@@ -4,6 +4,7 @@ import { enforceRateLimit } from "@/lib/http/rateLimit";
 import { ensureCompanyHasAtLeastOneCeoMembership } from "@/lib/auth/ceoGuard";
 import { upsertProfileColumns } from "@/lib/user/profileRecord";
 import { sanitizeProfileFullName } from "@/lib/user/profileFields";
+import { getStripe } from "@/lib/billing/stripe";
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
@@ -48,6 +49,47 @@ const isMissingSchemaError = (message: string | undefined) =>
     message ?? ""
   );
 
+async function loadStripeCheckoutBilling(stripeSessionId: string | null) {
+  if (!stripeSessionId) return null;
+
+  const session = await getStripe().checkout.sessions.retrieve(stripeSessionId, {
+    expand: ["subscription"],
+  });
+  if (session.mode !== "subscription" || session.status !== "complete") return null;
+
+  const subscription =
+    typeof session.subscription === "string"
+      ? await getStripe().subscriptions.retrieve(session.subscription)
+      : session.subscription;
+  if (!subscription) return null;
+
+  return {
+    stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id,
+    stripe_subscription_id: subscription.id,
+    subscription_status: subscription.status,
+    plan_type: "groundwork_pro",
+    trial_ends_at: typeof subscription.trial_end === "number" ? new Date(subscription.trial_end * 1000).toISOString() : null,
+    current_period_end:
+      typeof subscription.items.data[0]?.current_period_end === "number"
+        ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString()
+        : null,
+  };
+}
+
+async function applyStripeCheckoutBilling(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+  companyId: string,
+  stripeSessionId: string | null
+) {
+  const billing = await loadStripeCheckoutBilling(stripeSessionId);
+  if (!billing) return;
+
+  const result = await supabase.from("companies").update(billing).eq("id", companyId);
+  if (result.error && !isMissingSchemaError(result.error.message)) {
+    throw new Error(result.error.message || "Failed to attach Stripe billing");
+  }
+}
+
 async function ensureCompanyBootstrapDefaults(
   supabase: Awaited<ReturnType<typeof supabaseServer>>,
   companyId: string,
@@ -87,6 +129,11 @@ export async function POST(request: Request) {
     if (rateLimited) return rateLimited;
 
     const supabase = await supabaseServer();
+    const body = await request.json().catch(() => ({}));
+    const stripeSessionId =
+      body && typeof body === "object" && "stripeSessionId" in body
+        ? String((body as { stripeSessionId?: unknown }).stripeSessionId ?? "").trim() || null
+        : null;
 
     // Get current user
     const { data: userData, error: userError } = await supabase.auth.getUser();
@@ -118,6 +165,7 @@ export async function POST(request: Request) {
       const existingCompanyId = String(existingMemberships?.[0]?.company_id ?? "");
       if (existingCompanyId) {
         await ensureCompanyBootstrapDefaults(supabase, existingCompanyId, userMetadata);
+        await applyStripeCheckoutBilling(supabase, existingCompanyId, stripeSessionId);
         try {
           await ensureCompanyHasAtLeastOneCeoMembership(supabase, existingCompanyId);
         } catch {
@@ -210,6 +258,7 @@ export async function POST(request: Request) {
     if (companyError) {
       return errorResponse(companyError.message, 400);
     }
+    await applyStripeCheckoutBilling(supabase, String(company.id), stripeSessionId);
 
     // The memberships table stores company owners as "admin"; app role normalization
     // still treats admin as the top-level CEO/executive role.

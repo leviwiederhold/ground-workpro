@@ -59,7 +59,12 @@ function resolveApiGuardedModule(request: NextRequest) {
   return findGuardedModule(pathname, API_MODULE_GUARDS);
 }
 
+// Pages that must bypass role guards — they handle auth themselves (e.g. post-Stripe
+// redirect where membership may not exist yet).
+const PAGE_GUARD_BYPASSES = new Set(["/settings/billing/success"]);
+
 function findGuardedRoles(pathname: string): AppRole[] | null {
+  if (PAGE_GUARD_BYPASSES.has(pathname)) return null;
   const entry = Object.entries(ROUTE_GUARDS)
     .sort((a, b) => b[0].length - a[0].length)
     .find(([prefix]) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -138,6 +143,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 
       if (!resolvedRole) {
         if (!userId) {
+          if (!isApi) return NextResponse.redirect(new URL("/login", request.url));
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
@@ -148,12 +154,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           .limit(1);
 
         if (membershipError) {
+          if (!isApi) return NextResponse.redirect(new URL("/", request.url));
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
         companyId = String(memberships?.[0]?.company_id ?? "");
         const realRole = normalizeAppRole(memberships?.[0]?.role);
         if (!realRole) {
+          if (!isApi) return NextResponse.redirect(new URL("/", request.url));
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
@@ -169,10 +177,16 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       }
 
       if (!resolvedRole || !userId || !companyId) {
+        if (!isApi) return NextResponse.redirect(new URL("/", request.url));
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 
       if (guardedPageRoles && !guardedPageRoles.includes(resolvedRole)) {
+        // For page routes return a redirect rather than raw JSON so the user
+        // sees the dashboard instead of a JSON error in their browser.
+        if (!isApi) {
+          return NextResponse.redirect(new URL("/", request.url));
+        }
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 

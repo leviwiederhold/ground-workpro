@@ -24,8 +24,8 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "documents", label: "Documents", href: "/documents", iconKey: "folder-open" },
   { key: "training", label: "Training", href: "/training", iconKey: "chalkboard-user" },
   { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
-  { key: "subscribe", label: "Subscribe", href: "/subscribe", iconKey: "credit-card" },
 ];
+// Note: "subscribe" nav item intentionally removed — billing is accessed via profile dropdown → Billing.
 
 export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
   admin: [
@@ -40,7 +40,6 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "messages",
     "finance",
     "reports",
-    "subscribe",
     "documents",
     "team",
     "training",
@@ -96,8 +95,8 @@ export const ROUTE_GUARDS: Record<string, AppRole[]> = {
   "/inventory": ["admin", "pm", "mechanic"],
   "/finance": ["admin", "pm"],
   "/documents": ["admin", "pm", "foreman", "mechanic", "operator"],
+  "/settings/billing": ["admin"],
   "/settings": ["admin", "pm"],
-  "/subscribe": ["admin"],
 };
 
 export function toNavItems(role: AppRole): NavItem[] {

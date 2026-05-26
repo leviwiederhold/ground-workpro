@@ -119,7 +119,7 @@ export async function POST(request: Request) {
     if (!row) {
       return NextResponse.json({
         item: {
-          plan_type: parsed.data.plan_type ?? "starter",
+          plan_type: parsed.data.plan_type ?? "groundwork_pro",
           subscription_status: parsed.data.subscription_status,
           trial_ends_at: null,
           current_period_end: null,

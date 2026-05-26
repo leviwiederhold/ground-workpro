@@ -889,6 +889,7 @@ const MobileAppShell = ({
       const [subscriptionGate, setSubscriptionGate] = useState({
         loaded: false,
         active: true,
+        noWorkspace: false,
         error: '',
       });
       const setPressedNavItem = useCallback((itemId) => {
@@ -945,11 +946,23 @@ const MobileAppShell = ({
             const payload = await response.json().catch(() => ({}));
             if (!active) return;
             if (!response.ok) {
+              // 400/404 in native mode means no company workspace — block with
+              // the "Get Started on Web" screen rather than letting them through.
+              if (iosAppRuntime && (response.status === 400 || response.status === 404)) {
+                setSubscriptionGate({
+                  loaded: true,
+                  active: false,
+                  noWorkspace: true,
+                  error: '',
+                });
+                return;
+              }
               // Transient API failure — let the user through optimistically. The
               // gate will re-check on the next role change or page refresh.
               setSubscriptionGate({
                 loaded: true,
                 active: true,
+                noWorkspace: false,
                 error: payload?.error || 'Failed to load subscription status',
               });
               return;
@@ -2012,6 +2025,28 @@ const MobileAppShell = ({
               <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
               <div>Loading your workspace...</div>
             </Card>
+          );
+        }
+        // Gate: native app user has no company workspace — redirect to web.
+        if (subscriptionGate.noWorkspace && iosAppRuntime) {
+          return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] px-6 text-center">
+              <div className="w-14 h-14 rounded-full bg-brand-50 flex items-center justify-center mb-5">
+                <i className="fa-solid fa-globe text-brand-500 text-2xl" />
+              </div>
+              <div className="text-xl font-semibold text-gray-900 mb-3">Get Started on Web</div>
+              <p className="text-sm text-gray-600 mb-6 max-w-xs leading-relaxed">
+                Company setup and workspace creation are completed on the Groundwork Pro website.
+                Once your company workspace is created, you can sign into the mobile app.
+              </p>
+              <a
+                href="https://ground-workpro.com"
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-3 text-sm font-semibold text-white"
+              >
+                <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
+                Open Website
+              </a>
+            </div>
           );
         }
         // Gate: company account inactive — block all users.

@@ -6,6 +6,33 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 
+const GROUNDWORK_WEB_URL = "https://ground-workpro.com";
+
+/** Shown only in the native app when the signed-in user has no company workspace. */
+function NativeNoWorkspaceScreen() {
+  return (
+    <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-8 text-center">
+        <div className="w-14 h-14 rounded-full bg-brand-50 flex items-center justify-center mx-auto mb-5">
+          <i className="fa-solid fa-globe text-brand-500 text-2xl" />
+        </div>
+        <h1 className="text-xl font-semibold text-gray-900 mb-3">Get Started on Web</h1>
+        <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+          Company setup and workspace creation are completed on the Groundwork Pro website.
+          Once your company workspace is created, you can sign into the mobile app.
+        </p>
+        <a
+          href={GROUNDWORK_WEB_URL}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 active:bg-brand-700"
+        >
+          <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
+          Open Website
+        </a>
+      </div>
+    </main>
+  );
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -16,13 +43,29 @@ export default function LoginPage() {
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
+  const [showNoWorkspace, setShowNoWorkspace] = useState(false);
+
+  /**
+   * In native app mode, check if the user has an accepted workspace membership.
+   * If not, show the "Get Started on Web" screen instead of routing to the dashboard.
+   */
+  async function checkNativeWorkspace(): Promise<boolean> {
+    try {
+      const res = await fetch("/api/auth/has-workspace");
+      if (res.status === 401) return false;
+      const payload = await res.json().catch(() => ({}));
+      return Boolean(payload?.hasWorkspace);
+    } catch {
+      // Network error — optimistically allow entry so the app isn't bricked.
+      return true;
+    }
+  }
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
     const params = new URLSearchParams(window.location.search);
-    // Never carry checkout/session_id params into the signup link — a user arriving
-    // at /login?checkout=success has already paid and should log in, not re-sign-up.
+    // Never carry checkout/session_id params into the signup link.
     const rawParams = new URLSearchParams(window.location.search);
     rawParams.delete("checkout");
     rawParams.delete("session_id");
@@ -32,10 +75,25 @@ export default function LoginPage() {
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setTrialMode(shouldStartTrial);
     setCheckoutSuccess(hasCheckoutSuccess);
-    setNativeRuntime(isNativeAppRuntime());
+    const isNative = isNativeAppRuntime();
+    setNativeRuntime(isNative);
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (!active || !data.session) return;
+
+      // Native app: verify workspace membership before entering dashboard.
+      if (isNative) {
+        const hasWorkspace = await checkNativeWorkspace();
+        if (!active) return;
+        if (!hasWorkspace) {
+          setShowNoWorkspace(true);
+          return;
+        }
+        router.replace("/");
+        router.refresh();
+        return;
+      }
+
       if (hasCheckoutSuccess) {
         ensureTenantContext()
           .then(() => {
@@ -125,8 +183,26 @@ export default function LoginPage() {
         return;
       }
 
-      // Ensure session cookies are in place before redirecting.
+      // Ensure session cookies are in place before any checks.
       await supabase.auth.getSession();
+
+      // Native app: check workspace membership before entering dashboard.
+      if (nativeRuntime) {
+        const hasWorkspace = await checkNativeWorkspace();
+        if (!hasWorkspace) {
+          setShowNoWorkspace(true);
+          return;
+        }
+        // Invited employees go through ensureTenantContext to accept their invite.
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("invite") === "1") {
+          await ensureTenantContext();
+        }
+        router.replace("/");
+        router.refresh();
+        return;
+      }
+
       await ensureTenantContext();
       if (checkoutSuccess) {
         router.replace("/");
@@ -146,6 +222,11 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  // Native app — no workspace found after authentication.
+  if (showNoWorkspace) {
+    return <NativeNoWorkspaceScreen />;
   }
 
   return (

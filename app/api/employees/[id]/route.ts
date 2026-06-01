@@ -5,6 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -442,7 +443,16 @@ export async function DELETE(
     }
     const linkedUserId = String(employeeResult.data.user_id ?? "").trim();
 
-    const { error } = await supabase
+    // Use the service-role client for the destructive writes. The caller is
+    // already authorized (requireModuleAccess team_management:edit), and RLS on
+    // the memberships table only lets a user delete their OWN row — so deleting
+    // another member's membership via the request-scoped client silently
+    // affects 0 rows (no error), leaving an orphaned membership that still
+    // counts toward billable seats. Admin client guarantees the row is removed.
+    const admin = getSupabaseAdmin();
+    const writeClient = admin ?? supabase;
+
+    const { error } = await writeClient
       .from("employees")
       .delete()
       .eq("company_id", companyId)
@@ -453,7 +463,7 @@ export async function DELETE(
     }
 
     if (linkedUserId) {
-      const membershipDelete = await supabase
+      const membershipDelete = await writeClient
         .from("memberships")
         .delete()
         .eq("company_id", companyId)
@@ -462,7 +472,7 @@ export async function DELETE(
         return NextResponse.json({ error: membershipDelete.error.message }, { status: 400 });
       }
 
-      const permissionsDelete = await supabase
+      const permissionsDelete = await writeClient
         .from("module_permissions")
         .delete()
         .eq("company_id", companyId)

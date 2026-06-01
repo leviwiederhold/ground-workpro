@@ -4000,6 +4000,38 @@ const MobileAppShell = ({
         }
       };
 
+      const shareInviteLink = async (inviteLink) => {
+        if (!inviteLink) throw new Error('Create invite first');
+        if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+          try {
+            await navigator.share({
+              title: 'Join Groundwork Pro',
+              text: 'Use this invite link to join our Groundwork Pro workspace.',
+              url: inviteLink,
+            });
+            setInviteFeedback('Invite ready to share.');
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              setInviteFeedback('Invite link generated. Share when ready.');
+              return;
+            }
+            setInviteFeedback('Invite link generated. Use Copy Link below if sharing is unavailable.');
+          }
+          return;
+        }
+        await copyText(inviteLink);
+        setInviteFeedback('Invite link copied.');
+      };
+
+      const handleShareInvite = async () => {
+        setInviteFeedback('');
+        try {
+          await shareInviteLink(inviteForm.invite_url);
+        } catch (error) {
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to share invite link.');
+        }
+      };
+
       const handleCopyInviteMessage = async () => {
         setInviteFeedback('');
         try {
@@ -4076,10 +4108,8 @@ const MobileAppShell = ({
           }
           if (generatedInviteUrl) {
             try {
-              await copyText(generatedInviteUrl);
-              setInviteFeedback('Invite link generated and copied to clipboard.');
+              await shareInviteLink(generatedInviteUrl);
               setShowSensitiveInviteConfirm(false);
-              setShowInviteModal(false);
               return;
             } catch {
               setInviteFeedback('Invite link generated. Clipboard access failed, use Copy Link below.');
@@ -4780,12 +4810,16 @@ const MobileAppShell = ({
               {permissionModalMode !== 'member-edit' && inviteForm.invite_url && (
                 <div className="rounded-xl border border-green-200 bg-green-50 p-3 dark:border-green-900/40 dark:bg-green-950/20">
                   <p className="mb-2 text-xs font-medium text-green-700 dark:text-green-200">Invite link generated</p>
-                  <div className="flex gap-2">
+                  <p className="mb-2 break-all text-xs text-green-800 dark:text-green-100">{inviteForm.invite_url}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" size="sm" onClick={handleShareInvite}>
+                      <Icon name="share-nodes" className="mr-1" /> Share Invite
+                    </Button>
                     <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
                       <Icon name="link" className="mr-1" /> Copy Link
                     </Button>
-                    <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage}>
-                      <Icon name="envelope" className="mr-1" /> Copy Message
+                    <Button variant="secondary" size="sm" onClick={() => setShowInviteModal(false)}>
+                      Done
                     </Button>
                   </div>
                 </div>

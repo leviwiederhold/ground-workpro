@@ -3,10 +3,11 @@ import { enforceRateLimit } from "@/lib/http/rateLimit";
 import { supabaseServer } from "@/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { isStrongPassword, STRONG_PASSWORD_MESSAGE } from "@/lib/auth/passwordPolicy";
 
 const signupSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(6),
+  password: z.string().refine(isStrongPassword, STRONG_PASSWORD_MESSAGE),
   full_name: z.string().trim().max(160).optional(),
 });
 

@@ -24,7 +24,8 @@
     "build:next": "next build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "pnpm exec next typegen && tsc --noEmit --incremental false"
+    "typecheck": "pnpm exec next typegen && tsc --noEmit --incremental false",
+    "apple:secret": "node scripts/generate-apple-secret.js"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",
@@ -35,6 +36,7 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.95.3",
     "chart.js": "^4.5.0",
+    "jsonwebtoken": "^9.0.3",
     "leaflet": "^1.9.4",
     "next": "^15.1.0",
     "react": "^18.3.1",

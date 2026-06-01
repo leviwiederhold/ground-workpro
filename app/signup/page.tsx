@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
+import OAuthButtons from "@/app/components/auth/OAuthButtons";
+import PasswordChecklist from "@/app/components/auth/PasswordChecklist";
+import { isStrongPassword, STRONG_PASSWORD_MESSAGE } from "@/lib/auth/passwordPolicy";
 
 const ROLE_LABELS: Record<string, string> = {
   ceo: "CEO",
@@ -32,12 +35,14 @@ export default function SignupPage() {
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [loginHref, setLoginHref] = useState("/login");
+  const [oauthCallbackQuery, setOauthCallbackQuery] = useState("");
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
     const params = new URLSearchParams(window.location.search);
     setLoginHref(window.location.search ? `/login${window.location.search}` : "/login");
+    setOauthCallbackQuery(window.location.search.replace(/^\?/, ""));
     setNativeRuntime(isNativeAppRuntime());
     const hasInvite = params.get("invite") === "1";
     setInviteMode(hasInvite);
@@ -179,6 +184,11 @@ export default function SignupPage() {
     const ownerSignupRequiresCheckout = !inviteMode && !checkoutComplete;
     if (nativeRuntime && !inviteMode) {
       setError("Already part of a company? Sign in or contact your company administrator.");
+      setLoading(false);
+      return;
+    }
+    if (!isStrongPassword(password)) {
+      setError(STRONG_PASSWORD_MESSAGE);
       setLoading(false);
       return;
     }
@@ -403,6 +413,7 @@ export default function SignupPage() {
               required
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
             />
+            <PasswordChecklist value={password} />
           </div>
 
           <div>
@@ -433,6 +444,12 @@ export default function SignupPage() {
                   : "Create account"}
           </button>
         </form>
+        )}
+
+        {!nativeRuntime && (
+          <div className="mt-5">
+            <OAuthButtons callbackQuery={oauthCallbackQuery} />
+          </div>
         )}
 
         <p className="text-sm text-gray-500 mt-5 text-center">

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
+import OAuthButtons from "@/app/components/auth/OAuthButtons";
 
 const GROUNDWORK_WEB_URL = "https://ground-workpro.com";
 
@@ -54,6 +55,8 @@ export default function LoginPage() {
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
+  // Preserve invite context (and any params) through the OAuth callback.
+  const [oauthCallbackQuery, setOauthCallbackQuery] = useState("");
 
   /**
    * In native app mode, check if the user has an accepted workspace membership.
@@ -81,6 +84,7 @@ export default function LoginPage() {
     rawParams.delete("session_id");
     const filteredSearch = rawParams.toString();
     setSignupHref(filteredSearch ? `/signup?${filteredSearch}` : "/signup");
+    setOauthCallbackQuery(filteredSearch);
     const shouldStartTrial = params.get("trial") === "1";
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setTrialMode(shouldStartTrial);
@@ -334,6 +338,22 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        {!nativeRuntime && (
+          <p className="mt-3 text-center text-sm">
+            <Link href="/forgot-password" className="text-brand-600 hover:text-brand-700 font-medium">
+              Forgot password?
+            </Link>
+          </p>
+        )}
+
+        {/* OAuth — web only. Native deep-link callback is not confirmed yet, so
+            native keeps email/password only. */}
+        {!nativeRuntime && (
+          <div className="mt-5">
+            <OAuthButtons callbackQuery={oauthCallbackQuery} />
+          </div>
+        )}
 
         {nativeRuntime ? null : (
           <p className="text-sm text-gray-500 mt-5 text-center">

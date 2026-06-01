@@ -900,7 +900,7 @@ const MobileAppShell = ({
             if (!active) return;
             if (!response.ok) {
               // 400/404 in native mode means no company workspace — block with
-              // the "Get Started on Web" screen rather than letting them through.
+              // the "Continue on Web" screen rather than letting them through.
               if (iosAppRuntime && (response.status === 400 || response.status === 404)) {
                 setSubscriptionGate({
                   loaded: true,
@@ -1987,10 +1987,10 @@ const MobileAppShell = ({
               <div className="w-14 h-14 rounded-full bg-brand-50 flex items-center justify-center mb-5">
                 <i className="fa-solid fa-globe text-brand-500 text-2xl" />
               </div>
-              <div className="text-xl font-semibold text-gray-900 mb-3">Get Started on Web</div>
+              <div className="text-xl font-semibold text-gray-900 mb-3">Continue on Web</div>
               <p className="text-sm text-gray-600 mb-6 max-w-xs leading-relaxed">
-                Company setup and workspace creation are completed on the Groundwork Pro website.
-                Once your company workspace is created, you can sign into the mobile app.
+                Company setup is completed on the Groundwork Pro website. Once your
+                workspace is created, you can sign in here.
               </p>
               <button
                 type="button"
@@ -1998,7 +1998,7 @@ const MobileAppShell = ({
                 className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-3 text-sm font-semibold text-white"
               >
                 <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
-                Open Website
+                Continue on Web
               </button>
             </div>
           );
@@ -13368,6 +13368,9 @@ const MobileAppShell = ({
       }
 
       if (!isAuthenticated) {
+        // Logged-out destination is resolved — release the startup overlay so
+        // the landing/onboarding page is not hidden behind it for the full cap.
+        onReady?.();
         if (startupError) {
           return (
             <WorkspaceStartupErrorScreen

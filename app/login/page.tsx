@@ -25,10 +25,10 @@ function NativeNoWorkspaceScreen() {
         <div className="w-14 h-14 rounded-full bg-brand-50 flex items-center justify-center mx-auto mb-5">
           <i className="fa-solid fa-globe text-brand-500 text-2xl" />
         </div>
-        <h1 className="text-xl font-semibold text-gray-900 mb-3">Get Started on Web</h1>
+        <h1 className="text-xl font-semibold text-gray-900 mb-3">Continue on Web</h1>
         <p className="text-sm text-gray-600 mb-6 leading-relaxed">
-          Company setup and workspace creation are completed on the Groundwork Pro website.
-          Once your company workspace is created, you can sign into the mobile app.
+          Company setup is completed on the Groundwork Pro website. Once your
+          workspace is created, you can sign in here.
         </p>
         <button
           type="button"
@@ -36,7 +36,7 @@ function NativeNoWorkspaceScreen() {
           className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 active:bg-brand-700"
         >
           <i className="fa-solid fa-arrow-up-right-from-square text-xs" />
-          Open Website
+          Continue on Web
         </button>
       </div>
     </main>
@@ -57,7 +57,7 @@ export default function LoginPage() {
 
   /**
    * In native app mode, check if the user has an accepted workspace membership.
-   * If not, show the "Get Started on Web" screen instead of routing to the dashboard.
+   * If not, show the "Continue on Web" screen instead of routing to the dashboard.
    */
   async function checkNativeWorkspace(): Promise<boolean> {
     try {
@@ -91,8 +91,22 @@ export default function LoginPage() {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active || !data.session) return;
 
-      // Native app: verify workspace membership before entering dashboard.
+      // Native app: invite-first, then workspace gate.
       if (isNative) {
+        // Invited employees may not have a membership row yet — accept the
+        // invite BEFORE the workspace check so the gate never blocks them.
+        if (params.get("invite") === "1") {
+          try {
+            await ensureTenantContext();
+            if (!active) return;
+            router.replace("/");
+            router.refresh();
+          } catch (inviteError) {
+            if (!active) return;
+            setError(inviteError instanceof Error ? inviteError.message : "Failed to accept invite");
+          }
+          return;
+        }
         const hasWorkspace = await checkNativeWorkspace();
         if (!active) return;
         if (!hasWorkspace) {
@@ -196,17 +210,21 @@ export default function LoginPage() {
       // Ensure session cookies are in place before any checks.
       await supabase.auth.getSession();
 
-      // Native app: check workspace membership before entering dashboard.
+      // Native app: invite-first, then workspace gate.
       if (nativeRuntime) {
+        const params = new URLSearchParams(window.location.search);
+        // Invited employees may not have a membership row yet — accept the
+        // invite BEFORE the workspace check so the gate never blocks them.
+        if (params.get("invite") === "1") {
+          await ensureTenantContext();
+          router.replace("/");
+          router.refresh();
+          return;
+        }
         const hasWorkspace = await checkNativeWorkspace();
         if (!hasWorkspace) {
           setShowNoWorkspace(true);
           return;
-        }
-        // Invited employees go through ensureTenantContext to accept their invite.
-        const params = new URLSearchParams(window.location.search);
-        if (params.get("invite") === "1") {
-          await ensureTenantContext();
         }
         router.replace("/");
         router.refresh();
@@ -342,7 +360,7 @@ export default function LoginPage() {
                 onClick={openExternalWebsite}
                 className="text-sm text-gray-500 hover:text-gray-700 active:text-gray-900"
               >
-                Open website →
+                Continue on Web →
               </button>
             </div>
           </>

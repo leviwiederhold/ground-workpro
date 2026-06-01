@@ -10,7 +10,7 @@ export const runtime = "nodejs";
  * workspace (has an accepted membership row).
  *
  * Used by the native app to decide whether to route into the dashboard or
- * show the "Get Started on Web" screen (for brand-new CEO accounts that have
+ * show the "Continue on Web" screen (for brand-new CEO accounts that have
  * not yet created a company workspace on the web).
  *
  * Response: { hasWorkspace: boolean }

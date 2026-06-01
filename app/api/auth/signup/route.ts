@@ -7,6 +7,7 @@ import { z } from "zod";
 const signupSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
+  full_name: z.string().trim().max(160).optional(),
 });
 
 function isExistingAccountError(message: string) {
@@ -30,9 +31,11 @@ export async function POST(request: Request) {
 
   try {
     const supabase = await supabaseServer();
+    const fullName = parsed.data.full_name?.trim();
     const { data, error } = await supabase.auth.signUp({
       email: parsed.data.email,
       password: parsed.data.password,
+      ...(fullName ? { options: { data: { full_name: fullName } } } : {}),
     });
 
     if (error) {

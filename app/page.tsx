@@ -3677,6 +3677,7 @@ const MobileAppShell = ({
         id: '',
         full_name: '',
         email: '',
+        job_title: '',
         role: 'operator',
         invite_url: '',
       });
@@ -3876,7 +3877,7 @@ const MobileAppShell = ({
         setShowSensitiveInviteConfirm(false);
         setShowSeatCostWarning(false);
         setPermissionModalMode('invite-create');
-        setInviteForm({ id: '', full_name: '', email: '', role: 'operator', invite_url: '' });
+        setInviteForm({ id: '', full_name: '', email: '', job_title: '', role: 'operator', invite_url: '' });
         setPermissionForm({ ...roleTemplateDefaults.operator });
         setShowInviteModal(true);
       };
@@ -4046,15 +4047,21 @@ const MobileAppShell = ({
             ? `/api/team/invitations/${inviteForm.id}`
             : '/api/team/invitations';
           const method = permissionModalMode === 'invite-edit' ? 'PATCH' : 'POST';
+          // New flow: admin sets role, job title, and permissions only — no
+          // employee email/name. Only include name/email if they were actually
+          // provided (e.g. legacy member-permission edits), since the API
+          // rejects empty values.
+          const inviteBody = {
+            role: inviteForm.role,
+            job_title: inviteForm.job_title.trim() || undefined,
+            permissions: permissionsPayload,
+            ...(inviteForm.full_name.trim() ? { full_name: inviteForm.full_name.trim() } : {}),
+            ...(inviteForm.email.trim() ? { email: inviteForm.email.trim().toLowerCase() } : {}),
+          };
           const response = await fetch(endpoint, {
             method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              full_name: inviteForm.full_name.trim(),
-              email: inviteForm.email.trim().toLowerCase(),
-              role: inviteForm.role,
-              permissions: permissionsPayload,
-            }),
+            body: JSON.stringify(inviteBody),
           });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(payload?.error || 'Failed to save invite');
@@ -4088,11 +4095,14 @@ const MobileAppShell = ({
         } finally {
           setInviteSaveLoading(false);
         }
-      }, [inviteForm.email, inviteForm.full_name, inviteForm.id, inviteForm.role, loadPendingInvites, permissionModalMode, permissionsPayload]);
+      }, [inviteForm.email, inviteForm.full_name, inviteForm.job_title, inviteForm.id, inviteForm.role, loadPendingInvites, permissionModalMode, permissionsPayload]);
 
       const handleSaveInvite = async () => {
-        if (!inviteForm.full_name.trim() || !inviteForm.email.trim() || !inviteForm.role) {
-          setInviteFeedback('Name, email, role, and permissions are required.');
+        // New flow: the admin only needs to choose a role. Job title and
+        // permissions are optional; the employee provides their own name/email
+        // when they accept the invite.
+        if (!inviteForm.role) {
+          setInviteFeedback('Select a role to generate an invite link.');
           return;
         }
         // Show seat cost warning only for new invites (not edits — edits don't add seats).
@@ -4138,6 +4148,7 @@ const MobileAppShell = ({
               id: invite.id,
               full_name: invite.full_name || '',
               email: invite.email || '',
+              job_title: invite.job_title || '',
               role: invite.role || 'operator',
               invite_url: invite.invite_url || '',
             });
@@ -4678,25 +4689,18 @@ const MobileAppShell = ({
                 </div>
               </div>
               {permissionModalMode !== 'member-edit' && (
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Full Name</label>
-                    <input
-                      type="text"
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
-                      value={inviteForm.full_name}
-                      onChange={(event) => setInviteForm((prev) => ({ ...prev, full_name: event.target.value }))}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Email</label>
-                    <input
-                      type="email"
-                      className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
-                      value={inviteForm.email}
-                      onChange={(event) => setInviteForm((prev) => ({ ...prev, email: event.target.value }))}
-                    />
-                  </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Job Title <span className="font-normal normal-case tracking-normal text-gray-400">(optional)</span></label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Site Foreman"
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
+                    value={inviteForm.job_title}
+                    onChange={(event) => setInviteForm((prev) => ({ ...prev, job_title: event.target.value }))}
+                  />
+                  <p className="mt-1.5 text-xs leading-5 text-gray-500 dark:text-zinc-400">
+                    The new teammate enters their own name and email when they accept the invite link.
+                  </p>
                 </div>
               )}
 
@@ -4807,7 +4811,7 @@ const MobileAppShell = ({
                   disabled={inviteSaveLoading}
                   onClick={permissionModalMode === 'member-edit' ? handleSaveMemberPermissions : handleSaveInvite}
                 >
-                  {inviteSaveLoading ? 'Saving...' : permissionModalMode === 'member-edit' ? 'Save Permissions' : 'Save & Generate Link'}
+                  {inviteSaveLoading ? 'Saving...' : permissionModalMode === 'member-edit' ? 'Save Permissions' : permissionModalMode === 'invite-edit' ? 'Update Invite' : 'Generate Invite Link'}
                 </Button>
               </div>
             </div>

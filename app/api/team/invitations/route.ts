@@ -13,14 +13,14 @@ import {
   modulePermissionKeys,
   type ModulePermissionMap,
 } from "@/lib/permissions/types";
-import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 type PendingInvitationRow = {
   id: string;
   company_id: string;
-  email: string;
+  email: string | null;
   role: z.infer<typeof invitationRoleSchema>;
   full_name: string | null;
+  job_title: string | null;
   invite_token: string;
   expires_at: string;
   created_at: string;
@@ -33,10 +33,11 @@ const permissionOverrideSchema = z.object({
   access_level: moduleAccessLevelSchema,
 });
 
+// New flow: the admin supplies role, job title, and permissions only. The
+// employee provides their own email/name when they accept the invite.
 const createInvitationSchema = z.object({
-  full_name: z.string().trim().min(1),
-  email: z.string().trim().email(),
   role: invitationRoleSchema,
+  job_title: z.string().trim().max(120).optional(),
   permissions: z.array(permissionOverrideSchema).optional(),
 });
 
@@ -106,13 +107,13 @@ export async function GET(request: Request) {
 
     const invitationWithName = await supabase
       .from("pending_invitations")
-      .select("id, company_id, email, role, full_name, invite_token, expires_at, created_at, updated_at, accepted_at")
+      .select("id, company_id, email, role, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
       .eq("company_id", companyId)
       .is("accepted_at", null)
       .order("created_at", { ascending: false });
 
     const invitationWithoutName =
-      invitationWithName.error && /full_name/i.test(invitationWithName.error.message || "")
+      invitationWithName.error && /full_name|job_title/i.test(invitationWithName.error.message || "")
         ? await supabase
         .from("pending_invitations")
         .select("id, company_id, email, role, invite_token, expires_at, created_at, updated_at, accepted_at")
@@ -140,7 +141,8 @@ export async function GET(request: Request) {
       return {
         id: row.id,
         full_name: row.full_name ?? "",
-        email: row.email,
+        email: row.email ?? "",
+        job_title: row.job_title ?? "",
         role: row.role,
         app_role: invitationRoleToAppRole(row.role),
         status: "pending",
@@ -178,19 +180,33 @@ export async function POST(request: Request) {
       permissions: parsed.data.permissions ?? [],
     });
 
-    const inviteToken = randomBytes(24).toString("base64url");
-    const insertResult = await supabase
+    // 256 bits of entropy, URL-safe — hard to guess, single-use, expiring.
+    const inviteToken = randomBytes(32).toString("base64url");
+    const jobTitle = parsed.data.job_title?.trim() || null;
+    const baseInsert: Record<string, unknown> = {
+      company_id: companyId,
+      role: parsed.data.role,
+      job_title: jobTitle,
+      invite_token: inviteToken,
+      invited_by: userId,
+    };
+
+    // Insert with job_title; if the column doesn't exist yet (migration not run),
+    // retry without it so invite creation still works.
+    let insertResult = await supabase
       .from("pending_invitations")
-      .insert({
-        company_id: companyId,
-        full_name: parsed.data.full_name,
-        email: parsed.data.email.toLowerCase(),
-        role: parsed.data.role,
-        invite_token: inviteToken,
-        invited_by: userId,
-      })
-      .select("id, company_id, email, role, full_name, invite_token, expires_at, created_at, updated_at, accepted_at")
+      .insert(baseInsert)
+      .select("id, company_id, email, role, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
       .single();
+
+    if (insertResult.error && /job_title/i.test(insertResult.error.message || "")) {
+      const { job_title: _omit, ...withoutJobTitle } = baseInsert;
+      insertResult = await supabase
+        .from("pending_invitations")
+        .insert(withoutJobTitle)
+        .select("id, company_id, email, role, full_name, invite_token, expires_at, created_at, updated_at, accepted_at")
+        .single();
+    }
 
     if (insertResult.error) {
       return NextResponse.json({ error: insertResult.error.message }, { status: 400 });
@@ -216,46 +232,15 @@ export async function POST(request: Request) {
       ? `${origin}/signup?invite=1&token=${encodeURIComponent(inviteToken)}`
       : `/signup?invite=1&token=${encodeURIComponent(inviteToken)}`;
 
-    try {
-      // Notify the invited user when that email already maps to a known profile.
-      const profileResult = await supabase
-        .from("profiles")
-        .select("id")
-        .ilike("email", invitation.email)
-        .limit(1);
-      if (!profileResult.error) {
-        const recipientUserIds = (profileResult.data ?? [])
-          .map((row) => String((row as { id?: string }).id ?? ""))
-          .filter((id) => Boolean(id) && id !== String(userId));
-        if (recipientUserIds.length > 0) {
-          await enqueueNotifications({
-            supabase,
-            companyId,
-            userIds: recipientUserIds,
-            type: "company_invite",
-            payload: {
-              inviteId: invitation.id,
-              fullName: invitation.full_name ?? parsed.data.full_name,
-              email: invitation.email,
-              role: invitation.role,
-              href: "/signup",
-              inviteMessage: `${invitation.full_name ?? parsed.data.full_name} was invited to join the company.`,
-            },
-            entityType: "company_invite",
-            entityId: invitation.id,
-            actorUserId: userId,
-          });
-        }
-      }
-    } catch {
-      // Non-blocking notification fanout.
-    }
+    // No email is known at creation time anymore, so there is no specific user
+    // to notify — the link is shared by the admin directly.
 
     return NextResponse.json({
       item: {
         id: invitation.id,
-        full_name: invitation.full_name ?? parsed.data.full_name,
-        email: invitation.email,
+        full_name: invitation.full_name ?? "",
+        email: invitation.email ?? "",
+        job_title: invitation.job_title ?? jobTitle ?? "",
         role: invitation.role,
         app_role: invitationRoleToAppRole(invitation.role),
         status: "pending",

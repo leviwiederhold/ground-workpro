@@ -18,6 +18,8 @@ const bodySchema = z.object({
   email: z.string().email().optional(),
   employeeId: z.string().uuid().optional(),
   token: z.string().min(20).optional(),
+  // Employee-provided identity (new invite flow collects this at acceptance).
+  full_name: z.string().trim().max(160).optional(),
 });
 
 type PendingInvitationRow = {
@@ -26,6 +28,7 @@ type PendingInvitationRow = {
   employee_id?: string | null;
   role?: string | null;
   email?: string | null;
+  job_title?: string | null;
   accepted_at?: string | null;
   accepted_user_id?: string | null;
   expires_at?: string | null;
@@ -145,12 +148,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invite token is required" }, { status: 422 });
     }
 
-    const pendingInvitation = await client
+    let pendingInvitation = await client
       .from("pending_invitations")
-      .select("id, company_id, employee_id, role, email, accepted_at, accepted_user_id, expires_at, invited_by")
+      .select("id, company_id, employee_id, role, email, job_title, accepted_at, accepted_user_id, expires_at, invited_by")
       .eq("invite_token", inviteToken)
       .limit(1)
       .maybeSingle<PendingInvitationRow>();
+    if (pendingInvitation.error && /job_title/i.test(pendingInvitation.error.message || "")) {
+      pendingInvitation = await client
+        .from("pending_invitations")
+        .select("id, company_id, employee_id, role, email, accepted_at, accepted_user_id, expires_at, invited_by")
+        .eq("invite_token", inviteToken)
+        .limit(1)
+        .maybeSingle<PendingInvitationRow>();
+    }
     if (pendingInvitation.error) {
       return NextResponse.json({ error: pendingInvitation.error.message }, { status: 400 });
     }
@@ -173,6 +184,7 @@ export async function POST(request: Request) {
           employee_id: pendingInvitation.data.employee_id,
           role: pendingInvitation.data.role,
           email: pendingInvitation.data.email,
+          job_title: pendingInvitation.data.job_title ?? null,
           used_at: pendingInvitation.data.accepted_at,
           expires_at: pendingInvitation.data.expires_at,
           pending_id: pendingInvitation.data.id,
@@ -184,6 +196,7 @@ export async function POST(request: Request) {
             employee_id: legacyInvitation.data.employee_id,
             role: legacyInvitation.data.role,
             email: legacyInvitation.data.email,
+            job_title: null,
             used_at: legacyInvitation.data.used_at,
           expires_at: legacyInvitation.data.expires_at,
           pending_id: null,
@@ -201,8 +214,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invite expired" }, { status: 410 });
     }
 
+    // New invite flow: the invite carries NO email — the employee supplies their
+    // own at signup, so we accept whatever authenticated user opened the link.
+    // Legacy invites that DO carry an email must still match the signed-in user.
     const tokenEmail = String(invitationData.email ?? "").trim().toLowerCase();
-    if (!tokenEmail || tokenEmail !== email) {
+    if (tokenEmail && tokenEmail !== email) {
       return NextResponse.json({ error: "Invite email does not match signed-in user" }, { status: 403 });
     }
 
@@ -277,12 +293,16 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
     }
 
+    // Prefer the name the employee typed on the invite-acceptance form, then
+    // fall back to anything captured in auth user_metadata at signup.
     const rawProfileName = String(
-      authData.user.user_metadata?.full_name ??
+      parsed.data.full_name ??
+        authData.user.user_metadata?.full_name ??
         authData.user.user_metadata?.name ??
         ""
     ).trim();
     const profileName = rawProfileName ? sanitizeProfileFullName(rawProfileName, email) : "";
+    const inviteJobTitle = String(invitationData.job_title ?? "").trim();
     const profilePayload: Record<string, unknown> = {
       id: userId,
     };
@@ -331,6 +351,7 @@ export async function POST(request: Request) {
         full_name: profileName || inviteEmail,
         status: "active",
       };
+      if (inviteJobTitle) insertPayload.job_title = inviteJobTitle;
       for (let attempt = 0; attempt < 8; attempt += 1) {
         const insertResult = await client.from("employees").insert(insertPayload).select("id").maybeSingle();
         if (!insertResult.error && insertResult.data?.id) {
@@ -375,6 +396,7 @@ export async function POST(request: Request) {
       employeeUpdatePayload.name = profileName;
       employeeUpdatePayload.full_name = profileName;
     }
+    if (inviteJobTitle) employeeUpdatePayload.job_title = inviteJobTitle;
     for (let attempt = 0; attempt < 8; attempt += 1) {
       const employeeUpdate = await client
         .from("employees")

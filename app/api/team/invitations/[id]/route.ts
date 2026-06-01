@@ -25,6 +25,7 @@ const patchSchema = z
   .object({
     full_name: z.string().trim().min(1).optional(),
     email: z.string().trim().email().optional(),
+    job_title: z.string().trim().max(120).optional(),
     role: invitationRoleSchema.optional(),
     permissions: z.array(permissionOverrideSchema).optional(),
     regenerate: z.boolean().optional(),
@@ -123,9 +124,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const updatePayload: Record<string, unknown> = {};
     if (parsedBody.data.full_name !== undefined) updatePayload.full_name = parsedBody.data.full_name;
     if (parsedBody.data.email !== undefined) updatePayload.email = parsedBody.data.email.toLowerCase();
+    if (parsedBody.data.job_title !== undefined) updatePayload.job_title = parsedBody.data.job_title.trim() || null;
     if (parsedBody.data.role !== undefined) updatePayload.role = parsedBody.data.role;
     if (parsedBody.data.regenerate) {
-      updatePayload.invite_token = randomBytes(24).toString("base64url");
+      updatePayload.invite_token = randomBytes(32).toString("base64url");
       updatePayload.expires_at = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
     }
 

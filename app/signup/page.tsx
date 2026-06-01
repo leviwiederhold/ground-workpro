@@ -6,15 +6,29 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 
+const ROLE_LABELS: Record<string, string> = {
+  ceo: "CEO",
+  admin: "CEO",
+  manager: "Operations Manager",
+  pm: "Operations Manager",
+  foreman: "Foreman",
+  mechanic: "Mechanic",
+  operator: "Operator",
+  fieldstaff: "Field Staff",
+};
+
 export default function SignupPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [inviteMode, setInviteMode] = useState(false);
+  const [inviteInfo, setInviteInfo] = useState<{ companyName: string; role: string; jobTitle: string } | null>(null);
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [loginHref, setLoginHref] = useState("/login");
@@ -27,6 +41,25 @@ export default function SignupPage() {
     setNativeRuntime(isNativeAppRuntime());
     const hasInvite = params.get("invite") === "1";
     setInviteMode(hasInvite);
+    const inviteTokenForInfo = params.get("token") || "";
+    if (hasInvite && inviteTokenForInfo) {
+      // Show the employee what workspace / role / title they are joining.
+      fetch("/api/invite/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: inviteTokenForInfo }),
+      })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!active || !data?.item) return;
+          setInviteInfo({
+            companyName: String(data.item.company_name ?? "").trim(),
+            role: String(data.item.role ?? "").trim(),
+            jobTitle: String(data.item.job_title ?? "").trim(),
+          });
+        })
+        .catch(() => {});
+    }
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setCheckoutSuccess(hasCheckoutSuccess);
     const shouldStartTrial = !hasInvite && !hasCheckoutSuccess;
@@ -76,10 +109,11 @@ export default function SignupPage() {
     const stripeSessionId = params.get("session_id") || undefined;
 
     if (invite) {
+      const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
       const accept = await fetch("/api/invite/accept", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: inviteRole, email: inviteEmail, employeeId: inviteEmployeeId, token: inviteToken }),
+        body: JSON.stringify({ role: inviteRole, email: inviteEmail, employeeId: inviteEmployeeId, token: inviteToken, full_name: fullName || undefined }),
       });
       if (!accept.ok) {
         const payload = await accept.json().catch(() => ({}));
@@ -109,10 +143,11 @@ export default function SignupPage() {
   }
 
   async function signUpWithServer() {
+    const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
     const response = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, full_name: fullName || undefined }),
     });
     const payload = (await response.json().catch(() => ({}))) as {
       item?: { existingAccount?: boolean; authError?: string | null; hasSession?: boolean; identityCount?: number };
@@ -144,6 +179,12 @@ export default function SignupPage() {
     const ownerSignupRequiresCheckout = !inviteMode && !checkoutComplete;
     if (nativeRuntime && !inviteMode) {
       setError("Already part of a company? Sign in or contact your company administrator.");
+      setLoading(false);
+      return;
+    }
+    // Invited employees must supply their own name (admin no longer enters it).
+    if (inviteMode && (!firstName.trim() || !lastName.trim())) {
+      setError("Please enter your first and last name.");
       setLoading(false);
       return;
     }
@@ -285,7 +326,18 @@ export default function SignupPage() {
                 : "Create your account to get started."}
         </p>
 
-        {checkoutSuccess && !inviteMode && !nativeRuntime ? (
+        {inviteMode && inviteInfo ? (
+          <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
+            <p className="font-medium">
+              You&apos;re joining{inviteInfo.companyName ? ` ${inviteInfo.companyName}` : " the workspace"}
+            </p>
+            <p className="mt-1 text-brand-800">
+              {[ROLE_LABELS[inviteInfo.role] || inviteInfo.role, inviteInfo.jobTitle]
+                .filter(Boolean)
+                .join(" · ") || "Create your account to join the team."}
+            </p>
+          </div>
+        ) : checkoutSuccess && !inviteMode && !nativeRuntime ? (
           <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
             Stripe Checkout is complete. Create your account and company workspace to enter Groundwork Pro.
           </div>
@@ -316,6 +368,32 @@ export default function SignupPage() {
           </div>
         ) : (
         <form onSubmit={onSubmit} className="space-y-4">
+          {inviteMode && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
+                <input
+                  type="text"
+                  autoComplete="given-name"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Last name</label>
+                <input
+                  type="text"
+                  autoComplete="family-name"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
             <input

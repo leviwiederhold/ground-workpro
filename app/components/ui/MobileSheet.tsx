@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type MobileSheetProps = {
   isOpen: boolean;
@@ -17,6 +18,13 @@ type MobileSheetProps = {
   headerVariant?: 'detail' | 'form';
   footer?: React.ReactNode;
   status?: React.ReactNode;
+  /**
+   * Render the sheet through a portal attached to <body>. Use this when the
+   * sheet is mounted inside a `position: fixed` / `overflow: hidden` app-shell
+   * container that would otherwise clip or offset the overlay. Opt-in so
+   * existing modals are unaffected.
+   */
+  portal?: boolean;
 };
 
 const SIZE_CLASSNAMES = {
@@ -42,7 +50,14 @@ export function MobileSheet({
   headerVariant = 'detail',
   footer,
   status,
+  portal = false,
 }: MobileSheetProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   useEffect(() => {
     if (!isOpen || typeof document === 'undefined') return undefined;
     document.body.classList.add('modal-open');
@@ -53,7 +68,7 @@ export function MobileSheet({
 
   if (!isOpen) return null;
 
-  return (
+  const overlay = (
     <div className="mobile-sheet-backdrop fixed inset-0 z-50">
       <button
         type="button"
@@ -108,4 +123,12 @@ export function MobileSheet({
       </div>
     </div>
   );
+
+  // When requested, escape the app-shell's fixed/overflow container by rendering
+  // into <body>. Falls back to inline render until mounted (SSR-safe).
+  if (portal && mounted && typeof document !== 'undefined') {
+    return createPortal(overlay, document.body);
+  }
+
+  return overlay;
 }

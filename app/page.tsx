@@ -488,9 +488,9 @@ const MobileAppShell = ({
       );
     };
 
-    const Modal = ({ isOpen, onClose, title, children, size = 'md', footer }) => {
+    const Modal = ({ isOpen, onClose, title, children, size = 'md', footer, portal = false, panelClassName }) => {
       return (
-        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size} footer={footer}>
+        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size} footer={footer} portal={portal} panelClassName={panelClassName}>
           {children}
         </MobileSheet>
       );
@@ -4671,6 +4671,8 @@ const MobileAppShell = ({
             }}
             title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Employee'}
             size="md"
+            portal
+            panelClassName="!max-w-3xl"
           >
             <div className="space-y-5 text-gray-900 dark:text-zinc-100">
               <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-4 shadow-sm dark:border-zinc-800 dark:bg-gradient-to-br dark:from-[#0d0d0f] dark:to-[#141418]">

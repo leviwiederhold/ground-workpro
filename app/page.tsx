@@ -3603,6 +3603,10 @@ const MobileAppShell = ({
     // TEAM VIEW
     // ============================================
     const TeamView = ({ employees, employeesLoading, setEmployees, jobs, setShowModal, currentRole, moduleAccess = {} }) => {
+      // Explicit native-app detection, local to this component. `iosAppRuntime`
+      // from the sibling App component is NOT in scope here, so it must be
+      // resolved independently — never inferred from screen width.
+      const iosAppRuntime = useMemo(() => isIosNativeAppRuntime(), []);
       const [filter, setFilter] = useState('all');
       const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
       const [employeeActionLoading, setEmployeeActionLoading] = useState(false);
@@ -4304,9 +4308,13 @@ const MobileAppShell = ({
               <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
                 <Icon name="clock" className="mr-2" /> Time Clock
               </Button>
-              <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={!canManageTeamProfiles}>
-                <Icon name="user-plus" className="mr-2" /> Add Employee
-              </Button>
+              {/* Native iOS: Add Employee is hidden entirely (affects seat
+                  billing — managed on web only). Web CEO/admin keeps it. */}
+              {!iosAppRuntime && (
+                <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={!canManageTeamProfiles}>
+                  <Icon name="user-plus" className="mr-2" /> Add Employee
+                </Button>
+              )}
             </div>
           </div>
 

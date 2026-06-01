@@ -119,6 +119,7 @@ export async function loadProfileForSetup(supabase: SupabaseClient, userId: stri
     "avatar_url",
     "appearance_preference",
     "notification_preferences",
+    "setup_completed_at",
   ]);
   return profile.error ? null : profile.data ?? null;
 }
@@ -248,9 +249,13 @@ export async function getSetupStatusForUser(input: {
   const required_steps = requiredDefs.map(mapStep);
   const optional_steps = optionalDefs.map(mapStep);
 
+  // Authoritative flag: once the wizard stamps profiles.setup_completed_at, the
+  // user is done — never route them back to /setup automatically.
+  const wizardCompleted = hasTruthy((profile as Record<string, unknown> | null)?.setup_completed_at);
+
   const firstIncomplete = required_steps.find((step) => !step.completed) ?? null;
   const firstIncompleteOptional = optional_steps.find((step) => !step.completed) ?? null;
-  const required_complete = !firstIncomplete;
+  const required_complete = wizardCompleted || !firstIncomplete;
   const optional_complete = optional_steps.every((step) => step.completed);
   const optional_steps_skipped = hasOptionalStepsSkippedRecord(
     checklistData as Array<{ key: string | null; user_id: string | null; completed_at: string | null }>,
@@ -265,7 +270,7 @@ export async function getSetupStatusForUser(input: {
     required_complete,
     optional_complete,
     optional_steps_skipped,
-    is_complete: required_complete && (optional_complete || optional_steps_skipped),
+    is_complete: wizardCompleted || (required_complete && (optional_complete || optional_steps_skipped)),
     next_step_href: firstIncomplete?.href ?? firstIncompleteOptional?.href ?? null,
     next_optional_step_href: firstIncompleteOptional?.href ?? null,
   };

@@ -390,12 +390,13 @@ export async function PATCH(
       return NextResponse.json({ error: "Employee update returned no row" }, { status: 500 });
     }
 
-    // When a member is deactivated, sync the Stripe seat count down.
-    if (payload.status === "inactive") {
+    // Any status change (deactivation OR reactivation) shifts the active seat
+    // count, so resync the Stripe subscription quantity in both directions.
+    if (payload.status === "inactive" || payload.status === "active") {
       try {
         const syncResult = await syncStripeQuantityForCompany(companyId);
         if (!syncResult.synced) {
-          console.warn("[employees/PATCH] stripe quantity not synced after deactivation:", syncResult.reason);
+          console.warn("[employees/PATCH] stripe quantity not synced after status change:", syncResult.reason);
         }
       } catch (syncErr) {
         console.error("[employees/PATCH] stripe quantity sync error:", syncErr instanceof Error ? syncErr.message : syncErr);

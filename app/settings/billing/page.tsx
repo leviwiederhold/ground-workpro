@@ -228,8 +228,15 @@ export default function BillingSettingsPage() {
               }
             />
           </div>
+          {!loading && memberCount !== null && (
+            <div className="mx-6 mb-3 rounded-lg bg-gray-50 px-4 py-3 text-center text-sm font-medium text-gray-700">
+              {memberCount} active {memberCount === 1 ? "seat" : "seats"} × ${PRICE_PER_SEAT.toFixed(2)} ={" "}
+              <span className="text-gray-900">${estimatedMonthly.toFixed(2)}</span>/month
+            </div>
+          )}
           <p className="px-6 pb-4 text-xs text-gray-400">
-            Billed based on active members at the end of each billing period.
+            One company subscription, billed once based on active members at the
+            end of each billing period.
           </p>
         </div>
 

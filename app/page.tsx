@@ -17,6 +17,7 @@ import {
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
+import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
 
@@ -1994,7 +1995,7 @@ const MobileAppShell = ({
               </p>
               <button
                 type="button"
-                onClick={() => window.open("https://ground-workpro.com", "_system")}
+                onClick={() => { void openGroundworkWebsite(); }}
                 className="inline-flex items-center gap-2 rounded-lg bg-brand-500 px-5 py-3 text-sm font-semibold text-white"
               >
                 <i className="fa-solid fa-arrow-up-right-from-square text-xs" />

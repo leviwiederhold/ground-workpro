@@ -6,16 +6,15 @@ import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 import OAuthButtons from "@/app/components/auth/OAuthButtons";
-
-const GROUNDWORK_WEB_URL = "https://ground-workpro.com";
+import { openGroundworkWebsite } from "@/lib/runtime/openWebsite";
 
 /**
  * Opens the Groundwork Pro public website in the device's default external
- * browser. In Capacitor, window.open(url, '_system') bypasses the in-app
- * WebView and launches Safari (iOS) or the default browser (Android).
+ * browser (apex domain with www fallback). In Capacitor, window.open(url,
+ * '_system') bypasses the in-app WebView and launches Safari.
  */
 function openExternalWebsite() {
-  window.open(GROUNDWORK_WEB_URL, "_system");
+  void openGroundworkWebsite();
 }
 
 /** Shown only in the native app when the signed-in user has no company workspace. */

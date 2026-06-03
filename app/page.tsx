@@ -9928,8 +9928,9 @@ const MobileAppShell = ({
       const seatCount = Math.max(1, Number(billableEmployees.length || 0));
       const currentSeatPrice = plan.price; // $49.99 per active member/month
       const estimatedMonthly = seatCount * currentSeatPrice;
-      // TODO: sync Stripe subscription quantity to seatCount via stripe.subscriptions.update({ quantity: seatCount })
-      // when a member is added or deactivated. Not implemented yet — base subscription works correctly.
+      // Stripe subscription quantity is synced server-side via
+      // syncStripeQuantityForCompany() on invite acceptance and on member
+      // deactivation/deletion (see app/api/invite/accept and app/api/employees/[id]).
 
       useEffect(() => {
         let active = true;
@@ -10080,7 +10081,7 @@ const MobileAppShell = ({
               <p className="text-xs text-gray-600">
                 Billing model: <span className="font-medium text-gray-800">$49.99 / active member / month</span>.
                 {seatCount} active seat{seatCount !== 1 ? 's' : ''} × $49.99 = <span className="font-semibold text-gray-900">{formatCurrency(estimatedMonthly)}/mo</span>.
-                Stripe quantity sync is on the roadmap (TODO).
+                Your subscription quantity updates automatically as members are added or removed.
               </p>
             </div>
             <div className="flex gap-2 mt-5">

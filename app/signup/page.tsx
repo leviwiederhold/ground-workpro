@@ -102,6 +102,9 @@ export default function SignupPage() {
     return () => {
       active = false;
     };
+    // ensureTenantContext is a stable closure defined in this component; it is
+    // intentionally not a dependency to avoid re-running the mount effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   async function ensureTenantContext() {

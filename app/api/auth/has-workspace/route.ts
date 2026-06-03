@@ -31,8 +31,9 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Check memberships table — every accepted workspace member has a row here,
-  // including the CEO/owner. Pending invites do NOT have rows yet.
+  // Ownership and membership are both determined through the memberships table —
+  // every accepted workspace member (including the CEO/owner) has a row here.
+  // Pending invites do NOT have rows yet.
   const { data, error } = await supabase
     .from("memberships")
     .select("company_id")
@@ -41,16 +42,8 @@ export async function GET(request: Request) {
     .maybeSingle();
 
   if (error) {
-    // If the memberships table doesn't exist or is inaccessible, fall back to
-    // checking the companies table for owner-created workspaces.
-    const { data: companyData } = await supabase
-      .from("companies")
-      .select("id")
-      .eq("owner_user_id", user.id)
-      .limit(1)
-      .maybeSingle();
-
-    return Response.json({ hasWorkspace: Boolean(companyData?.id) });
+    console.error("[has-workspace] membership lookup failed:", error.message);
+    return Response.json({ error: "Failed to check workspace" }, { status: 500 });
   }
 
   return Response.json({ hasWorkspace: Boolean(data?.company_id) });

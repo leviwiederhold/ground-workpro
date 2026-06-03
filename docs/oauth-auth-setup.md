@@ -9,7 +9,8 @@ implemented and verified.
 1. Enable the Google provider in Supabase Auth.
 2. Enable the Apple provider in Supabase Auth.
 3. Add these application redirect URLs:
-   - `https://ground-workpro.com/auth/callback`
+   - `https://groundwork-pro.com/auth/callback`
+   - `https://www.groundwork-pro.com/auth/callback`
    - `https://ground-workpro.vercel.app/auth/callback`
    - `http://localhost:3000/auth/callback`
 
@@ -30,6 +31,7 @@ implemented and verified.
 
 ## Password recovery
 
-Allow `https://ground-workpro.com/reset-password`,
+Allow `https://groundwork-pro.com/reset-password`,
+`https://www.groundwork-pro.com/reset-password`,
 `https://ground-workpro.vercel.app/reset-password`, and
 `http://localhost:3000/reset-password` as Supabase Auth redirect URLs.

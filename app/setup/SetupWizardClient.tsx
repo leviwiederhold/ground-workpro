@@ -50,7 +50,7 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
   const [lastName, setLastName] = useState(prefill.lastName);
   const [phone, setPhone] = useState(prefill.phone);
   const [jobTitle, setJobTitle] = useState(prefill.jobTitle);
-  const [timezone, setTimezone] = useState(prefill.timezone || guessTimezone());
+  const [timezone] = useState(prefill.timezone || guessTimezone());
 
   // Employee work profile
   const [emergencyContact, setEmergencyContact] = useState(prefill.emergencyContact);

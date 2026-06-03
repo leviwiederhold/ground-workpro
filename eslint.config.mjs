@@ -11,7 +11,18 @@ const compat = new FlatCompat({
 
 const config = [
   {
-    ignores: ["next-env.d.ts", "app/page.tsx", ".next/**", "test-results/**", "playwright-report/**"],
+    ignores: [
+      "next-env.d.ts",
+      "app/page.tsx",
+      ".next/**",
+      "test-results/**",
+      "playwright-report/**",
+      // Native build artifacts and Node tooling scripts are not app source and
+      // must not be linted (generated Capacitor bridges, helper CLIs).
+      "ios/**",
+      "android/**",
+      "scripts/**",
+    ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {

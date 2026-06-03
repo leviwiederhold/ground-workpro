@@ -65,6 +65,9 @@ export default function LoginPage() {
     try {
       const res = await fetch("/api/auth/has-workspace");
       if (res.status === 401) return false;
+      // Server error (can't determine) — optimistically allow entry rather than
+      // locking out an existing user on a transient failure.
+      if (!res.ok) return true;
       const payload = await res.json().catch(() => ({}));
       return Boolean(payload?.hasWorkspace);
     } catch {

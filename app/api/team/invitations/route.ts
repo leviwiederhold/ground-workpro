@@ -200,7 +200,8 @@ export async function POST(request: Request) {
       .single();
 
     if (insertResult.error && /job_title/i.test(insertResult.error.message || "")) {
-      const { job_title: _omit, ...withoutJobTitle } = baseInsert;
+      const withoutJobTitle = { ...baseInsert };
+      delete withoutJobTitle.job_title;
       insertResult = await supabase
         .from("pending_invitations")
         .insert(withoutJobTitle)

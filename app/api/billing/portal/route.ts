@@ -1,5 +1,4 @@
 import { requireRole } from "@/lib/auth/requireRole";
-import { isBillingEnabled } from "@/lib/billing/isBillingEnabled";
 import { getStripe, isStripeConfigured } from "@/lib/billing/stripe";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -47,15 +46,21 @@ export async function POST(request: Request) {
     try {
       await requireRole(["admin"]);
     } catch {
-      return errorResponse("Forbidden", 403);
+      return errorResponse("You don't have permission to manage billing.", 403);
     }
 
-    if (!isBillingEnabled()) {
-      return errorResponse("Billing not enabled", 501);
-    }
-
+    // Config parity with checkout: the portal is available whenever Stripe is
+    // configured (STRIPE_SECRET_KEY + STRIPE_PRICE_ID). It does NOT depend on a
+    // separate BILLING_ENABLED flag — if checkout can run, the portal can too.
     if (!isStripeConfigured()) {
-      return errorResponse("Stripe not configured", 501);
+      console.error(
+        "[billing/portal] not configured — STRIPE_SECRET_KEY / STRIPE_PRICE_ID missing.",
+        {
+          has_secret_key: Boolean(process.env.STRIPE_SECRET_KEY?.trim()),
+          has_price_id: Boolean(process.env.STRIPE_PRICE_ID?.trim()),
+        }
+      );
+      return errorResponse("Billing is not configured", 501);
     }
 
     const { companyId } = await getCompanyId();
@@ -84,7 +89,7 @@ export async function POST(request: Request) {
 
     if (!customerId) {
       return errorResponse(
-        "No Stripe customer found for this company. Complete a checkout first.",
+        "We couldn't find billing details for this company yet.",
         400
       );
     }

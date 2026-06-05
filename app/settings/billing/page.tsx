@@ -72,6 +72,11 @@ export default function BillingSettingsPage() {
     if (isNative) return;
     async function load() {
       try {
+        // Reconcile the Stripe subscription quantity with the active seat count
+        // before reading status, so the displayed totals and the actual Stripe
+        // subscription stay in agreement (self-heals any drift). Non-blocking.
+        await fetch("/api/billing/sync-seats", { method: "POST" }).catch(() => {});
+
         const [statusRes, membersRes] = await Promise.all([
           fetch("/api/billing/status", { cache: "no-store" }),
           fetch("/api/company-members?excludeSelf=0", { cache: "no-store" }),

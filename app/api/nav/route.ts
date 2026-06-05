@@ -41,7 +41,7 @@ async function resolveContext() {
     return { error: NextResponse.json({ error: membershipResult.error.message }, { status: 400 }) };
   }
   if (!membershipResult.data?.company_id) {
-    return { error: NextResponse.json({ error: "No company membership found (run bootstrap)" }, { status: 403 }) };
+    return { error: NextResponse.json({ error: "No company workspace found" }, { status: 403 }) };
   }
 
   return {

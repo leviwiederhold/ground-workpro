@@ -2006,19 +2006,9 @@ const MobileAppShell = ({
         }
         // Gate: company account inactive — block all users.
         if (!subscriptionGate.active) {
-          // Web CEO: show billing action so they can fix it.
+          // Web CEO/admin: clean trial screen with a single checkout CTA.
           if (!iosAppRuntime && currentRole === 'executive') {
-            return (
-              <div className="space-y-4">
-                <Card className="p-4 border-amber-200 bg-amber-50 text-amber-900">
-                  <p className="font-medium">Subscription required</p>
-                  <p className="mt-1 text-sm">
-                    An active subscription is required to access the workspace.
-                  </p>
-                </Card>
-                <SubscribeView employees={employees} currentRole={currentRole} />
-              </div>
-            );
+            return <OwnerTrialGate />;
           }
           // Everyone else (native app or non-CEO web): neutral copy — no billing mention.
           return (
@@ -9911,6 +9901,59 @@ const MobileAppShell = ({
     };
 
     // ============================================
+    // OWNER TRIAL GATE
+    // Clean "Start your 7-day free trial" screen shown to a web CEO/admin whose
+    // company has no active/trialing subscription. Single CTA -> Stripe checkout.
+    // No billing-config, no developer language, no raw errors.
+    // ============================================
+    const OwnerTrialGate = () => {
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState('');
+
+      const startTrial = async () => {
+        setLoading(true);
+        setError('');
+        try {
+          const res = await fetch('/api/billing/checkout', { method: 'POST' });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || !payload?.url) {
+            setError("We couldn't start your free trial. Please try again or contact support.");
+            return;
+          }
+          window.location.href = payload.url;
+        } catch {
+          setError("We couldn't start your free trial. Please try again or contact support.");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      return (
+        <div className="flex min-h-[60vh] items-center justify-center px-4">
+          <Card className="w-full max-w-md p-8 text-center">
+            <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600">
+              <Icon name="rocket" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-900">Start your 7-day free trial</h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-gray-600">
+              Activate your free trial to unlock your Groundwork Pro workspace. You won&apos;t be charged
+              until the trial ends, and you can cancel anytime.
+            </p>
+            {error ? <p className="mt-4 text-sm text-red-600" role="alert">{error}</p> : null}
+            <button
+              type="button"
+              onClick={startTrial}
+              disabled={loading}
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60"
+            >
+              {loading ? 'Starting…' : 'Start 7-Day Free Trial'}
+            </button>
+          </Card>
+        </div>
+      );
+    };
+
+    // ============================================
     // SUBSCRIBE VIEW
     // ============================================
     const SubscribeView = ({ employees = [], currentRole }) => {
@@ -9977,11 +10020,11 @@ const MobileAppShell = ({
           }
           setActionMessage(
             path.includes('/checkout')
-              ? 'Checkout session requested.'
-              : 'Billing portal requested. Once Stripe is configured, this will open customer billing portal.'
+              ? 'Redirecting you to secure checkout…'
+              : 'Opening your billing portal…'
           );
         } catch {
-          setError('Billing action failed');
+          setError('Something went wrong. Please try again or contact support.');
         } finally {
           setActionLoading('');
         }
@@ -13343,7 +13386,7 @@ const MobileAppShell = ({
 	        }).catch((error) => {
 	          if (!isMounted) return;
 	          console.error('[startup] Failed to resolve session on app launch', error);
-	          setStartupError('Failed to initialize session.');
+	          setStartupError("We couldn't load your account. Please refresh and try again.");
 	          setIsAuthenticated(false);
 	          setAuthResolved(true);
 	          setSetupChecked(true);

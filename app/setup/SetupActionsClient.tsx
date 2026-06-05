@@ -19,14 +19,13 @@ export function SetupActionsClient({
     setError("");
     try {
       const response = await fetch("/api/bootstrap", { method: "POST" });
-      const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(String(payload?.error || "Failed to create your company workspace."));
+        setError("We couldn't finish creating your workspace. Please try again or contact support.");
         return;
       }
       router.refresh();
     } catch {
-      setError("Failed to create your company workspace.");
+      setError("We couldn't finish creating your workspace. Please try again or contact support.");
     } finally {
       setLoading(false);
     }

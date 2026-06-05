@@ -182,8 +182,8 @@ export default function LoginPage() {
       body: JSON.stringify({ stripeSessionId }),
     });
     if (!bootstrap.ok) {
-      const payload = await bootstrap.json().catch(() => ({}));
-      throw new Error(payload?.error || "Failed to initialize company");
+      // Never surface raw/internal bootstrap errors to the user.
+      throw new Error("We couldn't finish creating your workspace. Please try again or contact support.");
     }
   }
 

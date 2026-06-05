@@ -267,7 +267,7 @@ export async function getCompanyId() {
   }
 
   if (!companyId) {
-    throw new TenantResolverError("No company membership found (run bootstrap)", 403);
+    throw new TenantResolverError("No company workspace found", 403);
   }
 
   return { supabase, companyId, userId: userData.user.id, userEmail: String(userData.user.email ?? "").trim().toLowerCase() };

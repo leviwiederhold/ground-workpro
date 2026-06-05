@@ -136,8 +136,8 @@ export default function SignupPage() {
       body: JSON.stringify({ stripeSessionId }),
     });
     if (!bootstrap.ok) {
-      const payload = await bootstrap.json().catch(() => ({}));
-      throw new Error(payload?.error || "Failed to initialize company");
+      // Never surface raw/internal bootstrap errors to the user.
+      throw new Error("We couldn't finish creating your workspace. Please try again or contact support.");
     }
   }
 
@@ -352,11 +352,11 @@ export default function SignupPage() {
           </div>
         ) : checkoutSuccess && !inviteMode && !nativeRuntime ? (
           <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-            Stripe Checkout is complete. Create your account and company workspace to enter Groundwork Pro.
+            Your trial is ready. Create your account to enter Groundwork Pro.
           </div>
         ) : trialMode && !inviteMode && !nativeRuntime ? (
           <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm text-brand-800">
-            Create your account and company workspace. Stripe Checkout opens next.
+            Create your Groundwork Pro account to start your free trial.
           </div>
         ) : null}
 

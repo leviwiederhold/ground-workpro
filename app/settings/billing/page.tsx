@@ -72,14 +72,14 @@ export default function BillingSettingsPage() {
     if (isNative) return;
     async function load() {
       try {
-        // Reconcile the Stripe subscription quantity with the active seat count
-        // before reading status, so the displayed totals and the actual Stripe
-        // subscription stay in agreement (self-heals any drift). Non-blocking.
-        await fetch("/api/billing/sync-seats", { method: "POST" }).catch(() => {});
-
-        const [statusRes, membersRes] = await Promise.all([
+        // The authoritative billable seat count comes from /api/billing/sync-seats
+        // (getActiveBillableSeatCount = active employees ∪ owners, distinct). This
+        // is the SAME source as the Stripe quantity, so the displayed number and
+        // Stripe stay in agreement. We do NOT count company-members membership
+        // rows here — lingering memberships from deleted employees would inflate it.
+        const [syncRes, statusRes] = await Promise.all([
+          fetch("/api/billing/sync-seats", { method: "POST" }),
           fetch("/api/billing/status", { cache: "no-store" }),
-          fetch("/api/company-members?excludeSelf=0", { cache: "no-store" }),
         ]);
 
         if (statusRes.ok) {
@@ -89,14 +89,13 @@ export default function BillingSettingsPage() {
           setError("Failed to load billing status.");
         }
 
-        if (membersRes.ok) {
-          const payload = await membersRes.json();
-          // items from company-members are already filtered (inactive excluded, self included via excludeSelf=0)
-          const members: Array<{ status?: string }> = payload?.items ?? payload?.data ?? [];
-          const activeCount = Array.isArray(members)
-            ? members.filter((m) => (m?.status ?? "active") !== "inactive").length
-            : 0;
-          setMemberCount(Math.max(1, activeCount));
+        if (syncRes.ok) {
+          const payload = await syncRes.json();
+          const seatCount = Number(payload?.seatCount);
+          if (Number.isFinite(seatCount) && seatCount > 0) {
+            console.log(`[billing/page] activeSeats source=sync-seats count=${seatCount}`);
+            setMemberCount(seatCount);
+          }
         }
       } catch {
         setError("Failed to load billing information.");

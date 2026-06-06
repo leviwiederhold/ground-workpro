@@ -2,6 +2,7 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { isStripeConfigured } from "@/lib/billing/stripe";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
+import { getActiveBillableSeatCount } from "@/lib/billing/seatCount";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
 
@@ -54,15 +55,21 @@ export async function POST(request: Request) {
 
     const { companyId } = await getCompanyId();
 
+    // Authoritative billable seat count (active employees ∪ owners, distinct).
+    // This is the SAME source used for the Stripe quantity, so the billing page
+    // display and Stripe stay in agreement.
+    const seatCount = await getActiveBillableSeatCount(companyId);
+    console.log(`[sync-seats] activeSeats source=getActiveBillableSeatCount count=${seatCount}`);
+
     const result = await syncStripeQuantityForCompany(companyId);
     if (!result.synced) {
-      // Non-fatal reasons (no subscription yet, etc.) — report without error so
-      // the billing page can simply show current state.
-      console.warn("[billing/sync-seats] not synced:", result.reason);
-      return Response.json({ ok: true, synced: false, reason: result.reason });
+      // Non-fatal reasons (no subscription yet, etc.) — still return the count
+      // so the billing page can show the correct number.
+      console.warn("[billing/sync-seats] stripe not synced:", result.reason);
+      return Response.json({ ok: true, syncedToStripe: false, reason: result.reason, seatCount });
     }
 
-    return Response.json({ ok: true, synced: true, quantity: result.quantity });
+    return Response.json({ ok: true, syncedToStripe: true, seatCount: result.quantity ?? seatCount });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return errorResponse(error.message, error.status);

@@ -4099,14 +4099,14 @@ const MobileAppShell = ({
             return;
           }
           if (generatedInviteUrl) {
-            // Fully close the Invite Employee form (and the confirm/seat-cost
-            // modals) FIRST, then open the result modal on the next frame so the
-            // form modal has unmounted — otherwise the result can render behind it.
+            // Force-close every invite/confirm modal FIRST, let the DOM update,
+            // then open the result modal so it renders in front of nothing.
             setShowSensitiveInviteConfirm(false);
             setShowSeatCostWarning(false);
             setShowInviteModal(false);
+            setShowInviteResult(false);
             setInviteFeedback('');
-            setTimeout(() => setShowInviteResult(true), 0);
+            setTimeout(() => setShowInviteResult(true), 50);
             return;
           }
           setInviteFeedback('Invite saved.');
@@ -4685,7 +4685,7 @@ const MobileAppShell = ({
           </div>
 
           <Modal
-            isOpen={showInviteModal && !showInviteResult}
+            isOpen={showInviteModal && !showSeatCostWarning && !showSensitiveInviteConfirm && !showInviteResult}
             onClose={() => {
               setShowInviteModal(false);
               setShowSensitiveInviteConfirm(false);
@@ -4870,7 +4870,7 @@ const MobileAppShell = ({
           </Modal>
 
           <Modal
-            isOpen={showSeatCostWarning}
+            isOpen={showSeatCostWarning && !showInviteResult}
             onClose={() => setShowSeatCostWarning(false)}
             title="Adding a Team Member"
             size="sm"
@@ -4929,7 +4929,7 @@ const MobileAppShell = ({
           </Modal>
 
           <Modal
-            isOpen={showSensitiveInviteConfirm}
+            isOpen={showSensitiveInviteConfirm && !showInviteResult}
             onClose={() => setShowSensitiveInviteConfirm(false)}
             title="Confirm Sensitive Access"
             size="sm"

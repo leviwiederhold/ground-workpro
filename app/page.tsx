@@ -4099,13 +4099,14 @@ const MobileAppShell = ({
             return;
           }
           if (generatedInviteUrl) {
-            // Close the Invite Employee form and surface the link in a dedicated
-            // result modal IN FRONT (Share Invite / Copy Link / Done). Avoids the
-            // result rendering behind the form modal.
+            // Fully close the Invite Employee form (and the confirm/seat-cost
+            // modals) FIRST, then open the result modal on the next frame so the
+            // form modal has unmounted — otherwise the result can render behind it.
             setShowSensitiveInviteConfirm(false);
+            setShowSeatCostWarning(false);
             setShowInviteModal(false);
             setInviteFeedback('');
-            setShowInviteResult(true);
+            setTimeout(() => setShowInviteResult(true), 0);
             return;
           }
           setInviteFeedback('Invite saved.');
@@ -4684,7 +4685,7 @@ const MobileAppShell = ({
           </div>
 
           <Modal
-            isOpen={showInviteModal}
+            isOpen={showInviteModal && !showInviteResult}
             onClose={() => {
               setShowInviteModal(false);
               setShowSensitiveInviteConfirm(false);

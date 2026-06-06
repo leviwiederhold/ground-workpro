@@ -23,6 +23,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
  * Always returns at least 1 (a valid company always has its owner).
  */
 const INACTIVE_EMPLOYEE_STATUSES = ["inactive", "deleted", "archived", "removed"];
+const OWNER_MEMBERSHIP_ROLES = ["admin", "ceo", "executive", "owner"];
 
 export async function getActiveBillableSeatCount(companyId: string): Promise<number> {
   const admin = getSupabaseAdmin();
@@ -30,53 +31,67 @@ export async function getActiveBillableSeatCount(companyId: string): Promise<num
     throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
   }
 
-  // 1. Fetch all accepted members. memberships always have a user_id; the CEO
-  //    and every accepted employee each have exactly one logical membership.
+  // ── Active employees (source of truth for staff seats) ─────────────────────
+  // We do NOT count memberships alone: when an employee is deleted, the
+  // employees row is removed but a membership row can linger, which previously
+  // produced phantom seats (the "11th" seat). Staff seats come from the
+  // employees table, filtered to active rows with a real user_id.
+  const { data: employeeRows, error: employeeError } = await admin
+    .from("employees")
+    .select("user_id, status")
+    .eq("company_id", companyId);
+
+  if (employeeError) {
+    console.warn("[seatCount] employees query failed:", employeeError.message);
+  }
+
+  const activeEmployeeUserIds = new Set<string>();
+  for (const row of employeeRows ?? []) {
+    const userId = String(row.user_id ?? "").trim();
+    if (!userId) continue; // pending invite / unlinked row
+    const status = String(row.status ?? "").trim().toLowerCase();
+    if (INACTIVE_EMPLOYEE_STATUSES.includes(status)) continue; // deleted/inactive/archived/removed
+    activeEmployeeUserIds.add(userId);
+  }
+
+  // ── Owner(s) (CEO) — always billable, identified via admin membership ──────
+  // The owner may not have an employees row, so include them from memberships.
   const { data: membershipRows, error: membershipError } = await admin
     .from("memberships")
-    .select("user_id")
+    .select("user_id, role")
     .eq("company_id", companyId);
 
   if (membershipError) {
     console.warn("[seatCount] memberships query failed:", membershipError.message);
-    return 1;
   }
 
-  // 2. Collapse to DISTINCT non-null user IDs (defends against duplicate
-  //    membership rows so nobody is double-counted).
-  const distinctUserIds = Array.from(
-    new Set(
-      (membershipRows ?? [])
-        .map((r) => String(r.user_id ?? "").trim())
-        .filter(Boolean)
-    )
-  );
-
-  if (distinctUserIds.length === 0) {
-    // Company exists but has no membership rows yet — owner still counts.
-    return 1;
+  const ownerUserIds = new Set<string>();
+  const distinctMembershipUserIds = new Set<string>();
+  for (const row of membershipRows ?? []) {
+    const userId = String(row.user_id ?? "").trim();
+    if (!userId) continue;
+    distinctMembershipUserIds.add(userId);
+    const role = String(row.role ?? "").trim().toLowerCase();
+    if (OWNER_MEMBERSHIP_ROLES.includes(role)) ownerUserIds.add(userId);
   }
 
-  // 3. Exclude users whose employees record is deactivated/deleted/archived.
-  const { data: inactiveRows } = await admin
-    .from("employees")
-    .select("user_id")
-    .eq("company_id", companyId)
-    .in("user_id", distinctUserIds)
-    .in("status", INACTIVE_EMPLOYEE_STATUSES);
+  // ── Billable seats = DISTINCT( active employees ∪ owners ) ─────────────────
+  // Union de-dupes by user_id, so the CEO is counted exactly once even if they
+  // also have an employees row, and duplicate rows never double-count.
+  const seatUserIds = new Set<string>([...activeEmployeeUserIds, ...ownerUserIds]);
+  const seats = Math.max(1, seatUserIds.size);
 
-  const inactiveIds = new Set(
-    (inactiveRows ?? []).map((r) => String(r.user_id ?? "").trim()).filter(Boolean)
-  );
+  console.log("[seatCount]", {
+    company_id: companyId,
+    employeeRows: (employeeRows ?? []).length,
+    activeEmployeeUserIds: activeEmployeeUserIds.size,
+    membershipRows: (membershipRows ?? []).length,
+    distinctMembershipUserIds: distinctMembershipUserIds.size,
+    ownerUserIds: ownerUserIds.size,
+    excludedStatuses: INACTIVE_EMPLOYEE_STATUSES,
+    seats,
+  });
 
-  const activeCount = distinctUserIds.filter((id) => !inactiveIds.has(id)).length;
-  const seats = Math.max(1, activeCount);
-
-  console.log(
-    `[seatCount] company=${companyId} membershipRows=${(membershipRows ?? []).length} ` +
-      `distinctUsers=${distinctUserIds.length} inactive=${inactiveIds.size} seats=${seats}`
-  );
-
-  // Always at least 1 (the CEO/owner).
+  // Always at least 1 (a valid company always has its owner).
   return seats;
 }

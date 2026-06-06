@@ -3825,6 +3825,12 @@ const MobileAppShell = ({
         setTeamItems((current) => (current.length > 0 ? current : employees.map(mapEmployeeSeedToTeamItem)));
       }, [employees, mapEmployeeSeedToTeamItem]);
 
+      // Load persisted pending invites on Team page mount so they survive a
+      // refresh (not only while the invite modal is open).
+      useEffect(() => {
+        loadPendingInvites();
+      }, [loadPendingInvites]);
+
       useEffect(() => {
         if (!showInviteModal) return;
         loadPendingInvites();

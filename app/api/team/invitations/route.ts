@@ -105,11 +105,15 @@ export async function GET(request: Request) {
     await requireModuleAccess("team_management", "view");
     const { supabase, companyId } = await getCompanyId();
 
+    // Active pending = not accepted and not expired (company-scoped).
+    const nowIso = new Date().toISOString();
+
     const invitationWithName = await supabase
       .from("pending_invitations")
       .select("id, company_id, email, role, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
       .eq("company_id", companyId)
       .is("accepted_at", null)
+      .gt("expires_at", nowIso)
       .order("created_at", { ascending: false });
 
     const invitationWithoutName =
@@ -119,6 +123,7 @@ export async function GET(request: Request) {
         .select("id, company_id, email, role, invite_token, expires_at, created_at, updated_at, accepted_at")
         .eq("company_id", companyId)
         .is("accepted_at", null)
+        .gt("expires_at", nowIso)
         .order("created_at", { ascending: false })
         : null;
 

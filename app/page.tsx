@@ -4362,23 +4362,48 @@ const MobileAppShell = ({
                     <h4 className="font-semibold text-gray-900">Pending Invitations</h4>
                     <span className="text-xs text-gray-500">{pendingInvites.length}</span>
                   </div>
-                  <div className="space-y-2">
-                    {pendingInvites.map((invite) => (
-                      <div key={invite.id} className="border border-gray-200 rounded-lg px-3 py-2">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-gray-900">{invite.full_name || invite.email}</p>
-                            <p className="text-xs text-gray-600">{invite.email} · {invite.role}</p>
-                          </div>
-                          <div className="flex flex-wrap gap-1 justify-end">
-                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'copy')} disabled={!canManageTeamProfiles}>Copy</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'regenerate')} disabled={!canManageTeamProfiles}>Regenerate</Button>
-                            <Button variant="ghost" size="sm" onClick={() => handlePendingInviteAction(invite, 'edit')} disabled={!canManageTeamProfiles}>Edit</Button>
-                            <Button variant="danger" size="sm" onClick={() => handlePendingInviteAction(invite, 'cancel')} disabled={!canManageTeamProfiles}>Cancel</Button>
+                  <div className="space-y-3">
+                    {pendingInvites.map((invite) => {
+                      const roleLabels = {
+                        ceo: 'CEO', admin: 'CEO', manager: 'Operations Manager', pm: 'Operations Manager',
+                        foreman: 'Foreman', mechanic: 'Mechanic', operator: 'Operator', fieldstaff: 'Field Staff',
+                      };
+                      const roleLabel = roleLabels[String(invite.role || '').toLowerCase()] || (invite.role || 'Member');
+                      const jobTitle = String(invite.job_title || '').trim();
+                      const headline = jobTitle || roleLabel;
+                      const accessCount = Array.isArray(invite.permissions)
+                        ? invite.permissions.filter((p) => p && p.access_level && p.access_level !== 'none').length
+                        : 0;
+                      return (
+                        <div key={invite.id} className="rounded-xl border border-gray-200 bg-white p-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="text-sm font-semibold text-gray-900 truncate">{headline}</p>
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                                  Pending
+                                </span>
+                              </div>
+                              {jobTitle && (
+                                <p className="mt-0.5 text-xs text-gray-500">{roleLabel}</p>
+                              )}
+                              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-gray-500">
+                                {invite.created_at && <span>Invited {formatDate(invite.created_at)}</span>}
+                                {invite.expires_at && <span>Expires {formatDate(invite.expires_at)}</span>}
+                                {accessCount > 0 && <span>{accessCount} module{accessCount !== 1 ? 's' : ''} access</span>}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 sm:shrink-0 sm:justify-end">
+                              <Button variant="secondary" size="sm" onClick={() => handlePendingInviteAction(invite, 'copy')} disabled={!canManageTeamProfiles}>Copy</Button>
+                              <Button variant="secondary" size="sm" onClick={() => handlePendingInviteAction(invite, 'regenerate')} disabled={!canManageTeamProfiles}>Regenerate</Button>
+                              <Button variant="secondary" size="sm" onClick={() => handlePendingInviteAction(invite, 'edit')} disabled={!canManageTeamProfiles}>Edit</Button>
+                              <Button variant="danger" size="sm" onClick={() => handlePendingInviteAction(invite, 'cancel')} disabled={!canManageTeamProfiles}>Cancel</Button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </Card>
               ) : null}

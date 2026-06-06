@@ -3657,6 +3657,7 @@ const MobileAppShell = ({
         return 'operator';
       };
       const [showInviteModal, setShowInviteModal] = useState(false);
+      const [showInviteResult, setShowInviteResult] = useState(false);
       const [inviteSaveLoading, setInviteSaveLoading] = useState(false);
       const [pendingInvites, setPendingInvites] = useState([]);
       const [pendingInviteLoading, setPendingInviteLoading] = useState(false);
@@ -4098,15 +4099,14 @@ const MobileAppShell = ({
             return;
           }
           if (generatedInviteUrl) {
-            try {
-              await shareInviteLink(generatedInviteUrl);
-              setShowSensitiveInviteConfirm(false);
-              return;
-            } catch {
-              setInviteFeedback('Invite link generated. Clipboard access failed, use Copy Link below.');
-              setShowSensitiveInviteConfirm(false);
-              return;
-            }
+            // Close the Invite Employee form and surface the link in a dedicated
+            // result modal IN FRONT (Share Invite / Copy Link / Done). Avoids the
+            // result rendering behind the form modal.
+            setShowSensitiveInviteConfirm(false);
+            setShowInviteModal(false);
+            setInviteFeedback('');
+            setShowInviteResult(true);
+            return;
           }
           setInviteFeedback('Invite saved.');
           setShowSensitiveInviteConfirm(false);
@@ -4798,24 +4798,6 @@ const MobileAppShell = ({
                 <p className="text-xs text-amber-700">CEO role and permissions are locked at full access.</p>
               )}
 
-              {permissionModalMode !== 'member-edit' && inviteForm.invite_url && (
-                <div className="rounded-xl border border-green-200 bg-green-50 p-3 dark:border-green-900/40 dark:bg-green-950/20">
-                  <p className="mb-2 text-xs font-medium text-green-700 dark:text-green-200">Invite link generated</p>
-                  <p className="mb-2 break-all text-xs text-green-800 dark:text-green-100">{inviteForm.invite_url}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button variant="secondary" size="sm" onClick={handleShareInvite}>
-                      <Icon name="share-nodes" className="mr-1" /> Share Invite
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={handleCopyInviteLink}>
-                      <Icon name="link" className="mr-1" /> Copy Link
-                    </Button>
-                    <Button variant="secondary" size="sm" onClick={() => setShowInviteModal(false)}>
-                      Done
-                    </Button>
-                  </div>
-                </div>
-              )}
-
               {inviteFeedback && <p className="text-xs text-gray-600 dark:text-zinc-300">{inviteFeedback}</p>}
 
               <div className="flex justify-end gap-2 border-t border-gray-200 pt-3 dark:border-zinc-800">
@@ -4841,6 +4823,48 @@ const MobileAppShell = ({
                   {inviteSaveLoading ? 'Saving...' : permissionModalMode === 'member-edit' ? 'Save Permissions' : permissionModalMode === 'invite-edit' ? 'Update Invite' : 'Generate Invite Link'}
                 </Button>
               </div>
+            </div>
+          </Modal>
+
+          {/* Invite link result — shown IN FRONT after the form modal closes. */}
+          <Modal
+            isOpen={showInviteResult}
+            onClose={() => setShowInviteResult(false)}
+            title="Invite link ready"
+            size="md"
+            portal
+            panelClassName="!max-w-lg"
+          >
+            <div className="space-y-4 text-gray-900 dark:text-zinc-100">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-green-50 text-green-600 ring-1 ring-green-100 dark:bg-green-500/10 dark:text-green-300">
+                  <Icon name="link" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Share this link with your new teammate</p>
+                  <p className="mt-1 text-xs leading-5 text-gray-500 dark:text-zinc-400">
+                    They&apos;ll create their account and join your company. Pending invites don&apos;t affect billing until accepted.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-zinc-800 dark:bg-[#0d0d0f]">
+                <p className="break-all text-xs text-gray-700 dark:text-zinc-200">{inviteForm.invite_url}</p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button variant="brand" size="sm" onClick={handleShareInvite} disabled={!inviteForm.invite_url}>
+                  <Icon name="share-nodes" className="mr-1" /> Share Invite
+                </Button>
+                <Button variant="secondary" size="sm" onClick={handleCopyInviteLink} disabled={!inviteForm.invite_url}>
+                  <Icon name="link" className="mr-1" /> Copy Link
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setShowInviteResult(false)}>
+                  Done
+                </Button>
+              </div>
+
+              {inviteFeedback && <p className="text-xs text-gray-600 dark:text-zinc-300">{inviteFeedback}</p>}
             </div>
           </Modal>
 

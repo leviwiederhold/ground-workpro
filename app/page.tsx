@@ -4330,7 +4330,7 @@ const MobileAppShell = ({
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-center gap-4 min-w-0">
               <div className="flex overflow-x-auto rounded-xl bg-gray-100 p-1 dark:bg-[#111111] dark:ring-1 dark:ring-zinc-800">
-                {['all', 'on-site', 'off'].map(status => (
+                {['all', 'on-site', 'off', 'pending'].map(status => (
                   <button
                     key={status}
                     onClick={() => setFilter(status)}
@@ -4338,7 +4338,11 @@ const MobileAppShell = ({
                       filter === status ? 'bg-white shadow text-gray-900' : 'text-gray-600 hover:text-gray-900'
                     }`}
                   >
-                    {status === 'on-site' ? 'On Site' : status.charAt(0).toUpperCase() + status.slice(1)}
+                    {status === 'on-site'
+                      ? 'On Site'
+                      : status === 'pending'
+                        ? `Pending${pendingInvites.length > 0 ? ` (${pendingInvites.length})` : ''}`
+                        : status.charAt(0).toUpperCase() + status.slice(1)}
                   </button>
                 ))}
               </div>
@@ -4360,9 +4364,13 @@ const MobileAppShell = ({
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Employee List */}
             <div className="lg:col-span-2 space-y-3">
-              {pendingInviteLoading ? (
-                <LoadingBlock>Loading pending invites...</LoadingBlock>
-              ) : pendingInvites.length > 0 ? (
+              {/* Pending tab: invite links only (persisted; never employees). */}
+              {filter === 'pending' && (
+                pendingInviteLoading ? (
+                  <LoadingBlock>Loading pending invites...</LoadingBlock>
+                ) : pendingInvites.length === 0 ? (
+                  <EmptyState>No pending invitations.</EmptyState>
+                ) : (
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-3">
                     <h4 className="font-semibold text-gray-900">Pending Invitations</h4>
@@ -4412,9 +4420,12 @@ const MobileAppShell = ({
                     })}
                   </div>
                 </Card>
-              ) : null}
+                )
+              )}
 
-              {employeesLoading || teamLoading ? (
+              {/* All / On Site / Off tabs: actual employees only. */}
+              {filter !== 'pending' && (
+              employeesLoading || teamLoading ? (
                 <LoadingBlock testId="team-loading">Loading employees...</LoadingBlock>
               ) : filteredEmployees.length === 0 ? (
                 <EmptyState testId="team-empty">No employees yet.</EmptyState>
@@ -4489,7 +4500,8 @@ const MobileAppShell = ({
                     </div>
                   </Card>
                 );
-              })}
+              })
+              )}
             </div>
 
             {/* Employee Detail */}

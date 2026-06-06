@@ -4874,6 +4874,8 @@ const MobileAppShell = ({
             onClose={() => setShowSeatCostWarning(false)}
             title="Adding a Team Member"
             size="sm"
+            portal
+            panelClassName="!max-w-[720px]"
           >
             <div className="space-y-4">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">

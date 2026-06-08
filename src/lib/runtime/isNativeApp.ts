@@ -50,3 +50,22 @@ export function isIosNativeAppRuntime(): boolean {
 
   return false;
 }
+
+/**
+ * True only for a real mobile WEB browser (mobile Safari/Chrome) — NOT the
+ * native Capacitor app and NOT desktop. Used to decide whether to show the
+ * "download the iOS app" web prompt.
+ */
+export function isMobileWebBrowser(): boolean {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  // Never inside the native app wrapper.
+  if (isNativeAppRuntime()) return false;
+
+  const ua = navigator.userAgent || "";
+  // Phones/tablets. Includes iPadOS which reports as Macintosh + touch.
+  const isMobileUa = /Android|iPhone|iPod|iPad|Mobile|Windows Phone/i.test(ua);
+  const isIpadOs =
+    /Macintosh/i.test(ua) && typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1;
+
+  return isMobileUa || isIpadOs;
+}

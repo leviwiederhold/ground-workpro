@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { validateEnv } from "@/lib/env/validateEnv";
 import { ThemeInitializer } from "@/app/components/theme/ThemeInitializer";
+import MobileAppDownloadPrompt from "@/app/components/MobileAppDownloadPrompt";
 
 validateEnv();
 
@@ -41,6 +42,7 @@ export default function RootLayout({
       <body className="bg-gray-50 text-gray-900 antialiased">
         <ThemeInitializer />
         {children}
+        <MobileAppDownloadPrompt />
       </body>
     </html>
   );

@@ -18,6 +18,7 @@ import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
+import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
 
@@ -2455,6 +2456,13 @@ const MobileAppShell = ({
         >
           <div className="max-w-screen-2xl mx-auto">
             {renderView()}
+            {/* Mobile-web "download the app" prompt — only once the authenticated
+                dashboard is actually rendered (past auth, setup, and the
+                subscription/trial gate). The component itself further restricts
+                to mobile web, non-native, env URL present, and 7-day dismissal. */}
+            {subscriptionGate.loaded && subscriptionGate.active && (
+              <MobileAppDownloadPrompt />
+            )}
             <div className="mt-6 border-t border-gray-200 pt-4">
               <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>

@@ -13437,31 +13437,45 @@ const MobileAppShell = ({
 	        try {
 	          const controller = new AbortController();
 	          const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-	          const response = await fetch('/api/onboarding/setup-status', {
-	            cache: 'no-store',
-	            signal: controller.signal,
-	          }).finally(() => window.clearTimeout(timeoutId));
+	          const [response, billingResponse] = await Promise.all([
+	            fetch('/api/onboarding/setup-status', { cache: 'no-store', signal: controller.signal }),
+	            fetch('/api/billing/status', { cache: 'no-store', signal: controller.signal }),
+	          ]).finally(() => window.clearTimeout(timeoutId));
 	          const payload = await response.json().catch(() => ({}));
+	          const billingPayload = await billingResponse.json().catch(() => ({}));
 	          const requiredComplete =
 	            payload?.item?.required_complete === undefined
 	              ? Boolean(payload?.item?.is_complete)
 	              : Boolean(payload?.item?.required_complete);
+	          const setupRole = String(payload?.item?.role ?? '');
+	          const isOwner = setupRole === 'admin';
+	          const subscriptionActive = Boolean(billingPayload?.item?.is_active);
+	          // An OWNER without an active trial/subscription must NOT be sent to
+	          // /setup (it requires an active trial). Let the app render the
+	          // OwnerTrialGate (Start free trial) instead — otherwise /setup
+	          // bounces them back to "/" and loops.
+	          // Treat "unknown" (billing check failed) as needs-trial for owners so
+	          // we never route an owner to /setup unless their trial is confirmed
+	          // active — /setup would otherwise bounce them back and loop.
+	          const ownerNeedsTrial = isOwner && !subscriptionActive;
 	          if (process.env.NODE_ENV !== 'production') {
-	            // TEMP dev logging for onboarding redirect decisions.
 	            console.log('[verifySetup]', {
 	              ok: response.ok,
 	              status: response.status,
 	              requiredComplete,
+	              isOwner,
+	              subscriptionActive,
+	              ownerNeedsTrial,
 	              pathname: typeof window !== 'undefined' ? window.location.pathname : '',
-	              willRedirectToSetup: response.ok && !requiredComplete,
+	              willRedirectToSetup: response.ok && !requiredComplete && !ownerNeedsTrial,
 	            });
 	          }
-	          // Only redirect to /setup when the API SUCCESSFULLY reports an
-	          // incomplete onboarding. On error/timeout we must NOT redirect —
-	          // that previously drove the /login <-> /setup loop.
+	          // Redirect to /setup only when onboarding is incomplete AND the user
+	          // is allowed on /setup (employee, or owner with an active trial).
 	          if (
 	            response.ok &&
 	            !requiredComplete &&
+	            !ownerNeedsTrial &&
 	            typeof window !== 'undefined' &&
 	            window.location.pathname !== '/setup'
 	          ) {

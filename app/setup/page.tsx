@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getOptionalCompanyId } from "@/lib/tenant/getCompanyId";
 import { getSetupStatusForUser, loadProfileForSetup } from "@/lib/onboarding/setupFlow";
+import { getCompanyBillingStatus } from "@/lib/billing/isCompanySubscriptionActive";
 import SetupWizardClient from "./SetupWizardClient";
 
 export const dynamic = "force-dynamic";
@@ -39,8 +40,24 @@ export default async function SetupPage() {
     userEmail,
   });
 
-  // 3. Completed users leave setup. redirect() is OUTSIDE any try/catch so its
-  //    internal NEXT_REDIRECT is never swallowed into a /login bounce.
+  // 3. Owner gate: a company OWNER may only reach /setup once they have an
+  //    active trial/subscription. If they have no workspace yet, or their
+  //    company has no active/trialing subscription, send them to "/" where the
+  //    OwnerTrialGate starts Stripe checkout. Invited employees (non-owners)
+  //    are never gated on Stripe here — their access follows company state.
+  //    (redirect() is outside try/catch so NEXT_REDIRECT isn't swallowed.)
+  const isOwner = status.role === "admin";
+  if (isOwner) {
+    if (!companyId) {
+      redirect("/");
+    }
+    const billing = await getCompanyBillingStatus(supabase, companyId);
+    if (!billing.is_active) {
+      redirect("/");
+    }
+  }
+
+  // 4. Completed users leave setup.
   if (status.is_complete) {
     redirect("/");
   }

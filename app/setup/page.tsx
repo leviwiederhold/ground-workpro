@@ -13,20 +13,42 @@ function splitName(fullName: string): { first: string; last: string } {
 }
 
 export default async function SetupPage() {
+  // 1. Resolve auth/tenant. getOptionalCompanyId returns companyId:null for an
+  //    authenticated user without a workspace yet (e.g. brand-new OAuth owner),
+  //    and only throws when NOT authenticated. So a thrown error here = signed
+  //    out -> /login. An AUTHENTICATED user is never redirected to /login.
+  let supabase: Awaited<ReturnType<typeof getOptionalCompanyId>>["supabase"];
+  let companyId: string | null;
+  let userId: string;
+  let userEmail: string;
+  try {
+    const resolved = await getOptionalCompanyId();
+    supabase = resolved.supabase;
+    companyId = resolved.companyId;
+    userId = resolved.userId;
+    userEmail = String(resolved.userEmail ?? "").trim();
+  } catch {
+    redirect("/login");
+  }
+
+  // 2. Compute onboarding status (shared helper — single source of truth).
+  const status = await getSetupStatusForUser({
+    supabase,
+    companyId,
+    userId,
+    userEmail,
+  });
+
+  // 3. Completed users leave setup. redirect() is OUTSIDE any try/catch so its
+  //    internal NEXT_REDIRECT is never swallowed into a /login bounce.
+  if (status.is_complete) {
+    redirect("/");
+  }
+
+  // 4. Build prefill. Any data error here must keep the AUTHENTICATED user on
+  //    /setup (never /login), so fall back to a minimal prefill.
   let prefill;
   try {
-    const { supabase, companyId, userId, userEmail } = await getOptionalCompanyId();
-    const status = await getSetupStatusForUser({
-      supabase,
-      companyId,
-      userId,
-      userEmail: String(userEmail ?? "").trim(),
-    });
-
-    if (status.is_complete) {
-      redirect("/");
-    }
-
     const profile = await loadProfileForSetup(supabase, userId);
     const email = String(userEmail ?? "").trim().toLowerCase();
     const rawName = String((profile as Record<string, unknown> | null)?.full_name ?? "").trim();
@@ -90,7 +112,19 @@ export default async function SetupPage() {
       company,
     };
   } catch {
-    redirect("/login");
+    // Authenticated but prefill failed — keep the user on /setup with a minimal
+    // prefill instead of bouncing to /login.
+    prefill = {
+      role: status.role === "admin" ? ("owner" as const) : ("employee" as const),
+      hasCompany: status.has_company,
+      firstName: "",
+      lastName: "",
+      phone: "",
+      jobTitle: "",
+      timezone: "",
+      emergencyContact: "",
+      company: null,
+    };
   }
 
   return <SetupWizardClient prefill={prefill} />;

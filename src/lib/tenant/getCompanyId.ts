@@ -277,10 +277,11 @@ export async function getOptionalCompanyId() {
   try {
     return await getCompanyId();
   } catch (error) {
+    // A 403 from the resolver means "authenticated but no company workspace yet"
+    // (brand-new owner / OAuth user before bootstrap). Match on STATUS, not the
+    // human-readable message, so wording changes can't reintroduce a redirect
+    // loop. Any other error (incl. 401 not-authenticated) propagates.
     if (!(error instanceof TenantResolverError) || error.status !== 403) {
-      throw error;
-    }
-    if (!/No company membership found/i.test(error.message)) {
       throw error;
     }
 

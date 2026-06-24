@@ -13375,7 +13375,25 @@ const MobileAppShell = ({
 	            payload?.item?.required_complete === undefined
 	              ? Boolean(payload?.item?.is_complete)
 	              : Boolean(payload?.item?.required_complete);
-	          if (!requiredComplete && typeof window !== 'undefined' && window.location.pathname !== '/setup') {
+	          if (process.env.NODE_ENV !== 'production') {
+	            // TEMP dev logging for onboarding redirect decisions.
+	            console.log('[verifySetup]', {
+	              ok: response.ok,
+	              status: response.status,
+	              requiredComplete,
+	              pathname: typeof window !== 'undefined' ? window.location.pathname : '',
+	              willRedirectToSetup: response.ok && !requiredComplete,
+	            });
+	          }
+	          // Only redirect to /setup when the API SUCCESSFULLY reports an
+	          // incomplete onboarding. On error/timeout we must NOT redirect —
+	          // that previously drove the /login <-> /setup loop.
+	          if (
+	            response.ok &&
+	            !requiredComplete &&
+	            typeof window !== 'undefined' &&
+	            window.location.pathname !== '/setup'
+	          ) {
 	            window.location.replace('/setup');
 	            return;
 	          }

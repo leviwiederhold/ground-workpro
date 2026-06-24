@@ -12,8 +12,9 @@ type ThreadRow = {
   company_id: string;
   kind: string;
   name: string | null;
-  dm_user_a: string;
-  dm_user_b: string;
+  is_companywide?: boolean | null;
+  dm_user_a: string | null;
+  dm_user_b: string | null;
   created_at: string;
   updated_at: string;
   last_message_at: string | null;
@@ -286,11 +287,21 @@ export async function listThreadsByIds(
 ): Promise<ThreadRow[]> {
   if (threadIds.length === 0) return [];
 
-  const result = await getMessagingDb(supabase)
+  const db = getMessagingDb(supabase);
+  let result = await db
     .from("message_threads")
-    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select("id, company_id, kind, name, is_companywide, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
     .eq("company_id", companyId)
     .in("id", threadIds);
+
+  // Tolerate environments where the companywide migration hasn't run yet.
+  if (result.error && /is_companywide/i.test(result.error.message || "")) {
+    result = (await db
+      .from("message_threads")
+      .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+      .eq("company_id", companyId)
+      .in("id", threadIds)) as typeof result;
+  }
 
   if (result.error) throw new Error(result.error.message);
   return (result.data ?? []) as ThreadRow[];

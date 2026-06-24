@@ -58,6 +58,15 @@ export async function GET(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
 
+    // Guarantee the permanent Companywide chat exists and that its participants
+    // reflect current active members (defensive — also handled by DB triggers/
+    // backfill). Safe under concurrent opens via the partial unique index.
+    try {
+      await supabase.rpc("ensure_companywide_thread", { p_company_id: companyId });
+    } catch {
+      // Non-fatal: the inbox still renders existing threads.
+    }
+
     const myParticipants = await listParticipantRowsForUser(supabase, companyId, userId);
     const threadIds = Array.from(new Set(myParticipants.map((row) => String(row.thread_id))));
 
@@ -129,13 +138,17 @@ export async function GET(request: Request) {
         const latest = latestByThread.get(key);
         const kind = String(thread.kind || "direct");
         const isDirect = kind === "direct";
+        const isCompanywide = Boolean((thread as { is_companywide?: boolean | null }).is_companywide);
         const explicitGroupName = (thread as { name?: string | null }).name;
         return {
           id: thread.id,
           kind,
-          name: isDirect
-            ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
-            : (explicitGroupName === null || explicitGroupName === undefined ? "Group Chat" : String(explicitGroupName)),
+          is_companywide: isCompanywide,
+          name: isCompanywide
+            ? "Companywide"
+            : isDirect
+              ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
+              : (explicitGroupName === null || explicitGroupName === undefined ? "Group Chat" : String(explicitGroupName)),
           created_at: thread.created_at,
           updated_at: thread.updated_at,
           message_count: countByThread.get(key) ?? 0,
@@ -146,11 +159,14 @@ export async function GET(request: Request) {
           other_user_id: isDirect ? otherUserId : null,
         };
       })
-      .sort((a, b) =>
-        String(b.last_message_at || b.updated_at || b.created_at).localeCompare(
+      // Pin the Companywide chat to the top (default conversation), then by recency.
+      .sort((a, b) => {
+        if (a.is_companywide && !b.is_companywide) return -1;
+        if (b.is_companywide && !a.is_companywide) return 1;
+        return String(b.last_message_at || b.updated_at || b.created_at).localeCompare(
           String(a.last_message_at || a.updated_at || a.created_at)
-        )
-      );
+        );
+      });
 
     const totalUnread = items.reduce((sum, item) => sum + Number(item.unread_count ?? 0), 0);
 

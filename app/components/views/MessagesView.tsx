@@ -389,6 +389,22 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     }
   }, [availableUsersSeed, loadChannels, loadUsers]);
 
+  // Default conversation: open the permanent Companywide chat when Messaging
+  // first loads and nothing is selected yet (once).
+  const didDefaultSelectRef = useRef(false);
+  useEffect(() => {
+    if (didDefaultSelectRef.current) return;
+    if (activeChannel) {
+      didDefaultSelectRef.current = true;
+      return;
+    }
+    const companywide = (channels || []).find((c) => c && c.is_companywide);
+    if (companywide) {
+      didDefaultSelectRef.current = true;
+      setActiveChannel(companywide);
+    }
+  }, [channels, activeChannel]);
+
   useEffect(() => {
     const refreshInbox = () => {
       if (typeof document === 'undefined' || document.hidden) return;

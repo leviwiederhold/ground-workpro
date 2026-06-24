@@ -24,15 +24,15 @@ function RecoveryScreen({ sessionId }: { sessionId?: string }) {
         <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
           <i className="fa-solid fa-check text-green-600 text-xl" />
         </div>
-        <h1 className="text-xl font-semibold text-gray-900 mb-2">Payment Successful!</h1>
+        <h1 className="text-xl font-semibold text-gray-900 mb-2">Your trial is active!</h1>
         <p className="text-sm text-gray-600 mb-6">
-          Your Groundwork Pro workspace is ready. Sign in to continue.
+          Sign in once more to finish setting up your Groundwork Pro workspace.
         </p>
         <Link
           href={continueUrl}
           className="inline-flex w-full items-center justify-center rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600"
         >
-          Continue to Dashboard
+          Continue setup
         </Link>
       </div>
     </main>
@@ -55,23 +55,30 @@ export default function BillingSuccessClient({ sessionId }: Props) {
     async function finish() {
       const supabase = supabaseBrowser();
 
-      // 1. Try existing browser session (localStorage / cookies).
-      let { data } = await supabase.auth.getSession();
-
-      // 2. Attempt a session refresh — may succeed if server cookies were set.
-      if (!data.session) {
+      // Safe handoff: right after Stripe's cross-site redirect the auth cookies
+      // may not be immediately readable. Try getSession, then refreshSession,
+      // retrying a few times before giving up — so a paid trial user is not
+      // dead-ended at /login over a transient timing issue.
+      let session = null;
+      for (let attempt = 0; attempt < 4 && !session; attempt += 1) {
+        const { data } = await supabase.auth.getSession();
+        session = data.session;
+        if (session) break;
         const { data: refreshed } = await supabase.auth.refreshSession();
-        data = refreshed as typeof data;
+        session = refreshed.session;
+        if (session) break;
+        await new Promise((r) => setTimeout(r, 400));
       }
 
-      // 3. Still no session — show recovery screen with "Continue to Dashboard" link
-      //    that goes to /login?checkout=success (pre-filled success state).
-      if (!data.session) {
+      if (!session) {
+        // Genuinely no session after retries — show the polished handoff screen
+        // (a clean re-auth, never a raw error). After sign-in the user is routed
+        // to /setup, not the dashboard.
         setShowRecovery(true);
         return;
       }
 
-      // 4. Sync the Stripe session → company billing record.
+      // Sync the Stripe session → company billing record.
       if (sessionId) {
         try {
           const res = await fetch("/api/billing/sync-session", {
@@ -88,7 +95,8 @@ export default function BillingSuccessClient({ sessionId }: Props) {
         }
       }
 
-      router.replace("/?trial=started");
+      // Authenticated paid/trialing owner → onboarding (not dashboard yet).
+      router.replace("/setup?trial=started");
     }
 
     finish();

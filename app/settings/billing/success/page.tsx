@@ -43,12 +43,14 @@ export default async function BillingSuccessPage({ searchParams }: PageProps) {
       // Non-fatal: webhook handles eventual consistency.
       console.warn("[billing/success] server-side sync-session failed:", err);
     }
-    redirect("/?trial=started");
+    // Authenticated, paid/trialing owner → onboarding. /setup itself sends them
+    // on to the dashboard only once setup is complete. Never /login.
+    redirect("/setup?trial=started");
   }
 
   if (user) {
-    // No session_id but valid user — just go to dashboard.
-    redirect("/?trial=started");
+    // No session_id but valid user — still go to onboarding, not the dashboard.
+    redirect("/setup?trial=started");
   }
 
   // No server-side session found — fall back to client component which will

@@ -127,7 +127,8 @@ export default function LoginPage() {
       if (hasCheckoutSuccess) {
         ensureTenantContext()
           .then(() => {
-            router.replace("/");
+            // Post-checkout owners go to onboarding, not the dashboard.
+            router.replace("/setup?trial=started");
             router.refresh();
           })
           .catch((checkoutError) => {
@@ -239,7 +240,8 @@ export default function LoginPage() {
 
       await ensureTenantContext();
       if (checkoutSuccess) {
-        router.replace("/");
+        // Post-checkout owners go to onboarding, not the dashboard.
+        router.replace("/setup?trial=started");
         router.refresh();
         return;
       }

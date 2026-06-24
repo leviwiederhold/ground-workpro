@@ -833,6 +833,17 @@ const MobileAppShell = ({
       const [serverNavItems, setServerNavItems] = useState(cachedNavState.items);
       const [moduleAccess, setModuleAccess] = useState(cachedNavState.moduleAccess);
       const [navLoaded, setNavLoaded] = useState(cachedNavState.loaded);
+      // navEverLoaded: we have usable, server-confirmed permissions (from cache
+      // with data, or a successful /api/nav). The module gate must only apply
+      // once this is true — never deny access while permissions are still
+      // initializing or after a transient refresh failure.
+      const [navEverLoaded, setNavEverLoaded] = useState(
+        Boolean(cachedNavState.moduleAccess && Object.keys(cachedNavState.moduleAccess).length > 0)
+      );
+      const [navError, setNavError] = useState(false);
+      // Bumped whenever the Supabase session/token refreshes, to force a fresh
+      // server re-check of permissions + subscription (never trust stale state).
+      const [accessRefreshNonce, setAccessRefreshNonce] = useState(0);
       const [showNotifications, setShowNotifications] = useState(false);
       const [showUserMenu, setShowUserMenu] = useState(false);
       const [notifications, setNotifications] = useState([]);
@@ -943,7 +954,7 @@ const MobileAppShell = ({
         return () => {
           active = false;
         };
-      }, [currentRole, iosAppRuntime]);
+      }, [currentRole, iosAppRuntime, accessRefreshNonce]);
 
       // Subscribe view removed from nav — inactive billing state is shown inline by renderView.
 
@@ -1113,16 +1124,33 @@ const MobileAppShell = ({
           .filter(Boolean);
       }, []);
 
-      const loadNav = useCallback(async () => {
+      const loadNav = useCallback(async (isRetry = false) => {
+        const dev = process.env.NODE_ENV !== 'production';
         try {
-          const response = await fetch('/api/nav', { cache: 'no-store' });
+          setNavError(false);
+          let response = await fetch('/api/nav', { cache: 'no-store' });
+
+          // A 401/403 right after native login or during a token refresh means
+          // the access token is stale/mid-rotation — NOT that the user lost
+          // access. Refresh the Supabase session and retry once before giving up.
+          if ((response.status === 401 || response.status === 403) && !isRetry) {
+            if (dev) console.log('[loadNav] auth not ready (', response.status, ') — refreshing session and retrying');
+            try { await supabaseBrowser().auth.refreshSession(); } catch { /* ignore */ }
+            response = await fetch('/api/nav', { cache: 'no-store' });
+          }
+
           const payload = await response.json().catch(() => ({}));
+
           if (!response.ok) {
-            setServerNavItems(fallbackNavByRole(currentRole));
-            setModuleAccess({});
-            setCurrentRoleDisplay(currentRole);
+            // TRANSIENT failure: preserve last-known-good permissions. Never wipe
+            // moduleAccess to {} — that is what caused "Access Restricted" after a
+            // token refresh and the startup error on fresh login.
+            if (dev) console.warn('[loadNav] non-ok, preserving access', { status: response.status, navEverLoaded });
+            setNavError(true);
+            setServerNavItems((prev) => (Array.isArray(prev) && prev.length > 0 ? prev : fallbackNavByRole(currentRole)));
             return;
           }
+
           const uiRole = mapServerRoleToUiRole(payload?.role);
           const uiDisplayRole = mapServerRoleToUiRole(payload?.displayRole || payload?.role);
           setCurrentRole(uiRole);
@@ -1131,6 +1159,8 @@ const MobileAppShell = ({
           setServerNavItems(resolvedItems);
           const resolvedModuleAccess = payload?.moduleAccess && typeof payload.moduleAccess === 'object' ? payload.moduleAccess : {};
           setModuleAccess(resolvedModuleAccess);
+          setNavEverLoaded(true);
+          if (dev) console.log('[loadNav] ok', { role: uiRole, modules: Object.keys(resolvedModuleAccess).length });
           safeLocalStorageSet(
             NAV_CACHE_KEY,
             JSON.stringify({
@@ -1140,14 +1170,15 @@ const MobileAppShell = ({
               moduleAccess: resolvedModuleAccess,
             })
           );
-        } catch {
-          setServerNavItems(fallbackNavByRole(currentRole));
-          setModuleAccess({});
-          setCurrentRoleDisplay(currentRole);
+        } catch (err) {
+          // Network/runtime error: preserve last-known-good access, surface retry.
+          if (dev) console.warn('[loadNav] threw, preserving access', err);
+          setNavError(true);
+          setServerNavItems((prev) => (Array.isArray(prev) && prev.length > 0 ? prev : fallbackNavByRole(currentRole)));
         } finally {
           setNavLoaded(true);
         }
-      }, [currentRole, fallbackNavByRole, mapServerRoleToUiRole]);
+      }, [currentRole, fallbackNavByRole, mapServerRoleToUiRole, navEverLoaded]);
 
       const moduleForView = useCallback((view) => {
         const map = {
@@ -1857,7 +1888,25 @@ const MobileAppShell = ({
 
       useEffect(() => {
         loadNav();
-      }, [loadNav]);
+      }, [loadNav, accessRefreshNonce]);
+
+      // Re-fetch permissions + subscription after a Supabase token/session
+      // refresh (native sessions rotate ~hourly). Without this, a token refresh
+      // could leave access state stale/denied until the app was reopened.
+      useEffect(() => {
+        const supabase = supabaseBrowser();
+        const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+          if (event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') {
+            if (process.env.NODE_ENV !== 'production') {
+              console.log('[access] auth event', event, '→ re-checking permissions + subscription');
+            }
+            setAccessRefreshNonce((n) => n + 1);
+          }
+        });
+        return () => {
+          sub?.subscription?.unsubscribe?.();
+        };
+      }, []);
 
       useEffect(() => {
         setHeaderDateLabel(getUtcDateLabel());
@@ -1973,8 +2022,30 @@ const MobileAppShell = ({
       };
 
       const renderView = () => {
-        // Gate: lightweight spinner while entitlement check resolves post-auth.
-        if (!subscriptionGate.loaded) {
+        // Shared startup-readiness gate for EVERY authenticated view: hold until
+        // entitlement AND permissions (nav) have resolved at least once. This
+        // prevents any view from rendering a denied/error state while startup
+        // context is still initializing (fixes the post-login "startup issue"
+        // and transient "Access Restricted").
+        const startupReady = subscriptionGate.loaded && navEverLoaded;
+        if (!startupReady) {
+          // Genuine, unrecoverable-so-far failure with no usable cached access:
+          // offer a retry that re-runs initialization (not a page refresh).
+          if (navError && !navEverLoaded) {
+            return (
+              <Card className="p-8 text-center text-gray-600">
+                <div className="text-lg font-semibold text-gray-800 mb-2">We&apos;re getting things ready</div>
+                <div className="text-sm mb-4">We couldn&apos;t finish loading your workspace. Please try again.</div>
+                <button
+                  type="button"
+                  onClick={() => { setNavLoaded(false); void loadNav(true); }}
+                  className="inline-flex items-center justify-center rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+                >
+                  Retry
+                </button>
+              </Card>
+            );
+          }
           return (
             <Card className="p-8 text-center text-gray-600">
               <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />

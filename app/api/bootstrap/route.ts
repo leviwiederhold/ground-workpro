@@ -245,6 +245,37 @@ export async function POST(request: Request) {
       }
     }
 
+    // ── Defense-in-depth owner guard ───────────────────────────────────────
+    // Company bootstrap is ONLY for brand-new OWNER accounts that have no
+    // company association of any kind. The branches above already return early
+    // for members, linked employees, and pending invites; this is an explicit
+    // re-assertion right at the create-company path so a future refactor can
+    // never let an invited employee / existing member fall through and create a
+    // (duplicate) company. Re-checks membership, employee-row, and pending
+    // invite, then rejects anything that is an employee/member candidate.
+    {
+      const [membershipReassert, employeeReassert, pendingReassert] = await Promise.all([
+        supabase.from("memberships").select("company_id").eq("user_id", user.id).limit(1),
+        userEmail
+          ? supabase.from("employees").select("id").ilike("email", userEmail).not("company_id", "is", null).limit(1)
+          : Promise.resolve({ data: [], error: null } as { data: unknown[]; error: null }),
+        userEmail
+          ? supabase.from("pending_invitations").select("id").ilike("email", userEmail).is("accepted_at", null).limit(1)
+          : Promise.resolve({ data: [], error: null } as { data: unknown[]; error: null }),
+      ]);
+      const hasMembership = ((membershipReassert.data as unknown[]) ?? []).length > 0;
+      const hasEmployeeRow = ((employeeReassert.data as unknown[]) ?? []).length > 0;
+      const hasPendingInvite = ((pendingReassert.data as unknown[]) ?? []).length > 0;
+      if (hasMembership || hasEmployeeRow || hasPendingInvite) {
+        // This user belongs to (or was invited to) a company — they are an
+        // employee/member candidate, NOT a new owner. Never create a company.
+        return errorResponse(
+          "This account is associated with an existing company. Accept your invitation or sign in instead.",
+          409
+        );
+      }
+    }
+
     // 1) Ensure profile exists
     await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
 

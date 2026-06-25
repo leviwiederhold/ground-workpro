@@ -267,6 +267,16 @@ export async function getCompanyId() {
   }
 
   if (!companyId) {
+    // TEMP diagnostic: a 403 here means authenticated but no company membership.
+    if (process.env.NODE_ENV !== "production") {
+      console.warn("[getCompanyId] 403 denied", {
+        userId: userData.user.id,
+        localUserFound: true,
+        membershipFound: false,
+        companyId: null,
+        reason: "no_company_membership",
+      });
+    }
     throw new TenantResolverError("No company workspace found", 403);
   }
 

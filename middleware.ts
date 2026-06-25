@@ -177,6 +177,17 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       }
 
       if (!resolvedRole || !userId || !companyId) {
+        // TEMP diagnostic for the 403 storm investigation.
+        if (process.env.NODE_ENV !== "production") {
+          console.warn("[middleware] 403", {
+            route: request.nextUrl.pathname,
+            userId,
+            membershipFound: Boolean(companyId),
+            companyId: companyId || null,
+            role: resolvedRole || null,
+            reason: !userId ? "no_user" : !companyId ? "no_company_membership" : "no_role",
+          });
+        }
         if (!isApi) return NextResponse.redirect(new URL("/", request.url));
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }

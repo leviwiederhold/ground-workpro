@@ -13348,6 +13348,13 @@ const MobileAppShell = ({
 	      const [setupChecked, setSetupChecked] = useState(false);
 	      const [setupRefreshing, setSetupRefreshing] = useState(false);
 	      const [startupError, setStartupError] = useState<string | null>(null);
+	      // Confirmed startup access decision. The dashboard <App> (which loads
+	      // all protected APIs) only mounts when this is 'ready'. Until then we
+	      // render a standalone gate that fires NO protected/dashboard APIs.
+	      //   'loading' | 'ready' | 'needs-trial' | 'native-no-workspace' | 'company-inactive'
+	      const [accessDecision, setAccessDecision] = useState('loading');
+	      const [trialStarting, setTrialStarting] = useState(false);
+	      const [trialError, setTrialError] = useState('');
 	      const setupCheckInFlightRef = useRef(false);
 	      const hydrateCurrentUser = useCallback(async (sessionUser) => {
 	        const supabase = supabaseBrowser();
@@ -13449,38 +13456,40 @@ const MobileAppShell = ({
 	              : Boolean(payload?.item?.required_complete);
 	          const setupRole = String(payload?.item?.role ?? '');
 	          const isOwner = setupRole === 'admin';
+	          const hasCompany = Boolean(payload?.item?.has_company);
 	          const subscriptionActive = Boolean(billingPayload?.item?.is_active);
-	          // An OWNER without an active trial/subscription must NOT be sent to
-	          // /setup (it requires an active trial). Let the app render the
-	          // OwnerTrialGate (Start free trial) instead — otherwise /setup
-	          // bounces them back to "/" and loops.
-	          // Treat "unknown" (billing check failed) as needs-trial for owners so
-	          // we never route an owner to /setup unless their trial is confirmed
-	          // active — /setup would otherwise bounce them back and loop.
-	          const ownerNeedsTrial = isOwner && !subscriptionActive;
+	          const native = nativeRuntime;
+	          // Single source of truth for what the user may see. The dashboard
+	          // only mounts when 'ready'; everything else is a standalone gate
+	          // that fires NO protected/dashboard APIs.
+	          let decision;
+	          if (native && !hasCompany) {
+	            decision = 'native-no-workspace';
+	          } else if (!subscriptionActive) {
+	            decision = (isOwner && !native) ? 'needs-trial' : 'company-inactive';
+	          } else if (!requiredComplete) {
+	            decision = 'needs-setup';
+	          } else {
+	            decision = 'ready';
+	          }
 	          if (process.env.NODE_ENV !== 'production') {
 	            console.log('[verifySetup]', {
-	              ok: response.ok,
-	              status: response.status,
-	              requiredComplete,
-	              isOwner,
-	              subscriptionActive,
-	              ownerNeedsTrial,
+	              ok: response.ok, status: response.status, billingStatus: billingResponse.status,
+	              hasCompany, isOwner, subscriptionActive, requiredComplete, native, decision,
 	              pathname: typeof window !== 'undefined' ? window.location.pathname : '',
-	              willRedirectToSetup: response.ok && !requiredComplete && !ownerNeedsTrial,
 	            });
 	          }
-	          // Redirect to /setup only when onboarding is incomplete AND the user
-	          // is allowed on /setup (employee, or owner with an active trial).
-	          if (
-	            response.ok &&
-	            !requiredComplete &&
-	            !ownerNeedsTrial &&
-	            typeof window !== 'undefined' &&
-	            window.location.pathname !== '/setup'
-	          ) {
-	            window.location.replace('/setup');
-	            return;
+	          if (decision === 'needs-setup') {
+	            // Onboarding incomplete but access confirmed -> go to /setup.
+	            // Do NOT mark 'ready' (keeps the dashboard from mounting during
+	            // the redirect). /setup is a separate route.
+	            if (typeof window !== 'undefined' && window.location.pathname !== '/setup') {
+	              window.location.replace('/setup');
+	              return;
+	            }
+	            setAccessDecision('ready');
+	          } else {
+	            setAccessDecision(decision);
 	          }
 	        } catch {
 	          // Allow the app shell to recover even if setup status check fails or hangs.
@@ -13489,7 +13498,29 @@ const MobileAppShell = ({
 	          setSetupRefreshing(false);
 	          setSetupChecked(true);
 	        }
-	      }, [isAuthenticated]);
+	      }, [isAuthenticated, nativeRuntime]);
+
+	      // Start the 7-day trial for a web owner who is gated. Bootstraps the
+	      // company first (idempotent — self-heals a brand-new owner who has no
+	      // company yet), then opens Stripe checkout. No dashboard APIs involved.
+	      const startOwnerTrial = useCallback(async () => {
+	        setTrialStarting(true);
+	        setTrialError('');
+	        try {
+	          await fetch('/api/bootstrap', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+	          const res = await fetch('/api/billing/checkout', { method: 'POST' });
+	          const payload = await res.json().catch(() => ({}));
+	          if (!res.ok || !payload?.url) {
+	            setTrialError("We couldn't start your free trial. Please try again or contact support.");
+	            setTrialStarting(false);
+	            return;
+	          }
+	          window.location.href = payload.url;
+	        } catch {
+	          setTrialError("We couldn't start your free trial. Please try again or contact support.");
+	          setTrialStarting(false);
+	        }
+	      }, []);
 
 	      const handleLogin = (data) => {
 	        const email = String(data?.email ?? '').trim();
@@ -13668,8 +13699,53 @@ const MobileAppShell = ({
         return null;
       }
 
-      // All startup conditions met — signal the Page-level overlay to exit.
+      // Startup access resolved. Mount the dashboard <App> (which loads all
+      // protected APIs) ONLY when access is fully confirmed. Other states show
+      // a standalone gate that fires no protected/dashboard APIs.
       onReady?.();
+
+      if (accessDecision === 'native-no-workspace') {
+        return (
+          <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-brand-50 text-brand-500"><i className="fa-solid fa-globe text-2xl" /></div>
+              <h1 className="text-xl font-semibold text-gray-900 mb-3">Continue on Web</h1>
+              <p className="text-sm text-gray-600 mb-6 leading-relaxed">Company setup is completed on the Groundwork Pro website. Once your workspace is created, you can sign in here.</p>
+              <button type="button" onClick={() => { void openGroundworkWebsite(); }} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600"><i className="fa-solid fa-arrow-up-right-from-square text-xs" />Continue on Web</button>
+            </div>
+          </main>
+        );
+      }
+
+      if (accessDecision === 'needs-trial') {
+        return (
+          <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+              <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-brand-50 text-brand-600"><i className="fa-solid fa-rocket text-xl" /></div>
+              <h1 className="text-xl font-semibold text-gray-900">Start your 7-day free trial</h1>
+              <p className="mx-auto mt-2 max-w-sm text-sm text-gray-600">Start your trial to finish setting up your company and access Groundwork Pro. You won&apos;t be charged until the trial ends.</p>
+              {trialError ? <p className="mt-4 text-sm text-red-600" role="alert">{trialError}</p> : null}
+              <button type="button" onClick={() => { void startOwnerTrial(); }} disabled={trialStarting} className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60">{trialStarting ? 'Starting…' : 'Start Free Trial'}</button>
+            </div>
+          </main>
+        );
+      }
+
+      if (accessDecision === 'company-inactive') {
+        return (
+          <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+              <div className="text-lg font-semibold text-gray-800 mb-2">Account Unavailable</div>
+              <div className="text-sm text-gray-600">Your company account needs attention. Please contact your company administrator.</div>
+            </div>
+          </main>
+        );
+      }
+
+      if (accessDecision !== 'ready') {
+        return null;
+      }
+
       return <App currentUser={currentUser} onLogout={handleLogout} />;
     };
 

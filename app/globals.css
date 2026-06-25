@@ -53,6 +53,19 @@ body.modal-open {
   overscroll-behavior: none;
 }
 
+.inventory-item-modal {
+  width: calc(100vw - 1.5rem) !important;
+  max-width: 44rem !important;
+  max-height: calc(100dvh - 1.5rem) !important;
+}
+
+@media (min-width: 640px) {
+  .inventory-item-modal {
+    width: 100% !important;
+    max-height: min(88dvh, 52rem) !important;
+  }
+}
+
 .app-shell {
   min-height: calc(100svh - var(--safe-area-top) - var(--safe-area-bottom));
   min-height: calc(100dvh - var(--safe-area-top) - var(--safe-area-bottom));

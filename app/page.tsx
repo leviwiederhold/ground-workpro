@@ -7946,8 +7946,24 @@ const MobileAppShell = ({
             </Card>
           )}
 
-          <Modal isOpen={showAddModal} onClose={closeModal} title={editingId ? 'Edit Item' : 'Add Item'} size="md">
-            <div className="grid grid-cols-1 gap-4 overflow-x-hidden md:grid-cols-2 dark:text-zinc-100">
+          <Modal
+            isOpen={showAddModal}
+            onClose={closeModal}
+            title={editingId ? 'Edit Item' : 'Add Item'}
+            size="md"
+            portal
+            panelClassName="inventory-item-modal mx-3 rounded-xl dark:border-zinc-800 dark:bg-[#090909] [&_.mobile-sheet-header]:dark:border-zinc-800 [&_.mobile-sheet-header]:dark:bg-[#090909] [&_.mobile-sheet-header_h2]:dark:text-zinc-100 [&_.mobile-sheet-footer]:dark:border-zinc-800 [&_.mobile-sheet-footer]:dark:bg-[#090909] sm:mx-4"
+            footer={
+              <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <Button variant="secondary" onClick={closeModal} className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100 dark:hover:bg-[#111]">Cancel</Button>
+                <Button variant="brand" onClick={handleSaveItem} disabled={saveLoading}>
+                  <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
+                  {editingId ? 'Save Item' : 'Create Item'}
+                </Button>
+              </div>
+            }
+          >
+            <div className="grid min-w-0 grid-cols-1 gap-x-4 gap-y-4 overflow-x-hidden md:grid-cols-2 dark:text-zinc-100">
               <div className="md:col-span-2">
                 <p className="mb-1 text-xs text-gray-500">Name</p>
                 <input type="text" value={itemForm.name} onChange={(e) => setItemForm({ ...itemForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
@@ -8000,13 +8016,6 @@ const MobileAppShell = ({
               </div>
             </div>
             {formError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{formError}</p>}
-            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-              <Button variant="secondary" onClick={closeModal}>Cancel</Button>
-              <Button variant="brand" onClick={handleSaveItem} disabled={saveLoading}>
-                <Icon name={saveLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${saveLoading ? 'animate-spin' : ''}`} />
-                {editingId ? 'Save Item' : 'Create Item'}
-              </Button>
-            </div>
           </Modal>
 
           <Modal isOpen={Boolean(showTxnModal && selectedItem)} onClose={closeTxnModal} title={selectedItem ? `${txnType.charAt(0).toUpperCase() + txnType.slice(1)} · ${selectedItem.name}` : 'Inventory Transaction'} size="sm">

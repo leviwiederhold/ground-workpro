@@ -1,19 +1,88 @@
 'use server';
 
 import { redirect } from "next/navigation";
-import { Suspense } from "react";
 import { supabaseServer } from "@/lib/supabase/server";
-import BillingSuccessClient from "./BillingSuccessClient";
+import { getStripe } from "@/lib/billing/stripe";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getOptionalCompanyId } from "@/lib/tenant/getCompanyId";
+import { getSetupStatusForUser } from "@/lib/onboarding/setupFlow";
 
-function LoadingSpinner() {
-  return (
-    <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-      <div className="text-center">
-        <div className="w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-        <p className="text-gray-600 text-sm font-medium">Setting up your workspace…</p>
-      </div>
-    </main>
-  );
+function unixToIso(value: number | null | undefined) {
+  return typeof value === "number" ? new Date(value * 1000).toISOString() : null;
+}
+
+function idFromRef(value: string | { id?: string } | null | undefined): string {
+  if (!value) return "";
+  return typeof value === "string" ? value : String(value.id ?? "");
+}
+
+async function syncCheckoutSession(sessionId: string) {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return { synced: false, active: false, reason: "stripe_not_configured" };
+  }
+
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ["subscription"],
+  });
+
+  if (session.mode !== "subscription" || session.status !== "complete") {
+    return { synced: false, active: false, reason: "session_not_complete" };
+  }
+
+  const companyId = String(session.metadata?.company_id ?? "").trim();
+  if (!companyId) {
+    return { synced: false, active: false, reason: "no_company_id_in_metadata" };
+  }
+
+  const subscription =
+    typeof session.subscription === "string"
+      ? await stripe.subscriptions.retrieve(session.subscription)
+      : session.subscription;
+
+  if (!subscription) {
+    return { synced: false, active: false, reason: "no_subscription" };
+  }
+
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return { synced: false, active: subscription.status === "active" || subscription.status === "trialing", reason: "admin_not_configured" };
+  }
+
+  const updatePayload = {
+    stripe_customer_id: idFromRef(session.customer) || undefined,
+    stripe_subscription_id: subscription.id,
+    subscription_status: subscription.status,
+    plan_type: "groundwork_pro",
+    trial_ends_at: unixToIso(subscription.trial_end),
+    current_period_end: unixToIso(subscription.items.data[0]?.current_period_end),
+  };
+
+  let { error } = await admin
+    .from("companies")
+    .update(updatePayload)
+    .eq("id", companyId);
+
+  if (error?.code === "23514" && error.message?.includes("plan_type")) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { plan_type: _dropped, ...payloadWithoutPlanType } = updatePayload;
+    const retry = await admin
+      .from("companies")
+      .update(payloadWithoutPlanType)
+      .eq("id", companyId);
+    error = retry.error;
+  }
+
+  if (error) {
+    console.error("[billing/success] DB update failed:", error.message);
+    return { synced: false, active: false, reason: "db_error" };
+  }
+
+  return {
+    synced: true,
+    active: subscription.status === "active" || subscription.status === "trialing",
+    reason: subscription.status,
+  };
 }
 
 interface PageProps {
@@ -24,40 +93,34 @@ export default async function BillingSuccessPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const sessionId = params.session_id;
 
-  // The server receives HTTP cookies from Stripe's GET redirect — these survive
-  // cross-site redirects perfectly. If the user has a valid session here, we can
-  // sync and redirect without any client-side auth dance.
   const supabase = await supabaseServer();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-  if (user && sessionId) {
-    // Sync the Stripe session server-side before redirecting.
-    try {
-      const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
-      await fetch(`${baseUrl}/api/billing/sync-session`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId }),
-      });
-    } catch (err) {
-      // Non-fatal: webhook handles eventual consistency.
-      console.warn("[billing/success] server-side sync-session failed:", err);
+  if (userError || !user) {
+    redirect("/login");
+  }
+
+  if (sessionId) {
+    const syncResult = await syncCheckoutSession(sessionId);
+    console.log("[billing/success] checkout sync result", syncResult);
+    if (!syncResult.active) {
+      redirect("/");
     }
-    // Authenticated, paid/trialing owner → onboarding. /setup itself sends them
-    // on to the dashboard only once setup is complete. Never /login.
-    redirect("/setup?trial=started");
   }
 
-  if (user) {
-    // No session_id but valid user — still go to onboarding, not the dashboard.
-    redirect("/setup?trial=started");
+  let setupComplete = false;
+  try {
+    const { supabase: tenantSupabase, companyId, userId, userEmail } = await getOptionalCompanyId();
+    const status = await getSetupStatusForUser({
+      supabase: tenantSupabase,
+      companyId,
+      userId,
+      userEmail,
+    });
+    setupComplete = Boolean(status.is_complete);
+  } catch (error) {
+    console.warn("[billing/success] setup status check failed:", error);
   }
 
-  // No server-side session found — fall back to client component which will
-  // attempt refreshSession() and show recovery UI if needed.
-  return (
-    <Suspense fallback={<LoadingSpinner />}>
-      <BillingSuccessClient sessionId={sessionId} />
-    </Suspense>
-  );
+  redirect(setupComplete ? "/" : "/setup?trial=started");
 }

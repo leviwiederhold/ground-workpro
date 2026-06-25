@@ -73,14 +73,13 @@ export default function SignupPage() {
       if (!data.session) {
         if (hasCheckoutSuccess) {
           const sessionId = params.get("session_id");
-          router.replace(`/login?checkout=success${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`);
+          router.replace(`/settings/billing/success${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`);
         }
         return;
       }
       if (hasCheckoutSuccess) {
-        // billing/success already updated the DB; go straight to the dashboard.
-        // Never stay on /signup after a completed Stripe checkout.
-        router.replace("/");
+        const sessionId = params.get("session_id");
+        router.replace(`/settings/billing/success${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`);
         router.refresh();
         return;
       }

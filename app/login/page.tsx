@@ -92,6 +92,13 @@ export default function LoginPage() {
     setNativeRuntime(isNative);
 
     supabase.auth.getSession().then(async ({ data }) => {
+      if (hasCheckoutSuccess) {
+        const sessionId = params.get("session_id");
+        router.replace(`/settings/billing/success${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`);
+        router.refresh();
+        return;
+      }
+
       if (!active || !data.session) return;
 
       // Native app: invite-first, then workspace gate.
@@ -121,19 +128,6 @@ export default function LoginPage() {
         return;
       }
 
-      if (hasCheckoutSuccess) {
-        ensureTenantContext()
-          .then(() => {
-            // Post-checkout owners go to onboarding, not the dashboard.
-            router.replace("/setup?trial=started");
-            router.refresh();
-          })
-          .catch((checkoutError) => {
-            if (!active) return;
-            setError(checkoutError instanceof Error ? checkoutError.message : "Unable to finish checkout setup");
-          });
-        return;
-      }
       if (shouldStartTrial) {
         ensureTenantContext()
           .then(() => startStripeCheckout())

@@ -86,6 +86,12 @@ function requiredAccessForApiMethod(method: string): ModuleAccessLevel {
 }
 
 export async function middleware(request: NextRequest, event: NextFetchEvent) {
+  if (request.nextUrl.hostname === "www.groundwork-pro.com") {
+    const canonicalUrl = request.nextUrl.clone();
+    canonicalUrl.hostname = "groundwork-pro.com";
+    return NextResponse.redirect(canonicalUrl, 308);
+  }
+
   const { url, anonKey } = getSupabaseEnv();
 
   const requestId = buildRequestId(request);

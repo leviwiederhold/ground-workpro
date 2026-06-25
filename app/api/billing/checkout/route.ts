@@ -5,7 +5,8 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 
 export const runtime = "nodejs";
 
-const FALLBACK_SITE_URL = "https://ground-workpro.vercel.app";
+const CANONICAL_SITE_URL = "https://groundwork-pro.com";
+const FALLBACK_SITE_URL = CANONICAL_SITE_URL;
 // Hosts that must never be used for checkout redirect URLs (e.g. domains that
 // are not yet live). The production apex (groundwork-pro.com / www) is live and
 // is now allowed so success_url/cancel_url can use the real domain.
@@ -19,6 +20,9 @@ function normalizeConfiguredOrigin(value: string | undefined) {
     const parsed = new URL(trimmed);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
     if (INVALID_CHECKOUT_HOSTS.has(parsed.hostname)) return null;
+    if (parsed.hostname === "www.groundwork-pro.com" || parsed.hostname === "groundwork-pro.com") {
+      return CANONICAL_SITE_URL;
+    }
     return parsed.origin;
   } catch {
     return null;

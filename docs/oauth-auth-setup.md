@@ -11,7 +11,6 @@ implemented and verified.
 3. Add these application redirect URLs:
    - `https://groundwork-pro.com/auth/callback`
    - `https://groundwork-pro.com/**`
-   - `https://www.groundwork-pro.com/auth/callback`
    - `https://ground-workpro.vercel.app/auth/callback`
    - `http://localhost:3000/auth/callback`
 
@@ -33,6 +32,5 @@ implemented and verified.
 ## Password recovery
 
 Allow `https://groundwork-pro.com/reset-password`,
-`https://www.groundwork-pro.com/reset-password`,
 `https://ground-workpro.vercel.app/reset-password`, and
 `http://localhost:3000/reset-password` as Supabase Auth redirect URLs.

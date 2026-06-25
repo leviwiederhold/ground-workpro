@@ -54,8 +54,6 @@ export default function LoginPage() {
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
-  // Preserve invite context (and any params) through the OAuth callback.
-  const [oauthCallbackQuery, setOauthCallbackQuery] = useState("");
 
   /**
    * In native app mode, check if the user has an accepted workspace membership.
@@ -86,7 +84,6 @@ export default function LoginPage() {
     rawParams.delete("session_id");
     const filteredSearch = rawParams.toString();
     setSignupHref(filteredSearch ? `/signup?${filteredSearch}` : "/signup");
-    setOauthCallbackQuery(filteredSearch);
     const shouldStartTrial = params.get("trial") === "1";
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setTrialMode(shouldStartTrial);
@@ -355,7 +352,7 @@ export default function LoginPage() {
             native keeps email/password only. */}
         {!nativeRuntime && (
           <div className="mt-5">
-            <OAuthButtons callbackQuery={oauthCallbackQuery} />
+            <OAuthButtons />
           </div>
         )}
 

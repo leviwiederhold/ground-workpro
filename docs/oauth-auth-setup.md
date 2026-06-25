@@ -10,6 +10,7 @@ implemented and verified.
 2. Enable the Apple provider in Supabase Auth.
 3. Add these application redirect URLs:
    - `https://groundwork-pro.com/auth/callback`
+   - `https://groundwork-pro.com/**`
    - `https://www.groundwork-pro.com/auth/callback`
    - `https://ground-workpro.vercel.app/auth/callback`
    - `http://localhost:3000/auth/callback`

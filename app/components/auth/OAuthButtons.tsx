@@ -4,8 +4,6 @@ import { useState } from "react";
 import { supabaseBrowser } from "@/lib/supabase/client";
 
 type Props = {
-  /** Extra query string (e.g. invite token) to preserve through the callback. */
-  callbackQuery?: string;
   label?: string;
 };
 
@@ -15,7 +13,7 @@ type Props = {
  * NOTE: rendered on WEB only. Native callers hide these (native deep-link
  * OAuth callback is not yet confirmed) and keep email/password.
  */
-export default function OAuthButtons({ callbackQuery = "", label = "or continue with" }: Props) {
+export default function OAuthButtons({ label = "or continue with" }: Props) {
   const [loading, setLoading] = useState<"google" | "apple" | null>(null);
   const [error, setError] = useState("");
 
@@ -24,7 +22,7 @@ export default function OAuthButtons({ callbackQuery = "", label = "or continue 
     setError("");
     try {
       const origin = window.location.origin;
-      const redirectTo = `${origin}/auth/callback${callbackQuery ? `?${callbackQuery}` : ""}`;
+      const redirectTo = `${origin}/auth/callback`;
       const { error: oauthError } = await supabaseBrowser().auth.signInWithOAuth({
         provider,
         options: { redirectTo },

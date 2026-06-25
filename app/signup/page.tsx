@@ -35,14 +35,12 @@ export default function SignupPage() {
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [loginHref, setLoginHref] = useState("/login");
-  const [oauthCallbackQuery, setOauthCallbackQuery] = useState("");
 
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
     const params = new URLSearchParams(window.location.search);
     setLoginHref(window.location.search ? `/login${window.location.search}` : "/login");
-    setOauthCallbackQuery(window.location.search.replace(/^\?/, ""));
     setNativeRuntime(isNativeAppRuntime());
     const hasInvite = params.get("invite") === "1";
     setInviteMode(hasInvite);
@@ -451,7 +449,7 @@ export default function SignupPage() {
 
         {!nativeRuntime && (
           <div className="mt-5">
-            <OAuthButtons callbackQuery={oauthCallbackQuery} />
+            <OAuthButtons />
           </div>
         )}
 

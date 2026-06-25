@@ -13340,6 +13340,10 @@ const MobileAppShell = ({
     // ROOT - Authentication Wrapper
     // ============================================
 	    const Root = ({ onReady }: { onReady?: () => void }) => {
+	      const [oauthCallbackProcessing, setOauthCallbackProcessing] = useState(() => {
+	        if (typeof window === 'undefined') return false;
+	        return Boolean(new URLSearchParams(window.location.search).get('code'));
+	      });
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
 	      const [authResolved, setAuthResolved] = useState(false);
 	      const [nativeRuntime, setNativeRuntime] = useState(false);
@@ -13432,7 +13436,7 @@ const MobileAppShell = ({
 	      }, []);
 
 	      const verifySetup = useCallback(async () => {
-	        if (!isAuthenticated || setupCheckInFlightRef.current) {
+	        if (oauthCallbackProcessing || !isAuthenticated || setupCheckInFlightRef.current) {
 	          if (!isAuthenticated) setSetupChecked(true);
 	          return;
 	        }
@@ -13450,6 +13454,16 @@ const MobileAppShell = ({
 	          ]).finally(() => window.clearTimeout(timeoutId));
 	          const payload = await response.json().catch(() => ({}));
 	          const billingPayload = await billingResponse.json().catch(() => ({}));
+	          if (response.status === 401 || billingResponse.status === 401) {
+	            await supabaseBrowser().auth.signOut().catch(() => null);
+	            setIsAuthenticated(false);
+	            setCurrentUser(null);
+	            setAccessDecision('loading');
+	            return;
+	          }
+	          if (!response.ok || !billingResponse.ok) {
+	            throw new Error(payload?.error || billingPayload?.error || 'Unable to verify account access');
+	          }
 	          const requiredComplete =
 	            payload?.item?.required_complete === undefined
 	              ? Boolean(payload?.item?.is_complete)
@@ -13498,7 +13512,7 @@ const MobileAppShell = ({
 	          setSetupRefreshing(false);
 	          setSetupChecked(true);
 	        }
-	      }, [isAuthenticated, nativeRuntime]);
+	      }, [isAuthenticated, nativeRuntime, oauthCallbackProcessing]);
 
 	      // Start the 7-day trial for a web owner who is gated. Bootstraps the
 	      // company first (idempotent — self-heals a brand-new owner who has no
@@ -13577,6 +13591,19 @@ const MobileAppShell = ({
       };
 
       useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const code = new URLSearchParams(window.location.search).get('code');
+        if (!code) {
+          setOauthCallbackProcessing(false);
+          return;
+        }
+        const callbackUrl = new URL('/auth/callback', window.location.origin);
+        callbackUrl.search = window.location.search;
+        window.location.replace(callbackUrl.toString());
+      }, []);
+
+      useEffect(() => {
+        if (oauthCallbackProcessing) return undefined;
         let isMounted = true;
         const supabase = supabaseBrowser();
 
@@ -13627,19 +13654,20 @@ const MobileAppShell = ({
           isMounted = false;
           authListener.subscription.unsubscribe();
         };
-	      }, [hydrateCurrentUser]);
+	      }, [hydrateCurrentUser, oauthCallbackProcessing]);
 
 
       useEffect(() => {
+        if (oauthCallbackProcessing) return;
         if (!isAuthenticated) {
           setSetupChecked(true);
           return;
         }
         void verifySetup();
-      }, [isAuthenticated, verifySetup]);
+      }, [isAuthenticated, verifySetup, oauthCallbackProcessing]);
 
       useEffect(() => {
-        if (!isAuthenticated) return undefined;
+        if (oauthCallbackProcessing || !isAuthenticated) return undefined;
 
         const refreshOnReturn = () => {
           if (isSetupRefreshSuppressed()) {
@@ -13666,7 +13694,17 @@ const MobileAppShell = ({
           window.removeEventListener('pageshow', refreshOnPageShow);
           document.removeEventListener('visibilitychange', refreshOnReturn);
         };
-      }, [isAuthenticated, verifySetup]);
+      }, [isAuthenticated, verifySetup, oauthCallbackProcessing]);
+
+      if (oauthCallbackProcessing) {
+        return (
+          <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+            <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 text-center shadow-sm">
+              <div className="text-sm font-medium text-gray-700">Finishing sign in...</div>
+            </div>
+          </main>
+        );
+      }
 
       if (!authResolved || !nativeRuntimeResolved) {
         return null;

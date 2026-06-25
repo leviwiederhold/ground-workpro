@@ -13668,6 +13668,13 @@ const MobileAppShell = ({
 
       useEffect(() => {
         if (oauthCallbackProcessing || !isAuthenticated) return undefined;
+        if (
+          accessDecision === 'needs-trial' ||
+          accessDecision === 'native-no-workspace' ||
+          accessDecision === 'company-inactive'
+        ) {
+          return undefined;
+        }
 
         const refreshOnReturn = () => {
           if (isSetupRefreshSuppressed()) {
@@ -13694,7 +13701,7 @@ const MobileAppShell = ({
           window.removeEventListener('pageshow', refreshOnPageShow);
           document.removeEventListener('visibilitychange', refreshOnReturn);
         };
-      }, [isAuthenticated, verifySetup, oauthCallbackProcessing]);
+      }, [accessDecision, isAuthenticated, verifySetup, oauthCallbackProcessing]);
 
       if (oauthCallbackProcessing) {
         return (

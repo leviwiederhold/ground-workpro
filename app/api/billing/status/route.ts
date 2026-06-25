@@ -2,7 +2,6 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getCompanyBillingStatus } from "@/lib/billing/isCompanySubscriptionActive";
 import { errorResponse } from "@/lib/http/errorResponse";
 import { enforceRateLimit } from "@/lib/http/rateLimit";
-import { okItem } from "@/lib/http/json";
 import { serverError } from "@/lib/http/errors";
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
@@ -114,6 +113,26 @@ async function logBillingStatusDenied(request: Request, reason: string) {
   return diagnostic;
 }
 
+function noCompanyWorkspaceResponse() {
+  const status = {
+    active: false,
+    needsTrial: true,
+    hasCompany: false,
+    status: "none",
+    reason: "no_company_workspace",
+    is_active: false,
+    subscription_status: "none",
+    plan_type: "groundwork_pro",
+    trial_ends_at: null,
+    current_period_end: null,
+  };
+  return NextResponse.json({ ...status, item: status });
+}
+
+function isNoCompanyWorkspaceError(error: TenantResolverError) {
+  return error.status === 403 && /No company workspace found/i.test(String(error.message ?? ""));
+}
+
 export async function GET(request: Request) {
   const rateLimited = enforceRateLimit(request, {
     keyPrefix: "billing-status",
@@ -128,9 +147,32 @@ export async function GET(request: Request) {
     const status = await getCompanyBillingStatus(supabase, companyId);
     console.log("[billing/status] subscription_status:", status.subscription_status, "is_active:", status.is_active, "plan_type:", status.plan_type);
 
-    return okItem(status);
+    const billingStatus = {
+      ...status,
+      active: status.is_active,
+      needsTrial: !status.is_active,
+      hasCompany: true,
+      status: status.subscription_status,
+      reason: status.is_active ? "subscription_active" : "subscription_inactive",
+    };
+    return NextResponse.json({ ...billingStatus, item: billingStatus });
   } catch (error) {
     if (error instanceof TenantResolverError) {
+      if (isNoCompanyWorkspaceError(error)) {
+        const supabase = await supabaseServer();
+        const { data, error: userError } = await supabase.auth.getUser();
+        if (userError || !data.user) {
+          return errorResponse("Not authenticated", 401);
+        }
+        console.log("[billing/status] no company workspace; returning needsTrial", {
+          requestUrl: request.url,
+          userId: data.user.id,
+          email: String(data.user.email ?? "").trim().toLowerCase(),
+          reason: "no_company_workspace",
+        });
+        return noCompanyWorkspaceResponse();
+      }
+
       if (error.status === 403) {
         const diagnostic = await logBillingStatusDenied(request, getBillingStatusDenialReason(error));
         if (isBillingStatusDebug(request)) {

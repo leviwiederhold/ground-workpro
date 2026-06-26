@@ -67,6 +67,16 @@ export async function GET(request: Request) {
       // Non-fatal: the inbox still renders existing threads.
     }
 
+    // Viewer role (to decide whether to prompt naming) + company name (the
+    // "Use [Company Name]" default in the naming modal).
+    const [membershipRow, companyRow] = await Promise.all([
+      supabase.from("memberships").select("role").eq("company_id", companyId).eq("user_id", userId).limit(1).maybeSingle(),
+      supabase.from("companies").select("name").eq("id", companyId).maybeSingle(),
+    ]);
+    const viewerRole = String(membershipRow.data?.role ?? "").trim().toLowerCase();
+    const viewerIsAdmin = ["admin", "ceo", "executive", "owner"].includes(viewerRole);
+    const companyName = String(companyRow.data?.name ?? "").trim();
+
     const myParticipants = await listParticipantRowsForUser(supabase, companyId, userId);
     const threadIds = Array.from(new Set(myParticipants.map((row) => String(row.thread_id))));
 
@@ -140,12 +150,17 @@ export async function GET(request: Request) {
         const isDirect = kind === "direct";
         const isCompanywide = Boolean((thread as { is_companywide?: boolean | null }).is_companywide);
         const explicitGroupName = (thread as { name?: string | null }).name;
+        const companywideName = String(explicitGroupName ?? "").trim();
+        const companywideNeedsNaming = isCompanywide && companywideName.length === 0;
         return {
           id: thread.id,
           kind,
           is_companywide: isCompanywide,
+          // Until the owner names it, fall back to the company name (never the
+          // word "Companywide"). needs_naming drives the first-open prompt.
+          needs_naming: companywideNeedsNaming,
           name: isCompanywide
-            ? "Companywide"
+            ? (companywideName || companyName || "Team Chat")
             : isDirect
               ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
               : (explicitGroupName === null || explicitGroupName === undefined ? "Group Chat" : String(explicitGroupName)),
@@ -173,6 +188,8 @@ export async function GET(request: Request) {
     return Response.json({
       items: items.slice(from, to + 1),
       unread_count: totalUnread,
+      viewer_is_admin: viewerIsAdmin,
+      company_name: companyName,
       ...getPaginationMeta(items.length, page, pageSize),
     });
   } catch (error) {

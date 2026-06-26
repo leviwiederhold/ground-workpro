@@ -46,6 +46,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [pendingDirectContact, setPendingDirectContact] = useState(null);
   const [forcedDirectLabels, setForcedDirectLabels] = useState({});
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  // Company-wide chat naming
+  const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
+  const [companyName, setCompanyName] = useState('');
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [teamChatName, setTeamChatName] = useState('');
+  const [namingSaving, setNamingSaving] = useState(false);
+  const [namingError, setNamingError] = useState('');
   const messagesEndRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
@@ -241,6 +248,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       if (!response.ok) throw new Error(payload?.error || 'Failed to load channels');
       const nextChannels = Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : [];
       setChannels(nextChannels);
+      setViewerIsAdmin(Boolean(payload?.viewer_is_admin));
+      setCompanyName(String(payload?.company_name || ''));
       setActiveChannel((prev) => {
         if (!prev) return null;
         if (invalidChannelIds.includes(String(prev.id))) return null;
@@ -404,6 +413,61 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       setActiveChannel(companywide);
     }
   }, [channels, activeChannel]);
+
+  // First open by an owner of an UNNAMED company-wide chat -> prompt to name it.
+  // Shows once per chat (until named or explicitly dismissed this device).
+  const didNamePromptRef = useRef(false);
+  useEffect(() => {
+    if (didNamePromptRef.current) return;
+    const companywide = (channels || []).find((c) => c && c.is_companywide);
+    if (!companywide || !viewerIsAdmin || !companywide.needs_naming) return;
+    let dismissed = false;
+    try { dismissed = window.localStorage.getItem(`gw_companywide_named_prompt_${companywide.id}`) === '1'; } catch { /* ignore */ }
+    if (dismissed) return;
+    didNamePromptRef.current = true;
+    setTeamChatName('');
+    setNamingError('');
+    setShowNameModal(true);
+  }, [channels, viewerIsAdmin]);
+
+  const companywideChannel = useMemo(
+    () => (channels || []).find((c) => c && c.is_companywide) || null,
+    [channels]
+  );
+
+  const saveTeamChatName = useCallback(async () => {
+    const name = String(teamChatName || '').trim();
+    if (!name) { setNamingError('Enter a name for your team chat.'); return; }
+    setNamingSaving(true);
+    setNamingError('');
+    try {
+      const res = await fetch('/api/messages/companywide', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) { setNamingError(payload?.error || 'Failed to save name.'); return; }
+      try { if (companywideChannel) window.localStorage.setItem(`gw_companywide_named_prompt_${companywideChannel.id}`, '1'); } catch { /* ignore */ }
+      setShowNameModal(false);
+      await loadChannels(true);
+    } catch {
+      setNamingError('Failed to save name.');
+    } finally {
+      setNamingSaving(false);
+    }
+  }, [teamChatName, companywideChannel, loadChannels]);
+
+  const dismissNamePrompt = useCallback(() => {
+    try { if (companywideChannel) window.localStorage.setItem(`gw_companywide_named_prompt_${companywideChannel.id}`, '1'); } catch { /* ignore */ }
+    setShowNameModal(false);
+  }, [companywideChannel]);
+
+  const openRenameTeamChat = useCallback(() => {
+    setTeamChatName(String(companywideChannel?.name || ''));
+    setNamingError('');
+    setShowNameModal(true);
+  }, [companywideChannel]);
 
   useEffect(() => {
     const refreshInbox = () => {
@@ -791,7 +855,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <p className="text-xs text-gray-500 dark:text-zinc-400">{activeChannel.message_count || 0} messages</p>
               </div>
             </div>
-            <div className="shrink-0">
+            <div className="flex shrink-0 items-center gap-2">
+              {activeChannel.is_companywide && viewerIsAdmin && (
+                <Button variant="secondary" size="sm" onClick={openRenameTeamChat} data-testid="messages-rename-companywide">Rename</Button>
+              )}
               <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
             </div>
           </div>
@@ -1064,6 +1131,44 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                 <Button variant="brand" onClick={handleAddMembers} data-testid="messages-add-members">Add selected</Button>
               </div>
               {membersError && <p className="text-sm text-red-600 dark:text-red-300">{membersError}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Name your team chat — first open by an owner, or rename later. */}
+      {showNameModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={dismissNamePrompt} aria-hidden="true" />
+          <div className="relative w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-zinc-100">Name your team chat</h2>
+            <p className="mt-1 text-sm text-gray-600 dark:text-zinc-400">
+              Message your whole company from one place. Everyone on your team will automatically be included.
+            </p>
+            <label className="mt-4 block text-sm font-medium text-gray-700 dark:text-zinc-300">Team chat name</label>
+            <input
+              type="text"
+              value={teamChatName}
+              onChange={(e) => setTeamChatName(e.target.value)}
+              placeholder="e.g. Field Crew, Team Updates, [Business Name]"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-zinc-700 dark:bg-[#111111] dark:text-zinc-100"
+              autoFocus
+            />
+            {companyName ? (
+              <button
+                type="button"
+                onClick={() => setTeamChatName(companyName)}
+                className="mt-2 text-sm font-medium text-brand-600 hover:text-brand-700"
+              >
+                Use {companyName}
+              </button>
+            ) : null}
+            {namingError ? <p className="mt-3 text-sm text-red-600">{namingError}</p> : null}
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <Button variant="secondary" onClick={dismissNamePrompt} disabled={namingSaving}>Cancel</Button>
+              <Button variant="brand" onClick={saveTeamChatName} disabled={namingSaving || !teamChatName.trim()}>
+                {namingSaving ? 'Saving…' : 'Create team chat'}
+              </Button>
             </div>
           </div>
         </div>

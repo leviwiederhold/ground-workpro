@@ -199,10 +199,8 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       }
 
       if (guardedPageRoles && !guardedPageRoles.includes(resolvedRole)) {
-        // For page routes return a redirect rather than raw JSON so the user
-        // sees the dashboard instead of a JSON error in their browser.
         if (!isApi) {
-          return NextResponse.redirect(new URL("/", request.url));
+          return NextResponse.rewrite(new URL("/access-denied", request.url));
         }
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }

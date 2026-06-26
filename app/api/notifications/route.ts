@@ -26,6 +26,22 @@ const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional().default(20),
 });
 
+function withTimeout<T>(promise: PromiseLike<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error('notifications_timeout')), ms);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    );
+  });
+}
+
 function isMissingNotificationsTable(message: string) {
   const normalized = message.toLowerCase();
   return (
@@ -69,13 +85,19 @@ export async function GET(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
 
-    const primaryResult = await supabase
-      .from('notifications')
-      .select('id, user_id, type, title, body, link, actor_user_id, entity_type, entity_id, payload, is_read, read_at, created_at')
-      .eq('company_id', companyId)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    const primaryResult = await withTimeout(
+      supabase
+        .from('notifications')
+        .select('id, user_id, type, title, body, link, actor_user_id, entity_type, entity_id, payload, is_read, read_at, created_at')
+        .eq('company_id', companyId)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(limit),
+      3500
+    ).catch((error) => ({
+      data: [],
+      error: { message: error instanceof Error ? error.message : 'notifications_timeout' },
+    }));
 
     let rows: NotificationRow[] = (primaryResult.data ?? []) as NotificationRow[];
     let resultError: { message: string } | null = primaryResult.error
@@ -137,7 +159,10 @@ export async function GET(request: Request) {
         });
         return NextResponse.json({ items });
       }
-      return NextResponse.json({ error: resultError.message }, { status: 400 });
+      if (resultError.message === 'notifications_timeout') {
+        return NextResponse.json({ items: [], degraded: true, reason: 'notifications_timeout' });
+      }
+      return NextResponse.json({ error: resultError.message, items: [], degraded: true }, { status: 200 });
     }
 
     const items = rows.map((row) => {
@@ -172,6 +197,6 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : 'Internal server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ items: [], degraded: true, error: message }, { status: 200 });
   }
 }

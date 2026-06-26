@@ -24,6 +24,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "documents", label: "Documents", href: "/documents", iconKey: "folder-open" },
   { key: "training", label: "Training", href: "/training", iconKey: "chalkboard-user" },
   { key: "finance", label: "Finance", href: "/finance", iconKey: "landmark" },
+  { key: "settings", label: "Settings", href: "/settings", iconKey: "gear" },
 ];
 // Note: "subscribe" nav item intentionally removed — billing is accessed via profile dropdown → Billing.
 
@@ -44,6 +45,7 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "team",
     "training",
     "schedule",
+    "settings",
   ],
   pm: [
     "dashboard",
@@ -60,6 +62,7 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "team",
     "training",
     "schedule",
+    "settings",
   ],
   foreman: [
     "dashboard",

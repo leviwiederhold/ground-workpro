@@ -101,24 +101,40 @@ const FEEDBACK_TYPE_OPTIONS = [
   { value: 'general_feedback', label: 'General Feedback' },
 ];
 const loadCachedNavState = () => {
-  if (typeof window === 'undefined') {
-    return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
-  }
-  try {
-    const raw = safeLocalStorageGet(NAV_CACHE_KEY);
-    if (!raw) return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
-    const parsed = JSON.parse(raw);
-    return {
-      role: typeof parsed?.role === 'string' ? parsed.role : 'executive',
-      displayRole: typeof parsed?.displayRole === 'string' ? parsed.displayRole : typeof parsed?.role === 'string' ? parsed.role : 'executive',
-      items: Array.isArray(parsed?.items) ? parsed.items : [],
-      moduleAccess: parsed?.moduleAccess && typeof parsed.moduleAccess === 'object' ? parsed.moduleAccess : {},
-      loaded: Array.isArray(parsed?.items) && parsed.items.length > 0,
-    };
-  } catch {
-    return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
-  }
+  // Do not trust persisted nav/module permissions before the server verifies
+  // the current user's membership. A shared browser can otherwise show a
+  // previous admin's Finance/Reports links to a lower-level employee.
+  return { role: 'operator', displayRole: 'operator', items: [], moduleAccess: {}, loaded: false };
 };
+
+const APP_VIEW_PATHS = {
+  dashboard: '/',
+  messages: '/messages',
+  schedule: '/schedule',
+  jobs: '/jobs',
+  fleet: '/fleet',
+  team: '/team',
+  inventory: '/inventory',
+  maintenance: '/maintenance',
+  training: '/training',
+  safety: '/safety',
+  bids: '/bids',
+  vendors: '/vendors',
+  reports: '/reports',
+  costing: '/costing',
+  finance: '/finance',
+  settings: '/settings',
+  documents: '/documents',
+};
+
+const viewFromPathname = (pathname) => {
+  const firstSegment = String(pathname || '/').split('/').filter(Boolean)[0] || '';
+  if (!firstSegment) return 'dashboard';
+  if (APP_VIEW_PATHS[firstSegment]) return firstSegment;
+  return 'dashboard';
+};
+
+const pathForView = (view) => APP_VIEW_PATHS[String(view || '').toLowerCase()] || '/';
 
 // WorkspaceLoadingScreen removed — replaced by ExcavatorLoader (see import above).
 
@@ -821,6 +837,8 @@ const MobileAppShell = ({
       const cachedNavState = useMemo(() => loadCachedNavState(), []);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
+        const urlView = viewFromPathname(window.location.pathname);
+        if (urlView !== 'dashboard' || window.location.pathname === '/') return urlView;
         return safeLocalStorageGet('app.currentView', 'dashboard') || 'dashboard';
       });
       const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1108,11 +1126,12 @@ const MobileAppShell = ({
           documents: { key: 'documents', label: 'Documents', iconKey: 'folder-open' },
           training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
           finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
+          settings: { key: 'settings', label: 'Settings', iconKey: 'gear' },
           // subscribe intentionally omitted — billing accessed via profile dropdown
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule'],
-          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule', 'settings'],
+          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule', 'settings'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
           operator: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
@@ -1209,6 +1228,16 @@ const MobileAppShell = ({
         return String(moduleAccess?.[moduleKey] || 'none') === 'edit';
       }, [moduleAccess]);
 
+      const navigateToView = useCallback((view, { replace = false } = {}) => {
+        const nextView = String(view || 'dashboard');
+        setCurrentView(nextView);
+        if (typeof window === 'undefined') return;
+        const nextPath = pathForView(nextView);
+        if (window.location.pathname === nextPath) return;
+        const method = replace ? 'replaceState' : 'pushState';
+        window.history[method]({}, '', nextPath);
+      }, []);
+
       const notificationVisuals = {
         new_message: {
           icon: 'message',
@@ -1275,10 +1304,12 @@ const MobileAppShell = ({
       };
 
       const loadNotifications = useCallback(async () => {
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), 3500);
         try {
           setNotificationsLoading(true);
-          const listResponse = await fetch('/api/notifications?limit=30', { cache: 'no-store' });
-          const payload = await listResponse.json();
+          const listResponse = await fetch('/api/notifications?limit=30', { cache: 'no-store', signal: controller.signal });
+          const payload = await listResponse.json().catch(() => ({}));
           if (!listResponse.ok) throw new Error(payload?.error || 'Failed to load notifications');
           const nextItems = Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : [];
           setNotifications(nextItems);
@@ -1287,6 +1318,7 @@ const MobileAppShell = ({
           setNotifications([]);
           setUnreadNotificationsCount(0);
         } finally {
+          window.clearTimeout(timeoutId);
           setNotificationsLoading(false);
         }
       }, []);
@@ -1890,6 +1922,16 @@ const MobileAppShell = ({
         loadNav();
       }, [loadNav, accessRefreshNonce]);
 
+      useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const syncViewFromLocation = () => {
+          setCurrentView(viewFromPathname(window.location.pathname));
+        };
+        syncViewFromLocation();
+        window.addEventListener('popstate', syncViewFromLocation);
+        return () => window.removeEventListener('popstate', syncViewFromLocation);
+      }, []);
+
       // Re-fetch permissions + subscription after a Supabase token/session
       // refresh (native sessions rotate ~hourly). Without this, a token refresh
       // could leave access state stale/denied until the app was reopened.
@@ -1914,6 +1956,10 @@ const MobileAppShell = ({
 
       const navItems = serverNavItems
         .filter((item) => !(iosAppRuntime && item.key === 'subscribe'))
+        .filter((item) => {
+          const moduleKey = moduleForView(item.key);
+          return !moduleKey || canViewModule(moduleKey);
+        })
         .map((item) => ({
           id: item.key,
           icon: item.iconKey || 'circle',
@@ -1927,13 +1973,13 @@ const MobileAppShell = ({
       useEffect(() => {
         if (!navLoaded) return;
         if (navItems.length === 0) {
-          if (currentView !== 'dashboard') setCurrentView('dashboard');
+          if (currentView !== 'dashboard') navigateToView('dashboard', { replace: true });
           return;
         }
         if (!navItems.some((item) => item.id === currentView)) {
-          setCurrentView('dashboard');
+          navigateToView('dashboard', { replace: true });
         }
-      }, [navItems, currentView, navLoaded]);
+      }, [navItems, currentView, navLoaded, navigateToView]);
 
       useEffect(() => {
         safeLocalStorageSet('app.currentView', currentView);
@@ -2102,7 +2148,7 @@ const MobileAppShell = ({
           );
         }
         switch(currentView) {
-          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
+          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />;
           case 'messages': return <MessagesView employees={employees} availableUsersSeed={companyMembers} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
@@ -2190,7 +2236,7 @@ const MobileAppShell = ({
                       setPressedNavItem(null);
                     }}
                     onClick={() => {
-                      setCurrentView(navId);
+                      navigateToView(navId);
                       setMobileSidebarOpen(false);
                       setPressedNavItem(null);
                     }}
@@ -2484,7 +2530,7 @@ const MobileAppShell = ({
                           {/* Consolidated Settings — Profile, Company, Team,
                               Billing, and Security live on one page now. */}
                           <button
-                            onClick={() => { setShowUserMenu(false); setCurrentView('settings'); }}
+                            onClick={() => { setShowUserMenu(false); navigateToView('settings'); }}
                             className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                           >
                             <Icon name="gear" className="text-gray-400" /> Settings
@@ -4488,13 +4534,13 @@ const MobileAppShell = ({
                 <LoadingBlock testId="team-loading">Loading employees...</LoadingBlock>
               ) : filteredEmployees.length === 0 ? (
                 <EmptyState testId="team-empty">No employees yet.</EmptyState>
-              ) : filteredEmployees.map(emp => {
+              ) : filteredEmployees.map((emp, employeeIndex) => {
                 const job = jobs.find(j => j.id === emp.jobId);
                 const expiringSoon = (emp.certifications || []).filter(c => getDaysUntil(c.expires) < 60);
 
                 return (
                   <Card
-                    key={emp.id}
+                    key={`${emp.id || emp.email || emp.name || 'employee'}-${employeeIndex}`}
                     className={`p-4 cursor-pointer transition-all ${selectedEmployeeId === emp.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
                     onClick={() => {
                       setSelectedEmployeeId(emp.id);
@@ -4796,7 +4842,7 @@ const MobileAppShell = ({
             title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Employee'}
             size="md"
             portal
-            panelClassName="!max-w-3xl"
+            panelClassName="mx-3 max-h-[calc(100dvh-1.5rem)] !max-w-3xl rounded-xl sm:mx-4"
           >
             <div className="space-y-5 text-gray-900 dark:text-zinc-100">
               <div className="rounded-2xl border border-gray-200 bg-gradient-to-br from-gray-50 to-white p-4 shadow-sm dark:border-zinc-800 dark:bg-gradient-to-br dark:from-[#0d0d0f] dark:to-[#141418]">
@@ -4936,7 +4982,7 @@ const MobileAppShell = ({
             title="Invite link ready"
             size="md"
             portal
-            panelClassName="!max-w-lg"
+            panelClassName="mx-3 max-h-[calc(100dvh-1.5rem)] !max-w-lg rounded-xl sm:mx-4"
           >
             <div className="space-y-4 text-gray-900 dark:text-zinc-100">
               <div className="flex items-start gap-3">
@@ -4977,7 +5023,7 @@ const MobileAppShell = ({
             title="Adding a Team Member"
             size="sm"
             portal
-            panelClassName="!max-w-[720px]"
+            panelClassName="mx-3 max-h-[calc(100dvh-1.5rem)] !max-w-[720px] rounded-xl sm:mx-4"
           >
             <div className="space-y-4">
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
@@ -10540,7 +10586,7 @@ const MobileAppShell = ({
           <Card className="p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-900">Team & Roles</h3>
-              <Button variant="secondary" size="sm" onClick={() => setCurrentView('team')}>
+              <Button variant="secondary" size="sm" onClick={() => navigateToView('team')}>
                 <Icon name="arrow-right" className="mr-2" /> Open Team
               </Button>
             </div>
@@ -13504,21 +13550,27 @@ const MobileAppShell = ({
 	        setSetupChecked(false);
 
 	        try {
-	          const controller = new AbortController();
-	          const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-	          const [response, billingResponse] = await Promise.all([
-	            fetch('/api/onboarding/setup-status', { cache: 'no-store', signal: controller.signal }),
-	            fetch('/api/billing/status', { cache: 'no-store', signal: controller.signal }),
-	          ]).finally(() => window.clearTimeout(timeoutId));
-	          const payload = await response.json().catch(() => ({}));
-	          const billingPayload = await billingResponse.json().catch(() => ({}));
-	          if (response.status === 401 || billingResponse.status === 401) {
-	            await supabaseBrowser().auth.signOut().catch(() => null);
-	            setIsAuthenticated(false);
-	            setCurrentUser(null);
-	            setAccessDecision('loading');
-	            return;
-	          }
+          const fetchSetupAndBilling = async () => {
+            const controller = new AbortController();
+            const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+            return Promise.all([
+              fetch('/api/onboarding/setup-status', { cache: 'no-store', signal: controller.signal }),
+              fetch('/api/billing/status', { cache: 'no-store', signal: controller.signal }),
+            ]).finally(() => window.clearTimeout(timeoutId));
+          };
+          let [response, billingResponse] = await fetchSetupAndBilling();
+          if (response.status === 401 || billingResponse.status === 401) {
+            await supabaseBrowser().auth.refreshSession().catch(() => null);
+            await new Promise((resolve) => window.setTimeout(resolve, 350));
+            [response, billingResponse] = await fetchSetupAndBilling();
+          }
+          const payload = await response.json().catch(() => ({}));
+          const billingPayload = await billingResponse.json().catch(() => ({}));
+          if (response.status === 401 || billingResponse.status === 401) {
+            setStartupError("We couldn't refresh your session. Please sign in again.");
+            setAccessDecision('loading');
+            return;
+          }
 	          if (!response.ok || !billingResponse.ok) {
 	            throw new Error(payload?.error || billingPayload?.error || 'Unable to verify account access');
 	          }
@@ -13761,6 +13813,26 @@ const MobileAppShell = ({
         };
       }, [accessDecision, isAuthenticated, verifySetup, oauthCallbackProcessing]);
 
+      useEffect(() => {
+        if (oauthCallbackProcessing || !authResolved || !nativeRuntimeResolved) return;
+        if (!isAuthenticated) {
+          onReady?.();
+          return;
+        }
+        if (setupChecked && !setupRefreshing && accessDecision !== 'loading') {
+          onReady?.();
+        }
+      }, [
+        accessDecision,
+        authResolved,
+        isAuthenticated,
+        nativeRuntimeResolved,
+        oauthCallbackProcessing,
+        onReady,
+        setupChecked,
+        setupRefreshing,
+      ]);
+
       if (oauthCallbackProcessing) {
         return (
           <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -13776,9 +13848,6 @@ const MobileAppShell = ({
       }
 
       if (!isAuthenticated) {
-        // Logged-out destination is resolved — release the startup overlay so
-        // the landing/onboarding page is not hidden behind it for the full cap.
-        onReady?.();
         if (startupError) {
           return (
             <WorkspaceStartupErrorScreen
@@ -13805,8 +13874,6 @@ const MobileAppShell = ({
       // Startup access resolved. Mount the dashboard <App> (which loads all
       // protected APIs) ONLY when access is fully confirmed. Other states show
       // a standalone gate that fires no protected/dashboard APIs.
-      onReady?.();
-
       if (accessDecision === 'native-no-workspace') {
         return (
           <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">

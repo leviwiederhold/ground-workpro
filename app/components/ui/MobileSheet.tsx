@@ -76,9 +76,9 @@ export function MobileSheet({
         onClick={onClose}
         aria-label={closeLabel || (title ? `Close ${title}` : 'Close panel')}
       />
-      <div className="relative flex min-h-0 w-full items-start justify-center sm:h-full sm:items-center sm:p-4">
+      <div className="relative flex h-[100dvh] min-h-0 w-full items-start justify-center p-3 pb-[max(0.75rem,var(--safe-area-bottom))] sm:items-center sm:p-4">
         <div
-          className={`mobile-sheet-panel relative flex max-h-full w-full min-w-0 flex-col overflow-x-hidden border border-gray-200 bg-white shadow-2xl ${SIZE_CLASSNAMES[size]} sm:max-h-[min(90dvh,56rem)] ${panelClassName}`.trim()}
+          className={`mobile-sheet-panel relative flex max-h-[calc(100dvh-1.5rem)] w-full min-w-0 flex-col overflow-x-hidden rounded-xl border border-gray-200 bg-white shadow-2xl ${SIZE_CLASSNAMES[size]} sm:max-h-[min(90dvh,56rem)] ${panelClassName}`.trim()}
         >
           {!hideHeader ? (
             <div

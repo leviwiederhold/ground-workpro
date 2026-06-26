@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getOptionalCompanyId } from "@/lib/tenant/getCompanyId";
 import { getSetupStatusForUser, loadProfileForSetup } from "@/lib/onboarding/setupFlow";
 import { getCompanyBillingStatus } from "@/lib/billing/isCompanySubscriptionActive";
+import { SessionRecoveryScreen } from "@/app/components/auth/SessionRecoveryScreen";
 import SetupWizardClient from "./SetupWizardClient";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export default async function SetupPage() {
     userId = resolved.userId;
     userEmail = String(resolved.userEmail ?? "").trim();
   } catch {
-    redirect("/login");
+    return <SessionRecoveryScreen nextPath="/setup" />;
   }
 
   // 2. Compute onboarding status (shared helper — single source of truth).

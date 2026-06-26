@@ -9,6 +9,7 @@ const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targe
 export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
   const canEditJobs = String(moduleAccess?.jobs || 'none') === 'edit';
+  const canViewJobFinancials = ['view', 'edit'].includes(String(moduleAccess?.finance || 'none')) || ['view', 'edit'].includes(String(moduleAccess?.reports || 'none'));
   const currency = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -26,6 +27,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     start_date: '',
     target_end_date: '',
     notes: '',
+    budget: '',
   });
   const [saveLoading, setSaveLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -97,6 +99,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       start_date: '',
       target_end_date: '',
       notes: '',
+      budget: canViewJobFinancials ? 0 : undefined,
       crew_assigned_count: 0,
       equipment_assigned_count: 0,
     };
@@ -117,6 +120,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           start_date: '',
           target_end_date: '',
           notes: '',
+          ...(canViewJobFinancials ? { budget: 0 } : {}),
         }),
       });
 
@@ -209,6 +213,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       start_date: selectedJob.start_date || selectedJob.startDate || '',
       target_end_date: selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '',
       notes: selectedJob.notes || '',
+      budget: selectedJob.budget ?? '',
     });
     setJobActionError('');
   }, [normalizeJobStatus, selectedJob]);
@@ -518,6 +523,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       if (jobForm.start_date !== (selectedJob.start_date || selectedJob.startDate || '')) updates.start_date = jobForm.start_date;
       if (jobForm.target_end_date !== (selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '')) updates.target_end_date = jobForm.target_end_date;
       if (jobForm.notes !== (selectedJob.notes || '')) updates.notes = jobForm.notes;
+      if (canViewJobFinancials && String(jobForm.budget ?? '') !== String(selectedJob.budget ?? '')) updates.budget = jobForm.budget;
 
       if (Object.keys(updates).length === 0) {
         setSaveLoading(false);
@@ -887,6 +893,21 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 />
               </div>
 
+              {canViewJobFinancials && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Budget</p>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={jobForm.budget}
+                    onChange={(e) => setJobForm({ ...jobForm, budget: e.target.value })}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    disabled={!canEditJobs}
+                  />
+                </div>
+              )}
+
               <div>
                 <p className="text-xs text-gray-500 mb-2">Job Record Snapshot</p>
                 <div className="space-y-2 text-sm">
@@ -1012,6 +1033,12 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 <p className="text-xs text-gray-500 mb-1">Notes</p>
                 <textarea value={jobForm.notes} onChange={(e) => setJobForm({ ...jobForm, notes: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-24" disabled={!canEditJobs} />
               </div>
+              {canViewJobFinancials && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-1">Budget</p>
+                  <input type="number" min="0" step="0.01" value={jobForm.budget} onChange={(e) => setJobForm({ ...jobForm, budget: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
+                </div>
+              )}
               <div>
                 <p className="text-xs text-gray-500 mb-2">Job Record Snapshot</p>
                 <div className="space-y-2 text-sm">

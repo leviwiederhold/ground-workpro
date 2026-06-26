@@ -104,7 +104,12 @@ export async function getRoleScopedJobIds(
 }
 
 export function shouldRestrictJobsToAssignedJobs(role: AppRole | null | undefined): boolean {
-  return role === "mechanic";
+  // Field-level roles may only reach jobs they are assigned to. admin/pm see all
+  // jobs; foreman also browses the full list, so it is intentionally excluded.
+  // operator (which also covers normalized fieldstaff) and mechanic are scoped to
+  // their assigned jobs — this is what makes job *detail* access (e.g.
+  // GET /api/jobs/[id]) return 403 for an unassigned job instead of 200.
+  return role === "mechanic" || role === "operator";
 }
 
 export async function getRoleScopedEquipmentIds(

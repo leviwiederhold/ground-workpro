@@ -3,10 +3,27 @@ export function isNativeAppRuntime(): boolean {
 
   const candidate = window as typeof window & {
     __GROUNDWORK_NATIVE_APP__?: boolean | string;
+    Capacitor?: {
+      isNativePlatform?: () => boolean;
+    };
   };
 
   if (candidate.__GROUNDWORK_NATIVE_APP__ === true || candidate.__GROUNDWORK_NATIVE_APP__ === "1") {
     return true;
+  }
+
+  // Canonical Capacitor signal — true inside the real iOS/Android app wrapper
+  // (and what the native onboarding E2E mocks). Without this, a native launch
+  // that didn't set the custom flag/URL/localStorage falls through to the web
+  // marketing page instead of the onboarding gate.
+  if (typeof candidate.Capacitor?.isNativePlatform === "function") {
+    try {
+      if (candidate.Capacitor.isNativePlatform() === true) {
+        return true;
+      }
+    } catch {
+      // Fall through to the remaining heuristics.
+    }
   }
 
   const params = new URLSearchParams(window.location.search);

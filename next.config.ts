@@ -41,6 +41,29 @@ const securityHeaders = [
   },
 ];
 
+// Client-side "pretty" paths for in-app views (history.pushState targets in
+// app/page.tsx -> APP_VIEW_PATHS). These have no server route, so a direct load
+// or reload of e.g. /documents or /jobs would 404. Rewrite them to "/" so the
+// single-page app boots and reads the view from the pathname. "/settings" is
+// intentionally excluded — it has real route files (app/settings/**).
+const SPA_VIEW_PATHS = [
+  "messages",
+  "schedule",
+  "jobs",
+  "fleet",
+  "team",
+  "inventory",
+  "maintenance",
+  "training",
+  "safety",
+  "bids",
+  "vendors",
+  "reports",
+  "costing",
+  "finance",
+  "documents",
+];
+
 const nextConfig: NextConfig = {
   async headers() {
     return [
@@ -49,6 +72,15 @@ const nextConfig: NextConfig = {
         headers: securityHeaders,
       },
     ];
+  },
+  async rewrites() {
+    // afterFiles: real route files win; only unmatched SPA paths are rewritten.
+    return {
+      afterFiles: SPA_VIEW_PATHS.map((path) => ({
+        source: `/${path}`,
+        destination: "/",
+      })),
+    };
   },
 };
 

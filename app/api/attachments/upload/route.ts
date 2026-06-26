@@ -160,6 +160,11 @@ export async function POST(request: Request) {
 
     const entityType = entityTypeRaw as EntityType;
     const entityId = entityType === "document" ? companyId : normalizeId(entityIdRaw);
+    // Link the file to a job. Files uploaded FROM a job carry that job_id so they
+    // also appear (with job context) on the Documents page. An explicit job_id
+    // form field is honored for other contexts. Validated against company below.
+    const jobIdRaw = normalizeId(formData.get("job_id"));
+    const jobId = entityType === "job" ? entityId : jobIdRaw;
 
     try {
       if (entityType === "document" || entityType === "vendor") {
@@ -178,6 +183,21 @@ export async function POST(request: Request) {
     const ownership = await assertEntityOwnership(supabase, companyId, entityType, entityId);
     if (!ownership.ok) {
       return NextResponse.json({ error: ownership.error }, { status: 404 });
+    }
+
+    // Cross-company guard: an explicit job_id (non-job entity) must belong to this
+    // company. (For entity_type === 'job', the ownership check above already
+    // validated the job.) Never allow linking a file to another company's job.
+    if (jobId !== null && entityType !== "job") {
+      const jobCheck = await supabase
+        .from("jobs")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("id", jobId)
+        .maybeSingle();
+      if (jobCheck.error || !jobCheck.data) {
+        return NextResponse.json({ error: "Job not found in your company" }, { status: 404 });
+      }
     }
 
     const fileBytes = new Uint8Array(await file.arrayBuffer());
@@ -206,6 +226,7 @@ export async function POST(request: Request) {
       company_id: companyId,
       entity_type: entityType,
       entity_id: entityId,
+      job_id: jobId,
       file_name: safeFileName,
       content_type: contentType,
       bucket,

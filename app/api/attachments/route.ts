@@ -218,7 +218,12 @@ export async function GET(request: Request) {
       .eq("company_id", companyId);
 
     if (entityTypeParsed.data === "document") {
-      query = query.eq("entity_id", companyId).in("entity_type", ["document", "work_order"]);
+      // The Documents view shows company-level documents AND files uploaded from
+      // a job (entity_type 'job', which carry a job_id) — so every job upload
+      // appears here with its job context, without duplicating the file.
+      query = query.or(
+        `and(entity_id.eq.${companyId},entity_type.in.(document,work_order)),and(entity_type.eq.job,job_id.not.is.null)`
+      );
       if (jobIdValue !== null) {
         query = query.eq("job_id", jobIdValue);
       } else {

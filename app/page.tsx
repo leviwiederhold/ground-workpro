@@ -635,9 +635,13 @@ const MobileAppShell = ({
       const [uploading, setUploading] = useState(false);
       const [error, setError] = useState('');
       const fileInputRef = useRef(null);
-      const isDocumentContext = ['job', 'vendor', 'document'].includes(String(entityType || '').toLowerCase());
-      const panelLabel = isDocumentContext ? 'Documents' : 'Attachments';
-      const emptyLabel = isDocumentContext ? 'No documents yet.' : 'No attachments yet.';
+      const normalizedEntityType = String(entityType || '').toLowerCase();
+      const isJobContext = normalizedEntityType === 'job';
+      const isDocumentContext = ['job', 'vendor', 'document'].includes(normalizedEntityType);
+      const panelLabel = isJobContext ? 'Photos & Documents' : (isDocumentContext ? 'Documents' : 'Attachments');
+      const emptyLabel = isJobContext
+        ? 'No photos or documents added to this job yet.'
+        : (isDocumentContext ? 'No documents yet.' : 'No attachments yet.');
 
       const loadAttachments = useCallback(async () => {
         if (entityId === null || entityId === undefined || entityId === '') {

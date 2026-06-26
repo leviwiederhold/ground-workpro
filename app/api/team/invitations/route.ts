@@ -180,6 +180,15 @@ export async function POST(request: Request) {
       return NextResponse.json(toValidationError(parsed.error.issues), { status: 422 });
     }
 
+    // CEO is reserved for the company owner and cannot be assigned via invite.
+    // (Existing CEO accounts are unaffected; this only blocks NEW CEO invites.)
+    if (parsed.data.role === "ceo") {
+      return NextResponse.json(
+        { error: "CEO is reserved for the company owner and can't be assigned to an invited employee." },
+        { status: 422 }
+      );
+    }
+
     const normalized = normalizePermissionPayload({
       role: parsed.data.role,
       permissions: parsed.data.permissions ?? [],

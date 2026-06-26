@@ -66,7 +66,6 @@ export const ROLE_NAV_KEYS: Record<AppRole, string[]> = {
     "messages",
     "schedule",
     "jobs",
-    "reports",
     "safety",
   ],
   mechanic: [
@@ -91,7 +90,7 @@ export const ROUTE_GUARDS: Record<string, AppRole[]> = {
   "/safety": ["admin", "pm", "foreman", "mechanic", "operator"],
   "/bids": ["admin", "pm"],
   "/vendors": ["admin", "pm"],
-  "/reports": ["admin", "pm", "foreman"],
+  "/reports": ["admin", "pm"],
   "/inventory": ["admin", "pm", "mechanic"],
   "/finance": ["admin", "pm"],
   "/documents": ["admin", "pm", "foreman", "mechanic", "operator"],

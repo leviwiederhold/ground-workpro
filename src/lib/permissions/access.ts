@@ -51,11 +51,14 @@ const templateDefaults: Record<InvitationRole, ModulePermissionMap> = {
     safety: "edit",
     messages: "edit",
     inventory: "edit",
-    reports: "none",
+    // Finance and Reports are enabled by default for Manager-level and above,
+    // but VIEW-only — full edit of sensitive financial data stays with
+    // owner/admin (ceo) by default. Admins can still grant edit per-user.
+    reports: "view",
     vendors: "edit",
     documents: "edit",
     training: "edit",
-    finance: "none",
+    finance: "view",
     integrations: "none",
     team_management: "view",
   },

@@ -3700,7 +3700,7 @@ const MobileAppShell = ({
       const permissionLevels = ['none', 'view', 'edit'];
       const roleTemplateDefaults = {
         ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
-        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'none', team_management: 'view' },
+        manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'view', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'view', team_management: 'view' },
         foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', team_management: 'none' },
         mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'none', documents: 'none', training: 'view', finance: 'none', team_management: 'none' },
         operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', team_management: 'none' },
@@ -4842,7 +4842,12 @@ const MobileAppShell = ({
                     setPermissionForm({ ...roleTemplateDefaults[nextRole] });
                   }}
                 >
-                  <option value="ceo">CEO</option>
+                  {/* CEO is only the company owner — not an inviteable role.
+                      Keep the option only when editing an EXISTING CEO member so
+                      their role displays correctly. */}
+                  {permissionModalMode === 'member-edit' && inviteForm.role === 'ceo' && (
+                    <option value="ceo">CEO</option>
+                  )}
                   <option value="manager">Manager</option>
                   <option value="foreman">Foreman</option>
                   <option value="mechanic">Mechanic</option>

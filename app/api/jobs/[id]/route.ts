@@ -7,9 +7,8 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { hasModuleAccess, resolveUserModulePermissions } from "@/lib/permissions/runtime";
 import {
-  getRoleScopedJobIds,
+  getEffectiveScopedJobIds,
   resolveMembershipRole,
-  shouldRestrictJobsToAssignedJobs,
 } from "@/lib/jobs/roleScope";
 
 const jobStatusSchema = z.enum([
@@ -304,9 +303,7 @@ export async function GET(
     }
 
     const normalizedId = normalizeId(id);
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -378,9 +375,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const canViewFinancials = await canAccessJobFinancials(supabase, companyId, userId, role);
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -502,9 +497,7 @@ export async function DELETE(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { requireRole } from "@/lib/auth/requireRole";
-import { getRoleScopedJobIds, shouldRestrictJobsToAssignedJobs } from "@/lib/jobs/roleScope";
+import { getEffectiveScopedJobIds } from "@/lib/jobs/roleScope";
 import { getJobCostSummary } from "@/lib/job-costing/getJobCostSummary";
 import { getBidSummaryData } from "@/lib/bids/getBidSummaryData";
 
@@ -143,9 +143,7 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(effectiveRole)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, effectiveRole)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, effectiveRole);
     if (scopedJobIds && !scopedJobIds.includes(String(jobId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

@@ -7,9 +7,8 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
 import { hasModuleAccess, resolveUserModulePermissions } from "@/lib/permissions/runtime";
 import {
-  getRoleScopedJobIds,
+  getEffectiveScopedJobIds,
   resolveMembershipRole,
-  shouldRestrictJobsToAssignedJobs,
 } from "@/lib/jobs/roleScope";
 
 const persistedJobStatusSchema = z.enum([
@@ -414,9 +413,7 @@ export async function GET(request: Request) {
     }
     const canViewFinancials = await canAccessJobFinancials(supabase, companyId, userId, role);
 
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && scopedJobIds.length === 0) {
       return NextResponse.json({ items: [], jobs: [], nextCursor: null, page: 1, pageSize: limit, total: 0 });
     }

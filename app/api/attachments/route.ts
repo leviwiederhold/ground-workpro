@@ -6,9 +6,8 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
-  getRoleScopedJobIds,
+  getEffectiveScopedJobIds,
   resolveMembershipRole,
-  shouldRestrictJobsToAssignedJobs,
 } from "@/lib/jobs/roleScope";
 import {
   sanitizeAttachmentFileName,
@@ -170,9 +169,7 @@ async function assertDocumentJobAccess(
   if (error || !data?.length) return { ok: false, status: 404, error: "Job not found" };
 
   const role = await resolveMembershipRole(supabase, companyId, userId);
-  const scopedJobIds = role && shouldRestrictJobsToAssignedJobs(role)
-    ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-    : null;
+  const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
   if (scopedJobIds && !scopedJobIds.some((scopedJobId) => String(scopedJobId) === String(jobId))) {
     return { ok: false, status: 403, error: "Forbidden" };
   }
@@ -228,9 +225,7 @@ export async function GET(request: Request) {
         query = query.eq("job_id", jobIdValue);
       } else {
         const role = await resolveMembershipRole(supabase, companyId, userId);
-        const scopedJobIds = role && shouldRestrictJobsToAssignedJobs(role)
-          ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-          : null;
+        const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
         if (scopedJobIds) {
           query = scopedJobIds.length
             ? query.or(`job_id.is.null,job_id.in.(${scopedJobIds.join(",")})`)

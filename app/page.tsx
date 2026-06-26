@@ -2481,34 +2481,14 @@ const MobileAppShell = ({
                           </span>
                         </div>
                         <div className="py-1">
+                          {/* Consolidated Settings — Profile, Company, Team,
+                              Billing, and Security live on one page now. */}
                           <button
-                            onClick={() => navigateFromUserMenu('/profile')}
+                            onClick={() => { setShowUserMenu(false); setCurrentView('settings'); }}
                             className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                           >
-                            <Icon name="user" className="text-gray-400" /> My Profile
+                            <Icon name="gear" className="text-gray-400" /> Settings
                           </button>
-                          <button
-                            onClick={() => navigateFromUserMenu('/settings/account')}
-                            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                          >
-                            <Icon name="gear" className="text-gray-400" /> Account Settings
-                          </button>
-                          {isCeoRole && (
-                            <button
-                              onClick={() => navigateFromUserMenu('/settings/company')}
-                              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                              <Icon name="building" className="text-gray-400" /> Company Settings
-                            </button>
-                          )}
-                          {isCeoRole && !isIosNativeAppRuntime() && (
-                            <button
-                              onClick={() => navigateFromUserMenu('/settings/billing')}
-                              className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                            >
-                              <Icon name="credit-card" className="text-gray-400" /> Billing
-                            </button>
-                          )}
                         </div>
                         <div className="border-t border-gray-100 pt-1">
                           <button
@@ -10316,49 +10296,83 @@ const MobileAppShell = ({
     const SettingsView = ({ employees = [], currentUser, currentRole }) => {
       const isIosApp = useMemo(() => isIosNativeAppRuntime(), []);
       const isAdmin = currentRole === 'executive';
-      const [activeTab, setActiveTab] = useState('company');
+
+      // ── Shared records (the SAME ones the setup wizard writes) ──────────────
+      // Profile  -> /api/profile          (profiles table)
+      // Company  -> /api/company/settings (companies table)
+      // Billing  -> /api/billing/status   (Stripe-owned, read-only)
+      const [loadError, setLoadError] = useState('');
+      const [loading, setLoading] = useState(true);
+
+      const [profile, setProfile] = useState({ full_name: '', phone: '', job_title: '', timezone: '' });
+      const [profileSaving, setProfileSaving] = useState(false);
+      const [profileMsg, setProfileMsg] = useState('');
+
+      const [company, setCompany] = useState({ company_name: '', timezone: '', phone: '', email: '', address: '' });
+      const [companySaving, setCompanySaving] = useState(false);
+      const [companyMsg, setCompanyMsg] = useState('');
+
       const [billingStatus, setBillingStatus] = useState(null);
-      const [settingsLoading, setSettingsLoading] = useState(false);
-      const [settingsError, setSettingsError] = useState('');
+      const [portalLoading, setPortalLoading] = useState(false);
+      const [portalError, setPortalError] = useState('');
+
+      const [pwdSending, setPwdSending] = useState(false);
+      const [pwdMsg, setPwdMsg] = useState('');
+      const [signingOut, setSigningOut] = useState(false);
+
+      // Cost defaults (operational config — kept so nothing is lost).
       const [pricingLoading, setPricingLoading] = useState(false);
       const [pricingSaving, setPricingSaving] = useState(false);
       const [pricingError, setPricingError] = useState('');
       const [pricingSuccess, setPricingSuccess] = useState('');
       const [pricingSettings, setPricingSettings] = useState({
-        operator_labor_rate: 0,
-        labor_burden_percent: 0,
-        hauling_rate_per_hour: 0,
-        dump_fee_per_load: 0,
-        target_margin_percent: 0,
-        contingency_percent: 0,
-        markup_percent: 0,
+        operator_labor_rate: 0, labor_burden_percent: 0, hauling_rate_per_hour: 0,
+        dump_fee_per_load: 0, target_margin_percent: 0, contingency_percent: 0, markup_percent: 0,
       });
 
       useEffect(() => {
         let active = true;
         const load = async () => {
+          setLoading(true);
+          setLoadError('');
           try {
-            setSettingsLoading(true);
-            setSettingsError('');
-            if (isIosApp) return;
-            const billingRes = await fetch('/api/billing/status', { cache: 'no-store' });
-            const billingPayload = await billingRes.json().catch(() => ({}));
+            const [profileRes, companyRes, billingRes] = await Promise.all([
+              fetch('/api/profile', { cache: 'no-store' }),
+              isAdmin ? fetch('/api/company/settings', { cache: 'no-store' }) : Promise.resolve(null),
+              isIosApp ? Promise.resolve(null) : fetch('/api/billing/status', { cache: 'no-store' }),
+            ]);
             if (!active) return;
-            if (billingRes.ok) setBillingStatus(billingPayload?.item || null);
-            if (!billingRes.ok) {
-              setSettingsError(billingPayload?.error || 'Failed to load settings data');
+            if (profileRes && profileRes.ok) {
+              const p = (await profileRes.json().catch(() => ({})))?.item || {};
+              setProfile({
+                full_name: String(p.full_name || ''),
+                phone: String(p.phone || ''),
+                job_title: String(p.job_title || ''),
+                timezone: String(p.timezone || ''),
+              });
+            }
+            if (companyRes && companyRes.ok) {
+              const c = (await companyRes.json().catch(() => ({})))?.item || {};
+              setCompany({
+                company_name: String(c.company_name || c.name || ''),
+                timezone: String(c.timezone || ''),
+                phone: String(c.phone || ''),
+                email: String(c.email || ''),
+                address: String(c.address || ''),
+              });
+            }
+            if (billingRes && billingRes.ok) {
+              setBillingStatus((await billingRes.json().catch(() => ({})))?.item || null);
             }
           } catch {
-            if (active) setSettingsError('Failed to load settings data');
+            if (active) setLoadError('Failed to load settings.');
           } finally {
-            if (active) setSettingsLoading(false);
+            if (active) setLoading(false);
           }
         };
         load();
-        return () => {
-          active = false;
-        };
-      }, [isIosApp]);
+        return () => { active = false; };
+      }, [isAdmin, isIosApp]);
 
       useEffect(() => {
         let active = true;
@@ -10367,8 +10381,7 @@ const MobileAppShell = ({
             setPricingLoading(true);
             const response = await fetch('/api/pricing-settings', { cache: 'no-store' });
             const payload = await response.json().catch(() => ({}));
-            if (!active) return;
-            if (!response.ok) return;
+            if (!active || !response.ok) return;
             const row = payload?.pricing_settings || {};
             setPricingSettings({
               operator_labor_rate: Number(row.operator_labor_rate) || 0,
@@ -10384,32 +10397,92 @@ const MobileAppShell = ({
           }
         };
         loadPricing();
-        return () => {
-          active = false;
-        };
+        return () => { active = false; };
       }, []);
+
+      const saveProfile = async () => {
+        setProfileSaving(true); setProfileMsg('');
+        try {
+          const res = await fetch('/api/profile', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              full_name: profile.full_name.trim(),
+              phone: profile.phone.trim(),
+              job_title: profile.job_title.trim(),
+              timezone: profile.timezone.trim(),
+            }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) { setProfileMsg(payload?.error || 'Failed to save profile.'); return; }
+          setProfileMsg('Profile saved.');
+        } catch { setProfileMsg('Failed to save profile.'); }
+        finally { setProfileSaving(false); }
+      };
+
+      const saveCompany = async () => {
+        setCompanySaving(true); setCompanyMsg('');
+        try {
+          const res = await fetch('/api/company/settings', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              company_name: company.company_name.trim(),
+              timezone: company.timezone.trim(),
+              phone: company.phone.trim(),
+              email: company.email.trim(),
+              address: company.address.trim(),
+            }),
+          });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok) { setCompanyMsg(payload?.error || 'Failed to save company.'); return; }
+          setCompanyMsg('Company information saved.');
+        } catch { setCompanyMsg('Failed to save company.'); }
+        finally { setCompanySaving(false); }
+      };
 
       const savePricingSettings = async () => {
         try {
-          setPricingSaving(true);
-          setPricingError('');
-          setPricingSuccess('');
+          setPricingSaving(true); setPricingError(''); setPricingSuccess('');
           const response = await fetch('/api/pricing-settings', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(pricingSettings),
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pricingSettings),
           });
           const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            setPricingError(payload?.error || 'Failed to save pricing settings');
-            return;
-          }
-          setPricingSuccess('Pricing settings saved.');
-        } catch {
-          setPricingError('Failed to save pricing settings');
-        } finally {
-          setPricingSaving(false);
-        }
+          if (!response.ok) { setPricingError(payload?.error || 'Failed to save pricing settings'); return; }
+          setPricingSuccess('Cost defaults saved.');
+        } catch { setPricingError('Failed to save pricing settings'); }
+        finally { setPricingSaving(false); }
+      };
+
+      const openBillingPortal = async () => {
+        setPortalLoading(true); setPortalError('');
+        try {
+          const res = await fetch('/api/billing/portal', { method: 'POST' });
+          const payload = await res.json().catch(() => ({}));
+          if (!res.ok || !payload?.url) { setPortalError(payload?.error || 'Unable to open billing portal.'); return; }
+          window.location.href = payload.url;
+        } catch { setPortalError('Unable to open billing portal.'); }
+        finally { setPortalLoading(false); }
+      };
+
+      const sendPasswordReset = async () => {
+        setPwdSending(true); setPwdMsg('');
+        try {
+          const email = String(currentUser?.email || '').trim();
+          if (!email) { setPwdMsg('No email on file.'); return; }
+          const { error } = await supabaseBrowser().auth.resetPasswordForEmail(email, {
+            redirectTo: `${window.location.origin}/reset-password`,
+          });
+          setPwdMsg(error ? error.message : 'Password reset link sent to your email.');
+        } catch { setPwdMsg('Failed to send reset link.'); }
+        finally { setPwdSending(false); }
+      };
+
+      const signOut = async () => {
+        setSigningOut(true);
+        try { await fetch('/api/logout', { method: 'POST' }).catch(() => {}); } catch { /* ignore */ }
+        try { await supabaseBrowser().auth.signOut(); } catch { /* ignore */ }
+        window.location.assign('/login');
       };
 
       const teamByRole = employees.reduce((acc, emp) => {
@@ -10417,110 +10490,99 @@ const MobileAppShell = ({
         acc[key] = (acc[key] || 0) + 1;
         return acc;
       }, {});
+
+      const field = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+      const label = 'mb-1 block text-xs font-medium text-gray-500';
+
       return (
-        <div className="space-y-6">
-          <Tabs
-            tabs={[
-              { id: 'company', label: 'Company', icon: 'building' },
-              { id: 'users', label: 'Users & Roles', icon: 'users' },
-              ...(isIosApp ? [] : [{ id: 'billing', label: 'Billing', icon: 'credit-card' }]),
-              { id: 'pricing', label: 'Cost Defaults', icon: 'sliders' },
-              { id: 'security', label: 'Security', icon: 'shield-halved' },
-            ]}
-            activeTab={activeTab}
-            onChange={setActiveTab}
-          />
+        <div className="space-y-6 max-w-3xl">
+          {loadError && <InlineError>{loadError}</InlineError>}
 
-          {settingsError && <InlineError>{settingsError}</InlineError>}
-
-          {activeTab === 'company' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <Card className="p-4 lg:col-span-2">
-                <h3 className="font-semibold text-gray-900 mb-3">Company Profile</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs text-gray-500">Company Name</p>
-                    <p className="font-medium text-gray-900">{currentUser?.company || 'My Company'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Primary Admin</p>
-                    <p className="font-medium text-gray-900">{currentUser?.name || 'Admin User'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Admin Email</p>
-                    <p className="font-medium text-gray-900 break-all">{currentUser?.email || '-'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Timezone</p>
-                    <p className="font-medium text-gray-900">America/New_York</p>
-                  </div>
-                </div>
-              </Card>
-              <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-3">System Snapshot</h3>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-500">Team Members</span><span className="font-medium">{employees.length}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Workspace Status</span><span className="font-medium">{isIosApp ? 'Active' : billingStatus?.is_active ? 'Active' : 'Pending'}</span></div>
-                </div>
-              </Card>
-            </div>
-          )}
-
-          {activeTab === 'users' && (
-            <Card className="p-4">
-              <h3 className="font-semibold text-gray-900 mb-3">Users & Roles</h3>
-              <p className="text-sm text-gray-500 mb-4">
-                Role changes and invites are managed through Team. Only CEO/admin can change role permissions.
-              </p>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-                {['admin', 'pm', 'foreman', 'mechanic', 'operator'].map((role) => (
-                  <div key={role} className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-xs uppercase text-gray-500">{role}</p>
-                    <p className="text-xl font-semibold text-gray-900">{Number(teamByRole[role] || 0)}</p>
-                  </div>
-                ))}
-              </div>
-              <Button variant="secondary" onClick={() => setCurrentView('team')}>
-                <Icon name="arrow-right" className="mr-2" />
-                Open Team Management
+          {/* 1. My Profile */}
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900">My Profile</h3>
+              <Button variant="brand" size="sm" onClick={saveProfile} disabled={profileSaving || loading}>
+                {profileSaving ? 'Saving…' : 'Save'}
               </Button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className={label}>Full name</label><input className={field} value={profile.full_name} onChange={(e) => setProfile((p) => ({ ...p, full_name: e.target.value }))} /></div>
+              <div><label className={label}>Job title</label><input className={field} value={profile.job_title} onChange={(e) => setProfile((p) => ({ ...p, job_title: e.target.value }))} /></div>
+              <div><label className={label}>Phone</label><input className={field} value={profile.phone} onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))} inputMode="tel" /></div>
+              <div><label className={label}>Timezone</label><input className={field} value={profile.timezone} onChange={(e) => setProfile((p) => ({ ...p, timezone: e.target.value }))} placeholder="e.g. America/New_York" /></div>
+              <div className="sm:col-span-2"><label className={label}>Email</label><input className={`${field} bg-gray-50 text-gray-500`} value={String(currentUser?.email || '')} readOnly /></div>
+            </div>
+            {profileMsg && <p className="mt-3 text-sm text-gray-600">{profileMsg}</p>}
+          </Card>
+
+          {/* 2. Company Information (admin) */}
+          {isAdmin && (
+            <Card className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Company Information</h3>
+                <Button variant="brand" size="sm" onClick={saveCompany} disabled={companySaving || loading}>
+                  {companySaving ? 'Saving…' : 'Save'}
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={label}>Company name</label><input className={field} value={company.company_name} onChange={(e) => setCompany((c) => ({ ...c, company_name: e.target.value }))} /></div>
+                <div><label className={label}>Timezone</label><input className={field} value={company.timezone} onChange={(e) => setCompany((c) => ({ ...c, timezone: e.target.value }))} placeholder="e.g. America/New_York" /></div>
+                <div><label className={label}>Company phone</label><input className={field} value={company.phone} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} inputMode="tel" /></div>
+                <div><label className={label}>Company email</label><input className={field} value={company.email} onChange={(e) => setCompany((c) => ({ ...c, email: e.target.value }))} inputMode="email" /></div>
+                <div className="sm:col-span-2"><label className={label}>Address</label><textarea className={field} rows={2} value={company.address} onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))} /></div>
+              </div>
+              {companyMsg && <p className="mt-3 text-sm text-gray-600">{companyMsg}</p>}
             </Card>
           )}
 
-          {activeTab === 'billing' && (
-            <Card className="p-4">
-              <h3 className="font-semibold text-gray-900 mb-3">Billing & Subscription</h3>
-              {settingsLoading ? (
-                <p className="text-sm text-gray-500">Loading...</p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-xs text-gray-500">Plan</p>
-                    <p className="font-medium">{String(billingStatus?.plan_type || 'groundwork_pro')}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-xs text-gray-500">Subscription Status</p>
-                    <p className="font-medium">{String(billingStatus?.subscription_status || 'inactive')}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-xs text-gray-500">Trial Ends</p>
-                    <p className="font-medium">{billingStatus?.trial_ends_at ? formatDate(billingStatus.trial_ends_at) : '—'}</p>
-                  </div>
-                  <div className="rounded-lg border border-gray-200 p-3">
-                    <p className="text-xs text-gray-500">Current Period End</p>
-                    <p className="font-medium">{billingStatus?.current_period_end ? formatDate(billingStatus.current_period_end) : '—'}</p>
-                  </div>
+          {/* 3. Team / Role Summary */}
+          <Card className="p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900">Team & Roles</h3>
+              <Button variant="secondary" size="sm" onClick={() => setCurrentView('team')}>
+                <Icon name="arrow-right" className="mr-2" /> Open Team
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              {['admin', 'pm', 'foreman', 'mechanic', 'operator'].map((role) => (
+                <div key={role} className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs uppercase text-gray-500">{role === 'admin' ? 'CEO' : role}</p>
+                  <p className="text-xl font-semibold text-gray-900">{Number(teamByRole[role] || 0)}</p>
                 </div>
-              )}
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-gray-500">Role changes and invites are managed in Team. Admin-only, enforced server-side.</p>
+          </Card>
+
+          {/* 4. Billing & Subscription (web admin only; Stripe-owned, read-only) */}
+          {!isIosApp && isAdmin && (
+            <Card className="p-5">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-gray-900">Billing & Subscription</h3>
+                <Button variant="secondary" size="sm" onClick={openBillingPortal} disabled={portalLoading}>
+                  <Icon name={portalLoading ? 'spinner' : 'arrow-up-right-from-square'} className={`mr-2 ${portalLoading ? 'animate-spin' : ''}`} />
+                  Manage Billing
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Plan</p><p className="font-medium">Groundwork Pro</p></div>
+                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Status</p><p className="font-medium capitalize">{String(billingStatus?.subscription_status || 'inactive')}</p></div>
+                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Trial ends</p><p className="font-medium">{billingStatus?.trial_ends_at ? formatDate(billingStatus.trial_ends_at) : '—'}</p></div>
+                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Next renewal</p><p className="font-medium">{billingStatus?.current_period_end ? formatDate(billingStatus.current_period_end) : '—'}</p></div>
+              </div>
+              <p className="mt-3 text-xs text-gray-400">Price, payment method, and invoices are managed in the Stripe billing portal.</p>
+              {portalError && <p className="mt-2 text-sm text-red-600">{portalError}</p>}
             </Card>
           )}
 
-          {activeTab === 'pricing' && (
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-3">
+          {/* Cost Defaults (operational config; admin) */}
+          {isAdmin && (
+            <Card className="p-5">
+              <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900">Cost Defaults</h3>
-                <Button variant="brand" size="sm" onClick={savePricingSettings} disabled={!isAdmin || pricingSaving || pricingLoading}>
-                  {pricingSaving ? 'Saving...' : 'Save'}
+                <Button variant="brand" size="sm" onClick={savePricingSettings} disabled={pricingSaving || pricingLoading}>
+                  {pricingSaving ? 'Saving…' : 'Save'}
                 </Button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -10532,44 +10594,31 @@ const MobileAppShell = ({
                   ['target_margin_percent', 'Target Margin %'],
                   ['contingency_percent', 'Contingency %'],
                   ['markup_percent', 'Markup %'],
-                ].map(([key, label]) => (
+                ].map(([key, lbl]) => (
                   <div key={key}>
-                    <p className="text-xs text-gray-500 mb-1">{label}</p>
-                    <input
-                      type="number"
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      value={pricingSettings[key]}
-                      disabled={!isAdmin}
-                      onChange={(e) => setPricingSettings((prev) => ({ ...prev, [key]: Number(e.target.value) || 0 }))}
-                    />
+                    <p className="text-xs text-gray-500 mb-1">{lbl}</p>
+                    <input type="number" className={field} value={pricingSettings[key]} onChange={(e) => setPricingSettings((prev) => ({ ...prev, [key]: Number(e.target.value) || 0 }))} />
                   </div>
                 ))}
               </div>
               {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
               {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
-              {!isAdmin && <p className="text-xs text-gray-500 mt-3">Read-only. Only CEO/admin can save cost defaults.</p>}
             </Card>
           )}
 
-          {activeTab === 'security' && (
-            <Card className="p-4">
-              <h3 className="font-semibold text-gray-900 mb-3">Security & Access Policy</h3>
-              <div className="space-y-3 text-sm">
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="font-medium text-gray-900">Role switching policy</p>
-                  <p className="text-gray-600 mt-1">Only CEO/admin can use role-view switching. All other users are locked to assigned role.</p>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="font-medium text-gray-900">Employee role changes</p>
-                  <p className="text-gray-600 mt-1">Role promotions/demotions are admin-only and enforced server-side.</p>
-                </div>
-                <div className="rounded-lg border border-gray-200 p-3">
-                  <p className="font-medium text-gray-900">Invite flow</p>
-                  <p className="text-gray-600 mt-1">Invite links are tokenized, email-bound, and single-use with expiration.</p>
-                </div>
-              </div>
-            </Card>
-          )}
+          {/* 5. Security / Sign Out */}
+          <Card className="p-5">
+            <h3 className="font-semibold text-gray-900 mb-4">Security</h3>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Button variant="secondary" onClick={sendPasswordReset} disabled={pwdSending}>
+                <Icon name="key" className="mr-2" /> {pwdSending ? 'Sending…' : 'Change password'}
+              </Button>
+              <Button variant="danger" onClick={signOut} disabled={signingOut}>
+                <Icon name="arrow-right-from-bracket" className="mr-2" /> {signingOut ? 'Signing out…' : 'Sign out'}
+              </Button>
+            </div>
+            {pwdMsg && <p className="mt-3 text-sm text-gray-600">{pwdMsg}</p>}
+          </Card>
         </div>
       );
     };

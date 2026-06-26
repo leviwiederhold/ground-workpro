@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { requireModuleAccess } from "@/lib/auth/requireRole";
+import { requireModuleAccess, requireRole } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { resolveWorkOrderAssignment } from "@/lib/work-orders/assignment";
 
@@ -266,7 +266,9 @@ export async function DELETE(
 ) {
   try {
     try {
-      await requireModuleAccess("maintenance", "edit");
+      // Deletion is a management action — mechanics can create/edit work orders
+      // but only admin/pm may delete them.
+      await requireRole(["admin", "pm"]);
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

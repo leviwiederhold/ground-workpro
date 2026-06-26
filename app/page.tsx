@@ -120,6 +120,35 @@ const loadCachedNavState = () => {
   }
 };
 
+const APP_VIEW_PATHS = {
+  dashboard: '/',
+  messages: '/messages',
+  schedule: '/schedule',
+  jobs: '/jobs',
+  fleet: '/fleet',
+  team: '/team',
+  inventory: '/inventory',
+  maintenance: '/maintenance',
+  training: '/training',
+  safety: '/safety',
+  bids: '/bids',
+  vendors: '/vendors',
+  reports: '/reports',
+  costing: '/costing',
+  finance: '/finance',
+  settings: '/settings',
+  documents: '/documents',
+};
+
+const viewFromPathname = (pathname) => {
+  const firstSegment = String(pathname || '/').split('/').filter(Boolean)[0] || '';
+  if (!firstSegment) return 'dashboard';
+  if (APP_VIEW_PATHS[firstSegment]) return firstSegment;
+  return 'dashboard';
+};
+
+const pathForView = (view) => APP_VIEW_PATHS[String(view || '').toLowerCase()] || '/';
+
 // WorkspaceLoadingScreen removed — replaced by ExcavatorLoader (see import above).
 
 const WorkspaceStartupErrorScreen = ({ message, onRetry }) => (
@@ -821,6 +850,8 @@ const MobileAppShell = ({
       const cachedNavState = useMemo(() => loadCachedNavState(), []);
       const [currentView, setCurrentView] = useState(() => {
         if (typeof window === 'undefined') return 'dashboard';
+        const urlView = viewFromPathname(window.location.pathname);
+        if (urlView !== 'dashboard' || window.location.pathname === '/') return urlView;
         return safeLocalStorageGet('app.currentView', 'dashboard') || 'dashboard';
       });
       const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -1108,11 +1139,12 @@ const MobileAppShell = ({
           documents: { key: 'documents', label: 'Documents', iconKey: 'folder-open' },
           training: { key: 'training', label: 'Training', iconKey: 'chalkboard-user' },
           finance: { key: 'finance', label: 'Finance', iconKey: 'landmark' },
+          settings: { key: 'settings', label: 'Settings', iconKey: 'gear' },
           // subscribe intentionally omitted — billing accessed via profile dropdown
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule'],
-          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule', 'settings'],
+          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule', 'settings'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
           operator: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
@@ -1208,6 +1240,16 @@ const MobileAppShell = ({
         if (!moduleKey) return true;
         return String(moduleAccess?.[moduleKey] || 'none') === 'edit';
       }, [moduleAccess]);
+
+      const navigateToView = useCallback((view, { replace = false } = {}) => {
+        const nextView = String(view || 'dashboard');
+        setCurrentView(nextView);
+        if (typeof window === 'undefined') return;
+        const nextPath = pathForView(nextView);
+        if (window.location.pathname === nextPath) return;
+        const method = replace ? 'replaceState' : 'pushState';
+        window.history[method]({}, '', nextPath);
+      }, []);
 
       const notificationVisuals = {
         new_message: {
@@ -1890,6 +1932,16 @@ const MobileAppShell = ({
         loadNav();
       }, [loadNav, accessRefreshNonce]);
 
+      useEffect(() => {
+        if (typeof window === 'undefined') return undefined;
+        const syncViewFromLocation = () => {
+          setCurrentView(viewFromPathname(window.location.pathname));
+        };
+        syncViewFromLocation();
+        window.addEventListener('popstate', syncViewFromLocation);
+        return () => window.removeEventListener('popstate', syncViewFromLocation);
+      }, []);
+
       // Re-fetch permissions + subscription after a Supabase token/session
       // refresh (native sessions rotate ~hourly). Without this, a token refresh
       // could leave access state stale/denied until the app was reopened.
@@ -1927,13 +1979,13 @@ const MobileAppShell = ({
       useEffect(() => {
         if (!navLoaded) return;
         if (navItems.length === 0) {
-          if (currentView !== 'dashboard') setCurrentView('dashboard');
+          if (currentView !== 'dashboard') navigateToView('dashboard', { replace: true });
           return;
         }
         if (!navItems.some((item) => item.id === currentView)) {
-          setCurrentView('dashboard');
+          navigateToView('dashboard', { replace: true });
         }
-      }, [navItems, currentView, navLoaded]);
+      }, [navItems, currentView, navLoaded, navigateToView]);
 
       useEffect(() => {
         safeLocalStorageSet('app.currentView', currentView);
@@ -2102,7 +2154,7 @@ const MobileAppShell = ({
           );
         }
         switch(currentView) {
-          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
+          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />;
           case 'messages': return <MessagesView employees={employees} availableUsersSeed={companyMembers} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
@@ -2127,7 +2179,7 @@ const MobileAppShell = ({
               );
             }
             return <SubscribeView employees={employees} currentRole={currentRole} />;
-          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} />;
+          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} navigateToView={navigateToView} />;
           case 'marketing': return <MarketingView />;
           case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} jobs={jobs} />;
           default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
@@ -2190,7 +2242,7 @@ const MobileAppShell = ({
                       setPressedNavItem(null);
                     }}
                     onClick={() => {
-                      setCurrentView(navId);
+                      navigateToView(navId);
                       setMobileSidebarOpen(false);
                       setPressedNavItem(null);
                     }}
@@ -2484,7 +2536,7 @@ const MobileAppShell = ({
                           {/* Consolidated Settings — Profile, Company, Team,
                               Billing, and Security live on one page now. */}
                           <button
-                            onClick={() => { setShowUserMenu(false); setCurrentView('settings'); }}
+                            onClick={() => { setShowUserMenu(false); navigateToView('settings'); }}
                             className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                           >
                             <Icon name="gear" className="text-gray-400" /> Settings
@@ -10293,7 +10345,7 @@ const MobileAppShell = ({
     // ============================================
     // SETTINGS VIEW
     // ============================================
-    const SettingsView = ({ employees = [], currentUser, currentRole }) => {
+    const SettingsView = ({ employees = [], currentUser, currentRole, navigateToView }) => {
       const isIosApp = useMemo(() => isIosNativeAppRuntime(), []);
       const isAdmin = currentRole === 'executive';
 
@@ -10491,22 +10543,24 @@ const MobileAppShell = ({
         return acc;
       }, {});
 
-      const field = 'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
+      const field = 'w-full min-w-0 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent';
       const label = 'mb-1 block text-xs font-medium text-gray-500';
+      const cardClass = 'p-4 sm:p-5 lg:p-6';
+      const cardHeaderClass = 'mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between';
 
       return (
-        <div className="space-y-6 max-w-3xl">
+        <div className="mx-auto w-full max-w-6xl space-y-5 lg:space-y-6">
           {loadError && <InlineError>{loadError}</InlineError>}
 
           {/* 1. My Profile */}
-          <Card className="p-5">
-            <div className="flex items-center justify-between mb-4">
+          <Card className={cardClass}>
+            <div className={cardHeaderClass}>
               <h3 className="font-semibold text-gray-900">My Profile</h3>
-              <Button variant="brand" size="sm" onClick={saveProfile} disabled={profileSaving || loading}>
+              <Button variant="brand" size="sm" className="w-full sm:w-auto" onClick={saveProfile} disabled={profileSaving || loading}>
                 {profileSaving ? 'Saving…' : 'Save'}
               </Button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
               <div><label className={label}>Full name</label><input className={field} value={profile.full_name} onChange={(e) => setProfile((p) => ({ ...p, full_name: e.target.value }))} /></div>
               <div><label className={label}>Job title</label><input className={field} value={profile.job_title} onChange={(e) => setProfile((p) => ({ ...p, job_title: e.target.value }))} /></div>
               <div><label className={label}>Phone</label><input className={field} value={profile.phone} onChange={(e) => setProfile((p) => ({ ...p, phone: e.target.value }))} inputMode="tel" /></div>
@@ -10518,14 +10572,14 @@ const MobileAppShell = ({
 
           {/* 2. Company Information (admin) */}
           {isAdmin && (
-            <Card className="p-5">
-              <div className="flex items-center justify-between mb-4">
+            <Card className={cardClass}>
+              <div className={cardHeaderClass}>
                 <h3 className="font-semibold text-gray-900">Company Information</h3>
-                <Button variant="brand" size="sm" onClick={saveCompany} disabled={companySaving || loading}>
+                <Button variant="brand" size="sm" className="w-full sm:w-auto" onClick={saveCompany} disabled={companySaving || loading}>
                   {companySaving ? 'Saving…' : 'Save'}
                 </Button>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
                 <div><label className={label}>Company name</label><input className={field} value={company.company_name} onChange={(e) => setCompany((c) => ({ ...c, company_name: e.target.value }))} /></div>
                 <div><label className={label}>Timezone</label><input className={field} value={company.timezone} onChange={(e) => setCompany((c) => ({ ...c, timezone: e.target.value }))} placeholder="e.g. America/New_York" /></div>
                 <div><label className={label}>Company phone</label><input className={field} value={company.phone} onChange={(e) => setCompany((c) => ({ ...c, phone: e.target.value }))} inputMode="tel" /></div>
@@ -10537,16 +10591,16 @@ const MobileAppShell = ({
           )}
 
           {/* 3. Team / Role Summary */}
-          <Card className="p-5">
-            <div className="flex items-center justify-between mb-4">
+          <Card className={cardClass}>
+            <div className={cardHeaderClass}>
               <h3 className="font-semibold text-gray-900">Team & Roles</h3>
-              <Button variant="secondary" size="sm" onClick={() => setCurrentView('team')}>
+              <Button variant="secondary" size="sm" className="w-full sm:w-auto" onClick={() => navigateToView('team')}>
                 <Icon name="arrow-right" className="mr-2" /> Open Team
               </Button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
               {['admin', 'pm', 'foreman', 'mechanic', 'operator'].map((role) => (
-                <div key={role} className="rounded-lg border border-gray-200 p-3">
+                <div key={role} className="min-w-0 rounded-lg border border-gray-200 p-3">
                   <p className="text-xs uppercase text-gray-500">{role === 'admin' ? 'CEO' : role}</p>
                   <p className="text-xl font-semibold text-gray-900">{Number(teamByRole[role] || 0)}</p>
                 </div>
@@ -10557,19 +10611,19 @@ const MobileAppShell = ({
 
           {/* 4. Billing & Subscription (web admin only; Stripe-owned, read-only) */}
           {!isIosApp && isAdmin && (
-            <Card className="p-5">
-              <div className="flex items-center justify-between mb-4">
+            <Card className={cardClass}>
+              <div className={cardHeaderClass}>
                 <h3 className="font-semibold text-gray-900">Billing & Subscription</h3>
-                <Button variant="secondary" size="sm" onClick={openBillingPortal} disabled={portalLoading}>
+                <Button variant="secondary" size="sm" className="w-full sm:w-auto" onClick={openBillingPortal} disabled={portalLoading}>
                   <Icon name={portalLoading ? 'spinner' : 'arrow-up-right-from-square'} className={`mr-2 ${portalLoading ? 'animate-spin' : ''}`} />
                   Manage Billing
                 </Button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Plan</p><p className="font-medium">Groundwork Pro</p></div>
-                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Status</p><p className="font-medium capitalize">{String(billingStatus?.subscription_status || 'inactive')}</p></div>
-                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Trial ends</p><p className="font-medium">{billingStatus?.trial_ends_at ? formatDate(billingStatus.trial_ends_at) : '—'}</p></div>
-                <div className="rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Next renewal</p><p className="font-medium">{billingStatus?.current_period_end ? formatDate(billingStatus.current_period_end) : '—'}</p></div>
+              <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+                <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Plan</p><p className="truncate font-medium">Groundwork Pro</p></div>
+                <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Status</p><p className="truncate font-medium capitalize">{String(billingStatus?.subscription_status || 'inactive')}</p></div>
+                <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Trial ends</p><p className="truncate font-medium">{billingStatus?.trial_ends_at ? formatDate(billingStatus.trial_ends_at) : '—'}</p></div>
+                <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Next renewal</p><p className="truncate font-medium">{billingStatus?.current_period_end ? formatDate(billingStatus.current_period_end) : '—'}</p></div>
               </div>
               <p className="mt-3 text-xs text-gray-400">Price, payment method, and invoices are managed in the Stripe billing portal.</p>
               {portalError && <p className="mt-2 text-sm text-red-600">{portalError}</p>}
@@ -10578,14 +10632,14 @@ const MobileAppShell = ({
 
           {/* Cost Defaults (operational config; admin) */}
           {isAdmin && (
-            <Card className="p-5">
-              <div className="flex items-center justify-between mb-4">
+            <Card className={cardClass}>
+              <div className={cardHeaderClass}>
                 <h3 className="font-semibold text-gray-900">Cost Defaults</h3>
-                <Button variant="brand" size="sm" onClick={savePricingSettings} disabled={pricingSaving || pricingLoading}>
+                <Button variant="brand" size="sm" className="w-full sm:w-auto" onClick={savePricingSettings} disabled={pricingSaving || pricingLoading}>
                   {pricingSaving ? 'Saving…' : 'Save'}
                 </Button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 lg:gap-4">
                 {[
                   ['operator_labor_rate', 'Operator Labor Rate'],
                   ['labor_burden_percent', 'Labor Burden %'],
@@ -10607,13 +10661,13 @@ const MobileAppShell = ({
           )}
 
           {/* 5. Security / Sign Out */}
-          <Card className="p-5">
+          <Card className={cardClass}>
             <h3 className="font-semibold text-gray-900 mb-4">Security</h3>
-            <div className="flex flex-col sm:flex-row gap-3">
-              <Button variant="secondary" onClick={sendPasswordReset} disabled={pwdSending}>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Button variant="secondary" className="w-full sm:w-auto" onClick={sendPasswordReset} disabled={pwdSending}>
                 <Icon name="key" className="mr-2" /> {pwdSending ? 'Sending…' : 'Change password'}
               </Button>
-              <Button variant="danger" onClick={signOut} disabled={signingOut}>
+              <Button variant="danger" className="w-full sm:w-auto" onClick={signOut} disabled={signingOut}>
                 <Icon name="arrow-right-from-bracket" className="mr-2" /> {signingOut ? 'Signing out…' : 'Sign out'}
               </Button>
             </div>
@@ -13761,6 +13815,26 @@ const MobileAppShell = ({
         };
       }, [accessDecision, isAuthenticated, verifySetup, oauthCallbackProcessing]);
 
+      useEffect(() => {
+        if (oauthCallbackProcessing || !authResolved || !nativeRuntimeResolved) return;
+        if (!isAuthenticated) {
+          onReady?.();
+          return;
+        }
+        if (setupChecked && !setupRefreshing && accessDecision !== 'loading') {
+          onReady?.();
+        }
+      }, [
+        accessDecision,
+        authResolved,
+        isAuthenticated,
+        nativeRuntimeResolved,
+        oauthCallbackProcessing,
+        onReady,
+        setupChecked,
+        setupRefreshing,
+      ]);
+
       if (oauthCallbackProcessing) {
         return (
           <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
@@ -13776,9 +13850,6 @@ const MobileAppShell = ({
       }
 
       if (!isAuthenticated) {
-        // Logged-out destination is resolved — release the startup overlay so
-        // the landing/onboarding page is not hidden behind it for the full cap.
-        onReady?.();
         if (startupError) {
           return (
             <WorkspaceStartupErrorScreen
@@ -13805,8 +13876,6 @@ const MobileAppShell = ({
       // Startup access resolved. Mount the dashboard <App> (which loads all
       // protected APIs) ONLY when access is fully confirmed. Other states show
       // a standalone gate that fires no protected/dashboard APIs.
-      onReady?.();
-
       if (accessDecision === 'native-no-workspace') {
         return (
           <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">

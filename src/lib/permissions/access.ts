@@ -18,6 +18,17 @@ const accessRank: Record<ModuleAccessLevel, number> = {
   edit: 2,
 };
 
+// Finance and Reports are sensitive (financials) and restricted to Manager-level
+// and above (manager + owner/admin "ceo"). Any role below Manager must never be
+// granted Finance/Reports, even if a request includes them — they are stripped
+// server-side here.
+const MANAGER_LEVEL_TEMPLATE_ROLES = new Set<InvitationRole>(["ceo", "manager"]);
+const SENSITIVE_MANAGER_ONLY_MODULES: ModulePermissionKey[] = ["finance", "reports"];
+
+export function isManagerLevelInvitationRole(role: InvitationRole): boolean {
+  return MANAGER_LEVEL_TEMPLATE_ROLES.has(role);
+}
+
 const roleToTemplateRole: Record<AppRole, InvitationRole> = {
   admin: "ceo",
   pm: "manager",
@@ -162,6 +173,13 @@ export function normalizePermissionPayload(input: unknown): {
 
   for (const key of modulePermissionKeys) {
     if (!merged[key]) merged[key] = "none";
+  }
+
+  // Strip Finance/Reports for any role below Manager — sensitive financials stay
+  // Manager+ only, regardless of what the client submitted. (CEO is overridden to
+  // full access below.)
+  if (!isManagerLevelInvitationRole(parsed.role)) {
+    for (const key of SENSITIVE_MANAGER_ONLY_MODULES) merged[key] = "none";
   }
 
   if (parsed.role === "ceo") {

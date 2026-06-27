@@ -95,7 +95,13 @@ async function ensureCompanyBootstrapDefaults(
   companyId: string,
   metadata: Record<string, unknown> | undefined
 ) {
-  const fallbackTimezone = String(metadata?.timezone ?? "").trim() || "America/New_York";
+  // Never auto-default the company timezone. A timezone (with the company name)
+  // marks company setup "derived complete", which would let a brand-new owner
+  // skip /setup. Only honor a timezone the user explicitly provided at signup;
+  // otherwise leave it empty so onboarding routes the owner to /setup.
+  const explicitTimezone = String(metadata?.timezone ?? "").trim();
+  if (!explicitTimezone) return;
+
   const companyResult = await supabase
     .from("companies")
     .select("timezone")
@@ -112,7 +118,7 @@ async function ensureCompanyBootstrapDefaults(
 
   const updateResult = await supabase
     .from("companies")
-    .update({ timezone: fallbackTimezone })
+    .update({ timezone: explicitTimezone })
     .eq("id", companyId);
   if (updateResult.error && !isMissingSchemaError(updateResult.error.message)) {
     throw new Error(updateResult.error.message || "Failed to initialize company timezone");
@@ -282,7 +288,10 @@ export async function POST(request: Request) {
     // 2) Create company
     const { data: company, error: companyError } = await supabase
       .from("companies")
-      .insert({ name: requestedCompanyName || "My First Company", timezone: String(userMetadata?.timezone ?? "").trim() || "America/New_York" })
+      // Do NOT auto-set a default timezone here. A timezone (plus company name)
+      // would mark company setup "derived complete" and let a brand-new owner
+      // skip /setup. The owner sets the timezone during onboarding instead.
+      .insert({ name: requestedCompanyName || "My First Company", timezone: "" })
       .select()
       .single();
 

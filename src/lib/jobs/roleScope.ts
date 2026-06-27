@@ -1,5 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
+import {
+  applyPermissionOverrideFromCookie,
+  hasModuleAccess,
+  resolveUserModulePermissions,
+  TEST_MODULE_ACCESS_COOKIE,
+} from "@/lib/permissions/runtime";
+import { cookies } from "next/headers";
 
 const MISSING_SCHEMA_RE = /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i;
 
@@ -103,8 +110,50 @@ export async function getRoleScopedJobIds(
   return getAssignedJobIds(supabase, companyId, userId);
 }
 
+// True when the user can view the jobs module (admin/pm always; otherwise based
+// on resolved module permissions, including the dev/E2E test override cookie).
+export async function userHasJobsViewAccess(
+  supabase: any,
+  companyId: string,
+  userId: string,
+  role: AppRole
+): Promise<boolean> {
+  if (role === "admin" || role === "pm") return true;
+  let permissions = await resolveUserModulePermissions({ supabase, companyId, userId, role });
+  if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
+    const store = await cookies();
+    permissions = applyPermissionOverrideFromCookie(
+      permissions,
+      store.get(TEST_MODULE_ACCESS_COOKIE)?.value
+    );
+  }
+  return hasModuleAccess(permissions, "jobs", "view");
+}
+
+// Permission-aware job scoping. Field-level roles (operator/mechanic) are
+// restricted to their assigned jobs ONLY when they lack jobs module view access.
+// A user explicitly granted jobs:view (or higher) can reach all company jobs;
+// without it they see only assigned jobs. admin/pm/foreman are never restricted.
+// Returns null = no restriction (all company jobs visible).
+export async function getEffectiveScopedJobIds(
+  supabase: any,
+  companyId: string,
+  userId: string,
+  role: AppRole | null | undefined
+): Promise<string[] | null> {
+  if (!role) return null;
+  if (!shouldRestrictJobsToAssignedJobs(role)) return null;
+  if (await userHasJobsViewAccess(supabase, companyId, userId, role)) return null;
+  return getAssignedJobIds(supabase, companyId, userId);
+}
+
 export function shouldRestrictJobsToAssignedJobs(role: AppRole | null | undefined): boolean {
-  return role === "mechanic";
+  // Field-level roles may only reach jobs they are assigned to. admin/pm see all
+  // jobs; foreman also browses the full list, so it is intentionally excluded.
+  // operator (which also covers normalized fieldstaff) and mechanic are scoped to
+  // their assigned jobs — this is what makes job *detail* access (e.g.
+  // GET /api/jobs/[id]) return 403 for an unassigned job instead of 200.
+  return role === "mechanic" || role === "operator";
 }
 
 export async function getRoleScopedEquipmentIds(

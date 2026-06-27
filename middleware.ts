@@ -199,11 +199,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       }
 
       if (guardedPageRoles && !guardedPageRoles.includes(resolvedRole)) {
-        // For page routes return a redirect rather than raw JSON so the user
-        // sees the dashboard instead of a JSON error in their browser.
-        if (!isApi) {
-          return NextResponse.redirect(new URL("/", request.url));
-        }
+        // Deny direct access to a guarded page route for roles that lack it.
+        // Return a 403 (not a 200 access-denied rewrite) so a denied role truly
+        // cannot reach the page — the in-app SPA still shows its own "Access
+        // Restricted" state for client-side view switches.
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
 

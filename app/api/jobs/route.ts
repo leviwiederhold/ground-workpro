@@ -5,10 +5,10 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { hasModuleAccess, resolveUserModulePermissions } from "@/lib/permissions/runtime";
 import {
-  getRoleScopedJobIds,
+  getEffectiveScopedJobIds,
   resolveMembershipRole,
-  shouldRestrictJobsToAssignedJobs,
 } from "@/lib/jobs/roleScope";
 
 const persistedJobStatusSchema = z.enum([
@@ -33,13 +33,22 @@ const listQuerySchema = z.object({
 });
 
 const createJobSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().optional(),
+  title: z.string().optional(),
   status: persistedJobStatusSchema.default("draft").optional(),
   client: z.string().default("").optional(),
+  client_name: z.string().default("").optional(),
+  address: z.string().default("").optional(),
   site_address: z.string().default("").optional(),
+  startDate: z.string().default("").optional(),
   start_date: z.string().default("").optional(),
+  endDate: z.string().default("").optional(),
+  end_date: z.string().default("").optional(),
+  targetEndDate: z.string().default("").optional(),
   target_end_date: z.string().default("").optional(),
   notes: z.string().default("").optional(),
+  description: z.string().default("").optional(),
+  budget: z.union([z.number(), z.string()]).nullable().optional(),
 });
 
 type JobNotesMeta = {
@@ -82,15 +91,17 @@ function buildJobNotes(plainNotes: string, meta: JobNotesMeta): string {
 
 const mapJob = (row: any) => {
   const parsedNotes = parseJobNotes(row.notes);
+  const siteAddress = row.site_address ?? row.address ?? "";
+  const hasCoordinates = row.lat !== null && row.lat !== undefined && row.lng !== null && row.lng !== undefined;
   return {
   id: row.id,
   name: row.name ?? "",
   client: row.client ?? row.client_name ?? parsedNotes.meta.client ?? "",
   client_name: row.client_name ?? row.client ?? parsedNotes.meta.client ?? "",
   status: row.status ?? "draft",
-  siteAddress: row.siteAddress ?? row.site_address ?? row.address ?? "",
-  address: row.site_address ?? row.address ?? "",
-  site_address: row.site_address ?? row.address ?? "",
+  siteAddress: row.siteAddress ?? siteAddress,
+  address: siteAddress,
+  site_address: siteAddress,
   notes: parsedNotes.plainNotes,
   budget: Number(row.budget ?? 0),
   spent: Number(row.spent ?? 0),
@@ -100,10 +111,72 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+  geocoding_status: hasCoordinates ? "resolved" : siteAddress ? "not_configured" : "not_requested",
   source_bid_id: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   sourceBidId: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   };
 };
+
+const FINANCIAL_JOB_FIELDS = [
+  "budget",
+  "budget_cost",
+  "budgetCost",
+  "spent",
+  "cost",
+  "cost_to_date",
+  "costToDate",
+  "profit",
+  "margin",
+  "margin_percent",
+  "marginPercent",
+  "marginPct",
+  "contract_value",
+  "contractValue",
+] as const;
+
+async function canAccessJobFinancials(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  companyId: string,
+  userId: string,
+  role: string | null | undefined
+) {
+  if (role === "admin" || role === "pm") return true;
+  if (!role) return false;
+  const permissions = await resolveUserModulePermissions({
+    supabase,
+    companyId,
+    userId,
+    role: role as any,
+  });
+  return hasModuleAccess(permissions, "finance", "view") || hasModuleAccess(permissions, "reports", "view");
+}
+
+function redactJobFinancials<T extends Record<string, unknown>>(job: T, canViewFinancials: boolean): T {
+  if (canViewFinancials) return job;
+  const redacted = { ...job };
+  for (const field of FINANCIAL_JOB_FIELDS) {
+    delete redacted[field];
+  }
+  return redacted as T;
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeOptionalDate(...values: unknown[]): string {
+  for (const value of values) {
+    const text = normalizeText(value);
+    if (text) return text;
+  }
+  return "";
+}
+
+function normalizeBudget(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(String(value).replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
 
 async function getJobAssignmentCounts(
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
@@ -227,7 +300,7 @@ async function insertJobWithSchemaFallback(
 ) {
   const insertPayload: Record<string, unknown> = { ...payload };
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     const result = await supabase.from("jobs").insert(insertPayload).select("*").single();
     if (!result.error) return result;
 
@@ -268,6 +341,15 @@ async function insertJobWithSchemaFallback(
     }
     if (missingColumn === "targetEndDate" && "targetEndDate" in insertPayload) {
       delete insertPayload.targetEndDate;
+      continue;
+    }
+
+    if (missingColumn === "budget" && "budget" in insertPayload) {
+      delete insertPayload.budget;
+      continue;
+    }
+    if ((missingColumn === "lat" || missingColumn === "lng") && missingColumn in insertPayload) {
+      delete insertPayload[missingColumn];
       continue;
     }
 
@@ -329,10 +411,9 @@ export async function GET(request: Request) {
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const canViewFinancials = await canAccessJobFinancials(supabase, companyId, userId, role);
 
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && scopedJobIds.length === 0) {
       return NextResponse.json({ items: [], jobs: [], nextCursor: null, page: 1, pageSize: limit, total: 0 });
     }
@@ -406,7 +487,7 @@ export async function GET(request: Request) {
     const rows = data ?? [];
     const hasMore = rows.length > limit;
     const trimmedRows = hasMore ? rows.slice(0, limit) : rows;
-    const jobs = trimmedRows.map(mapJob);
+    const jobs = trimmedRows.map((row) => redactJobFinancials(mapJob(row), canViewFinancials));
     const jobIds = jobs.map((job) => String(job.id));
     const countsByJobId = await getJobAssignmentCounts(supabase, companyId, jobIds);
     const jobsWithCounts = jobs.map((job) => {
@@ -421,6 +502,7 @@ export async function GET(request: Request) {
 
     const total = typeof totalCount === "number" ? totalCount : jobsWithCounts.length + offset;
     const page = Math.floor(offset / limit) + 1;
+    // Keep both keys for existing Jobs/Schedule/Map consumers while they migrate to `items`.
     return NextResponse.json({ items: jobsWithCounts, jobs: jobsWithCounts, nextCursor, page, pageSize: limit, total });
   } catch (error) {
     if (error instanceof TenantResolverError) {
@@ -456,22 +538,47 @@ export async function POST(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
     const { data: userData } = await supabase.auth.getUser();
+    const membershipRole = await resolveMembershipRole(supabase, companyId, userId);
+    const effectiveRole = await getEffectiveRole();
+    const role = effectiveRole ?? membershipRole;
+    const canViewFinancials = await canAccessJobFinancials(supabase, companyId, userId, role);
 
-    const encodedNotes = buildJobNotes(payload.notes ?? "", {
-      client: payload.client ?? "",
-      start_date: payload.start_date ?? "",
-      target_end_date: payload.target_end_date ?? "",
+    const name = normalizeText(payload.name) || normalizeText(payload.title);
+    if (!name) {
+      return NextResponse.json({ error: "Invalid job payload", details: { fieldErrors: { name: ["Required"] } } }, { status: 400 });
+    }
+
+    const client = normalizeText(payload.client) || normalizeText(payload.client_name);
+    const siteAddress = normalizeText(payload.site_address) || normalizeText(payload.address);
+    const startDate = normalizeOptionalDate(payload.start_date, payload.startDate);
+    const targetEndDate = normalizeOptionalDate(
+      payload.target_end_date,
+      payload.targetEndDate,
+      payload.end_date,
+      payload.endDate
+    );
+    const notes = normalizeText(payload.notes) || normalizeText(payload.description);
+    const budget = normalizeBudget(payload.budget);
+
+    const encodedNotes = buildJobNotes(notes, {
+      client,
+      start_date: startDate,
+      target_end_date: targetEndDate,
     });
 
     const baseInsertPayload = {
       company_id: companyId,
       created_by: userData?.user?.id ?? null,
-      name: payload.name,
-      client: payload.client ?? "",
-      site_address: payload.site_address ?? "",
-      start_date: payload.start_date || null,
-      target_end_date: payload.target_end_date || null,
+      name,
+      client,
+      client_name: client,
+      site_address: siteAddress,
+      start_date: startDate || null,
+      target_end_date: targetEndDate || null,
       notes: encodedNotes,
+      lat: null,
+      lng: null,
+      ...(canViewFinancials && budget !== null ? { budget } : {}),
     };
 
     const insertPayload = {
@@ -494,7 +601,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const job = mapJob(data);
+    const job = redactJobFinancials(mapJob(data), canViewFinancials);
     await logAuditEvent({
       supabase,
       companyId,

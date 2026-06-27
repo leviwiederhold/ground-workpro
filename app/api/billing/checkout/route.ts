@@ -144,10 +144,10 @@ export async function POST(request: Request) {
       price: priceId,
       key_mode: stripeKeyMode(),
     });
-    const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
+    const checkoutParams = {
+      mode: "subscription" as const,
       customer: customerId,
-      payment_method_collection: "always",
+      payment_method_collection: "always" as const,
       line_items: [{ price: priceId, quantity: 1 }],
       subscription_data: {
         trial_period_days: 7,
@@ -161,6 +161,10 @@ export async function POST(request: Request) {
       },
       success_url: `${origin}/settings/billing/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/pricing`,
+    };
+    const idempotencyBucket = Math.floor(Date.now() / (10 * 60 * 1000));
+    const session = await stripe.checkout.sessions.create(checkoutParams, {
+      idempotencyKey: `checkout:${companyId}:${userId}:${priceId}:${idempotencyBucket}`,
     });
 
     console.log("[billing/checkout] session created:", session.id);

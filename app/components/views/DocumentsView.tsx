@@ -571,7 +571,8 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui, jobs = [] })
           headerClassName="dark:border-zinc-800"
           bodyClassName="bg-gray-50 p-4 sm:p-6 dark:bg-zinc-900/60"
         >
-            <div className="mb-4 flex justify-end">
+          <div data-testid="documents-preview-modal" className="flex h-full min-h-0 flex-col">
+            <div className="mb-4 flex items-center justify-end gap-2">
               {getDocumentLink(previewDocument) ? (
                 <a
                   href={getDocumentLink(previewDocument)}
@@ -584,6 +585,16 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui, jobs = [] })
                   Download
                 </a>
               ) : null}
+              <button
+                type="button"
+                onClick={() => setPreviewDocumentId(null)}
+                className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                data-testid="documents-preview-close"
+                aria-label="Close preview"
+              >
+                <Icon name="xmark" className="mr-2" />
+                Close
+              </button>
             </div>
               {isImageDocument(previewDocument) && getDocumentLink(previewDocument) ? (
                 <div
@@ -627,6 +638,7 @@ export function DocumentsView({ currentRole, moduleAccess = {}, ui, jobs = [] })
                   </div>
                 </div>
               )}
+          </div>
         </MobileSheet>
       )}
     </div>

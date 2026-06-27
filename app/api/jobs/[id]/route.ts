@@ -5,10 +5,10 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { logAuditEvent } from "@/lib/audit/logAuditEvent";
+import { hasModuleAccess, resolveUserModulePermissions } from "@/lib/permissions/runtime";
 import {
-  getRoleScopedJobIds,
+  getEffectiveScopedJobIds,
   resolveMembershipRole,
-  shouldRestrictJobsToAssignedJobs,
 } from "@/lib/jobs/roleScope";
 
 const jobStatusSchema = z.enum([
@@ -23,12 +23,21 @@ const jobStatusSchema = z.enum([
 const updateJobSchema = z
   .object({
     name: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
     status: jobStatusSchema.optional(),
     client: z.string().nullable().optional(),
+    client_name: z.string().nullable().optional(),
+    address: z.string().nullable().optional(),
     site_address: z.string().nullable().optional(),
+    startDate: z.string().nullable().optional(),
     start_date: z.string().nullable().optional(),
+    endDate: z.string().nullable().optional(),
+    end_date: z.string().nullable().optional(),
+    targetEndDate: z.string().nullable().optional(),
     target_end_date: z.string().nullable().optional(),
     notes: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    budget: z.union([z.number(), z.string()]).nullable().optional(),
   })
   .refine((value: any) => Object.keys(value).length > 0, {
     message: "At least one field is required",
@@ -74,14 +83,16 @@ function buildJobNotes(plainNotes: string, meta: JobNotesMeta): string {
 
 const mapJob = (row: any) => {
   const parsedNotes = parseJobNotes(row.notes);
+  const siteAddress = row.site_address ?? row.address ?? "";
+  const hasCoordinates = row.lat !== null && row.lat !== undefined && row.lng !== null && row.lng !== undefined;
   return {
   id: row.id,
   name: row.name ?? "",
   client: row.client ?? row.client_name ?? parsedNotes.meta.client ?? "",
   client_name: row.client_name ?? row.client ?? parsedNotes.meta.client ?? "",
   status: row.status ?? "draft",
-  address: row.site_address ?? row.address ?? "",
-  site_address: row.site_address ?? row.address ?? "",
+  address: siteAddress,
+  site_address: siteAddress,
   notes: parsedNotes.plainNotes,
   budget: Number(row.budget ?? 0),
   spent: Number(row.spent ?? 0),
@@ -93,10 +104,73 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+  geocoding_status: hasCoordinates ? "resolved" : siteAddress ? "not_configured" : "not_requested",
   source_bid_id: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   sourceBidId: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   };
 };
+
+const FINANCIAL_JOB_FIELDS = [
+  "budget",
+  "budget_cost",
+  "budgetCost",
+  "spent",
+  "cost",
+  "cost_to_date",
+  "costToDate",
+  "profit",
+  "margin",
+  "margin_percent",
+  "marginPercent",
+  "marginPct",
+  "contract_value",
+  "contractValue",
+] as const;
+
+async function canAccessJobFinancials(
+  supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
+  companyId: string,
+  userId: string,
+  role: string | null | undefined
+) {
+  if (role === "admin" || role === "pm") return true;
+  if (!role) return false;
+  const permissions = await resolveUserModulePermissions({
+    supabase,
+    companyId,
+    userId,
+    role: role as any,
+  });
+  return hasModuleAccess(permissions, "finance", "view") || hasModuleAccess(permissions, "reports", "view");
+}
+
+function redactJobFinancials<T extends Record<string, unknown>>(job: T, canViewFinancials: boolean): T {
+  if (canViewFinancials) return job;
+  const redacted = { ...job };
+  for (const field of FINANCIAL_JOB_FIELDS) {
+    delete redacted[field];
+  }
+  return redacted as T;
+}
+
+function normalizeText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeNullableText(value: unknown): string | null {
+  if (value === null) return null;
+  return normalizeText(value);
+}
+
+function firstDefined<T>(...values: T[]): T | undefined {
+  return values.find((value) => value !== undefined);
+}
+
+function normalizeBudget(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(String(value).replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
 const isMissingSchemaError = (message: string | undefined) =>
@@ -126,7 +200,7 @@ async function updateJobWithSchemaFallback(
 ) {
   const updatePayload: Record<string, unknown> = { ...payload };
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
     const result = await supabase
       .from("jobs")
       .update(updatePayload)
@@ -175,6 +249,15 @@ async function updateJobWithSchemaFallback(
       continue;
     }
 
+    if (missingColumn === "budget" && "budget" in updatePayload) {
+      delete updatePayload.budget;
+      continue;
+    }
+    if ((missingColumn === "lat" || missingColumn === "lng") && missingColumn in updatePayload) {
+      delete updatePayload[missingColumn];
+      continue;
+    }
+
     if (missingColumn in updatePayload) {
       delete updatePayload[missingColumn];
       if (Object.keys(updatePayload).length === 0) {
@@ -220,12 +303,11 @@ export async function GET(
     }
 
     const normalizedId = normalizeId(id);
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const canViewFinancials = await canAccessJobFinancials(supabase, companyId, userId, role);
 
     const { data, error } = await supabase
       .from("jobs")
@@ -241,7 +323,7 @@ export async function GET(
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ job: mapJob(data) });
+    return NextResponse.json({ job: redactJobFinancials(mapJob(data), canViewFinancials) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -292,9 +374,8 @@ export async function PATCH(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const canViewFinancials = await canAccessJobFinancials(supabase, companyId, userId, role);
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -307,34 +388,56 @@ export async function PATCH(
       .maybeSingle();
 
     const beforeParsedNotes = parseJobNotes(beforeRow?.notes);
+    const clientUpdate = firstDefined(updatesBody.client, updatesBody.client_name);
+    const addressUpdate = firstDefined(updatesBody.site_address, updatesBody.address);
+    const startDateUpdate = firstDefined(updatesBody.start_date, updatesBody.startDate);
+    const targetEndDateUpdate = firstDefined(
+      updatesBody.target_end_date,
+      updatesBody.targetEndDate,
+      updatesBody.end_date,
+      updatesBody.endDate
+    );
+    const notesUpdate = firstDefined(updatesBody.notes, updatesBody.description);
+    const nameUpdate = firstDefined(updatesBody.name, updatesBody.title);
+
     const resolvedClient =
-      updatesBody.client !== undefined
-        ? (updatesBody.client ?? "")
+      clientUpdate !== undefined
+        ? (clientUpdate ?? "")
         : (beforeRow?.client ?? beforeRow?.client_name ?? beforeParsedNotes.meta.client ?? "");
     const resolvedStartDate =
-      updatesBody.start_date !== undefined
-        ? (updatesBody.start_date ?? "")
+      startDateUpdate !== undefined
+        ? (startDateUpdate ?? "")
         : (beforeRow?.start_date ?? beforeRow?.startDate ?? beforeParsedNotes.meta.start_date ?? "");
     const resolvedTargetEndDate =
-      updatesBody.target_end_date !== undefined
-        ? (updatesBody.target_end_date ?? "")
+      targetEndDateUpdate !== undefined
+        ? (targetEndDateUpdate ?? "")
         : (beforeRow?.target_end_date ?? beforeRow?.targetEndDate ?? beforeRow?.end_date ?? beforeRow?.endDate ?? beforeParsedNotes.meta.target_end_date ?? "");
     const resolvedNotesText =
-      updatesBody.notes !== undefined
-        ? (updatesBody.notes ?? "")
+      notesUpdate !== undefined
+        ? (notesUpdate ?? "")
         : beforeParsedNotes.plainNotes;
 
     const updatePayload: Record<string, unknown> = {};
-    if (updatesBody.name !== undefined) updatePayload.name = updatesBody.name;
+    if (nameUpdate !== undefined) updatePayload.name = normalizeText(nameUpdate);
     if (updatesBody.status !== undefined) updatePayload.status = updatesBody.status;
-    if (updatesBody.client !== undefined) updatePayload.client = updatesBody.client;
-    if (updatesBody.site_address !== undefined) updatePayload.site_address = updatesBody.site_address;
-    if (updatesBody.start_date !== undefined) updatePayload.start_date = updatesBody.start_date || null;
-    if (updatesBody.target_end_date !== undefined) updatePayload.target_end_date = updatesBody.target_end_date || null;
+    if (clientUpdate !== undefined) {
+      updatePayload.client = normalizeNullableText(clientUpdate);
+      updatePayload.client_name = normalizeNullableText(clientUpdate);
+    }
+    if (addressUpdate !== undefined) {
+      updatePayload.site_address = normalizeNullableText(addressUpdate);
+      updatePayload.lat = null;
+      updatePayload.lng = null;
+    }
+    if (startDateUpdate !== undefined) updatePayload.start_date = normalizeText(startDateUpdate) || null;
+    if (targetEndDateUpdate !== undefined) updatePayload.target_end_date = normalizeText(targetEndDateUpdate) || null;
+    if (canViewFinancials && updatesBody.budget !== undefined) {
+      updatePayload.budget = normalizeBudget(updatesBody.budget);
+    }
     updatePayload.notes = buildJobNotes(resolvedNotesText, {
-      client: resolvedClient,
-      start_date: resolvedStartDate,
-      target_end_date: resolvedTargetEndDate,
+      client: normalizeText(resolvedClient),
+      start_date: normalizeText(resolvedStartDate),
+      target_end_date: normalizeText(resolvedTargetEndDate),
     });
 
     const { data, error } = await updateJobWithSchemaFallback(
@@ -353,7 +456,7 @@ export async function PATCH(
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    const job = mapJob(updatedRow);
+    const job = redactJobFinancials(mapJob(updatedRow), canViewFinancials);
     await logAuditEvent({
       supabase,
       companyId,
@@ -361,7 +464,7 @@ export async function PATCH(
       eventType: "job.updated",
       entityType: "job",
       entityId: normalizedId as string | number,
-      before: beforeRow ? mapJob(beforeRow) : null,
+      before: beforeRow ? redactJobFinancials(mapJob(beforeRow), canViewFinancials) : null,
       after: job,
     });
 
@@ -394,9 +497,7 @@ export async function DELETE(
     if (!role) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const scopedJobIds = shouldRestrictJobsToAssignedJobs(role)
-      ? await getRoleScopedJobIds(supabase, companyId, userId, role)
-      : null;
+    const scopedJobIds = await getEffectiveScopedJobIds(supabase, companyId, userId, role);
     if (scopedJobIds && !scopedJobIds.includes(String(normalizedId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }

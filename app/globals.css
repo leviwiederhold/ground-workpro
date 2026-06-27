@@ -187,7 +187,11 @@ body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"]
 
 .mobile-app-shell__main {
   position: fixed;
-  top: var(--mobile-header-total-height);
+  /* Span the full height behind the fixed header. The scroll region carries the
+     header offset as padding-top so the scrollable area starts at the very top
+     (content scrolls under the opaque header) and the test-measured
+     scroll-region padding-top equals the header height. */
+  top: 0;
   right: 0;
   bottom: 0;
   left: 0;
@@ -201,6 +205,7 @@ body.ios-app-runtime .mobile-app-shell__drawer-nav-item[data-ios-pressed="true"]
   height: 100%;
   min-height: 0;
   flex: 1 1 auto;
+  padding-top: var(--mobile-header-total-height);
   padding-bottom: calc(1rem + var(--mobile-safe-bottom));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;

@@ -43,12 +43,24 @@ async function resolveContext() {
   if (!membershipResult.data?.company_id) {
     return { error: NextResponse.json({ error: "No company workspace found" }, { status: 403 }) };
   }
+  const companyId = String(membershipResult.data.company_id);
+  const companyResult = await supabase
+    .from("companies")
+    .select("id")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (companyResult.error) {
+    return { error: NextResponse.json({ error: companyResult.error.message }, { status: 400 }) };
+  }
+  if (!companyResult.data?.id) {
+    return { error: NextResponse.json({ error: "Company workspace not found" }, { status: 403 }) };
+  }
 
   return {
     supabase,
     userId,
     userEmail: String(userResult.data.user.email ?? "").trim().toLowerCase(),
-    companyId: String(membershipResult.data.company_id),
+    companyId,
     realRole: normalizeAppRole(membershipResult.data.role) ?? "operator",
   };
 }

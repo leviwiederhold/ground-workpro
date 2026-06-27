@@ -1086,6 +1086,7 @@ export function BidsView({ bids, bidsLoading, setBids, jobs, ui, currentRole }) 
               isOpen={showBidModal}
               onClose={closeBidModal}
               title={editingBidId ? 'Edit Bid' : 'Create Bid'}
+              closeLabel="Close bid modal"
               size="md"
               headerVariant="form"
               bodyClassName="space-y-4"

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { isCompanyOwnerEmployee } from "@/lib/auth/ownerLock";
 import {
   assertCeoAccessLocked,
   assertCeoSelfAccessNotReduced,
@@ -67,7 +69,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     const employeeResult = await supabase
       .from("employees")
-      .select("id, role, user_id")
+      .select("id, role, user_id, email")
       .eq("company_id", companyId)
       .eq("id", parsedParams.data.id)
       .maybeSingle();
@@ -137,7 +139,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const employeeResult = await supabase
       .from("employees")
-      .select("id, role, user_id")
+      .select("id, role, user_id, email")
       .eq("company_id", companyId)
       .eq("id", parsedParams.data.id)
       .maybeSingle();
@@ -147,6 +149,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     if (!employeeResult.data) {
       return NextResponse.json({ error: "Team member not found" }, { status: 404 });
+    }
+
+    // Owner/CEO lock takes precedence over the unlinked-account guard: the
+    // owner's role cannot be changed even if their employees row isn't linked.
+    if (parsedBody.data.role && parsedBody.data.role !== "ceo") {
+      const adminClient = getSupabaseAdmin();
+      const isOwner = await isCompanyOwnerEmployee({
+        adminClient,
+        db: adminClient ?? supabase,
+        companyId,
+        employeeRole: employeeResult.data.role,
+        employeeUserId: employeeResult.data.user_id,
+        employeeEmail: (employeeResult.data as { email?: unknown }).email,
+      });
+      if (isOwner) {
+        return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
+      }
     }
 
     const targetUserId = String(employeeResult.data.user_id ?? "").trim();

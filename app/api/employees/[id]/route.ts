@@ -6,6 +6,7 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { isCompanyOwnerEmployee } from "@/lib/auth/ownerLock";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -177,7 +178,6 @@ export async function PATCH(
     }
     const existingEmployee = existingEmployeeResult.data;
     const payload = parsed.data;
-    const existingRole = normalizeRoleValue(existingEmployee.role);
 
     if (payload.role !== undefined && actorRole !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -187,8 +187,21 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    if (payload.role !== undefined && existingRole === "admin" && normalizeRoleValue(payload.role) !== "admin") {
-      return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
+    // Owner/CEO lock: the company owner's role cannot be changed through the
+    // Employees endpoint, regardless of how the employees row is linked.
+    if (payload.role !== undefined && normalizeRoleValue(payload.role) !== "admin") {
+      const adminClient = getSupabaseAdmin();
+      const isTargetCeo = await isCompanyOwnerEmployee({
+        adminClient,
+        db: adminClient ?? supabase,
+        companyId,
+        employeeRole: existingEmployee.role,
+        employeeUserId: existingEmployee.user_id,
+        employeeEmail: existingEmployee.email,
+      });
+      if (isTargetCeo) {
+        return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
+      }
     }
 
     const updatePayload: Record<string, unknown> = {};

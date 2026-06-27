@@ -32,6 +32,8 @@ export default function SignupPage() {
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [inviteMode, setInviteMode] = useState(false);
   const [inviteInfo, setInviteInfo] = useState<{ companyName: string; role: string; jobTitle: string } | null>(null);
+  const [inviteBlock, setInviteBlock] = useState<{ title: string; message: string } | null>(null);
+  const [signingOut, setSigningOut] = useState(false);
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [loginHref, setLoginHref] = useState("/login");
@@ -60,6 +62,22 @@ export default function SignupPage() {
             role: String(data.item.role ?? "").trim(),
             jobTitle: String(data.item.job_title ?? "").trim(),
           });
+          // Block accepting in the inviter's own session: an owner/admin (or any
+          // existing member) must use a different browser or sign out so the
+          // invitee gets their own account — never the owner's.
+          if (data.item.viewer_is_owner) {
+            setInviteBlock({
+              title: "You're signed in as the company owner",
+              message:
+                "You're signed in as the company owner. Open this invite in a different browser or sign out to accept as a new employee.",
+            });
+          } else if (data.item.viewer_is_member) {
+            setInviteBlock({
+              title: "You're already a member",
+              message:
+                "You're already a member of this company. Open this invite in a different browser, or sign out and accept with the invited employee's own account.",
+            });
+          }
         })
         .catch(() => {});
     }
@@ -81,6 +99,13 @@ export default function SignupPage() {
         const sessionId = params.get("session_id");
         router.replace(`/settings/billing/success${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`);
         router.refresh();
+        return;
+      }
+      if (hasInvite) {
+        // A signed-in user opened an invite link. Never redirect to the dashboard
+        // (that reuses this session as the "employee"). The validate check above
+        // surfaces an owner/member block screen; otherwise the invitee can sign
+        // out and accept with their own account.
         return;
       }
       if (shouldStartTrial) {
@@ -316,6 +341,40 @@ export default function SignupPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (inviteMode && inviteBlock) {
+    return (
+      <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+        <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+            <i className="fa-solid fa-user-shield text-xl" aria-hidden="true" />
+          </div>
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">{inviteBlock.title}</h1>
+          <p className="text-sm text-gray-600 mb-6">{inviteBlock.message}</p>
+          <button
+            type="button"
+            onClick={async () => {
+              setSigningOut(true);
+              try {
+                await supabaseBrowser().auth.signOut();
+              } catch {
+                // ignore — fall through to reload so the invite can be retried
+              }
+              window.location.reload();
+            }}
+            disabled={signingOut}
+            className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60"
+            data-testid="invite-signout"
+          >
+            {signingOut ? "Signing out…" : "Sign out and accept as employee"}
+          </button>
+          <a href={loginHref} className="mt-3 inline-block text-sm text-gray-500 hover:text-gray-700">
+            Cancel
+          </a>
+        </div>
+      </main>
+    );
   }
 
   return (

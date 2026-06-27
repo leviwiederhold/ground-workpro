@@ -97,6 +97,29 @@ export async function POST(request: Request) {
     companyName = String(companyResult.data?.name ?? "").trim();
   }
 
+  // Detect whether the CURRENT browser session already belongs to the invited
+  // company. The signup/accept screen uses this to block an owner/admin (or any
+  // existing member) from accepting the invite in their own session — they must
+  // use a different browser or sign out so the invitee gets their own account.
+  let viewerIsMember = false;
+  let viewerIsOwner = false;
+  const { data: viewerAuth } = await fallback.auth.getUser();
+  const viewerUserId = String(viewerAuth?.user?.id ?? "").trim();
+  if (viewerUserId) {
+    const viewerMembership = await client
+      .from("memberships")
+      .select("role")
+      .eq("company_id", invitation.company_id)
+      .eq("user_id", viewerUserId)
+      .maybeSingle();
+    if (!viewerMembership.error && viewerMembership.data) {
+      viewerIsMember = true;
+      const viewerRole = String(viewerMembership.data.role ?? "").trim().toLowerCase();
+      viewerIsOwner =
+        viewerRole.includes("admin") || viewerRole.includes("ceo") || viewerRole.includes("executive");
+    }
+  }
+
   return NextResponse.json({
     item: {
       valid: true,
@@ -106,6 +129,8 @@ export async function POST(request: Request) {
       job_title: invitation.job_title ?? "",
       company_id: invitation.company_id,
       company_name: companyName,
+      viewer_is_member: viewerIsMember,
+      viewer_is_owner: viewerIsOwner,
     },
   });
 }

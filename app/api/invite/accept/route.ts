@@ -222,6 +222,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invite email does not match signed-in user" }, { status: 403 });
     }
 
+    // SECURITY: a user who already belongs to the invited company cannot accept
+    // an invite as a new employee. This blocks the critical "owner/admin opened
+    // the invite link in their own browser" case, which would otherwise reuse
+    // and OVERWRITE the owner's membership/role. The invitee must accept from
+    // their own account in a separate session.
+    const membershipInInvitedCompany = await client
+      .from("memberships")
+      .select("role")
+      .eq("company_id", invitationData.company_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!membershipInInvitedCompany.error && membershipInInvitedCompany.data) {
+      const currentRole = normalizeRole(membershipInInvitedCompany.data.role);
+      if (currentRole === "ceo" || currentRole === "admin" || isCeoMembershipRole(membershipInInvitedCompany.data.role)) {
+        return NextResponse.json(
+          {
+            error: "owner_session",
+            message:
+              "You're signed in as the company owner. Open this invite in a different browser or sign out to accept as a new employee.",
+          },
+          { status: 409 }
+        );
+      }
+      return NextResponse.json(
+        {
+          error: "already_member",
+          message:
+            "You're already a member of this company. Open this invite in a different browser, or sign out and accept with the invited employee's own account.",
+        },
+        { status: 409 }
+      );
+    }
+
     if (existingMembership.data?.company_id) {
       const existingCompanyId = String(existingMembership.data.company_id);
       const invitedCompanyId = String(invitationData.company_id);
@@ -260,6 +293,14 @@ export async function POST(request: Request) {
     );
     const userIsExistingCeo = ceoUserIds.has(userId);
     const resolvedIsCeo = isCeoMembershipRole(resolvedRole);
+    // Invites can never grant company owner/CEO access (CEO is also non-inviteable
+    // at creation). An invited user only ever receives an employee membership.
+    if (resolvedIsCeo) {
+      return NextResponse.json(
+        { error: "Invites cannot grant company owner/CEO access." },
+        { status: 422 }
+      );
+    }
     if (!resolvedIsCeo && ceoUserIds.size === 0) {
       return NextResponse.json({ error: "Company must always have at least one CEO membership" }, { status: 409 });
     }

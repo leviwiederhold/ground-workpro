@@ -3754,6 +3754,15 @@ const MobileAppShell = ({
         { key: 'team_management', label: 'Team Management' },
       ];
       const permissionLevels = ['none', 'view', 'edit'];
+      // Finance and Reports are Manager-or-above only. Below Manager they are
+      // hidden in the invite form and force-stripped from the payload (server
+      // enforces too). CEO is the owner and is not inviteable.
+      const MANAGER_LEVEL_INVITE_ROLES = ['ceo', 'manager'];
+      const SENSITIVE_MANAGER_ONLY_KEYS = ['finance', 'reports'];
+      const isManagerLevelInviteRole = (role) =>
+        MANAGER_LEVEL_INVITE_ROLES.includes(String(role || '').toLowerCase());
+      const canSeeSensitiveModule = (moduleKey, role) =>
+        !SENSITIVE_MANAGER_ONLY_KEYS.includes(moduleKey) || isManagerLevelInviteRole(role);
       const roleTemplateDefaults = {
         ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
         manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'view', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'view', team_management: 'view' },
@@ -4166,9 +4175,13 @@ const MobileAppShell = ({
         () =>
           permissionModules.map((module) => ({
             module_key: module.key,
-            access_level: permissionForm[module.key] || 'none',
+            // Below Manager never carries Finance/Reports access, even if stale
+            // form state set it. Server re-enforces this.
+            access_level: canSeeSensitiveModule(module.key, inviteForm.role)
+              ? (permissionForm[module.key] || 'none')
+              : 'none',
           })),
-        [permissionForm]
+        [permissionForm, inviteForm.role]
       );
 
       const sensitivePermissionGrants = useMemo(
@@ -4918,7 +4931,9 @@ const MobileAppShell = ({
                   <span className="text-[11px] text-gray-500 dark:text-zinc-400">Readable on mobile and desktop</span>
                 </div>
                 <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-[#090909]">
-                  {permissionModules.map((module) => (
+                  {permissionModules
+                    .filter((module) => canSeeSensitiveModule(module.key, inviteForm.role))
+                    .map((module) => (
                     <div key={module.key} className="grid grid-cols-1 gap-3 border-b border-gray-100 px-4 py-3 last:border-b-0 dark:border-zinc-800 sm:grid-cols-[minmax(0,1fr)_128px] sm:items-center">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="text-sm font-medium text-gray-800 dark:text-zinc-200">{module.label}</span>

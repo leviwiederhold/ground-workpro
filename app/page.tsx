@@ -7844,60 +7844,64 @@ const MobileAppShell = ({
             <table className="w-full">
               <thead className="bg-gray-50 dark:bg-[#050505]">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Item</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Category</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">On Hand</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Reserved</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Available</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Reorder</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Last Unit Cost</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Location</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Job</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500 dark:text-zinc-400">Actions</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Item</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Category</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">On Hand</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Reserved</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Available</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Reorder</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Last Unit Cost</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Location</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Job</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-zinc-400">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-zinc-800">
                 {inventoryLoading ? (
                   <tr>
-                    <td className="px-4 py-4 text-sm text-gray-500 dark:text-zinc-400" colSpan={10}>Loading inventory...</td>
+                    <td className="px-3 py-2 text-sm text-gray-500 dark:text-zinc-400" colSpan={10}>Loading inventory...</td>
                   </tr>
                 ) : filteredInventory.length === 0 ? (
                   <tr>
-                    <td className="px-4 py-4 text-sm text-gray-500 dark:text-zinc-400" colSpan={10}>No inventory items yet.</td>
+                    <td className="px-3 py-2 text-sm text-gray-500 dark:text-zinc-400" colSpan={10}>No inventory items yet.</td>
                   </tr>
                 ) : filteredInventory.map(item => {
                   const job = jobs.find(j => j.id === item.jobId);
                   const isLow = item.qtyOnHand <= item.reorderPoint;
                   return (
-                    <tr key={item.id} className={`hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''} ${selectedItemId === item.id ? 'ring-1 ring-brand-300' : ''}`} onClick={() => setSelectedItemId(item.id)}>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                    <tr key={item.id} className={`cursor-pointer text-sm hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''} ${selectedItemId === item.id ? 'ring-1 ring-brand-300' : ''}`} onClick={() => setSelectedItemId(item.id)}>
+                      <td className="whitespace-nowrap px-3 py-1.5">
+                        <div className="flex items-center gap-1.5">
                           {isLow && <Icon name="triangle-exclamation" className="text-red-500" />}
                           <span className="font-medium text-gray-900 dark:text-zinc-100">{item.name}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-zinc-300">{item.category}</td>
-                      <td className="px-4 py-3 text-right text-sm font-medium text-gray-900 dark:text-zinc-100">{item.qtyOnHand} {item.unit}</td>
-                      <td className="px-4 py-3 text-right text-sm text-gray-500 dark:text-zinc-400">{item.qtyReserved} {item.unit}</td>
-                      <td className="px-4 py-3 text-right text-sm font-medium text-green-600 dark:text-green-400">{item.qtyOnHand - item.qtyReserved} {item.unit}</td>
-                      <td className="px-4 py-3 text-right text-sm text-gray-700 dark:text-zinc-300">{item.reorderPoint} {item.unit}</td>
-                      <td className="px-4 py-3 text-right text-sm text-gray-700 dark:text-zinc-300">{formatCurrency(item.lastUnitCost ?? item.unitCost)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-zinc-300">{item.location}</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-zinc-300">{job?.name || 'General'}</td>
-                      <td className="px-4 py-3 text-right">
-                        <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'receive'); }}><Icon name="plus" /></Button>
-                        <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'issue'); }}><Icon name="arrow-up-right-from-square" /></Button>
-                        <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'adjust'); }}><Icon name="sliders" /></Button>
-                        <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'transfer'); }}><Icon name="right-left" /></Button>
-                        <Button variant="secondary" size="sm" onClick={(event) => { event.stopPropagation(); openEditModal(item); }}><Icon name="pen-to-square" /></Button>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          onClick={(event) => { event.stopPropagation(); handleDeleteItem(item.id); }}
-                          disabled={deleteLoadingId === item.id}
-                        >
-                          <Icon name={deleteLoadingId === item.id ? 'spinner' : 'trash'} className={deleteLoadingId === item.id ? 'animate-spin' : ''} />
-                        </Button>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{item.category}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums text-gray-900 dark:text-zinc-100">{item.qtyOnHand} {item.unit}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-zinc-400">{item.qtyReserved} {item.unit}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums text-green-600 dark:text-green-400">{item.qtyOnHand - item.qtyReserved} {item.unit}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-zinc-300">{item.reorderPoint} {item.unit}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-zinc-300">{formatCurrency(item.lastUnitCost ?? item.unitCost)}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{item.location}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{job?.name || 'General'}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button variant="secondary" size="sm" title="Receive" aria-label="Receive" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'receive'); }}><Icon name="plus" /></Button>
+                          <Button variant="secondary" size="sm" title="Issue" aria-label="Issue" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'issue'); }}><Icon name="arrow-up-right-from-square" /></Button>
+                          <Button variant="secondary" size="sm" title="Adjust" aria-label="Adjust" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'adjust'); }}><Icon name="sliders" /></Button>
+                          <Button variant="secondary" size="sm" title="Transfer" aria-label="Transfer" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'transfer'); }}><Icon name="right-left" /></Button>
+                          <Button variant="secondary" size="sm" title="Edit" aria-label="Edit" onClick={(event) => { event.stopPropagation(); openEditModal(item); }}><Icon name="pen-to-square" /></Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            title="Delete"
+                            aria-label="Delete"
+                            onClick={(event) => { event.stopPropagation(); handleDeleteItem(item.id); }}
+                            disabled={deleteLoadingId === item.id}
+                          >
+                            <Icon name={deleteLoadingId === item.id ? 'spinner' : 'trash'} className={deleteLoadingId === item.id ? 'animate-spin' : ''} />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );

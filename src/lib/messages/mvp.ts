@@ -375,7 +375,12 @@ export async function resolveDisplayNames(
   const map = new Map<string, string>();
   if (unique.length === 0) return map;
 
-  const profilesResult = await supabase
+  // Resolve names with the admin client so every member's profile/employee name
+  // is readable regardless of the VIEWER's RLS. Otherwise an employee can't read
+  // the owner's profile full_name and the sender falls back to their email.
+  const db = getSupabaseAdmin() ?? supabase;
+
+  const profilesResult = await db
     .from("profiles")
     .select("id, full_name, display_name")
     .in("id", unique);
@@ -389,7 +394,7 @@ export async function resolveDisplayNames(
   } else if (
     /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")
   ) {
-    const fallbackProfilesResult = await supabase
+    const fallbackProfilesResult = await db
       .from("profiles")
       .select("id, full_name")
       .in("id", unique);
@@ -409,7 +414,7 @@ export async function resolveDisplayNames(
       if (resolved) map.set(String(row.id), resolved);
   }
 
-  const employeesPrimaryResult = await supabase
+  const employeesPrimaryResult = await db
     .from("employees")
     .select("user_id, name, full_name, email")
     .eq("company_id", companyId)
@@ -428,7 +433,7 @@ export async function resolveDisplayNames(
       employeesPrimaryResult.error.message || ""
     )
   ) {
-    const employeesFallbackResult = await supabase
+    const employeesFallbackResult = await db
       .from("employees")
       .select("user_id, full_name")
       .eq("company_id", companyId)

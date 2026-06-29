@@ -7712,6 +7712,13 @@ const MobileAppShell = ({
 
       const lowStock = inventory.filter(i => i.qtyOnHand <= i.reorderPoint);
       const totalValue = inventory.reduce((sum, i) => sum + (i.qtyOnHand * i.unitCost), 0);
+      // Only show a unit-of-measure when it's a real label. Some legacy rows have
+      // a numeric/garbage unit (e.g. "30"), which made quantity cells read like
+      // "20 30". Suppress those so each quantity cell shows exactly one value.
+      const unitSuffix = (unit) => {
+        const u = String(unit ?? '').trim();
+        return u && !/^\d+(\.\d+)?$/.test(u) ? ` ${u}` : '';
+      };
 
       useEffect(() => {
         let isMounted = true;
@@ -7833,7 +7840,7 @@ const MobileAppShell = ({
               <h4 className="mb-2 font-medium text-red-800 dark:text-red-200"><Icon name="triangle-exclamation" className="mr-2" />Low Stock Alert</h4>
               <div className="flex flex-wrap gap-2">
                 {lowStock.map(item => (
-                  <Badge key={item.id} variant="danger">{item.name}: {item.qtyOnHand} {item.unit} remaining</Badge>
+                  <Badge key={item.id} variant="danger">{item.name}: {item.qtyOnHand}{unitSuffix(item.unit)} remaining</Badge>
                 ))}
               </div>
             </Card>
@@ -7877,10 +7884,10 @@ const MobileAppShell = ({
                         </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{item.category}</td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums text-gray-900 dark:text-zinc-100">{item.qtyOnHand} {item.unit}</td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-zinc-400">{item.qtyReserved} {item.unit}</td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums text-green-600 dark:text-green-400">{item.qtyOnHand - item.qtyReserved} {item.unit}</td>
-                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-zinc-300">{item.reorderPoint} {item.unit}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums text-gray-900 dark:text-zinc-100">{item.qtyOnHand}{unitSuffix(item.unit)}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-500 dark:text-zinc-400">{item.qtyReserved}{unitSuffix(item.unit)}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right font-medium tabular-nums text-green-600 dark:text-green-400">{item.qtyOnHand - item.qtyReserved}{unitSuffix(item.unit)}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-zinc-300">{item.reorderPoint}{unitSuffix(item.unit)}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-gray-700 dark:text-zinc-300">{formatCurrency(item.lastUnitCost ?? item.unitCost)}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{item.location}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{job?.name || 'General'}</td>
@@ -7938,11 +7945,11 @@ const MobileAppShell = ({
                     <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
                       <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[#050505]">
                         <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">On Hand</p>
-                        <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyOnHand} {item.unit}</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyOnHand}{unitSuffix(item.unit)}</p>
                       </div>
                       <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-[#050505]">
                         <p className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">Reserved</p>
-                        <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyReserved} {item.unit}</p>
+                        <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyReserved}{unitSuffix(item.unit)}</p>
                       </div>
                     </div>
                     <div className="mt-4 grid grid-cols-3 gap-2">

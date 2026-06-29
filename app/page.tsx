@@ -7541,6 +7541,7 @@ const MobileAppShell = ({
       const [showAddModal, setShowAddModal] = useState(false);
       const [showTxnModal, setShowTxnModal] = useState(false);
       const [selectedItemId, setSelectedItemId] = useState(null);
+      const [quickAdjustLoading, setQuickAdjustLoading] = useState(false);
       const [txnType, setTxnType] = useState('receive');
       const [txnLoading, setTxnLoading] = useState(false);
       const [txnError, setTxnError] = useState('');
@@ -7773,6 +7774,35 @@ const MobileAppShell = ({
         setTxnError('');
       };
 
+      // Quick +/- On Hand adjustment from the expanded panel. Persists a proper
+      // stock-adjustment ledger entry (absolute target qty; never below 0).
+      // Available is derived (On Hand - Reserved), so it updates automatically.
+      const quickAdjustOnHand = async (item, delta) => {
+        if (!item || quickAdjustLoading) return;
+        const current = Number(item.qtyOnHand || 0);
+        const nextQty = current + delta;
+        if (nextQty < 0) return;
+        setQuickAdjustLoading(true);
+        try {
+          const response = await fetch(`/api/inventory/${item.id}/adjust`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ qty: nextQty, notes: 'Quick adjust' }),
+          });
+          const json = await response.json().catch(() => null);
+          if (response.ok && json?.item?.inventory) {
+            setInventory((prev) =>
+              prev.map((it) => (String(it.id) === String(item.id) ? json.item.inventory : it))
+            );
+            if (json.item.transaction) {
+              setLedgerItems((prev) => [json.item.transaction, ...prev].filter(Boolean).slice(0, 20));
+            }
+          }
+        } finally {
+          setQuickAdjustLoading(false);
+        }
+      };
+
       const handleTxnSubmit = async () => {
         if (!selectedItemId) return;
         setTxnLoading(true);
@@ -7876,7 +7906,7 @@ const MobileAppShell = ({
                   const job = jobs.find(j => j.id === item.jobId);
                   const isLow = item.qtyOnHand <= item.reorderPoint;
                   return (
-                    <tr key={item.id} className={`cursor-pointer text-sm hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''} ${selectedItemId === item.id ? 'ring-1 ring-brand-300' : ''}`} onClick={() => setSelectedItemId(item.id)}>
+                    <tr key={item.id} className={`cursor-pointer text-sm hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''} ${selectedItemId === item.id ? 'bg-brand-50 dark:bg-brand-500/10 shadow-[inset_3px_0_0_0_#f97316]' : ''}`} onClick={() => setSelectedItemId((prev) => (String(prev) === String(item.id) ? null : item.id))}>
                       <td className="whitespace-nowrap px-3 py-1.5">
                         <div className="flex items-center gap-1.5">
                           {isLow && <Icon name="triangle-exclamation" className="text-red-500" />}
@@ -7928,8 +7958,8 @@ const MobileAppShell = ({
                   <button
                     key={item.id}
                     type="button"
-                    className={`w-full rounded-2xl border p-4 text-left shadow-sm transition ${selectedItemId === item.id ? 'border-brand-300 ring-1 ring-brand-300' : 'border-gray-200 dark:border-zinc-800'} ${isLow ? 'bg-red-50 dark:bg-red-950/20' : 'bg-white dark:bg-[#090909]'}`}
-                    onClick={() => setSelectedItemId(item.id)}
+                    className={`w-full rounded-2xl border p-4 text-left shadow-sm transition ${selectedItemId === item.id ? 'border-brand-400 dark:border-brand-500/50' : 'border-gray-200 dark:border-zinc-800'} ${selectedItemId === item.id ? 'bg-brand-50 dark:bg-brand-500/10' : isLow ? 'bg-red-50 dark:bg-red-950/20' : 'bg-white dark:bg-[#090909]'}`}
+                    onClick={() => setSelectedItemId((prev) => (String(prev) === String(item.id) ? null : item.id))}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -7971,19 +8001,39 @@ const MobileAppShell = ({
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
                 <div>
                   <p className="text-xs text-gray-500 dark:text-zinc-500">On Hand</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.qtyOnHand} {selectedItem.unit}</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => quickAdjustOnHand(selectedItem, -1)}
+                      disabled={quickAdjustLoading || selectedItem.qtyOnHand <= 0}
+                      aria-label="Decrease on hand by 1"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
+                    >
+                      <Icon name="minus" />
+                    </button>
+                    <span className="min-w-[2.5ch] text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-zinc-100">{selectedItem.qtyOnHand}{unitSuffix(selectedItem.unit)}</span>
+                    <button
+                      type="button"
+                      onClick={() => quickAdjustOnHand(selectedItem, 1)}
+                      disabled={quickAdjustLoading}
+                      aria-label="Increase on hand by 1"
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
+                    >
+                      <Icon name="plus" />
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-zinc-500">Reserved</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.qtyReserved} {selectedItem.unit}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.qtyReserved}{unitSuffix(selectedItem.unit)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-zinc-500">Available</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{(selectedItem.qtyOnHand - selectedItem.qtyReserved)} {selectedItem.unit}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{(selectedItem.qtyOnHand - selectedItem.qtyReserved)}{unitSuffix(selectedItem.unit)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-zinc-500">Reorder Point</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.reorderPoint} {selectedItem.unit}</p>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.reorderPoint}{unitSuffix(selectedItem.unit)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-gray-500 dark:text-zinc-500">Last Unit Cost</p>

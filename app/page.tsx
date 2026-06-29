@@ -7539,14 +7539,7 @@ const MobileAppShell = ({
       const [filter, setFilter] = useState('all');
       const [search, setSearch] = useState('');
       const [showAddModal, setShowAddModal] = useState(false);
-      const [showTxnModal, setShowTxnModal] = useState(false);
-      const [selectedItemId, setSelectedItemId] = useState(null);
-      const [quickAdjustLoading, setQuickAdjustLoading] = useState(false);
-      const [txnType, setTxnType] = useState('receive');
-      const [txnLoading, setTxnLoading] = useState(false);
-      const [txnError, setTxnError] = useState('');
-      const [ledgerLoading, setLedgerLoading] = useState(false);
-      const [ledgerItems, setLedgerItems] = useState([]);
+      const [adjustingId, setAdjustingId] = useState(null);
       const [saveLoading, setSaveLoading] = useState(false);
       const [deleteLoadingId, setDeleteLoadingId] = useState(null);
       const [formError, setFormError] = useState('');
@@ -7563,15 +7556,6 @@ const MobileAppShell = ({
         jobId: '',
         status: 'active',
       });
-      const [txnForm, setTxnForm] = useState({
-        qty: 1,
-        unit_cost: 0,
-        job_id: '',
-        from_location: '',
-        to_location: '',
-        notes: '',
-      });
-
       const resetForm = () => {
         setItemForm({
           name: '',
@@ -7704,7 +7688,6 @@ const MobileAppShell = ({
       };
 
       const categories = [...new Set(inventory.map(i => i.category))];
-      const selectedItem = inventory.find((item) => String(item.id) === String(selectedItemId)) || null;
       const filteredInventory = inventory.filter(item => {
         if (filter !== 'all' && item.category !== filter) return false;
         if (search && !item.name.toLowerCase().includes(search.toLowerCase())) return false;
@@ -7721,68 +7704,16 @@ const MobileAppShell = ({
         return u && !/^\d+(\.\d+)?$/.test(u) ? ` ${u}` : '';
       };
 
-      useEffect(() => {
-        let isMounted = true;
-        const loadLedger = async () => {
-          if (!selectedItemId) {
-            if (isMounted) setLedgerItems([]);
-            return;
-          }
-          try {
-            setLedgerLoading(true);
-            const response = await fetch(`/api/inventory/${selectedItemId}/ledger?limit=20`, { cache: 'no-store' });
-            const payload = await response.json().catch(() => null);
-            if (!response.ok) {
-              throw new Error(payload?.error || 'Failed to load ledger');
-            }
-            if (isMounted) {
-              setLedgerItems(payload?.items || []);
-            }
-          } catch {
-            if (isMounted) {
-              setLedgerItems([]);
-            }
-          } finally {
-            if (isMounted) {
-              setLedgerLoading(false);
-            }
-          }
-        };
-        loadLedger();
-        return () => {
-          isMounted = false;
-        };
-      }, [selectedItemId]);
-
-      const openTxnModal = (item, type) => {
-        setSelectedItemId(item.id);
-        setTxnType(type);
-        setTxnError('');
-        setTxnForm({
-          qty: 1,
-          unit_cost: Number(item.lastUnitCost ?? item.unitCost ?? 0),
-          job_id: item.jobId ?? '',
-          from_location: item.location || '',
-          to_location: item.location || '',
-          notes: '',
-        });
-        setShowTxnModal(true);
-      };
-
-      const closeTxnModal = () => {
-        setShowTxnModal(false);
-        setTxnError('');
-      };
-
-      // Quick +/- On Hand adjustment from the expanded panel. Persists a proper
-      // stock-adjustment ledger entry (absolute target qty; never below 0).
-      // Available is derived (On Hand - Reserved), so it updates automatically.
+      // Quick +/- On Hand adjustment. Persists immediately via the existing
+      // /adjust endpoint (absolute target qty, never below 0). Available is
+      // derived (On Hand - Reserved), so it updates automatically. Reserved is
+      // not edited here.
       const quickAdjustOnHand = async (item, delta) => {
-        if (!item || quickAdjustLoading) return;
+        if (!item || adjustingId) return;
         const current = Number(item.qtyOnHand || 0);
         const nextQty = current + delta;
         if (nextQty < 0) return;
-        setQuickAdjustLoading(true);
+        setAdjustingId(String(item.id));
         try {
           const response = await fetch(`/api/inventory/${item.id}/adjust`, {
             method: 'POST',
@@ -7794,49 +7725,9 @@ const MobileAppShell = ({
             setInventory((prev) =>
               prev.map((it) => (String(it.id) === String(item.id) ? json.item.inventory : it))
             );
-            if (json.item.transaction) {
-              setLedgerItems((prev) => [json.item.transaction, ...prev].filter(Boolean).slice(0, 20));
-            }
           }
         } finally {
-          setQuickAdjustLoading(false);
-        }
-      };
-
-      const handleTxnSubmit = async () => {
-        if (!selectedItemId) return;
-        setTxnLoading(true);
-        setTxnError('');
-        try {
-          const endpoint = `/api/inventory/${selectedItemId}/${txnType}`;
-          const payload = {
-            qty: Number(txnForm.qty || 0),
-            unit_cost: Number(txnForm.unit_cost || 0),
-            job_id: txnForm.job_id || null,
-            from_location: txnForm.from_location || '',
-            to_location: txnForm.to_location || '',
-            notes: txnForm.notes || '',
-          };
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const json = await response.json().catch(() => null);
-          if (!response.ok || !json?.item?.inventory) {
-            setTxnError(json?.error || 'Failed to apply transaction');
-            setTxnLoading(false);
-            return;
-          }
-          setInventory((prev) =>
-            prev.map((item) => (String(item.id) === String(selectedItemId) ? json.item.inventory : item))
-          );
-          setLedgerItems((prev) => [json.item.transaction, ...prev].filter(Boolean).slice(0, 20));
-          setShowTxnModal(false);
-        } catch {
-          setTxnError('Failed to apply transaction');
-        } finally {
-          setTxnLoading(false);
+          setAdjustingId(null);
         }
       };
 
@@ -7906,7 +7797,7 @@ const MobileAppShell = ({
                   const job = jobs.find(j => j.id === item.jobId);
                   const isLow = item.qtyOnHand <= item.reorderPoint;
                   return (
-                    <tr key={item.id} className={`cursor-pointer text-sm hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''} ${selectedItemId === item.id ? 'bg-brand-50 dark:bg-brand-500/10 shadow-[inset_3px_0_0_0_#f97316]' : ''}`} onClick={() => setSelectedItemId((prev) => (String(prev) === String(item.id) ? null : item.id))}>
+                    <tr key={item.id} className={`text-sm hover:bg-gray-50 dark:hover:bg-[#101010] ${isLow ? 'bg-red-50 dark:bg-red-950/15' : ''}`}>
                       <td className="whitespace-nowrap px-3 py-1.5">
                         <div className="flex items-center gap-1.5">
                           {isLow && <Icon name="triangle-exclamation" className="text-red-500" />}
@@ -7922,20 +7813,14 @@ const MobileAppShell = ({
                       <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{item.location}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-gray-600 dark:text-zinc-300">{job?.name || 'General'}</td>
                       <td className="whitespace-nowrap px-3 py-1.5 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <Button variant="secondary" size="sm" title="Receive" aria-label="Receive" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'receive'); }}><Icon name="plus" /></Button>
-                          <Button variant="secondary" size="sm" title="Issue" aria-label="Issue" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'issue'); }}><Icon name="arrow-up-right-from-square" /></Button>
-                          <Button variant="secondary" size="sm" title="Adjust" aria-label="Adjust" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'adjust'); }}><Icon name="sliders" /></Button>
-                          <Button variant="secondary" size="sm" title="Transfer" aria-label="Transfer" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'transfer'); }}><Icon name="right-left" /></Button>
-                          <Button variant="secondary" size="sm" title="Edit" aria-label="Edit" onClick={(event) => { event.stopPropagation(); openEditModal(item); }}><Icon name="pen-to-square" /></Button>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            title="Delete"
-                            aria-label="Delete"
-                            onClick={(event) => { event.stopPropagation(); handleDeleteItem(item.id); }}
-                            disabled={deleteLoadingId === item.id}
-                          >
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="inline-flex items-center rounded-md border border-gray-300 dark:border-zinc-700">
+                            <button type="button" aria-label="Decrease on hand by 1" disabled={adjustingId === String(item.id) || item.qtyOnHand <= 0} onClick={() => quickAdjustOnHand(item, -1)} className="flex h-6 w-6 items-center justify-center text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-zinc-200 dark:hover:bg-[#111]"><Icon name="minus" /></button>
+                            <span className="min-w-[2.5ch] px-1 text-center text-xs font-semibold tabular-nums text-gray-900 dark:text-zinc-100">{item.qtyOnHand}</span>
+                            <button type="button" aria-label="Increase on hand by 1" disabled={adjustingId === String(item.id)} onClick={() => quickAdjustOnHand(item, 1)} className="flex h-6 w-6 items-center justify-center text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-zinc-200 dark:hover:bg-[#111]"><Icon name="plus" /></button>
+                          </div>
+                          <Button variant="secondary" size="sm" title="Edit" aria-label="Edit" onClick={() => openEditModal(item)}><Icon name="pen-to-square" /></Button>
+                          <Button variant="secondary" size="sm" title="Delete" aria-label="Delete" disabled={deleteLoadingId === item.id} onClick={() => handleDeleteItem(item.id)}>
                             <Icon name={deleteLoadingId === item.id ? 'spinner' : 'trash'} className={deleteLoadingId === item.id ? 'animate-spin' : ''} />
                           </Button>
                         </div>
@@ -7955,11 +7840,9 @@ const MobileAppShell = ({
                 const job = jobs.find(j => j.id === item.jobId);
                 const isLow = item.qtyOnHand <= item.reorderPoint;
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
-                    className={`w-full rounded-2xl border p-4 text-left shadow-sm transition ${selectedItemId === item.id ? 'border-brand-400 dark:border-brand-500/50' : 'border-gray-200 dark:border-zinc-800'} ${selectedItemId === item.id ? 'bg-brand-50 dark:bg-brand-500/10' : isLow ? 'bg-red-50 dark:bg-red-950/20' : 'bg-white dark:bg-[#090909]'}`}
-                    onClick={() => setSelectedItemId((prev) => (String(prev) === String(item.id) ? null : item.id))}
+                    className={`w-full rounded-2xl border p-4 text-left shadow-sm ${isLow ? 'border-gray-200 bg-red-50 dark:border-zinc-800 dark:bg-red-950/20' : 'border-gray-200 bg-white dark:border-zinc-800 dark:bg-[#090909]'}`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -7982,86 +7865,21 @@ const MobileAppShell = ({
                         <p className="mt-1 font-medium text-gray-900 dark:text-zinc-100">{item.qtyReserved}{unitSuffix(item.unit)}</p>
                       </div>
                     </div>
-                    <div className="mt-4 grid grid-cols-3 gap-2">
-                      <Button variant="secondary" size="sm" className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'receive'); }}>Receive</Button>
-                      <Button variant="secondary" size="sm" className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={(event) => { event.stopPropagation(); openTxnModal(item, 'issue'); }}>Issue</Button>
-                      <Button variant="secondary" size="sm" className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={(event) => { event.stopPropagation(); openEditModal(item); }}>Edit</Button>
+                    <div className="mt-4 flex items-center gap-2">
+                      <div className="inline-flex items-center rounded-md border border-gray-300 dark:border-zinc-700">
+                        <button type="button" aria-label="Decrease on hand by 1" disabled={adjustingId === String(item.id) || item.qtyOnHand <= 0} onClick={() => quickAdjustOnHand(item, -1)} className="flex h-8 w-9 items-center justify-center text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-zinc-200 dark:hover:bg-[#111]"><Icon name="minus" /></button>
+                        <span className="min-w-[3ch] px-1 text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-zinc-100">{item.qtyOnHand}</span>
+                        <button type="button" aria-label="Increase on hand by 1" disabled={adjustingId === String(item.id)} onClick={() => quickAdjustOnHand(item, 1)} className="flex h-8 w-9 items-center justify-center text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-zinc-200 dark:hover:bg-[#111]"><Icon name="plus" /></button>
+                      </div>
+                      <Button variant="secondary" size="sm" className="flex-1 dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" onClick={() => openEditModal(item)}>Edit</Button>
+                      <Button variant="secondary" size="sm" className="flex-1 dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-200" disabled={deleteLoadingId === item.id} onClick={() => handleDeleteItem(item.id)}><Icon name={deleteLoadingId === item.id ? 'spinner' : 'trash'} className={`mr-1 ${deleteLoadingId === item.id ? 'animate-spin' : ''}`} />Delete</Button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
           </Card>
 
-          {selectedItem && (
-            <Card className="p-4 dark:border-zinc-800 dark:bg-[#090909]">
-              <div className="mb-2 flex items-center justify-between">
-                <h4 className="font-semibold text-gray-900 dark:text-zinc-100">Ledger · {selectedItem.name}</h4>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-zinc-500">On Hand</p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => quickAdjustOnHand(selectedItem, -1)}
-                      disabled={quickAdjustLoading || selectedItem.qtyOnHand <= 0}
-                      aria-label="Decrease on hand by 1"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
-                    >
-                      <Icon name="minus" />
-                    </button>
-                    <span className="min-w-[2.5ch] text-center text-sm font-semibold tabular-nums text-gray-900 dark:text-zinc-100">{selectedItem.qtyOnHand}{unitSuffix(selectedItem.unit)}</span>
-                    <button
-                      type="button"
-                      onClick={() => quickAdjustOnHand(selectedItem, 1)}
-                      disabled={quickAdjustLoading}
-                      aria-label="Increase on hand by 1"
-                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-zinc-500">Reserved</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.qtyReserved}{unitSuffix(selectedItem.unit)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-zinc-500">Available</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{(selectedItem.qtyOnHand - selectedItem.qtyReserved)}{unitSuffix(selectedItem.unit)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-zinc-500">Reorder Point</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{selectedItem.reorderPoint}{unitSuffix(selectedItem.unit)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-zinc-500">Last Unit Cost</p>
-                  <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{formatCurrency(selectedItem.lastUnitCost ?? selectedItem.unitCost)}</p>
-                </div>
-              </div>
-              {ledgerLoading ? (
-                <p className="text-sm text-gray-500 dark:text-zinc-400">Loading ledger...</p>
-              ) : ledgerItems.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-zinc-400">No transactions yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {ledgerItems.map((entry) => (
-                    <div key={entry.id} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 p-2 text-sm dark:border-zinc-800 dark:bg-[#050505]">
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-zinc-100">{String(entry.type || '').toUpperCase()}</p>
-                        <p className="text-xs text-gray-500 dark:text-zinc-400">{formatDate(entry.createdAt)}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-medium text-gray-900 dark:text-zinc-100">{entry.qty}</p>
-                        <p className="text-xs text-gray-500 dark:text-zinc-400">{formatCurrency(entry.unitCost || 0)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-          )}
 
           <Modal
             isOpen={showAddModal}
@@ -8069,7 +7887,7 @@ const MobileAppShell = ({
             title={editingId ? 'Edit Item' : 'Add Item'}
             size="md"
             portal
-            panelClassName="inventory-item-modal mx-3 rounded-xl dark:border-zinc-800 dark:bg-[#090909] [&_.mobile-sheet-header]:dark:border-zinc-800 [&_.mobile-sheet-header]:dark:bg-[#090909] [&_.mobile-sheet-header_h2]:dark:text-zinc-100 [&_.mobile-sheet-footer]:dark:border-zinc-800 [&_.mobile-sheet-footer]:dark:bg-[#090909] sm:mx-4"
+            panelClassName="rounded-xl dark:border-zinc-800 dark:bg-[#090909] [&_.mobile-sheet-header]:dark:border-zinc-800 [&_.mobile-sheet-header]:dark:bg-[#090909] [&_.mobile-sheet-header_h2]:dark:text-zinc-100 [&_.mobile-sheet-footer]:dark:border-zinc-800 [&_.mobile-sheet-footer]:dark:bg-[#090909]"
             footer={
               <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
                 <Button variant="secondary" onClick={closeModal} className="dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100 dark:hover:bg-[#111]">Cancel</Button>
@@ -8135,59 +7953,6 @@ const MobileAppShell = ({
             {formError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{formError}</p>}
           </Modal>
 
-          <Modal isOpen={Boolean(showTxnModal && selectedItem)} onClose={closeTxnModal} title={selectedItem ? `${txnType.charAt(0).toUpperCase() + txnType.slice(1)} · ${selectedItem.name}` : 'Inventory Transaction'} size="sm">
-            {selectedItem ? (
-              <>
-                <div className="space-y-3 dark:text-zinc-100">
-                  <div>
-                    <p className="mb-1 text-xs text-gray-500">Quantity</p>
-                    <input type="number" min="0" step="0.01" value={txnForm.qty} onChange={(e) => setTxnForm((prev) => ({ ...prev, qty: Number(e.target.value) }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                  {(txnType === 'receive' || txnType === 'adjust') && (
-                    <div>
-                      <p className="mb-1 text-xs text-gray-500">Unit Cost</p>
-                      <input type="number" min="0" step="0.01" value={txnForm.unit_cost} onChange={(e) => setTxnForm((prev) => ({ ...prev, unit_cost: Number(e.target.value) }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                    </div>
-                  )}
-                  {txnType === 'issue' && (
-                    <div>
-                      <p className="mb-1 text-xs text-gray-500">Issue to Job (optional)</p>
-                      <select value={txnForm.job_id} onChange={(e) => setTxnForm((prev) => ({ ...prev, job_id: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100">
-                        <option value="">No job</option>
-                        {jobs.map((job) => (
-                          <option key={job.id} value={job.id}>{job.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                  {(txnType === 'issue' || txnType === 'transfer') && (
-                    <div>
-                      <p className="mb-1 text-xs text-gray-500">From Location</p>
-                      <input type="text" value={txnForm.from_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, from_location: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                    </div>
-                  )}
-                  {(txnType === 'receive' || txnType === 'transfer') && (
-                    <div>
-                      <p className="mb-1 text-xs text-gray-500">To Location</p>
-                      <input type="text" value={txnForm.to_location} onChange={(e) => setTxnForm((prev) => ({ ...prev, to_location: e.target.value }))} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                    </div>
-                  )}
-                  <div>
-                    <p className="mb-1 text-xs text-gray-500">Notes</p>
-                    <textarea value={txnForm.notes} onChange={(e) => setTxnForm((prev) => ({ ...prev, notes: e.target.value }))} className="h-20 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100" />
-                  </div>
-                </div>
-                {txnError && <p className="mt-4 text-sm text-red-600 dark:text-red-300">{txnError}</p>}
-                <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                  <Button variant="secondary" onClick={closeTxnModal}>Cancel</Button>
-                  <Button variant="brand" onClick={handleTxnSubmit} disabled={txnLoading}>
-                    <Icon name={txnLoading ? 'spinner' : 'floppy-disk'} className={`mr-2 ${txnLoading ? 'animate-spin' : ''}`} />
-                    {txnLoading ? 'Saving...' : 'Save'}
-                  </Button>
-                </div>
-              </>
-            ) : null}
-          </Modal>
         </div>
       );
     };

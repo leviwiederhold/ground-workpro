@@ -34,6 +34,15 @@ const DocumentsView = dynamic(
 const MessagesView = dynamic(
   () => import('@/app/components/views/MessagesView').then((mod) => mod.MessagesView)
 );
+const JobsiteTimeView = dynamic(
+  () => import('@/app/components/views/JobsiteTimeView').then((mod) => mod.JobsiteTimeView)
+);
+const JobsiteTimeEmployeeCard = dynamic(
+  () => import('@/app/components/views/JobsiteTimeEmployeeCard').then((mod) => mod.JobsiteTimeEmployeeCard)
+);
+const JobsiteTimeSettingsCard = dynamic(
+  () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
+);
 const ScheduleView = dynamic(
   () => import('@/app/components/views/ScheduleView').then((mod) => mod.ScheduleView)
 );
@@ -127,6 +136,7 @@ const APP_VIEW_PATHS = {
   jobs: '/jobs',
   fleet: '/fleet',
   team: '/team',
+  jobsite_time: '/jobsite-time',
   inventory: '/inventory',
   maintenance: '/maintenance',
   training: '/training',
@@ -1132,6 +1142,7 @@ const MobileAppShell = ({
           schedule: { key: 'schedule', label: 'Schedule', iconKey: 'calendar-week' },
           jobs: { key: 'jobs', label: 'Jobs', iconKey: 'briefcase' },
           team: { key: 'team', label: 'Team', iconKey: 'people-group' },
+          jobsite_time: { key: 'jobsite_time', label: 'Jobsite Time', iconKey: 'clock' },
           fleet: { key: 'fleet', label: 'Fleet', iconKey: 'truck-field' },
           messages: { key: 'messages', label: 'Messages', iconKey: 'comments' },
           maintenance: { key: 'maintenance', label: 'Maintenance', iconKey: 'toolbox' },
@@ -2158,12 +2169,18 @@ const MobileAppShell = ({
           );
         }
         switch(currentView) {
-          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />;
+          case 'dashboard': return (
+            <div className="space-y-4">
+              <JobsiteTimeEmployeeCard />
+              <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />
+            </div>
+          );
           case 'messages': return <MessagesView employees={employees} availableUsersSeed={companyMembers} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
+          case 'jobsite_time': return <JobsiteTimeView employees={employees} jobs={jobs} />;
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} companyMembers={companyMembers} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} trainingLoading={trainingLoading} trainingError={trainingError} onRefreshTraining={loadTraining} />;
@@ -10439,6 +10456,9 @@ const MobileAppShell = ({
               {companyMsg && <p className="mt-3 text-sm text-gray-600">{companyMsg}</p>}
             </Card>
           )}
+
+          {/* Automatic Jobsite Time (admin only) */}
+          {isAdmin && <JobsiteTimeSettingsCard />}
 
           {/* 3. Team / Role Summary */}
           <Card className={cardClass}>

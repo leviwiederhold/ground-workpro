@@ -17,12 +17,34 @@ type CompanyRow = {
   company_id: string;
   name: string;
   email: string;
+  contact_email?: string | null;
+  search_matches?: Array<{
+    source: string;
+    email: string | null;
+    user_id?: string | null;
+    employee_id?: string | null;
+    stripe_customer_id?: string | null;
+    company_id?: string | null;
+    note?: string;
+  }>;
   subscription_status: string;
   plan_type: string;
   stripe_active: boolean;
   grants_free_access: boolean;
   display_status: string;
   override: OverrideInfo;
+};
+
+type SearchDiagnostic = {
+  email: string;
+  auth_user_exists: boolean;
+  profile_exists: boolean;
+  membership_exists: boolean;
+  employee_exists: boolean;
+  stripe_customer_exists: boolean;
+  company_found: boolean;
+  orphaned: boolean;
+  orphan_matches: Array<{ source: string; email: string | null; note?: string; stripe_customer_id?: string | null }>;
 };
 
 const OVERRIDE_TYPES = [
@@ -38,6 +60,7 @@ export function BillingOverridesClient() {
   const [rows, setRows] = useState<CompanyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [diagnostic, setDiagnostic] = useState<SearchDiagnostic | null>(null);
   const [selected, setSelected] = useState<CompanyRow | null>(null);
 
   const load = useCallback(async (search: string) => {
@@ -48,6 +71,7 @@ export function BillingOverridesClient() {
       const json = await res.json().catch(() => null);
       if (!res.ok) throw new Error(json?.error || "Failed to load companies");
       setRows(json?.items ?? []);
+      setDiagnostic(json?.diagnostic ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load companies");
     } finally {
@@ -110,13 +134,26 @@ export function BillingOverridesClient() {
               {loading ? (
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">No companies found.</td></tr>
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    {diagnostic ? <SearchDiagnosticMessage diagnostic={diagnostic} /> : "No companies found."}
+                  </td>
+                </tr>
               ) : (
                 rows.map((row) => (
                   <tr key={row.company_id}>
                     <td className="px-4 py-3">
                       <div className="font-medium text-gray-900">{row.name || "(unnamed)"}</div>
-                      <div className="text-xs text-gray-500">{row.email}</div>
+                      <div className="text-xs text-gray-500">{row.contact_email || row.email || "No email on company"}</div>
+                      {row.search_matches && row.search_matches.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {row.search_matches.slice(0, 3).map((match, index) => (
+                            <span key={`${match.source}-${index}`} className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-600">
+                              {match.source}{match.email ? `: ${match.email}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-700">{row.subscription_status}</td>
                     <td className="px-4 py-3">
@@ -143,6 +180,40 @@ export function BillingOverridesClient() {
 
       {selected && <OverrideDrawer company={selected} onClose={() => setSelected(null)} onSaved={refreshRow} />}
     </main>
+  );
+}
+
+function SearchDiagnosticMessage({ diagnostic }: { diagnostic: SearchDiagnostic }) {
+  const found = [
+    diagnostic.auth_user_exists ? "auth user" : "",
+    diagnostic.profile_exists ? "profile" : "",
+    diagnostic.membership_exists ? "membership" : "",
+    diagnostic.employee_exists ? "employee record" : "",
+    diagnostic.stripe_customer_exists ? "Stripe customer" : "",
+  ].filter(Boolean);
+
+  if (diagnostic.company_found) return <span>No companies found.</span>;
+
+  return (
+    <div className="mx-auto max-w-lg text-left">
+      <p className="text-center text-sm font-medium text-gray-700">No company is connected to {diagnostic.email}.</p>
+      <p className="mt-2 text-center text-xs text-gray-500">
+        {found.length > 0
+          ? `Found ${found.join(", ")}, but no linked company.`
+          : "No auth user, profile, membership, employee record, or Stripe customer was found for that email."}
+      </p>
+      {diagnostic.orphan_matches.length > 0 && (
+        <div className="mt-3 space-y-1 rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+          {diagnostic.orphan_matches.slice(0, 5).map((match, index) => (
+            <div key={`${match.source}-${index}`}>
+              <span className="font-medium">{match.source}</span>
+              {match.stripe_customer_id ? ` ${match.stripe_customer_id}` : ""}
+              {match.note ? ` - ${match.note}` : " - no linked company"}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -9,7 +9,28 @@
 --   company-scoped, content-hashed path so identical bytes are not duplicated.
 -- - RLS mirrors messages: only participants of the thread can read/insert, and
 --   only within their own company.
+--
+-- STORAGE BUCKET (manual, one-time): create BEFORE using the feature. Bucket
+-- creation is intentionally NOT done in SQL here — on hosted Supabase, inserting
+-- into storage.buckets from a migration is permission-sensitive and, if it
+-- fails, it aborts this whole migration. Create it in the dashboard instead:
+--   - Name:          message-attachments
+--   - Public:        false (private)
+--   - File size limit: 10 MB
+--   - Allowed MIME types: image/jpeg, image/png, image/gif, image/webp,
+--       image/heic, image/heif, application/pdf, text/plain, text/csv,
+--       application/msword,
+--       application/vnd.openxmlformats-officedocument.wordprocessingml.document,
+--       application/vnd.ms-excel,
+--       application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+-- (Server-side upload validation enforces the same size/type allowlist, so the
+--  bucket-level limits are defense-in-depth.)
 -- ============================================================================
+
+-- The FK below references public.messages(id, company_id), which requires a
+-- matching composite unique key. Create it FIRST so the table's FK can bind.
+create unique index if not exists messages_id_company_key
+  on public.messages(id, company_id);
 
 create table if not exists public.message_attachments (
   id uuid primary key default gen_random_uuid(),
@@ -29,10 +50,6 @@ create table if not exists public.message_attachments (
     references public.messages(id, company_id)
     on delete cascade
 );
-
--- messages needs a composite unique on (id, company_id) for the FK above.
-create unique index if not exists messages_id_company_key
-  on public.messages(id, company_id);
 
 create index if not exists message_attachments_company_message_idx
   on public.message_attachments(company_id, message_id);
@@ -91,9 +108,3 @@ do $$ begin
     for delete
     using (uploader_id = auth.uid());
 exception when duplicate_object then null; end $$;
-
--- Private storage bucket for message attachments (idempotent). Access is always
--- via short-lived signed URLs minted server-side after a participant check.
-insert into storage.buckets (id, name, public)
-values ('message-attachments', 'message-attachments', false)
-on conflict (id) do nothing;

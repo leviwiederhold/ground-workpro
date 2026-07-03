@@ -45,6 +45,14 @@ export default function BillingSuccessClient({ sessionId }: { sessionId: string 
           body: JSON.stringify({ sessionId }),
         });
         lastReason = String(sync.payload?.reason || sync.payload?.status || "");
+        if (
+          sync.response.ok &&
+          sync.payload?.synced === true &&
+          (sync.payload?.active === true || sync.payload?.status === "trialing" || sync.payload?.status === "active")
+        ) {
+          window.location.replace("/setup?trial=started");
+          return;
+        }
       }
 
       const billing = await fetchJson("/api/billing/status");

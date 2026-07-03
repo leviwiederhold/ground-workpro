@@ -10,6 +10,13 @@ type BillingStatus = {
   trial_ends_at: string | null;
   current_period_end: string | null;
   is_active: boolean;
+  // Override-aware fields (employee-safe; no internal reason/notes).
+  display_status?: string;
+  is_complimentary?: boolean;
+  override_type?: string;
+  override_until?: string | null;
+  discount_percent?: number | null;
+  discount_amount_cents?: number | null;
 };
 
 
@@ -28,7 +35,8 @@ function fmt(dateStr: string | null | undefined): string {
   }
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ billing }: { billing: BillingStatus | null }) {
+  const status = billing?.subscription_status ?? "inactive";
   const map: Record<string, { label: string; cls: string }> = {
     trialing: { label: "Trialing", cls: "bg-blue-100 text-blue-800" },
     active: { label: "Active", cls: "bg-green-100 text-green-800" },
@@ -38,9 +46,20 @@ function StatusBadge({ status }: { status: string }) {
     incomplete: { label: "Incomplete", cls: "bg-amber-100 text-amber-800" },
     inactive: { label: "Inactive", cls: "bg-gray-100 text-gray-700" },
   };
-  const { label, cls } = map[status] ?? { label: status, cls: "bg-gray-100 text-gray-700" };
+  // Complimentary access (free_lifetime / free_until) takes visual priority; the
+  // server-provided display_status already renders the human-readable label,
+  // including any "· Discounted x%" annotation.
+  if (billing?.is_complimentary) {
+    return (
+      <span className="inline-flex items-center rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800">
+        {billing.display_status || "Complimentary"}
+      </span>
+    );
+  }
+  const fallback = map[status] ?? { label: status, cls: "bg-gray-100 text-gray-700" };
+  const label = billing?.display_status || fallback.label;
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${cls}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${fallback.cls}`}>
       {label}
     </span>
   );
@@ -180,7 +199,7 @@ export default function BillingSettingsPage() {
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
             <h2 className="text-base font-semibold text-gray-900">Subscription</h2>
-            {!loading && billing && <StatusBadge status={statusLower} />}
+            {!loading && billing && <StatusBadge billing={billing} />}
           </div>
 
           {loading ? (
@@ -191,7 +210,7 @@ export default function BillingSettingsPage() {
           ) : (
             <div className="px-6 py-2">
               <Row label="Plan" value="Groundwork Pro" />
-              <Row label="Status" value={<StatusBadge status={statusLower} />} />
+              <Row label="Status" value={<StatusBadge billing={billing} />} />
               <Row label="Price" value="$49.99 / active member / month" />
               {isTrialing && (
                 <Row

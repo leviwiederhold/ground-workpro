@@ -148,7 +148,20 @@ export async function GET(request: Request) {
     console.log("[billing/status] subscription_status:", status.subscription_status, "is_active:", status.is_active, "plan_type:", status.plan_type);
 
     const billingStatus = {
-      ...status,
+      plan_type: status.plan_type,
+      subscription_status: status.subscription_status,
+      trial_ends_at: status.trial_ends_at,
+      current_period_end: status.current_period_end,
+      stripe_active: status.stripe_active,
+      is_active: status.is_active,
+      display_status: status.display_status,
+      // Employee-safe override summary — the internal reason/notes are NEVER
+      // included here; only the platform-admin API can read them.
+      override_type: status.override.type,
+      override_until: status.override.until,
+      is_complimentary: status.override.grantsFreeAccess,
+      discount_percent: status.override.discountPercent,
+      discount_amount_cents: status.override.discountAmountCents,
       active: status.is_active,
       needsTrial: !status.is_active,
       hasCompany: true,

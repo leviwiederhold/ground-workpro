@@ -4,6 +4,10 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
 import { getThreadIfParticipant } from "@/lib/messages/mvp";
+import {
+  MAX_MESSAGE_ATTACHMENTS,
+  persistMessageAttachments,
+} from "@/lib/messages/attachments";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -13,8 +17,9 @@ const paramsSchema = z.object({
   id: z.string().uuid(),
 });
 
+// Body is optional when at least one attachment is present (enforced below).
 const sendMessageSchema = z.object({
-  body: z.string().trim().min(1).max(4000),
+  body: z.string().trim().max(4000).optional().default(""),
 });
 
 type ValidationIssue = {
@@ -49,8 +54,37 @@ export async function POST(
     const parsedParams = paramsSchema.safeParse(await params);
     if (!parsedParams.success) return validationError(toValidationDetails(parsedParams.error));
 
-    const parsedBody = sendMessageSchema.safeParse(await request.json());
+    // Accept either JSON (text-only) or multipart/form-data (text + attachments).
+    let rawBody: unknown = {};
+    let files: File[] = [];
+    const contentTypeHeader = request.headers.get("content-type") || "";
+    if (contentTypeHeader.includes("multipart/form-data")) {
+      const formData = await request.formData();
+      rawBody = { body: String(formData.get("body") ?? "") };
+      files = formData
+        .getAll("files")
+        .filter((entry): entry is File => entry instanceof File && entry.size > 0);
+    } else {
+      try {
+        rawBody = await request.json();
+      } catch {
+        rawBody = {};
+      }
+    }
+
+    const parsedBody = sendMessageSchema.safeParse(rawBody);
     if (!parsedBody.success) return validationError(toValidationDetails(parsedBody.error));
+
+    const messageBody = parsedBody.data.body.trim();
+    // Do not send an empty message unless at least one attachment is present.
+    if (!messageBody && files.length === 0) {
+      return validationError([{ path: "body", message: "Message cannot be empty" }]);
+    }
+    if (files.length > MAX_MESSAGE_ATTACHMENTS) {
+      return validationError([
+        { path: "files", message: `You can attach at most ${MAX_MESSAGE_ATTACHMENTS} files` },
+      ]);
+    }
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
@@ -77,7 +111,7 @@ export async function POST(
         company_id: companyId,
         thread_id: thread.id,
         sender_user_id: userId,
-        body: parsedBody.data.body,
+        body: messageBody,
         created_at: now,
       })
       .select("id, thread_id, sender_user_id, body, created_at")
@@ -85,6 +119,27 @@ export async function POST(
 
     if (insertResult.error || !insertResult.data) {
       return serverError(insertResult.error?.message || "Failed to send message");
+    }
+
+    // Upload + link attachments. If this fails, roll back the message so the
+    // client can keep the composed message + files rather than losing them.
+    let attachments: unknown[] = [];
+    if (files.length > 0) {
+      try {
+        attachments = await persistMessageAttachments({
+          db,
+          companyId,
+          threadId: thread.id,
+          messageId: insertResult.data.id,
+          uploaderId: userId,
+          files,
+        });
+      } catch (attachmentError) {
+        await db.from("messages").delete().eq("company_id", companyId).eq("id", insertResult.data.id);
+        return serverError(
+          attachmentError instanceof Error ? attachmentError.message : "Failed to attach files"
+        );
+      }
     }
 
     await Promise.all([
@@ -123,7 +178,9 @@ export async function POST(
               type: "new_message",
               payload: {
                 threadId: thread.id,
-                messagePreview: parsedBody.data.body.slice(0, 120),
+                messagePreview:
+                  messageBody.slice(0, 120) ||
+                  (files.length === 1 ? "Sent an attachment" : `Sent ${files.length} attachments`),
                 href: "/messages",
               },
               entityType: "message_thread",
@@ -145,6 +202,7 @@ export async function POST(
         sender_user_id: insertResult.data.sender_user_id,
         body: insertResult.data.body,
         created_at: insertResult.data.created_at,
+        attachments,
       },
       201
     );

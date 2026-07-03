@@ -9,6 +9,8 @@ import {
   resolveAvatarUrls,
   resolveDisplayNames,
 } from "@/lib/messages/mvp";
+import { attachmentsForMessages } from "@/lib/messages/attachments";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -74,9 +76,12 @@ export async function GET(
     const senderUserIds = Array.from(
       new Set(items.map((row) => String(row.sender_user_id ?? "")).filter(Boolean))
     );
-    const [displayNames, avatarUrls] = await Promise.all([
+    const messageIds = items.map((row) => String(row.id)).filter(Boolean);
+    const db = getSupabaseAdmin() ?? supabase;
+    const [displayNames, avatarUrls, attachmentsByMessage] = await Promise.all([
       resolveDisplayNames(supabase, companyId, senderUserIds),
       resolveAvatarUrls(supabase, senderUserIds),
+      attachmentsForMessages(db, companyId, messageIds),
     ]);
 
     return Response.json({
@@ -89,6 +94,7 @@ export async function GET(
         sender_avatar_url: avatarUrls.get(String(row.sender_user_id)) || "",
         body: row.body,
         created_at: row.created_at,
+        attachments: attachmentsByMessage.get(String(row.id)) ?? [],
       })),
       ...getPaginationMeta(count, page, pageSize),
     });

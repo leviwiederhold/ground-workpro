@@ -53,6 +53,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [teamChatName, setTeamChatName] = useState('');
   const [namingSaving, setNamingSaving] = useState(false);
   const [namingError, setNamingError] = useState('');
+  const [pendingAttachments, setPendingAttachments] = useState([]);
+  const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
@@ -65,6 +67,15 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   useEffect(() => {
     channelsRef.current = channels;
   }, [channels]);
+
+  // Clear any composed attachments when switching threads so files are never
+  // sent to the wrong conversation; revoke their object URLs to avoid leaks.
+  useEffect(() => {
+    setPendingAttachments((prev) => {
+      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      return [];
+    });
+  }, [activeChannel?.id, pendingDirectContact?.userId]);
 
   useEffect(() => {
     if (!Array.isArray(availableUsersSeed) || availableUsersSeed.length === 0) return;
@@ -609,8 +620,175 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     }
   };
 
+  const MAX_ATTACHMENTS = 10;
+  const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+  const formatFileSize = (bytes) => {
+    const n = Number(bytes || 0);
+    if (!Number.isFinite(n) || n <= 0) return '';
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const isImageAttachment = (att) =>
+    Boolean(att?.is_image) || String(att?.content_type || '').toLowerCase().startsWith('image/');
+
+  const iconForContentType = (contentType) => {
+    const t = String(contentType || '').toLowerCase();
+    if (t.startsWith('image/')) return 'image';
+    if (t.includes('pdf')) return 'file-pdf';
+    if (t.includes('word') || t.includes('msword')) return 'file-word';
+    if (t.includes('sheet') || t.includes('excel') || t.includes('csv')) return 'file-excel';
+    return 'file';
+  };
+
+  const handleFilesSelected = (fileList) => {
+    setSendError('');
+    const incoming = Array.from(fileList || []);
+    if (incoming.length === 0) return;
+    setPendingAttachments((prev) => {
+      const next = [...prev];
+      for (const file of incoming) {
+        if (next.length >= MAX_ATTACHMENTS) {
+          setSendError(`You can attach at most ${MAX_ATTACHMENTS} files.`);
+          break;
+        }
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          setSendError(`"${file.name}" is larger than 10 MB.`);
+          continue;
+        }
+        next.push({
+          id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+          file,
+          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+        });
+      }
+      return next;
+    });
+  };
+
+  const removePendingAttachment = (id) => {
+    setPendingAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
+  };
+
+  const clearPendingAttachments = () => {
+    setPendingAttachments((prev) => {
+      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      return [];
+    });
+  };
+
+  const openAttachmentPicker = () => {
+    if (fileInputRef.current) fileInputRef.current.click();
+  };
+
+  const renderComposerAttachments = () => (
+    <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+        className="hidden"
+        onChange={(e) => {
+          handleFilesSelected(e.target.files);
+          e.target.value = '';
+        }}
+        data-testid="messages-attach-input"
+      />
+      {pendingAttachments.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2" data-testid="messages-attachment-previews">
+          {pendingAttachments.map((att) => (
+            <div key={att.id} className="relative flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-1.5 pr-7 dark:border-zinc-800 dark:bg-[#111111]">
+              {att.previewUrl ? (
+                <img src={att.previewUrl} alt={att.file.name} className="h-10 w-10 rounded object-cover" />
+              ) : (
+                <span className="flex h-10 w-10 items-center justify-center rounded bg-gray-200 text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
+                  <Icon name={iconForContentType(att.file.type)} />
+                </span>
+              )}
+              <div className="min-w-0 max-w-[9rem]">
+                <p className="truncate text-xs font-medium text-gray-800 dark:text-zinc-200">{att.file.name}</p>
+                <p className="text-[10px] text-gray-500 dark:text-zinc-500">{formatFileSize(att.file.size)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => removePendingAttachment(att.id)}
+                className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-zinc-700"
+                aria-label={`Remove ${att.file.name}`}
+              >
+                <Icon name="xmark" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  const renderAttachButton = () => (
+    <button
+      type="button"
+      onClick={openAttachmentPicker}
+      disabled={sendLoading || pendingAttachments.length >= MAX_ATTACHMENTS}
+      className="shrink-0 rounded-xl p-2.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-[#111111]"
+      title="Attach photos or files"
+      data-testid="messages-attach-button"
+    >
+      <Icon name="paperclip" />
+    </button>
+  );
+
+  const renderMessageAttachments = (msg, isMine) => {
+    const list = Array.isArray(msg?.attachments) ? msg.attachments : [];
+    if (list.length === 0) return null;
+    return (
+      <div className="mt-2 flex flex-col gap-2">
+        {list.map((att) =>
+          isImageAttachment(att) && att.download_url ? (
+            <a key={att.id} href={att.download_url} target="_blank" rel="noopener noreferrer" className="block">
+              <img
+                src={att.download_url}
+                alt={att.file_name || 'Image attachment'}
+                className="max-h-64 w-auto max-w-full rounded-lg border border-black/5 object-cover dark:border-white/10"
+                loading="lazy"
+              />
+            </a>
+          ) : (
+            <a
+              key={att.id}
+              href={att.download_url || undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center gap-3 rounded-lg border p-2.5 no-underline ${
+                isMine
+                  ? 'border-white/20 bg-white/10 hover:bg-white/20'
+                  : 'border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-zinc-700 dark:bg-[#0c0c0c] dark:hover:bg-[#151515]'
+              }`}
+            >
+              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded ${isMine ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>
+                <Icon name={iconForContentType(att.content_type)} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate text-xs font-medium ${isMine ? 'text-white' : 'text-gray-800 dark:text-zinc-100'}`}>{att.file_name || 'Attachment'}</span>
+                <span className={`block text-[10px] ${isMine ? 'text-white/70' : 'text-gray-500 dark:text-zinc-400'}`}>{formatFileSize(att.file_size)}</span>
+              </span>
+              <Icon name="download" className={isMine ? 'text-white/80' : 'text-gray-400'} />
+            </a>
+          )
+        )}
+      </div>
+    );
+  };
+
   const handleSendMessage = async () => {
-    if (!messageText.trim()) return;
+    const trimmedText = messageText.trim();
+    if (!trimmedText && pendingAttachments.length === 0) return;
     try {
       setSendLoading(true);
       setSendError('');
@@ -632,21 +810,38 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       }
       if (!channelId) return;
 
-      const response = await fetch(`/api/messages/threads/${channelId}/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body: messageText.trim() }),
-      });
+      const hasAttachments = pendingAttachments.length > 0;
+      let response;
+      if (hasAttachments) {
+        const formData = new FormData();
+        formData.append('body', trimmedText);
+        pendingAttachments.forEach((att) => formData.append('files', att.file, att.file.name));
+        response = await fetch(`/api/messages/threads/${channelId}/send`, {
+          method: 'POST',
+          body: formData,
+        });
+      } else {
+        response = await fetch(`/api/messages/threads/${channelId}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: trimmedText }),
+        });
+      }
       const payload = await response.json();
+      // On failure we intentionally keep messageText + pendingAttachments so the
+      // composed message is never silently lost.
       if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
-      const sentBody = messageText.trim();
+      const sentBody = trimmedText;
+      const attachmentCount = pendingAttachments.length;
       setMessageText('');
+      clearPendingAttachments();
       const pendingLabel = String(pendingDirectContact?.label || 'Team Member');
       const pendingUserId = String(pendingDirectContact?.userId || '');
       setMessages((prev) => [
         ...prev,
         {
           ...payload.item,
+          attachments: Array.isArray(payload.item.attachments) ? payload.item.attachments : [],
           sender_display_name: 'You',
           sender_avatar_url: '',
         },
@@ -664,7 +859,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           other_user_id: existing?.other_user_id || pendingUserId || null,
           last_message_at: payload.item.created_at,
           updated_at: payload.item.created_at,
-          last_message_preview: sentBody,
+          last_message_preview: sentBody || (attachmentCount === 1 ? '📎 Attachment' : `📎 ${attachmentCount} attachments`),
           message_count: Number(existing?.message_count || 0) + 1,
           unread_count: 0,
         };
@@ -900,7 +1095,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                         ? 'rounded-br-md bg-brand-600 text-white dark:bg-brand-500'
                         : 'rounded-bl-md border border-zinc-800 bg-[#111111] text-zinc-100'
                     }`}>
-                      <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p>
+                      {msg.body ? <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p> : null}
+                      {renderMessageAttachments(msg, isMine)}
                       <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
                     </div>
                     </div>
@@ -913,11 +1109,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           </div>
 
           <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+            {renderComposerAttachments()}
             <div className="flex min-w-0 items-end gap-2 sm:gap-3">
+              {renderAttachButton()}
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : activeChannel.is_companywide ? (companyName ? `Send a message to everyone in ${companyName}` : 'Message your team') : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button onClick={handleSendMessage} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -946,11 +1144,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             <div className="text-sm text-gray-500 dark:text-zinc-400">Send the first message to start this chat.</div>
           </div>
           <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+            {renderComposerAttachments()}
             <div className="flex min-w-0 items-end gap-2 sm:gap-3">
+              {renderAttachButton()}
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button onClick={handleSendMessage} disabled={!messageText.trim() || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button onClick={handleSendMessage} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>

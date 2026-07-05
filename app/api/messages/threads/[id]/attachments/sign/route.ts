@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
@@ -84,7 +85,22 @@ export async function POST(
       const path = buildMessageAttachmentPath(companyId, validation.safeFileName);
       const signed = await db.storage.from(MESSAGE_ATTACHMENTS_BUCKET).createSignedUploadUrl(path);
       if (signed.error || !signed.data) {
-        return serverError(signed.error?.message || "Failed to prepare upload");
+        const rawMessage = signed.error?.message || "";
+        // Log the underlying Supabase Storage error for diagnosis.
+        console.error("[messages/attachments/sign] createSignedUploadUrl failed", {
+          bucket: MESSAGE_ATTACHMENTS_BUCKET,
+          path,
+          error: rawMessage,
+        });
+        // A missing bucket surfaces as "Bucket not found" / "The related resource
+        // does not exist". Return a clear, actionable message instead of the raw text.
+        if (/bucket not found|does not exist|related resource/i.test(rawMessage)) {
+          return NextResponse.json(
+            { error: "Message attachment storage bucket is not configured" },
+            { status: 500 }
+          );
+        }
+        return serverError(rawMessage || "Failed to prepare upload");
       }
       uploads.push({
         path,

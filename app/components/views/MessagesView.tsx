@@ -68,22 +68,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     channelsRef.current = channels;
   }, [channels]);
 
-  // TEMPORARY DIAGNOSTICS (attachment send-refresh bug). The build marker proves
-  // the NEW bundle is loaded — if you don't see it, the device is running stale
-  // cached/native code. The beforeunload log fires if ANY real page navigation /
-  // reload happens, so we can tell a true refresh apart from a component update.
-  useEffect(() => {
-    console.log('[MessagesDiag] MessagesView mounted — build=attachments-diagnostics-v1');
-    const onBeforeUnload = () => {
-      console.log('[MessagesDiag] ⚠️ page is UNLOADING (navigation/refresh happening now)');
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => {
-      console.log('[MessagesDiag] ⚠️ MessagesView UNMOUNTING (component being destroyed)');
-      window.removeEventListener('beforeunload', onBeforeUnload);
-    };
-  }, []);
-
   // Clear any composed attachments when switching threads so files are never
   // sent to the wrong conversation; revoke their object URLs to avoid leaks.
   useEffect(() => {
@@ -689,7 +673,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   // this button-click gesture works in iOS WKWebView (the native app), unlike a
   // label wrapping a display:none input, which silently fails to fire onChange.
   const openFilePicker = () => {
-    console.log('[MessagesDiag] open file picker clicked — inputPresent:', Boolean(fileInputRef.current), 'activeChannelId(before):', activeChannel?.id ?? null);
     // The OS file picker blurs the window; on refocus, the app's global
     // focus/visibility handler runs verifySetup() which remounts this view and
     // loses the input's onChange. Suppress that refresh for the duration of the
@@ -709,7 +692,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       window.__groundworkSuppressSetupRefreshUntil = Date.now() + 8000;
     }
     const files = Array.from(event.currentTarget.files ?? []);
-    console.log('[MessagesDiag] file picker changed — count:', files.length, files.map((f) => f.name), 'activeChannelId(after):', activeChannel?.id ?? null);
     if (files.length > 0) addFilesToPending(files);
     // Clear AFTER storing so re-selecting the same file still fires onChange.
     event.currentTarget.value = '';
@@ -827,11 +809,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     const trimmedText = messageText.trim();
-    console.log('[MessagesDiag] send clicked — hasText:', Boolean(trimmedText), 'selected attachment count:', pendingAttachments.length);
-    if (!trimmedText && pendingAttachments.length === 0) {
-      console.log('[MessagesDiag] early return: no text and no attachments');
-      return;
-    }
+    if (!trimmedText && pendingAttachments.length === 0) return;
     try {
       setSendLoading(true);
       setSendError('');
@@ -859,7 +837,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       // message with only the resulting object metadata.
       const attachmentPayload = [];
       if (pendingAttachments.length > 0) {
-        console.log('[MessagesDiag] signing upload started — files:', pendingAttachments.length);
         const signRes = await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -871,7 +848,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             })),
           }),
         });
-        console.log('[MessagesDiag] sign API responded — status:', signRes.status);
         const signPayload = await signRes.json().catch(() => null);
         if (!signRes.ok || !Array.isArray(signPayload?.uploads)) {
           throw new Error(signPayload?.error || 'Failed to prepare upload');
@@ -880,7 +856,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         for (let i = 0; i < signPayload.uploads.length; i += 1) {
           const up = signPayload.uploads[i];
           const file = pendingAttachments[i].file;
-          console.log('[MessagesDiag] Supabase upload started —', up.path);
           const { error: upErr } = await storage
             .from(up.bucket)
             .uploadToSignedUrl(up.path, up.token, file, { contentType: up.content_type });
@@ -894,13 +869,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         }
       }
 
-      console.log('[MessagesDiag] send API started — attachments:', attachmentPayload.length);
       const response = await fetch(`/api/messages/threads/${channelId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: trimmedText, attachments: attachmentPayload }),
       });
-      console.log('[MessagesDiag] send API responded — status:', response.status);
       const payload = await response.json().catch(() => null);
       // On failure we intentionally keep messageText + pendingAttachments so the
       // composed message is never silently lost.
@@ -956,7 +929,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       }));
       loadChannels(true);
     } catch (error) {
-      console.error('[MessagesDiag] caught error during send:', error);
       setSendError(error instanceof Error ? error.message : 'Failed to send message');
     } finally {
       setSendLoading(false);

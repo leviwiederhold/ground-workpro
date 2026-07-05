@@ -786,7 +786,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     );
   };
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = async (e) => {
+    // Defensive: never let a click/keypress bubble into a native form submit /
+    // navigation. The composer is not in a <form>, but this keeps it robust.
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     const trimmedText = messageText.trim();
     if (!trimmedText && pendingAttachments.length === 0) return;
     try {
@@ -810,24 +813,50 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       }
       if (!channelId) return;
 
-      const hasAttachments = pendingAttachments.length > 0;
-      let response;
-      if (hasAttachments) {
-        const formData = new FormData();
-        formData.append('body', trimmedText);
-        pendingAttachments.forEach((att) => formData.append('files', att.file, att.file.name));
-        response = await fetch(`/api/messages/threads/${channelId}/send`, {
-          method: 'POST',
-          body: formData,
-        });
-      } else {
-        response = await fetch(`/api/messages/threads/${channelId}/send`, {
+      // Attachments upload DIRECTLY to Supabase Storage via short-lived signed
+      // upload URLs, so file bytes never pass through the serverless function
+      // (which caps request bodies well below our 10 MB limit). We then send the
+      // message with only the resulting object metadata.
+      const attachmentPayload = [];
+      if (pendingAttachments.length > 0) {
+        const signRes = await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ body: trimmedText }),
+          body: JSON.stringify({
+            files: pendingAttachments.map((att) => ({
+              file_name: att.file.name,
+              content_type: att.file.type || 'application/octet-stream',
+              file_size: att.file.size,
+            })),
+          }),
         });
+        const signPayload = await signRes.json().catch(() => null);
+        if (!signRes.ok || !Array.isArray(signPayload?.uploads)) {
+          throw new Error(signPayload?.error || 'Failed to prepare upload');
+        }
+        const storage = supabaseBrowser().storage;
+        for (let i = 0; i < signPayload.uploads.length; i += 1) {
+          const up = signPayload.uploads[i];
+          const file = pendingAttachments[i].file;
+          const { error: upErr } = await storage
+            .from(up.bucket)
+            .uploadToSignedUrl(up.path, up.token, file, { contentType: up.content_type });
+          if (upErr) throw new Error(upErr.message || 'Failed to upload attachment');
+          attachmentPayload.push({
+            path: up.path,
+            file_name: up.file_name,
+            content_type: up.content_type,
+            file_size: up.file_size,
+          });
+        }
       }
-      const payload = await response.json();
+
+      const response = await fetch(`/api/messages/threads/${channelId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: trimmedText, attachments: attachmentPayload }),
+      });
+      const payload = await response.json().catch(() => null);
       // On failure we intentionally keep messageText + pendingAttachments so the
       // composed message is never silently lost.
       if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
@@ -1115,7 +1144,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : activeChannel.is_companywide ? (companyName ? `Send a message to everyone in ${companyName}` : 'Message your team') : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button onClick={handleSendMessage} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -1150,7 +1179,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button onClick={handleSendMessage} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>

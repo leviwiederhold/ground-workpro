@@ -54,7 +54,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [namingSaving, setNamingSaving] = useState(false);
   const [namingError, setNamingError] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState([]);
-  const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
@@ -697,24 +696,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     });
   };
 
-  const openAttachmentPicker = () => {
-    if (fileInputRef.current) fileInputRef.current.click();
-  };
-
   const renderComposerAttachments = () => (
     <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-        className="hidden"
-        onChange={(e) => {
-          handleFilesSelected(e.target.files);
-          e.target.value = '';
-        }}
-        data-testid="messages-attach-input"
-      />
       {pendingAttachments.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-2" data-testid="messages-attachment-previews">
           {pendingAttachments.map((att) => (
@@ -745,17 +728,34 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     </>
   );
 
+  // The hidden file input lives INSIDE the label, so a native click on the label
+  // opens that exact input's picker — no ref, no programmatic .click(), and no
+  // possibility of targeting a detached/duplicate input. onChange fires reliably.
+  const attachDisabled = sendLoading || pendingAttachments.length >= MAX_ATTACHMENTS;
   const renderAttachButton = () => (
-    <button
-      type="button"
-      onClick={openAttachmentPicker}
-      disabled={sendLoading || pendingAttachments.length >= MAX_ATTACHMENTS}
-      className="shrink-0 rounded-xl p-2.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-[#111111]"
+    <label
       title="Attach photos or files"
       data-testid="messages-attach-button"
+      onClick={() => console.log('[MessagesDiag] attach label clicked — disabled:', attachDisabled)}
+      className={`shrink-0 rounded-xl p-2.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-zinc-400 dark:hover:bg-[#111111] ${
+        attachDisabled ? 'pointer-events-none opacity-50' : 'cursor-pointer'
+      }`}
     >
       <Icon name="paperclip" />
-    </button>
+      <input
+        type="file"
+        multiple
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+        className="hidden"
+        disabled={attachDisabled}
+        onChange={(e) => {
+          console.log('[MessagesDiag] file input onChange fired — files:', e.target.files?.length ?? 0);
+          handleFilesSelected(e.target.files);
+          e.target.value = '';
+        }}
+        data-testid="messages-attach-input"
+      />
+    </label>
   );
 
   const renderMessageAttachments = (msg, isMine) => {

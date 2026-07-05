@@ -78,7 +78,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       console.log('[MessagesDiag] ⚠️ page is UNLOADING (navigation/refresh happening now)');
     };
     window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    return () => {
+      console.log('[MessagesDiag] ⚠️ MessagesView UNMOUNTING (component being destroyed)');
+      window.removeEventListener('beforeunload', onBeforeUnload);
+    };
   }, []);
 
   // Clear any composed attachments when switching threads so files are never
@@ -686,13 +689,27 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   // this button-click gesture works in iOS WKWebView (the native app), unlike a
   // label wrapping a display:none input, which silently fails to fire onChange.
   const openFilePicker = () => {
-    console.log('[MessagesDiag] open file picker clicked — inputPresent:', Boolean(fileInputRef.current));
+    console.log('[MessagesDiag] open file picker clicked — inputPresent:', Boolean(fileInputRef.current), 'activeChannelId(before):', activeChannel?.id ?? null);
+    // The OS file picker blurs the window; on refocus, the app's global
+    // focus/visibility handler runs verifySetup() which remounts this view and
+    // loses the input's onChange. Suppress that refresh for the duration of the
+    // pick (same mechanism DocumentsView uses). This sets a window flag only —
+    // it does NOT change any React/thread/view state, so it cannot cause a
+    // re-render itself.
+    if (typeof window !== 'undefined') {
+      window.__groundworkSuppressSetupRefreshUntil = Date.now() + 120000;
+    }
     fileInputRef.current?.click();
   };
 
   const handleAttachmentSelect = (event) => {
+    // Keep the refresh suppressed briefly past selection so the refocus that
+    // fires when the picker closes doesn't remount us before state is stored.
+    if (typeof window !== 'undefined') {
+      window.__groundworkSuppressSetupRefreshUntil = Date.now() + 8000;
+    }
     const files = Array.from(event.currentTarget.files ?? []);
-    console.log('[MessagesDiag] file picker changed — count:', files.length, files.map((f) => f.name));
+    console.log('[MessagesDiag] file picker changed — count:', files.length, files.map((f) => f.name), 'activeChannelId(after):', activeChannel?.id ?? null);
     if (files.length > 0) addFilesToPending(files);
     // Clear AFTER storing so re-selecting the same file still fires onChange.
     event.currentTarget.value = '';

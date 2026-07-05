@@ -26,6 +26,7 @@ type MessageRow = {
   sender_user_id: string;
   body: string;
   created_at: string;
+  edited_at?: string | null;
 };
 
 function getMessagingDb(supabase: SupabaseClient) {
@@ -332,17 +333,26 @@ export async function listMessagesForThread(
   from: number,
   to: number
 ): Promise<{ items: MessageRow[]; count: number }> {
-  const result = await getMessagingDb(supabase)
-    .from("messages")
-    .select("id, thread_id, sender_user_id, body, created_at", { count: "exact" })
-    .eq("company_id", companyId)
-    .eq("thread_id", threadId)
-    .order("created_at", { ascending: true })
-    .range(from, to);
+  const db = getMessagingDb(supabase);
+  const runQuery = (columns: string) =>
+    db
+      .from("messages")
+      .select(columns, { count: "exact" })
+      .eq("company_id", companyId)
+      .eq("thread_id", threadId)
+      .order("created_at", { ascending: true })
+      .range(from, to);
+
+  // Prefer selecting edited_at; tolerate environments where the migration that
+  // adds it has not been applied yet (fall back to the base columns).
+  let result = await runQuery("id, thread_id, sender_user_id, body, created_at, edited_at");
+  if (result.error && /edited_at/i.test(result.error.message || "")) {
+    result = await runQuery("id, thread_id, sender_user_id, body, created_at");
+  }
 
   if (result.error) throw new Error(result.error.message);
   return {
-    items: (result.data ?? []) as MessageRow[],
+    items: (result.data ?? []) as unknown as MessageRow[],
     count: Number(result.count ?? 0),
   };
 }

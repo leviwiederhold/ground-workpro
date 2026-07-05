@@ -18,8 +18,22 @@ const paramsSchema = z.object({
 });
 
 // Body is optional when at least one attachment is present (enforced below).
+// Attachments reference objects the browser already uploaded directly to Storage
+// (see the /attachments/sign route); only metadata + path flow through here.
 const sendMessageSchema = z.object({
   body: z.string().trim().max(4000).optional().default(""),
+  attachments: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        file_name: z.string().min(1),
+        content_type: z.string().min(1),
+        file_size: z.number().finite().positive(),
+      })
+    )
+    .max(MAX_MESSAGE_ATTACHMENTS)
+    .optional()
+    .default([]),
 });
 
 type ValidationIssue = {
@@ -54,36 +68,22 @@ export async function POST(
     const parsedParams = paramsSchema.safeParse(await params);
     if (!parsedParams.success) return validationError(toValidationDetails(parsedParams.error));
 
-    // Accept either JSON (text-only) or multipart/form-data (text + attachments).
+    // JSON body: text + optional metadata for files already uploaded to Storage.
     let rawBody: unknown = {};
-    let files: File[] = [];
-    const contentTypeHeader = request.headers.get("content-type") || "";
-    if (contentTypeHeader.includes("multipart/form-data")) {
-      const formData = await request.formData();
-      rawBody = { body: String(formData.get("body") ?? "") };
-      files = formData
-        .getAll("files")
-        .filter((entry): entry is File => entry instanceof File && entry.size > 0);
-    } else {
-      try {
-        rawBody = await request.json();
-      } catch {
-        rawBody = {};
-      }
+    try {
+      rawBody = await request.json();
+    } catch {
+      rawBody = {};
     }
 
     const parsedBody = sendMessageSchema.safeParse(rawBody);
     if (!parsedBody.success) return validationError(toValidationDetails(parsedBody.error));
 
     const messageBody = parsedBody.data.body.trim();
+    const attachmentInputs = parsedBody.data.attachments;
     // Do not send an empty message unless at least one attachment is present.
-    if (!messageBody && files.length === 0) {
+    if (!messageBody && attachmentInputs.length === 0) {
       return validationError([{ path: "body", message: "Message cannot be empty" }]);
-    }
-    if (files.length > MAX_MESSAGE_ATTACHMENTS) {
-      return validationError([
-        { path: "files", message: `You can attach at most ${MAX_MESSAGE_ATTACHMENTS} files` },
-      ]);
     }
 
     const threadId = parsedParams.data.id;
@@ -121,10 +121,11 @@ export async function POST(
       return serverError(insertResult.error?.message || "Failed to send message");
     }
 
-    // Upload + link attachments. If this fails, roll back the message so the
-    // client can keep the composed message + files rather than losing them.
+    // Link attachments (bytes already uploaded to Storage). If this fails, roll
+    // back the message so the client can keep the composed message + files
+    // rather than losing them.
     let attachments: unknown[] = [];
-    if (files.length > 0) {
+    if (attachmentInputs.length > 0) {
       try {
         attachments = await persistMessageAttachments({
           db,
@@ -132,7 +133,7 @@ export async function POST(
           threadId: thread.id,
           messageId: insertResult.data.id,
           uploaderId: userId,
-          files,
+          attachments: attachmentInputs,
         });
       } catch (attachmentError) {
         await db.from("messages").delete().eq("company_id", companyId).eq("id", insertResult.data.id);
@@ -180,7 +181,9 @@ export async function POST(
                 threadId: thread.id,
                 messagePreview:
                   messageBody.slice(0, 120) ||
-                  (files.length === 1 ? "Sent an attachment" : `Sent ${files.length} attachments`),
+                  (attachmentInputs.length === 1
+                    ? "Sent an attachment"
+                    : `Sent ${attachmentInputs.length} attachments`),
                 href: "/messages",
               },
               entityType: "message_thread",

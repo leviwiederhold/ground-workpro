@@ -1,10 +1,51 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { createHash } from "crypto";
+import { randomUUID } from "crypto";
 import { validateAttachmentMetadata } from "@/src/lib/attachments/security";
 
 export const MESSAGE_ATTACHMENTS_BUCKET = "message-attachments";
 export const MAX_MESSAGE_ATTACHMENTS = 10;
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+export type MessageAttachmentInput = {
+  path: string;
+  file_name: string;
+  content_type: string;
+  file_size: number;
+};
+
+// Validate a single file's METADATA (name/type/size) against the shared
+// attachment security allowlist — rejects executables/dangerous types and files
+// over the size cap. Used before issuing an upload URL and again when the
+// message is sent (defense in depth), since bytes upload directly to Storage.
+export function validateMessageFileMeta(input: {
+  file_name: string;
+  content_type: string;
+  file_size: number;
+}):
+  | { ok: true; safeFileName: string; contentType: string }
+  | { ok: false; error: string } {
+  const validation = validateAttachmentMetadata({
+    fileName: input.file_name || "upload.bin",
+    contentType: input.content_type || "application/octet-stream",
+    sizeBytes: Number(input.file_size),
+  });
+  if (!validation.ok) return { ok: false, error: validation.error };
+  return { ok: true, safeFileName: validation.safeFileName, contentType: validation.contentType };
+}
+
+// Company-scoped storage path for a message attachment. Bytes upload directly
+// from the browser via a signed upload URL, so the path is generated server-side
+// and always carries the company prefix used by the send-time ownership check.
+export function buildMessageAttachmentPath(companyId: string, safeFileName: string): string {
+  const extMatch = safeFileName.match(/\.([a-zA-Z0-9]+)$/);
+  const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : "";
+  return `${companyId}/messages/${randomUUID()}${ext}`;
+}
+
+export function isCompanyScopedMessagePath(companyId: string, path: string): boolean {
+  const prefix = `${companyId}/messages/`;
+  return typeof path === "string" && path.startsWith(prefix) && !path.includes("..") && !path.includes("//");
+}
 
 export function isImageContentType(contentType: string | null | undefined): boolean {
   return String(contentType ?? "").toLowerCase().startsWith("image/");
@@ -28,106 +69,63 @@ export function mapMessageAttachment(row: any, signedUrl: string | null = null) 
   };
 }
 
-type PreparedFile = {
-  bytes: Uint8Array;
-  fileName: string;
-  contentType: string;
-  size: number;
-  sha256: string;
-  path: string;
-};
-
-// Validate + hash a single incoming file. Rejects disallowed/dangerous types
-// and oversized files (server-side) via the shared attachment security allowlist.
-async function toPrepared(companyId: string, file: File): Promise<PreparedFile | { error: string }> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const validation = validateAttachmentMetadata({
-    fileName: file.name || "upload.bin",
-    contentType: file.type || "application/octet-stream",
-    sizeBytes: bytes.byteLength,
-  });
-  if (!validation.ok) return { error: validation.error };
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
-  const extMatch = validation.safeFileName.match(/\.([a-zA-Z0-9]+)$/);
-  const ext = extMatch ? `.${extMatch[1].toLowerCase()}` : "";
-  // Content-hashed, company-scoped path → identical bytes are stored once.
-  const path = `${companyId}/messages/${sha256}${ext}`;
-  return {
-    bytes,
-    fileName: validation.safeFileName,
-    contentType: validation.contentType,
-    size: bytes.byteLength,
-    sha256,
-    path,
-  };
-}
-
-// Upload + persist attachments for a just-created message. Uploads are
-// deduplicated by content hash (a matching object is reused, not re-uploaded).
-// On any failure, storage objects uploaded during THIS call are cleaned up and
-// an error is thrown so the caller can roll back the message.
+// Persist attachment rows for a just-created message. Bytes were already
+// uploaded DIRECTLY to Storage by the browser (via a signed upload URL), so this
+// only validates ownership + metadata, confirms each object exists, and inserts
+// the rows. On any failure the referenced objects are removed and an error is
+// thrown so the caller can roll back the message.
 export async function persistMessageAttachments(params: {
   db: any;
   companyId: string;
   threadId: string;
   messageId: string;
   uploaderId: string;
-  files: File[];
+  attachments: MessageAttachmentInput[];
 }): Promise<any[]> {
-  const { db, companyId, threadId, messageId, uploaderId, files } = params;
-  if (files.length === 0) return [];
-  if (files.length > MAX_MESSAGE_ATTACHMENTS) {
+  const { db, companyId, threadId, messageId, uploaderId, attachments } = params;
+  if (!attachments || attachments.length === 0) return [];
+  if (attachments.length > MAX_MESSAGE_ATTACHMENTS) {
     throw new Error(`You can attach at most ${MAX_MESSAGE_ATTACHMENTS} files per message`);
   }
 
-  const prepared: PreparedFile[] = [];
-  for (const file of files) {
-    const result = await toPrepared(companyId, file);
-    if ("error" in result) throw new Error(result.error);
-    prepared.push(result);
-  }
+  const rows: any[] = [];
+  for (const attachment of attachments) {
+    // Ownership: never allow linking an object outside this company's namespace.
+    if (!isCompanyScopedMessagePath(companyId, attachment.path)) {
+      throw new Error("Invalid attachment path");
+    }
+    const validation = validateMessageFileMeta(attachment);
+    if (!validation.ok) throw new Error(validation.error);
 
-  const newlyUploadedPaths: string[] = [];
-  try {
-    for (const p of prepared) {
-      const { error: uploadError } = await db.storage
-        .from(MESSAGE_ATTACHMENTS_BUCKET)
-        .upload(p.path, p.bytes, { upsert: false, contentType: p.contentType });
-      if (uploadError) {
-        // Duplicate object == dedupe hit (same bytes already stored). Reuse it.
-        const message = String(uploadError.message || "").toLowerCase();
-        const isDuplicate =
-          message.includes("already exists") ||
-          message.includes("duplicate") ||
-          (uploadError as any).statusCode === "409";
-        if (!isDuplicate) throw new Error(uploadError.message || "Failed to upload attachment");
-      } else {
-        newlyUploadedPaths.push(p.path);
-      }
+    // Confirm the object actually exists (signing a missing object errors),
+    // preventing rows that reference nothing.
+    const check = await db.storage
+      .from(MESSAGE_ATTACHMENTS_BUCKET)
+      .createSignedUrl(attachment.path, 60);
+    if (check.error || !check.data?.signedUrl) {
+      throw new Error("Uploaded file not found");
     }
 
-    const rows = prepared.map((p) => ({
+    rows.push({
       company_id: companyId,
       message_id: messageId,
       thread_id: threadId,
       uploader_id: uploaderId,
-      file_name: p.fileName,
-      content_type: p.contentType,
-      file_size: p.size,
+      file_name: validation.safeFileName,
+      content_type: validation.contentType,
+      file_size: Number(attachment.file_size),
       storage_bucket: MESSAGE_ATTACHMENTS_BUCKET,
-      storage_path: p.path,
-      content_sha256: p.sha256,
-    }));
+      storage_path: attachment.path,
+    });
+  }
 
+  const paths = rows.map((r) => r.storage_path);
+  try {
     const insertResult = await db.from("message_attachments").insert(rows).select("*");
     if (insertResult.error) throw new Error(insertResult.error.message || "Failed to save attachments");
-
     return signAttachments(db, insertResult.data ?? []);
   } catch (error) {
-    // Roll back ONLY the objects this request uploaded (never a deduped/shared one).
-    if (newlyUploadedPaths.length > 0) {
-      await db.storage.from(MESSAGE_ATTACHMENTS_BUCKET).remove(newlyUploadedPaths).catch(() => null);
-    }
+    await db.storage.from(MESSAGE_ATTACHMENTS_BUCKET).remove(paths).catch(() => null);
     throw error;
   }
 }

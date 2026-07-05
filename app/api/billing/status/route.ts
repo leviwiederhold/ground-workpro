@@ -146,6 +146,10 @@ export async function GET(request: Request) {
     console.log("[billing/status] userId:", userId, "companyId:", companyId);
     const status = await getCompanyBillingStatus(supabase, companyId);
     console.log("[billing/status] subscription_status:", status.subscription_status, "is_active:", status.is_active, "plan_type:", status.plan_type);
+    const hasActiveOverrideDisplay =
+      status.override.grantsFreeAccess ||
+      status.override.isDiscount ||
+      (status.override.type === "free_until" && !status.override.isExpired && Boolean(status.override.until));
 
     const billingStatus = {
       plan_type: status.plan_type,
@@ -155,10 +159,12 @@ export async function GET(request: Request) {
       stripe_active: status.stripe_active,
       is_active: status.is_active,
       display_status: status.display_status,
+      effective_display_status: status.display_status,
       // Employee-safe override summary — the internal reason/notes are NEVER
       // included here; only the platform-admin API can read them.
       override_type: status.override.type,
       override_until: status.override.until,
+      override_display_status: hasActiveOverrideDisplay ? status.display_status : null,
       is_complimentary: status.override.grantsFreeAccess,
       discount_percent: status.override.discountPercent,
       discount_amount_cents: status.override.discountAmountCents,

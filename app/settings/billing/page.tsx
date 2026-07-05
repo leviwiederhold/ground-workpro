@@ -12,6 +12,8 @@ type BillingStatus = {
   is_active: boolean;
   // Override-aware fields (employee-safe; no internal reason/notes).
   display_status?: string;
+  effective_display_status?: string;
+  override_display_status?: string | null;
   is_complimentary?: boolean;
   override_type?: string;
   override_until?: string | null;
@@ -57,7 +59,7 @@ function StatusBadge({ billing }: { billing: BillingStatus | null }) {
     );
   }
   const fallback = map[status] ?? { label: status, cls: "bg-gray-100 text-gray-700" };
-  const label = billing?.display_status || fallback.label;
+  const label = billing?.effective_display_status || billing?.override_display_status || billing?.display_status || fallback.label;
   return (
     <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${fallback.cls}`}>
       {label}

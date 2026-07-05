@@ -10397,6 +10397,16 @@ const MobileAppShell = ({
       const label = 'mb-1 block text-xs font-medium text-gray-500';
       const cardClass = 'p-4 sm:p-5 lg:p-6';
       const cardHeaderClass = 'mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between';
+      const billingDisplayStatus = String(
+        billingStatus?.effective_display_status ||
+        billingStatus?.override_display_status ||
+        billingStatus?.display_status ||
+        billingStatus?.subscription_status ||
+        'inactive'
+      );
+      const rawStripeStatus = String(billingStatus?.subscription_status || 'inactive');
+      const showStripeStatusContext =
+        billingDisplayStatus.trim().toLowerCase() !== rawStripeStatus.trim().toLowerCase();
 
       return (
         <div className="mx-auto w-full max-w-6xl space-y-5 lg:space-y-6">
@@ -10471,7 +10481,13 @@ const MobileAppShell = ({
               </div>
               <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
                 <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Plan</p><p className="truncate font-medium">Groundwork Pro</p></div>
-                <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Status</p><p className="truncate font-medium capitalize">{String(billingStatus?.subscription_status || 'inactive')}</p></div>
+                <div className="min-w-0 rounded-lg border border-gray-200 p-3">
+                  <p className="text-xs text-gray-500">Status</p>
+                  <p className="truncate font-medium">{billingDisplayStatus}</p>
+                  {showStripeStatusContext && (
+                    <p className="mt-1 truncate text-xs text-gray-400">Stripe: {rawStripeStatus}</p>
+                  )}
+                </div>
                 <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Trial ends</p><p className="truncate font-medium">{billingStatus?.trial_ends_at ? formatDate(billingStatus.trial_ends_at) : '—'}</p></div>
                 <div className="min-w-0 rounded-lg border border-gray-200 p-3"><p className="text-xs text-gray-500">Next renewal</p><p className="truncate font-medium">{billingStatus?.current_period_end ? formatDate(billingStatus.current_period_end) : '—'}</p></div>
               </div>

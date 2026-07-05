@@ -38,6 +38,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [availableUsers, setAvailableUsers] = useState(() => (Array.isArray(availableUsersSeed) ? availableUsersSeed.filter(hasUserId) : []));
   const [selectedNewChatUsers, setSelectedNewChatUsers] = useState([]);
   const [showMembers, setShowMembers] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
+  const [msgMenuOpenId, setMsgMenuOpenId] = useState('');
+  const [editingMsgId, setEditingMsgId] = useState('');
+  const [editingText, setEditingText] = useState('');
+  const [msgActionError, setMsgActionError] = useState('');
   const [members, setMembers] = useState([]);
   const [membersError, setMembersError] = useState('');
   const [selectedAddMembers, setSelectedAddMembers] = useState([]);
@@ -764,41 +769,68 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const renderMessageAttachments = (msg, isMine) => {
     const list = Array.isArray(msg?.attachments) ? msg.attachments : [];
     if (list.length === 0) return null;
+    const images = list.filter((att) => isImageAttachment(att) && att.download_url);
+    const files = list.filter((att) => !(isImageAttachment(att) && att.download_url));
+
     return (
       <div className="mt-2 flex flex-col gap-2">
-        {list.map((att) =>
-          isImageAttachment(att) && att.download_url ? (
-            <a key={att.id} href={att.download_url} target="_blank" rel="noopener noreferrer" className="block">
-              <img
-                src={att.download_url}
-                alt={att.file_name || 'Image attachment'}
-                className="max-h-64 w-auto max-w-full rounded-lg border border-black/5 object-cover dark:border-white/10"
-                loading="lazy"
-              />
-            </a>
-          ) : (
-            <a
-              key={att.id}
-              href={att.download_url || undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`flex items-center gap-3 rounded-lg border p-2.5 no-underline ${
-                isMine
-                  ? 'border-white/20 bg-white/10 hover:bg-white/20'
-                  : 'border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-zinc-700 dark:bg-[#0c0c0c] dark:hover:bg-[#151515]'
-              }`}
-            >
-              <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded ${isMine ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>
-                <Icon name={iconForContentType(att.content_type)} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className={`block truncate text-xs font-medium ${isMine ? 'text-white' : 'text-gray-800 dark:text-zinc-100'}`}>{att.file_name || 'Attachment'}</span>
-                <span className={`block text-[10px] ${isMine ? 'text-white/70' : 'text-gray-500 dark:text-zinc-400'}`}>{formatFileSize(att.file_size)}</span>
-              </span>
-              <Icon name="download" className={isMine ? 'text-white/80' : 'text-gray-400'} />
-            </a>
-          )
+        {images.length > 0 && (
+          <div className={images.length === 1 ? 'w-full' : 'grid grid-cols-2 gap-1'}>
+            {images.map((att) => (
+              <div
+                key={att.id}
+                className={`group relative overflow-hidden rounded-lg border border-black/5 dark:border-white/10 ${
+                  images.length === 1 ? 'max-w-[16rem]' : 'aspect-square'
+                }`}
+              >
+                <a href={att.download_url} target="_blank" rel="noopener noreferrer" className="block">
+                  <img
+                    src={att.download_url}
+                    alt={att.file_name || 'Image attachment'}
+                    className={images.length === 1 ? 'max-h-64 w-full object-cover' : 'h-full w-full object-cover'}
+                    loading="lazy"
+                  />
+                </a>
+                {/* Explicit download over the existing signed URL (bucket is private). */}
+                <a
+                  href={att.download_url}
+                  download={att.file_name || true}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  title="Download image"
+                  aria-label={`Download ${att.file_name || 'image'}`}
+                  className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity hover:bg-black/75 focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Icon name="download" className="text-xs" />
+                </a>
+              </div>
+            ))}
+          </div>
         )}
+        {files.map((att) => (
+          <a
+            key={att.id}
+            href={att.download_url || undefined}
+            download={att.file_name || true}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex max-w-[18rem] items-center gap-3 rounded-lg border p-2.5 no-underline ${
+              isMine
+                ? 'border-white/20 bg-white/10 hover:bg-white/20'
+                : 'border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-zinc-700 dark:bg-[#0c0c0c] dark:hover:bg-[#151515]'
+            }`}
+          >
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded ${isMine ? 'bg-white/20 text-white' : 'bg-gray-200 text-gray-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>
+              <Icon name={iconForContentType(att.content_type)} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate text-xs font-medium ${isMine ? 'text-white' : 'text-gray-800 dark:text-zinc-100'}`}>{att.file_name || 'Attachment'}</span>
+              <span className={`block text-[10px] ${isMine ? 'text-white/70' : 'text-gray-500 dark:text-zinc-400'}`}>{formatFileSize(att.file_size)}</span>
+            </span>
+            <Icon name="download" className={isMine ? 'text-white/80' : 'text-gray-400'} />
+          </a>
+        ))}
       </div>
     );
   };
@@ -972,6 +1004,58 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     await loadChannels();
   };
 
+  const startEditMessage = (msg) => {
+    setMsgMenuOpenId('');
+    setMsgActionError('');
+    setEditingMsgId(String(msg.id));
+    setEditingText(String(msg.body || ''));
+  };
+
+  const cancelEditMessage = () => {
+    setEditingMsgId('');
+    setEditingText('');
+  };
+
+  const saveEditMessage = async (msg) => {
+    const threadId = String(activeChannel?.id || '');
+    const nextBody = editingText.trim();
+    if (!threadId || !nextBody) return;
+    if (nextBody === String(msg.body || '')) {
+      cancelEditMessage();
+      return;
+    }
+    setMsgActionError('');
+    try {
+      const response = await fetch(`/api/messages/threads/${threadId}/messages/${msg.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: nextBody }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to edit message');
+      setMessages((prev) => prev.map((m) => (String(m.id) === String(msg.id) ? { ...m, body: payload.item.body } : m)));
+      cancelEditMessage();
+    } catch (error) {
+      setMsgActionError(error instanceof Error ? error.message : 'Failed to edit message');
+    }
+  };
+
+  const deleteMessage = async (msg) => {
+    const threadId = String(activeChannel?.id || '');
+    if (!threadId) return;
+    setMsgMenuOpenId('');
+    if (typeof window !== 'undefined' && !window.confirm('Delete this message? This cannot be undone.')) return;
+    setMsgActionError('');
+    try {
+      const response = await fetch(`/api/messages/threads/${threadId}/messages/${msg.id}`, { method: 'DELETE' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.item?.deleted) throw new Error(payload?.error || 'Failed to delete message');
+      setMessages((prev) => prev.filter((m) => String(m.id) !== String(msg.id)));
+    } catch (error) {
+      setMsgActionError(error instanceof Error ? error.message : 'Failed to delete message');
+    }
+  };
+
   return (
     <div className="flex h-[calc(100dvh-var(--mobile-header-total-height)-var(--mobile-safe-bottom)-1.5rem)] min-h-0 w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-zinc-800 dark:bg-[#050505] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)] md:h-[calc(100dvh-170px)] md:min-h-[700px]" data-testid="messages-root">
       {/* ONE stable hidden file input — mounted at the root of MessagesView, NOT
@@ -1106,15 +1190,51 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <h3 className="truncate font-semibold text-gray-900 dark:text-zinc-100" data-testid="messages-active-channel">
                 {getChannelDisplayName(activeChannel)}
               </h3>
-              <p className="text-xs text-gray-500 dark:text-zinc-400">{activeChannel.message_count || 0} messages</p>
+              <p className="text-xs text-gray-500 dark:text-zinc-400">
+                {activeChannel.is_companywide
+                  ? 'Company chat'
+                  : isDirectChannel(activeChannel)
+                    ? 'Direct message'
+                    : Number(activeChannel.member_count || 0) > 0
+                      ? `${Number(activeChannel.member_count)} member${Number(activeChannel.member_count) === 1 ? '' : 's'}`
+                      : 'Group chat'}
+              </p>
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {activeChannel.is_companywide && viewerIsAdmin && (
-                <Button variant="secondary" size="sm" onClick={openRenameTeamChat} data-testid="messages-rename-companywide">Rename</Button>
-              )}
-              <Button variant="secondary" size="sm" onClick={() => setShowMembers(true)} data-testid="messages-members-open">Members</Button>
-            </div>
+            {!isDirectChannel(activeChannel) && (
+              <div className="relative flex shrink-0 items-center">
+                <button
+                  type="button"
+                  onClick={() => setHeaderMenuOpen((v) => !v)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-zinc-400 dark:hover:bg-[#111111]"
+                  title="Chat options"
+                  aria-label="Chat options"
+                  data-testid="messages-header-menu"
+                >
+                  <Icon name="ellipsis" />
+                </button>
+                {headerMenuOpen && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setHeaderMenuOpen(false)} />
+                    <div className="absolute right-0 top-10 z-50 w-48 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-[#0c0c0c]">
+                      {activeChannel.is_companywide && viewerIsAdmin && (
+                        <button type="button" onClick={() => { setHeaderMenuOpen(false); openRenameTeamChat(); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-zinc-200 dark:hover:bg-[#151515]" data-testid="messages-rename-companywide">
+                          <Icon name="pen" className="text-xs text-gray-400" /> Rename chat
+                        </button>
+                      )}
+                      <button type="button" onClick={() => { setHeaderMenuOpen(false); setShowMembers(true); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-zinc-200 dark:hover:bg-[#151515]" data-testid="messages-members-open">
+                        <Icon name="users" className="text-xs text-gray-400" /> View members
+                      </button>
+                      {!activeChannel.is_companywide && isGroupChannel(activeChannel) && (
+                        <button type="button" onClick={() => { setHeaderMenuOpen(false); handleLeave(); }} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30" data-testid="messages-leave-chat-header">
+                          <Icon name="right-from-bracket" className="text-xs" /> Leave chat
+                        </button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6">
@@ -1149,14 +1269,63 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                         {msg.sender_display_name || (isMine ? 'You' : 'Team Member')}
                       </p>
                     )}
+                    <div className={`group flex items-start gap-1 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
                     <div className={`max-w-full rounded-2xl px-4 py-2.5 ${
                       isMine
                         ? 'rounded-br-md bg-brand-600 text-white dark:bg-brand-500'
                         : 'rounded-bl-md border border-zinc-800 bg-[#111111] text-zinc-100'
                     }`}>
-                      {msg.body ? <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p> : null}
-                      {renderMessageAttachments(msg, isMine)}
-                      <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
+                      {editingMsgId === String(msg.id) ? (
+                        <div className="flex flex-col gap-2" data-testid={`messages-edit-box-${msg.id}`}>
+                          <textarea
+                            value={editingText}
+                            onChange={(e) => setEditingText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEditMessage(msg); } if (e.key === 'Escape') cancelEditMessage(); }}
+                            rows={2}
+                            autoFocus
+                            className="w-full min-w-[12rem] resize-none rounded-lg border border-white/30 bg-white/15 px-2 py-1 text-sm text-white placeholder:text-white/60 focus:outline-none"
+                          />
+                          <div className="flex justify-end gap-2">
+                            <button type="button" onClick={cancelEditMessage} className="rounded-md px-2 py-1 text-xs font-medium text-white/80 hover:bg-white/10">Cancel</button>
+                            <button type="button" onClick={() => saveEditMessage(msg)} disabled={!editingText.trim()} className="rounded-md bg-white/20 px-2 py-1 text-xs font-semibold text-white hover:bg-white/30 disabled:opacity-50" data-testid={`messages-edit-save-${msg.id}`}>Save</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {msg.body ? <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p> : null}
+                          {renderMessageAttachments(msg, isMine)}
+                          <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
+                        </>
+                      )}
+                    </div>
+                    {isMine && editingMsgId !== String(msg.id) && (
+                      <div className="relative shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setMsgMenuOpenId(msgMenuOpenId === String(msg.id) ? '' : String(msg.id))}
+                          className="flex h-7 w-7 items-center justify-center rounded-full text-gray-400 opacity-0 hover:bg-gray-100 hover:text-gray-600 focus:opacity-100 group-hover:opacity-100 dark:hover:bg-[#151515]"
+                          aria-label="Message options"
+                          data-testid={`messages-message-menu-${msg.id}`}
+                        >
+                          <Icon name="ellipsis" />
+                        </button>
+                        {msgMenuOpenId === String(msg.id) && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setMsgMenuOpenId('')} />
+                            <div className="absolute right-0 top-8 z-50 w-36 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-zinc-800 dark:bg-[#0c0c0c]">
+                              {msg.body ? (
+                                <button type="button" onClick={() => startEditMessage(msg)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 dark:text-zinc-200 dark:hover:bg-[#151515]" data-testid={`messages-edit-${msg.id}`}>
+                                  <Icon name="pen" className="text-xs text-gray-400" /> Edit
+                                </button>
+                              ) : null}
+                              <button type="button" onClick={() => deleteMessage(msg)} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30" data-testid={`messages-delete-${msg.id}`}>
+                                <Icon name="trash" className="text-xs" /> Delete
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                     </div>
                     </div>
                     </div>
@@ -1164,6 +1333,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                 </div>
               );
             })}
+            {msgActionError && (
+              <div className="mx-auto max-w-md rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-center text-xs text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" data-testid="messages-action-error">
+                {msgActionError}
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 

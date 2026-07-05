@@ -52,6 +52,7 @@ const SPA_VIEW_PATHS = [
   "jobs",
   "fleet",
   "team",
+  "jobsite-time",
   "inventory",
   "maintenance",
   "training",

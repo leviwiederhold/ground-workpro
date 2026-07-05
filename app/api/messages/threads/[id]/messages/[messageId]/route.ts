@@ -82,18 +82,34 @@ export async function PATCH(
       return validationError([{ path: "body", message: "Message cannot be empty" }]);
     }
 
-    const updated = await ctx.db
-      .from("messages")
-      .update({ body: parsedBody.data.body })
-      .eq("company_id", ctx.companyId)
-      .eq("id", ctx.message.id)
-      .select("id, thread_id, sender_user_id, body, created_at")
-      .maybeSingle();
+    const now = new Date().toISOString();
+    const runUpdate = (payload: Record<string, unknown>, columns: string) =>
+      ctx.db
+        .from("messages")
+        .update(payload)
+        .eq("company_id", ctx.companyId)
+        .eq("id", ctx.message.id)
+        .select(columns)
+        .maybeSingle();
+
+    // Stamp edited_at so the "edited" indicator persists; tolerate environments
+    // where the edited_at migration has not been applied yet.
+    let updated = await runUpdate(
+      { body: parsedBody.data.body, edited_at: now },
+      "id, thread_id, sender_user_id, body, created_at, edited_at"
+    );
+    if (updated.error && /edited_at/i.test(updated.error.message || "")) {
+      updated = await runUpdate(
+        { body: parsedBody.data.body },
+        "id, thread_id, sender_user_id, body, created_at"
+      );
+    }
 
     if (updated.error) return serverError(updated.error.message);
     if (!updated.data) return notFound("Message not found");
 
-    return okItem({ ...updated.data, channel_id: updated.data.thread_id });
+    const row = updated.data as unknown as Record<string, unknown>;
+    return okItem({ ...row, channel_id: row.thread_id });
   } catch (error) {
     if (error instanceof TenantResolverError) return toTenantErrorResponse(error);
     return serverError(error instanceof Error ? error.message : "Internal server error");

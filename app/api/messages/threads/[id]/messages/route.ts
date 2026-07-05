@@ -94,6 +94,7 @@ export async function GET(
         sender_avatar_url: avatarUrls.get(String(row.sender_user_id)) || "",
         body: row.body,
         created_at: row.created_at,
+        edited_at: row.edited_at ?? null,
         attachments: attachmentsByMessage.get(String(row.id)) ?? [],
       })),
       ...getPaginationMeta(count, page, pageSize),

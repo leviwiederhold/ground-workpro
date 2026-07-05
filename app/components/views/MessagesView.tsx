@@ -531,43 +531,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         .toLowerCase()
         .includes(searchTerm.toLowerCase())
     );
-  const directChannelByUserId = useMemo(() => {
-    const map = new Map();
-    for (const channel of channels) {
-      if (!isDirectChannel(channel)) continue;
-      const key = String(channel.other_user_id || '').trim();
-      if (!key) continue;
-      map.set(key, channel);
-    }
-    return map;
-  }, [channels, isDirectChannel]);
-  const filteredContacts = contactOptions.filter(
-    (contact) => contact.hasAccount && normalized(contact.label).includes(normalized(searchTerm))
-  );
   const showConversationPanel = Boolean(activeChannel || pendingDirectContact);
-
-  const startDirectChat = async (contact) => {
-    setCreateChannelError('');
-    if (!contact.userId) {
-      setCreateChannelError('This team member does not have an account yet');
-      return;
-    }
-    const existing = directChannelByUserId.get(String(contact.userId));
-    if (existing) {
-      setForcedDirectLabels((prev) => ({
-        ...prev,
-        [String(existing.id)]: String(contact.label || 'Team Member'),
-      }));
-      setActiveChannel(existing);
-      setPendingDirectContact(null);
-      return;
-    }
-    setActiveChannel(null);
-    setPendingDirectContact({
-      userId: String(contact.userId),
-      label: String(contact.label || 'Team Member'),
-    });
-  };
 
   const handleCreateChannel = async () => {
     try {
@@ -1033,7 +997,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to edit message');
-      setMessages((prev) => prev.map((m) => (String(m.id) === String(msg.id) ? { ...m, body: payload.item.body } : m)));
+      setMessages((prev) => prev.map((m) => (
+        String(m.id) === String(msg.id)
+          ? { ...m, body: payload.item.body, edited_at: payload.item.edited_at ?? new Date().toISOString() }
+          : m
+      )));
       cancelEditMessage();
     } catch (error) {
       setMsgActionError(error instanceof Error ? error.message : 'Failed to edit message');
@@ -1117,44 +1085,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                 <p className="text-xs truncate text-white/80">No messages yet</p>
               </button>
             )}
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col border-t border-gray-100 px-4 py-3 dark:border-zinc-900">
-            <p className="mb-2 text-[11px] uppercase tracking-wide text-gray-500 dark:text-zinc-500">Team Members</p>
-            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1" data-testid="messages-team-members-list">
-              {filteredContacts.map((contact) => {
-                const directChannel = contact.userId ? directChannelByUserId.get(String(contact.userId)) : null;
-                const isActiveDirect =
-                  Boolean(directChannel) && String(activeChannel?.id || '') === String(directChannel?.id || '');
-                const preview = directChannel?.last_message_at
-                  ? formatThreadSubtextTime(directChannel.last_message_at)
-                  : (directChannel?.last_message_preview || contact.subtitle || 'Team member');
-                return (
-                <button
-                  key={`contact-${contact.key}`}
-                  type="button"
-                  onClick={() => startDirectChat(contact)}
-                  className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-50 dark:hover:bg-[#131313] ${
-                    isActiveDirect ? 'border border-brand-200 bg-brand-50 dark:border-brand-900/60 dark:bg-brand-950/30' : ''
-                  }`}
-                  data-testid={`messages-contact-${contact.key}`}
-                >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[11px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
-                      {contact.avatarUrl ? (
-                        <img src={contact.avatarUrl} alt={contact.label} className="h-full w-full object-cover" />
-                      ) : (
-                        initialsForName(contact.label)
-                      )}
-                    </span>
-                    <div className="min-w-0">
-                    <p className="truncate text-sm text-gray-900 dark:text-zinc-100">{contact.label}</p>
-                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{preview}</p>
-                    </div>
-                  </div>
-                  <span className="shrink-0 text-[10px] text-gray-500 dark:text-zinc-500">Chat</span>
-                </button>
-              )})}
-            </div>
           </div>
         </div>
       </div>
@@ -1294,7 +1224,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                         <>
                           {msg.body ? <p className="text-sm whitespace-pre-wrap break-words">{msg.body}</p> : null}
                           {renderMessageAttachments(msg, isMine)}
-                          <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>{formatMessageTime(msg.created_at)}</p>
+                          <p className={`mt-1 text-[10px] ${isMine ? 'text-white/80' : 'text-gray-500 dark:text-zinc-400'}`}>
+                            {formatMessageTime(msg.edited_at || msg.created_at)}
+                            {msg.edited_at ? <span className="italic"> · edited</span> : null}
+                          </p>
                         </>
                       )}
                     </div>
@@ -1343,7 +1276,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
 
           <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
             {renderComposerAttachments()}
-            <div className="flex min-w-0 items-end gap-2 sm:gap-3">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               {renderAttachButton()}
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : activeChannel.is_companywide ? (companyName ? `Send a message to everyone in ${companyName}` : 'Message your team') : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
@@ -1378,7 +1311,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           </div>
           <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
             {renderComposerAttachments()}
-            <div className="flex min-w-0 items-end gap-2 sm:gap-3">
+            <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               {renderAttachButton()}
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />

@@ -71,10 +71,43 @@ export async function POST(
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
-    const db = getSupabaseAdmin() ?? supabase;
+    const admin = getSupabaseAdmin();
+    const db = admin ?? supabase;
 
     const { thread, participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
     if (!participant || !thread) return forbidden();
+
+    // TEMPORARY DIAGNOSTICS: prove which Supabase project this deployment talks
+    // to and whether it can see the message-attachments bucket. If the bucket
+    // was created in a different project than NEXT_PUBLIC_SUPABASE_URL points to,
+    // listBuckets will not include it here.
+    let projectHost = "unknown";
+    try {
+      projectHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "").hostname;
+    } catch {
+      projectHost = "invalid-or-missing-NEXT_PUBLIC_SUPABASE_URL";
+    }
+    let bucketsSeen: string[] = [];
+    let getBucketFound = false;
+    let storageProbeError: string | null = null;
+    try {
+      const list = await db.storage.listBuckets();
+      const getBucket = await db.storage.getBucket(MESSAGE_ATTACHMENTS_BUCKET);
+      bucketsSeen = (list.data ?? []).map((b) => b.id);
+      getBucketFound = Boolean(getBucket.data);
+      storageProbeError = list.error?.message ?? getBucket.error?.message ?? null;
+    } catch (diagError) {
+      storageProbeError = diagError instanceof Error ? diagError.message : String(diagError);
+    }
+    const diagnostics = {
+      projectHost,
+      usingServiceRole: Boolean(admin),
+      expectedBucket: MESSAGE_ATTACHMENTS_BUCKET,
+      bucketsSeen,
+      getBucketFound,
+      storageProbeError,
+    };
+    console.log("[messages/attachments/sign] storage diagnostics", diagnostics);
 
     const uploads = [];
     for (const file of parsed.data.files) {
@@ -96,7 +129,12 @@ export async function POST(
         // does not exist". Return a clear, actionable message instead of the raw text.
         if (/bucket not found|does not exist|related resource/i.test(rawMessage)) {
           return NextResponse.json(
-            { error: "Message attachment storage bucket is not configured" },
+            {
+              error: "Message attachment storage bucket is not configured",
+              // TEMPORARY: exposes which project the prod app talks to and what
+              // buckets it can actually see, so a wrong-project bucket is obvious.
+              diagnostics,
+            },
             { status: 500 }
           );
         }

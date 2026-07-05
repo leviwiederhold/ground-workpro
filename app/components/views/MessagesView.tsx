@@ -55,6 +55,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [namingError, setNamingError] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
   const resolvedDirectChannelIdsRef = useRef(new Set());
@@ -655,10 +656,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     return 'file';
   };
 
-  const handleFilesSelected = (fileList) => {
+  // Single source of truth for selected files = pendingAttachments state.
+  const addFilesToPending = (files) => {
     setSendError('');
-    const incoming = Array.from(fileList || []);
-    console.log('[MessagesDiag] file picker changed — selected files count:', incoming.length);
+    const incoming = Array.from(files || []);
     if (incoming.length === 0) return;
     setPendingAttachments((prev) => {
       const next = [...prev];
@@ -679,6 +680,22 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       }
       return next;
     });
+  };
+
+  // Open the ONE stable hidden file input via ref. Programmatic .click() inside
+  // this button-click gesture works in iOS WKWebView (the native app), unlike a
+  // label wrapping a display:none input, which silently fails to fire onChange.
+  const openFilePicker = () => {
+    console.log('[MessagesDiag] open file picker clicked — inputPresent:', Boolean(fileInputRef.current));
+    fileInputRef.current?.click();
+  };
+
+  const handleAttachmentSelect = (event) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    console.log('[MessagesDiag] file picker changed — count:', files.length, files.map((f) => f.name));
+    if (files.length > 0) addFilesToPending(files);
+    // Clear AFTER storing so re-selecting the same file still fires onChange.
+    event.currentTarget.value = '';
   };
 
   const removePendingAttachment = (id) => {
@@ -728,34 +745,21 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     </>
   );
 
-  // The hidden file input lives INSIDE the label, so a native click on the label
-  // opens that exact input's picker — no ref, no programmatic .click(), and no
-  // possibility of targeting a detached/duplicate input. onChange fires reliably.
   const attachDisabled = sendLoading || pendingAttachments.length >= MAX_ATTACHMENTS;
+  // A real button that programmatically clicks the ONE stable hidden input (see
+  // the top-level return). The input is NOT inside this conditional composer, so
+  // it never remounts when the active thread changes mid-selection.
   const renderAttachButton = () => (
-    <label
+    <button
+      type="button"
+      onClick={openFilePicker}
+      disabled={attachDisabled}
       title="Attach photos or files"
       data-testid="messages-attach-button"
-      onClick={() => console.log('[MessagesDiag] attach label clicked — disabled:', attachDisabled)}
-      className={`shrink-0 rounded-xl p-2.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 dark:text-zinc-400 dark:hover:bg-[#111111] ${
-        attachDisabled ? 'pointer-events-none opacity-50' : 'cursor-pointer'
-      }`}
+      className="shrink-0 rounded-xl p-2.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-[#111111]"
     >
       <Icon name="paperclip" />
-      <input
-        type="file"
-        multiple
-        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-        className="hidden"
-        disabled={attachDisabled}
-        onChange={(e) => {
-          console.log('[MessagesDiag] file input onChange fired — files:', e.target.files?.length ?? 0);
-          handleFilesSelected(e.target.files);
-          e.target.value = '';
-        }}
-        data-testid="messages-attach-input"
-      />
-    </label>
+    </button>
   );
 
   const renderMessageAttachments = (msg, isMine) => {
@@ -981,6 +985,18 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
 
   return (
     <div className="flex h-[calc(100dvh-var(--mobile-header-total-height)-var(--mobile-safe-bottom)-1.5rem)] min-h-0 w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-zinc-800 dark:bg-[#050505] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)] md:h-[calc(100dvh-170px)] md:min-h-[700px]" data-testid="messages-root">
+      {/* ONE stable hidden file input — mounted at the root of MessagesView, NOT
+          inside a conditional composer, so it survives thread switches and the
+          picker's async selection always fires onChange on the same element. */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
+        className="hidden"
+        onChange={handleAttachmentSelect}
+        data-testid="messages-attach-input"
+      />
       <div className={`min-w-0 w-full md:w-80 md:shrink-0 bg-white border-r border-gray-200 dark:border-zinc-800 dark:bg-[#090909] flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`} data-testid="messages-sidebar">
         <div className="space-y-3 border-b border-gray-200 p-4 dark:border-zinc-800">
           <div className="flex items-center justify-between">

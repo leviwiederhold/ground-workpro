@@ -50,18 +50,18 @@ export function JobsiteTimeEmployeeCard() {
     : !today
       ? 'Waiting for arrival'
       : today.clockOutAt
-        ? 'Left site'
+        ? 'Left'
         : today.status === 'needs_review'
           ? 'Needs review'
           : today.clockInAt
-            ? 'On site'
+            ? 'Checked In'
             : 'Waiting for arrival';
 
   const statusStyle: Record<string, string> = {
     'Not tracking': 'bg-gray-100 text-gray-700',
     'Waiting for arrival': 'bg-blue-100 text-blue-700',
-    'On site': 'bg-green-100 text-green-700',
-    'Left site': 'bg-amber-100 text-amber-700',
+    'Checked In': 'bg-green-100 text-green-700',
+    'Left': 'bg-amber-100 text-amber-700',
     'Needs review': 'bg-orange-100 text-orange-700',
   };
 
@@ -69,16 +69,16 @@ export function JobsiteTimeEmployeeCard() {
     <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-[#090909]">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Automatic Jobsite Time</p>
-          <p className="text-xs text-gray-500 dark:text-zinc-400">Assigned-job arrival &amp; departure</p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Attendance</p>
+          <p className="text-xs text-gray-500 dark:text-zinc-400">Assigned job · Arrived &amp; Left</p>
         </div>
         <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyle[status] || 'bg-gray-100 text-gray-700'}`}>{status}</span>
       </div>
 
       {enabled && today && (
         <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-          <div><p className="text-xs text-gray-500">Arrival</p><p className="font-medium tabular-nums text-gray-900 dark:text-zinc-100">{today.clockInAt ? new Date(today.clockInAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}</p></div>
-          <div><p className="text-xs text-gray-500">Departure</p><p className="font-medium tabular-nums text-gray-900 dark:text-zinc-100">{today.clockOutAt ? new Date(today.clockOutAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Arrived</p><p className="font-medium tabular-nums text-gray-900 dark:text-zinc-100">{today.clockInAt ? new Date(today.clockInAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}</p></div>
+          <div><p className="text-xs text-gray-500">Left</p><p className="font-medium tabular-nums text-gray-900 dark:text-zinc-100">{today.clockOutAt ? new Date(today.clockOutAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—'}</p></div>
         </div>
       )}
 
@@ -93,7 +93,7 @@ export function JobsiteTimeEmployeeCard() {
             onClick={async () => setPermission(await requestJobsiteLocationPermission())}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
           >
-            Allow jobsite location
+            Allow location
           </button>
           {permission && <span className="text-xs text-gray-500">Permission: {permission}</span>}
         </div>

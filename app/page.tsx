@@ -43,6 +43,10 @@ const JobsiteTimeEmployeeCard = dynamic(
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
+const LocationGate = dynamic(
+  () => import('@/app/components/views/LocationGate').then((mod) => mod.LocationGate),
+  { ssr: false }
+);
 const ScheduleView = dynamic(
   () => import('@/app/components/views/ScheduleView').then((mod) => mod.ScheduleView)
 );
@@ -1142,7 +1146,7 @@ const MobileAppShell = ({
           schedule: { key: 'schedule', label: 'Schedule', iconKey: 'calendar-week' },
           jobs: { key: 'jobs', label: 'Jobs', iconKey: 'briefcase' },
           team: { key: 'team', label: 'Team', iconKey: 'people-group' },
-          jobsite_time: { key: 'jobsite_time', label: 'Jobsite Time', iconKey: 'clock' },
+          jobsite_time: { key: 'jobsite_time', label: 'Attendance', iconKey: 'clock' },
           fleet: { key: 'fleet', label: 'Fleet', iconKey: 'truck-field' },
           messages: { key: 'messages', label: 'Messages', iconKey: 'comments' },
           maintenance: { key: 'maintenance', label: 'Maintenance', iconKey: 'toolbox' },
@@ -2308,7 +2312,7 @@ const MobileAppShell = ({
                     <Icon name="bars" />
                   </button>
                   <div className="min-w-0 self-center">
-                    <h1 className="truncate text-lg font-semibold capitalize leading-tight text-gray-900 md:text-xl">{currentView.replace('-', ' ')}</h1>
+                    <h1 className="truncate text-lg font-semibold capitalize leading-tight text-gray-900 md:text-xl">{navItems.find((navItem) => navItem.id === currentView)?.label || currentView.replace(/[-_]/g, ' ')}</h1>
                     <p className="truncate text-xs leading-tight text-gray-500 sm:text-sm" suppressHydrationWarning>
                       {headerDateLabel || getUtcDateLabel()}
                     </p>
@@ -2604,6 +2608,9 @@ const MobileAppShell = ({
               </div>
             </div>
           </div>
+          {/* Location requirement — native field employees only; never blocks
+              managers or desktop web (self-gated inside the component). */}
+          <LocationGate role={currentRole} />
         </MobileAppShell>
 
           {/* Modals */}
@@ -10420,7 +10427,7 @@ const MobileAppShell = ({
             </Card>
           )}
 
-          {/* Automatic Jobsite Time (admin only) */}
+          {/* Attendance (admin only) */}
           {isAdmin && <JobsiteTimeSettingsCard />}
 
           {/* 3. Team / Role Summary */}

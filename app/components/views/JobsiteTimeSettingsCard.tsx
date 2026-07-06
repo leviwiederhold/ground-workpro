@@ -2,9 +2,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ALLOWED_GEOFENCE_RADII_FEET, DEFAULT_JOBSITE_TIME_SETTINGS } from '@/lib/jobsite-time/domain';
+import { ALLOWED_GEOFENCE_RADII_FEET, DEFAULT_JOBSITE_TIME_SETTINGS, geofenceRadiusLabel } from '@/lib/jobsite-time/domain';
 
-// CEO/Admin-only company settings for Automatic Jobsite Time. Rendered inside the
+// CEO/Admin-only company settings for Attendance. Rendered inside the
 // consolidated Settings page for admins.
 export function JobsiteTimeSettingsCard() {
   const [settings, setSettings] = useState<any>(DEFAULT_JOBSITE_TIME_SETTINGS);
@@ -72,14 +72,14 @@ export function JobsiteTimeSettingsCard() {
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-zinc-800 dark:bg-[#090909]">
-      <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Automatic Jobsite Time</h3>
+      <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Attendance</h3>
       <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
-        Turn assigned-job jobsite arrival/departure into reviewable timecards. Location is only used during assigned
+        Turn assigned-job arrivals and departures into reviewable hours. Location is only used during assigned
         shifts — no continuous tracking, no employee map.
       </p>
 
       <div className="mt-3 divide-y divide-gray-100 dark:divide-zinc-800">
-        <Toggle label="Enable Automatic Jobsite Time" k="enabled" />
+        <Toggle label="Enable Attendance" k="enabled" />
         <Toggle label="Require manager approval before hours count" k="requireApproval" />
         <div className="flex items-center justify-between gap-3 py-2">
           <span className="text-sm font-medium text-gray-800 dark:text-zinc-200">Geofence radius</span>
@@ -89,8 +89,12 @@ export function JobsiteTimeSettingsCard() {
             onChange={(e) => save({ geofenceRadiusFeet: Number(e.target.value) })}
             className={num}
           >
+            {/* Preserve a previously-saved radius that isn't one of the presets. */}
+            {!ALLOWED_GEOFENCE_RADII_FEET.includes(Number(settings.geofenceRadiusFeet) as never) && (
+              <option value={settings.geofenceRadiusFeet}>{geofenceRadiusLabel(Number(settings.geofenceRadiusFeet))} (current)</option>
+            )}
             {ALLOWED_GEOFENCE_RADII_FEET.map((r) => (
-              <option key={r} value={r}>{r} ft</option>
+              <option key={r} value={r}>{geofenceRadiusLabel(r)}</option>
             ))}
           </select>
         </div>

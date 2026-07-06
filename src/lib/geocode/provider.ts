@@ -1,10 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Provider-agnostic geocoding/address autocomplete. Keys are read from env and
 // never hardcoded. Supported (in priority order):
-//   Mapbox : MAPBOX_SERVER_TOKEN | NEXT_PUBLIC_MAPBOX_TOKEN
-//   Google : GOOGLE_MAPS_SERVER_KEY | NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
-// If no key is set, isGeocodeConfigured() is false and the UI falls back to
-// plain manual entry (address stored unverified, no coordinates).
+//   Geoapify : GEOAPIFY_API_KEY | NEXT_PUBLIC_GEOAPIFY_API_KEY   (chosen provider)
+//   Mapbox   : MAPBOX_SERVER_TOKEN | NEXT_PUBLIC_MAPBOX_TOKEN
+//   Google   : GOOGLE_MAPS_SERVER_KEY | NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+// Only one key is required — Geoapify alone is sufficient; Mapbox/Google are not
+// needed. If no key is set, isGeocodeConfigured() is false and the UI falls back
+// to plain manual entry (address stored unverified, no coordinates).
 
 export type GeocodeSuggestion = { placeId: string; description: string };
 
@@ -16,14 +18,43 @@ export type GeocodeResult = {
   components: { street?: string; city?: string; state?: string; zip?: string };
 };
 
-type Provider = { kind: 'mapbox' | 'google'; token: string };
+type Provider = { kind: 'geoapify' | 'mapbox' | 'google'; token: string };
 
 function getProvider(): Provider | null {
+  const geoapify = (process.env.GEOAPIFY_API_KEY || process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY || '').trim();
+  if (geoapify) return { kind: 'geoapify', token: geoapify };
   const mapbox = (process.env.MAPBOX_SERVER_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN || '').trim();
   if (mapbox) return { kind: 'mapbox', token: mapbox };
   const google = (process.env.GOOGLE_MAPS_SERVER_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
   if (google) return { kind: 'google', token: google };
   return null;
+}
+
+// --- Geoapify --------------------------------------------------------------
+function geoapifyResult(r: any): GeocodeResult | null {
+  const lat = Number(r?.lat);
+  const lng = Number(r?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    placeId: String(r.place_id ?? ''),
+    formatted: String(r.formatted ?? ''),
+    lat,
+    lng,
+    components: {
+      street: r.address_line1 || [r.housenumber, r.street].filter(Boolean).join(' ') || undefined,
+      city: r.city || r.county,
+      state: r.state_code || r.state,
+      zip: r.postcode,
+    },
+  };
+}
+
+async function geoapifyQuery(token: string, path: 'autocomplete' | 'search', text: string, limit: number): Promise<any[]> {
+  const url = `https://api.geoapify.com/v1/geocode/${path}?text=${encodeURIComponent(text)}&format=json&limit=${limit}&apiKey=${encodeURIComponent(token)}`;
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const json = await res.json().catch(() => null);
+  return Array.isArray(json?.results) ? json.results : [];
 }
 
 export function isGeocodeConfigured(): boolean {
@@ -88,6 +119,12 @@ export async function suggestAddresses(query: string): Promise<GeocodeSuggestion
   const provider = getProvider();
   if (!provider || q.length < 3) return [];
   try {
+    if (provider.kind === 'geoapify') {
+      const results = await geoapifyQuery(provider.token, 'autocomplete', q, 5);
+      return results
+        .filter((r) => r?.formatted)
+        .map((r) => ({ placeId: String(r.place_id ?? r.formatted), description: String(r.formatted) }));
+    }
     if (provider.kind === 'mapbox') {
       const features = await mapboxForward(provider.token, q, 5);
       return features.map((f) => ({ placeId: String(f.id), description: String(f.place_name || f.text || '') }));
@@ -104,6 +141,12 @@ export async function resolvePlace(placeId: string, fallbackQuery?: string): Pro
   const provider = getProvider();
   if (!provider) return null;
   try {
+    if (provider.kind === 'geoapify') {
+      // Geoapify autocomplete already returns coordinates; re-query by the
+      // selected text (most precise) and take the top result.
+      const results = await geoapifyQuery(provider.token, 'autocomplete', fallbackQuery || placeId, 1);
+      return results[0] ? geoapifyResult(results[0]) : null;
+    }
     if (provider.kind === 'mapbox') {
       // Mapbox forward geocoding already returns coordinates; re-query by the
       // place text (placeId here is the mapbox feature id) to fetch the feature.
@@ -159,6 +202,10 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult | n
   const q = address.trim();
   if (!provider || !q) return null;
   try {
+    if (provider.kind === 'geoapify') {
+      const results = await geoapifyQuery(provider.token, 'search', q, 1);
+      return results[0] ? geoapifyResult(results[0]) : null;
+    }
     if (provider.kind === 'mapbox') {
       const features = await mapboxForward(provider.token, q, 1);
       const f = features[0];

@@ -60,7 +60,7 @@ export function AddressAutocomplete({
       } finally {
         setLoading(false);
       }
-    }, 300);
+    }, 250);
   };
 
   const handleType = (text: string) => {
@@ -123,9 +123,9 @@ export function AddressAutocomplete({
         {resolving ? (
           <span className="text-gray-500">Verifying address…</span>
         ) : verified ? (
-          <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><i className="fa-solid fa-circle-check" /> Verified address</span>
+          <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><i className="fa-solid fa-circle-check" /> Verified Address</span>
         ) : value.trim() ? (
-          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><i className="fa-solid fa-triangle-exclamation" /> Address not verified — select a suggestion for accurate location</span>
+          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400"><i className="fa-solid fa-triangle-exclamation" /> Address needs verification — select a suggestion</span>
         ) : null}
       </div>
     </div>

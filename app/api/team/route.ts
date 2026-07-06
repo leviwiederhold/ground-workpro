@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
-import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
+import { normalizeAppRole } from "@/lib/nav/config";
 import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -31,14 +31,6 @@ const mapRoleForOutput = (rawRole: unknown): string => {
   const normalized = normalizeAppRole(raw);
   if (normalized) return normalized;
   return raw.toLowerCase();
-};
-
-const isPayVisibleRole = (role: AppRole | null) => role === "admin" || role === "pm";
-
-const toNumber = (value: unknown) => {
-  if (value === null || value === undefined || value === "") return 0;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const parseCertifications = (value: unknown): Array<{ name: string; expires: string }> => {
@@ -71,8 +63,7 @@ export async function GET(request: Request) {
     }
 
     const { supabase, companyId } = await getCompanyId();
-    const effectiveRole = await getEffectiveRole();
-    if (!effectiveRole) {
+    if (!(await getEffectiveRole())) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -139,13 +130,7 @@ export async function GET(request: Request) {
         accountStatus: linkedUserId ? "active" : "invited",
         assignedToday: null as { jobId: string; jobName: string; href: string } | null,
         hoursThisWeek: 0,
-        pay: {
-          visible: isPayVisibleRole(effectiveRole),
-          hourlyRate: isPayVisibleRole(effectiveRole)
-            ? toNumber(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate)
-            : 0,
-          loadedHourlyCost: 0,
-        },
+        pay: { visible: false },
         email: String(row.email ?? ""),
         phone: String(row.phone ?? ""),
         avatarUrl: "",
@@ -498,13 +483,6 @@ export async function GET(request: Request) {
       if (activeShiftStart) {
         item.clockedInAt = activeShiftStart;
         item.status = "active";
-      }
-      if (item.pay.visible) {
-        const burdenPct = 0;
-        item.pay.loadedHourlyCost = Number((item.pay.hourlyRate * (1 + burdenPct)).toFixed(2));
-      } else {
-        item.pay.hourlyRate = 0;
-        item.pay.loadedHourlyCost = 0;
       }
     }
 

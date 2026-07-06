@@ -274,14 +274,14 @@ const MobileAppShell = ({
     ];
 
     const EMPLOYEES = [
-      { id: 1, name: 'Mike Johnson', role: 'Foreman', phone: '(614) 555-0101', email: 'mjohnson@groundwork.com', hourlyRate: 42, certifications: [{ name: 'OSHA 30', expires: '2026-08-15' }, { name: 'CDL Class A', expires: '2026-03-22' }], jobId: 1, status: 'clocked-in', clockedInAt: '06:45 AM' },
-      { id: 2, name: 'Sarah Williams', role: 'Equipment Operator', phone: '(614) 555-0102', email: 'swilliams@groundwork.com', hourlyRate: 35, certifications: [{ name: 'OSHA 10', expires: '2025-12-01' }, { name: 'CDL Class B', expires: '2027-01-15' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:00 AM' },
-      { id: 3, name: 'James Rodriguez', role: 'Equipment Operator', phone: '(614) 555-0103', email: 'jrodriguez@groundwork.com', hourlyRate: 35, certifications: [{ name: 'OSHA 10', expires: '2026-05-20' }, { name: 'Excavator Cert', expires: '2026-11-30' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:30 AM' },
-      { id: 4, name: 'David Chen', role: 'Foreman', phone: '(614) 555-0104', email: 'dchen@groundwork.com', hourlyRate: 42, certifications: [{ name: 'OSHA 30', expires: '2026-02-28' }, { name: 'CDL Class A', expires: '2025-09-10' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:45 AM' },
-      { id: 5, name: 'Tom Martinez', role: 'Laborer', phone: '(614) 555-0105', email: 'tmartinez@groundwork.com', hourlyRate: 26, certifications: [{ name: 'OSHA 10', expires: '2026-07-12' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:15 AM' },
-      { id: 6, name: 'Chris Taylor', role: 'Equipment Operator', phone: '(614) 555-0106', email: 'ctaylor@groundwork.com', hourlyRate: 35, certifications: [{ name: 'OSHA 10', expires: '2026-04-18' }, { name: 'CDL Class A', expires: '2026-12-05' }], jobId: 3, status: 'clocked-in', clockedInAt: '07:00 AM' },
-      { id: 7, name: 'Brian Wilson', role: 'Mechanic', phone: '(614) 555-0107', email: 'bwilson@groundwork.com', hourlyRate: 38, certifications: [{ name: 'ASE Master', expires: '2027-03-01' }, { name: 'CAT Certified', expires: '2026-06-30' }], jobId: null, status: 'clocked-in', clockedInAt: '07:30 AM' },
-      { id: 8, name: 'Kevin Brown', role: 'Laborer', phone: '(614) 555-0108', email: 'kbrown@groundwork.com', hourlyRate: 26, certifications: [{ name: 'OSHA 10', expires: '2026-09-25' }], jobId: null, status: 'off', clockedInAt: null },
+      { id: 1, name: 'Mike Johnson', role: 'Foreman', phone: '(614) 555-0101', email: 'mjohnson@groundwork.com', certifications: [{ name: 'OSHA 30', expires: '2026-08-15' }, { name: 'CDL Class A', expires: '2026-03-22' }], jobId: 1, status: 'clocked-in', clockedInAt: '06:45 AM' },
+      { id: 2, name: 'Sarah Williams', role: 'Equipment Operator', phone: '(614) 555-0102', email: 'swilliams@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2025-12-01' }, { name: 'CDL Class B', expires: '2027-01-15' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:00 AM' },
+      { id: 3, name: 'James Rodriguez', role: 'Equipment Operator', phone: '(614) 555-0103', email: 'jrodriguez@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-05-20' }, { name: 'Excavator Cert', expires: '2026-11-30' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:30 AM' },
+      { id: 4, name: 'David Chen', role: 'Foreman', phone: '(614) 555-0104', email: 'dchen@groundwork.com', certifications: [{ name: 'OSHA 30', expires: '2026-02-28' }, { name: 'CDL Class A', expires: '2025-09-10' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:45 AM' },
+      { id: 5, name: 'Tom Martinez', role: 'Laborer', phone: '(614) 555-0105', email: 'tmartinez@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-07-12' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:15 AM' },
+      { id: 6, name: 'Chris Taylor', role: 'Equipment Operator', phone: '(614) 555-0106', email: 'ctaylor@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-04-18' }, { name: 'CDL Class A', expires: '2026-12-05' }], jobId: 3, status: 'clocked-in', clockedInAt: '07:00 AM' },
+      { id: 7, name: 'Brian Wilson', role: 'Mechanic', phone: '(614) 555-0107', email: 'bwilson@groundwork.com', certifications: [{ name: 'ASE Master', expires: '2027-03-01' }, { name: 'CAT Certified', expires: '2026-06-30' }], jobId: null, status: 'clocked-in', clockedInAt: '07:30 AM' },
+      { id: 8, name: 'Kevin Brown', role: 'Laborer', phone: '(614) 555-0108', email: 'kbrown@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-09-25' }], jobId: null, status: 'off', clockedInAt: null },
     ];
 
     const WORK_ORDERS = [
@@ -460,7 +460,7 @@ const MobileAppShell = ({
     // ============================================
 
     const Card = ({ children, className = '', onClick, ...props }) => (
-      <div className={`bg-white rounded-lg border border-gray-200 shadow-sm ${className}`} onClick={onClick} {...props}>
+      <div className={`bg-white rounded-lg border border-gray-200 shadow-sm dark:border-zinc-800 dark:bg-[#090909] dark:text-zinc-100 ${className}`} onClick={onClick} {...props}>
         {children}
       </div>
     );
@@ -468,10 +468,10 @@ const MobileAppShell = ({
     const Button = ({ children, variant = 'primary', size = 'md', type = 'button', onClick, disabled, className = '', ...props }) => {
       const variants = {
         primary: 'bg-dark-900 hover:bg-dark-800 text-white',
-        secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300',
+        secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 dark:border-zinc-700 dark:bg-[#111111] dark:text-zinc-200 dark:hover:bg-[#181818]',
         brand: 'bg-brand-500 hover:bg-brand-600 text-white',
         danger: 'bg-red-600 hover:bg-red-700 text-white',
-        ghost: 'hover:bg-gray-100 text-gray-600',
+        ghost: 'hover:bg-gray-100 text-gray-600 dark:text-zinc-300 dark:hover:bg-[#151515]',
       };
       const sizes = {
         sm: 'px-3 py-1.5 text-sm',
@@ -529,9 +529,20 @@ const MobileAppShell = ({
       );
     };
 
-    const Modal = ({ isOpen, onClose, title, children, size = 'md', footer, portal = false, panelClassName }) => {
+    const Modal = ({ isOpen, onClose, title, subtitle, children, size = 'md', footer, portal = false, panelClassName, headerClassName, bodyClassName }) => {
       return (
-        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size} footer={footer} portal={portal} panelClassName={panelClassName}>
+        <MobileSheet
+          isOpen={isOpen}
+          onClose={onClose}
+          title={title}
+          subtitle={subtitle}
+          size={size}
+          footer={footer}
+          portal={portal}
+          panelClassName={panelClassName}
+          headerClassName={headerClassName}
+          bodyClassName={bodyClassName}
+        >
           {children}
         </MobileSheet>
       );
@@ -629,9 +640,9 @@ const MobileAppShell = ({
             )}
           </div>
           <div className="mt-3">
-            <p className="text-xl sm:text-2xl font-dozer text-gray-900">{value}</p>
-            <p className="text-sm text-gray-500 font-medium leading-tight">{label}</p>
-            {subValue && <p className="text-xs text-gray-400 mt-1">{subValue}</p>}
+            <p className="text-xl sm:text-2xl font-dozer text-gray-900 dark:text-zinc-100">{value}</p>
+            <p className="text-sm text-gray-500 font-medium leading-tight dark:text-zinc-400">{label}</p>
+            {subValue && <p className="text-xs text-gray-400 mt-1 dark:text-zinc-500">{subValue}</p>}
           </div>
         </Card>
       );
@@ -3747,7 +3758,6 @@ const MobileAppShell = ({
         role: 'operator',
         phone: '',
         email: '',
-        hourlyRate: 0,
         jobId: '',
         status: 'active',
       });
@@ -3832,12 +3842,7 @@ const MobileAppShell = ({
             }
           : null,
         hoursThisWeek: Number(employee.hoursThisWeek || 0),
-        pay: {
-          visible: ['executive', 'operations', 'admin', 'pm'].includes(String(currentRole || '').toLowerCase()),
-          hourlyRate: Number(employee.hourlyRate || 0),
-          loadedHourlyCost: 0,
-        },
-        hourlyRate: Number(employee.hourlyRate || 0),
+        pay: { visible: false },
         certifications: Array.isArray(employee.certifications) ? employee.certifications : [],
         phone: employee.phone || '',
         email: employee.email || '',
@@ -3861,8 +3866,6 @@ const MobileAppShell = ({
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
       const canManageTeamProfiles = String(moduleAccess?.team_management || 'none') === 'edit';
-      const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
-
       const stats = {
         total: teamItems.length,
         onSite: teamItems.filter(isTeamMemberOnSite).length,
@@ -3910,8 +3913,7 @@ const MobileAppShell = ({
             accountStatus: item.accountStatus || (item.userId ? 'active' : 'invited'),
             assignedToday: item.assignedToday || null,
             hoursThisWeek: Number(item.hoursThisWeek || 0),
-            pay: item.pay || { visible: false, hourlyRate: 0, loadedHourlyCost: 0 },
-            hourlyRate: Number(item.hourlyRate ?? item.pay?.hourlyRate ?? 0),
+            pay: { visible: false },
             certifications: Array.isArray(item.certifications) ? item.certifications : [],
             phone: item.phone || '',
             email: item.email || '',
@@ -3991,7 +3993,6 @@ const MobileAppShell = ({
           role: selectedEmployeeRecord?.role || selectedEmployee.role || 'operator',
           phone: selectedEmployeeRecord?.phone || selectedEmployee.phone || '',
           email: selectedEmployeeRecord?.email || selectedEmployee.email || '',
-          hourlyRate: Number(selectedEmployeeRecord?.hourlyRate || selectedEmployee.hourlyRate || 0),
           jobId:
             selectedEmployeeRecord?.jobId
               ? String(selectedEmployeeRecord.jobId)
@@ -4030,7 +4031,6 @@ const MobileAppShell = ({
           const baselineRole = (selectedEmployeeRecord?.role || selectedEmployee.role || 'operator').toLowerCase();
           const baselinePhone = selectedEmployeeRecord?.phone || selectedEmployee.phone || '';
           const baselineEmail = selectedEmployeeRecord?.email || selectedEmployee.email || '';
-          const baselineHourlyRate = Number(selectedEmployeeRecord?.hourlyRate ?? selectedEmployee.hourlyRate ?? 0);
           const baselineJobId = selectedEmployeeRecord?.jobId
             ? String(selectedEmployeeRecord.jobId)
             : selectedEmployee.assignedToday?.jobId
@@ -4043,9 +4043,6 @@ const MobileAppShell = ({
           if (String(employeeForm.role || '').toLowerCase() !== String(baselineRole)) requestBody.role = employeeForm.role || 'operator';
           if ((employeeForm.phone || '') !== String(baselinePhone)) requestBody.phone = employeeForm.phone || '';
           if ((employeeForm.email || '') !== String(baselineEmail)) requestBody.email = employeeForm.email || '';
-          if (canEditPay && Number(employeeForm.hourlyRate || 0) !== Number(baselineHourlyRate)) {
-            requestBody.hourlyRate = Number(employeeForm.hourlyRate || 0);
-          }
           if (String(employeeForm.jobId || '') !== String(baselineJobId || '')) {
             requestBody.jobId = employeeForm.jobId || null;
           }
@@ -4177,6 +4174,11 @@ const MobileAppShell = ({
             .join(', '),
         [sensitivePermissionGrants]
       );
+      const sensitivePermissionDescriptions = {
+        finance: 'View financial summaries, costs, profitability, and related job financial details.',
+        reports: 'Open reports that may include revenue, cost, margin, and company performance details.',
+        billing: 'Access billing and subscription-related workspace information.',
+      };
 
       const executeSaveInvite = useCallback(async () => {
         setInviteSaveLoading(true);
@@ -4710,29 +4712,17 @@ const MobileAppShell = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Hourly Rate</p>
-                      <input
-                        type="number"
-                        value={employeeForm.hourlyRate}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, hourlyRate: Number(e.target.value) || 0 }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        disabled={!canEditPay}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-1">Status</p>
-                      <select
-                        value={employeeForm.status}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, status: e.target.value }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        disabled={!canManageTeamProfiles}
-                      >
-                        <option value="active">active</option>
-                        <option value="inactive">inactive</option>
-                      </select>
-                    </div>
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Status</p>
+                    <select
+                      value={employeeForm.status}
+                      onChange={(e) => setEmployeeForm((prev) => ({ ...prev, status: e.target.value }))}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                      disabled={!canManageTeamProfiles}
+                    >
+                      <option value="active">active</option>
+                      <option value="inactive">inactive</option>
+                    </select>
                   </div>
 
                   <div>
@@ -5092,31 +5082,68 @@ const MobileAppShell = ({
           <Modal
             isOpen={showSensitiveInviteConfirm && !showInviteResult}
             onClose={() => setShowSensitiveInviteConfirm(false)}
-            title="Confirm Sensitive Access"
-            size="sm"
-          >
-            <div className="space-y-3">
-              <div className="border border-amber-200 bg-amber-50 rounded-lg p-3">
-                <p className="text-xs text-amber-800">{SENSITIVE_PERMISSION_WARNING_COPY}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Sensitive access being granted</p>
-                <ul className="text-sm text-gray-800 space-y-1">
-                  {sensitivePermissionGrants.map((grant) => (
-                    <li key={`${grant.key}-${grant.accessLevel}`} className="flex items-center justify-between">
-                      <span>{grant.label}</span>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 uppercase">{grant.accessLevel}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
+            title="Sensitive Access"
+            subtitle="Review the permissions you're granting before continuing."
+            size="md"
+            panelClassName="!max-w-[680px] rounded-2xl dark:border-zinc-800 dark:bg-[#090909] [&_.mobile-sheet-footer]:dark:border-zinc-800 [&_.mobile-sheet-footer]:dark:bg-[#090909] [&_.mobile-sheet-header]:dark:border-zinc-800 [&_.mobile-sheet-header]:dark:bg-[#090909] [&_.mobile-sheet-header_h2]:dark:text-zinc-100 [&_.mobile-sheet-header_p]:dark:text-zinc-400"
+            headerClassName="pt-5 pb-4"
+            bodyClassName="!py-4"
+            footer={(
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowSensitiveInviteConfirm(false)}>
                   Cancel
                 </Button>
                 <Button type="button" variant="brand" size="sm" onClick={handleConfirmSensitiveInvite} disabled={inviteSaveLoading}>
                   {inviteSaveLoading ? 'Saving...' : 'Confirm & Continue'}
                 </Button>
+              </div>
+            )}
+          >
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-100 text-sm text-amber-700">
+                    <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">Sensitive permissions</p>
+                    <p className="mt-1 text-sm leading-5 text-amber-800">
+                      This employee will have access to financial and compensation-related information.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {sensitivePermissionGrants.map((grant) => (
+                  <div
+                    key={`${grant.key}-${grant.accessLevel}`}
+                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-[#050505]"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{grant.label}</p>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
+                            {grant.accessLevel}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm leading-5 text-gray-500 dark:text-zinc-400">
+                          {sensitivePermissionDescriptions[grant.key] || 'Access to sensitive company information.'}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="w-full sm:w-auto sm:shrink-0"
+                        onClick={() => setShowSensitiveInviteConfirm(false)}
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </Modal>
@@ -6674,7 +6701,6 @@ const MobileAppShell = ({
                 columns={[
                   { header: 'Employee', render: (row) => <span className="font-medium">{row.name}</span> },
                   { header: 'Role', key: 'role' },
-                  { header: 'Rate', render: (row) => `$${row.hourlyRate}/hr` },
                   { header: 'Status', render: (row) => <Badge className={getStatusColor(row.status)}>{row.status}</Badge> },
                   { header: 'Current Job', render: (row) => jobs.find(j => j.id === row.jobId)?.name || '-' },
                 ]}

@@ -67,7 +67,6 @@ const mapEmployee = (row: any) => {
     user_id: row.user_id ?? null,
     phone: row.phone ?? "",
     email: row.email ?? "",
-    hourlyRate: Number(row.hourly_rate ?? row.hourlyRate ?? row.pay_rate ?? row.rate ?? 0),
     certifications: parseCertifications(row.certifications),
     jobId: row.job_id === null || row.job_id === undefined ? null : /^\d+$/.test(String(row.job_id)) ? Number(row.job_id) : row.job_id,
     status: row.status ?? "off",

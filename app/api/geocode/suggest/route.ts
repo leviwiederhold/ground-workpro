@@ -18,7 +18,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ configured: false, suggestions: [] });
   }
 
-  const q = new URL(request.url).searchParams.get("q") ?? "";
-  const suggestions = await suggestAddresses(q);
+  const params = new URL(request.url).searchParams;
+  const q = params.get("q") ?? "";
+  const lat = Number(params.get("lat"));
+  const lon = Number(params.get("lon"));
+  const bias = Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
+  const suggestions = await suggestAddresses(q, bias);
   return NextResponse.json({ configured: true, suggestions });
 }

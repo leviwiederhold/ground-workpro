@@ -41,6 +41,8 @@ export function AddressAutocomplete({
   const [resolving, setResolving] = useState(false);
   const [browserBias, setBrowserBias] = useState<{ lat: number; lon: number } | null>(null);
   const debounceRef = useRef<any>(null);
+  const suggestAbortRef = useRef<AbortController | null>(null);
+  const lookupAbortRef = useRef<AbortController | null>(null);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -48,40 +50,62 @@ export function AddressAutocomplete({
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      suggestAbortRef.current?.abort();
+      lookupAbortRef.current?.abort();
+    };
   }, []);
 
   // Bias suggestions to the user's location — but only if geolocation permission
   // is ALREADY granted (never prompt just to bias autocomplete).
   useEffect(() => {
     if (typeof navigator === 'undefined' || !navigator.permissions?.query || !navigator.geolocation) return;
+    let cancelled = false;
     navigator.permissions.query({ name: 'geolocation' as PermissionName }).then((status) => {
+      if (cancelled) return;
       if (status.state === 'granted') {
         navigator.geolocation.getCurrentPosition(
-          (pos) => setBrowserBias({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+          (pos) => {
+            if (!cancelled) setBrowserBias({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+          },
           () => {},
           { maximumAge: 600000, timeout: 5000 }
         );
       }
     }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const query = (text: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (text.trim().length < 3) { setSuggestions([]); setOpen(false); return; }
     debounceRef.current = setTimeout(async () => {
+      suggestAbortRef.current?.abort();
+      const controller = new AbortController();
+      suggestAbortRef.current = controller;
+      const timeoutId = window.setTimeout(() => controller.abort(), 5000);
       setLoading(true);
       try {
         // Prefer live browser location; fall back to the company's saved
         // coordinates; else US-only with no proximity bias.
         const bias = browserBias || (Number.isFinite(Number(biasLat)) && Number.isFinite(Number(biasLng)) ? { lat: Number(biasLat), lon: Number(biasLng) } : null);
         const biasQs = bias ? `&lat=${bias.lat}&lon=${bias.lon}` : '';
-        const res = await fetch(`/api/geocode/suggest?q=${encodeURIComponent(text)}${biasQs}`, { cache: 'no-store' });
+        const res = await fetch(`/api/geocode/suggest?q=${encodeURIComponent(text)}${biasQs}`, { cache: 'no-store', signal: controller.signal });
         const json = await res.json().catch(() => null);
         setConfigured(Boolean(json?.configured));
         setSuggestions(Array.isArray(json?.suggestions) ? json.suggestions : []);
         setOpen(true);
+      } catch {
+        setConfigured(false);
+        setSuggestions([]);
+        setOpen(true);
       } finally {
+        window.clearTimeout(timeoutId);
+        if (suggestAbortRef.current === controller) suggestAbortRef.current = null;
         setLoading(false);
       }
     }, 250);
@@ -95,9 +119,13 @@ export function AddressAutocomplete({
 
   const choose = async (s: { placeId: string; description: string }) => {
     setOpen(false);
+    lookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    lookupAbortRef.current = controller;
+    const timeoutId = window.setTimeout(() => controller.abort(), 5000);
     setResolving(true);
     try {
-      const res = await fetch(`/api/geocode/lookup?placeId=${encodeURIComponent(s.placeId)}&q=${encodeURIComponent(s.description)}`, { cache: 'no-store' });
+      const res = await fetch(`/api/geocode/lookup?placeId=${encodeURIComponent(s.placeId)}&q=${encodeURIComponent(s.description)}`, { cache: 'no-store', signal: controller.signal });
       const json = await res.json().catch(() => null);
       const r = json?.result;
       if (r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng))) {
@@ -106,7 +134,11 @@ export function AddressAutocomplete({
         // Couldn't resolve coordinates — keep the text but unverified.
         onSelect({ address: s.description, verified: false, lat: null, lng: null, placeId: null });
       }
+    } catch {
+      onSelect({ address: s.description, verified: false, lat: null, lng: null, placeId: null });
     } finally {
+      window.clearTimeout(timeoutId);
+      if (lookupAbortRef.current === controller) lookupAbortRef.current = null;
       setResolving(false);
     }
   };

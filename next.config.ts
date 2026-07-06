@@ -47,6 +47,7 @@ const securityHeaders = [
 // single-page app boots and reads the view from the pathname. "/settings" is
 // intentionally excluded — it has real route files (app/settings/**).
 const SPA_VIEW_PATHS = [
+  "dashboard",
   "messages",
   "schedule",
   "jobs",

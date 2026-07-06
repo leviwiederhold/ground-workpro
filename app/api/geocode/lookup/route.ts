@@ -3,6 +3,21 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { isGeocodeConfigured, resolvePlace } from "@/lib/geocode/provider";
 
 export const dynamic = "force-dynamic";
+const GEO_ROUTE_TIMEOUT_MS = 6000;
+
+async function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeoutId = setTimeout(() => resolve(fallback), GEO_ROUTE_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
 
 // GET /api/geocode/lookup?placeId=...&q=...  — resolve a suggestion to verified
 // coordinates + formatted address, server-side.
@@ -25,6 +40,6 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "placeId or q required" }, { status: 400 });
   }
 
-  const result = await resolvePlace(placeId, q);
+  const result = await withTimeout(resolvePlace(placeId, q), null);
   return NextResponse.json({ configured: true, result });
 }

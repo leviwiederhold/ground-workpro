@@ -19,6 +19,7 @@ export type GeocodeResult = {
 };
 
 type Provider = { kind: 'geoapify' | 'mapbox' | 'google'; token: string };
+const GEOCODE_TIMEOUT_MS = 5000;
 
 function getProvider(): Provider | null {
   const geoapify = (process.env.GEOAPIFY_API_KEY || process.env.NEXT_PUBLIC_GEOAPIFY_API_KEY || '').trim();
@@ -28,6 +29,20 @@ function getProvider(): Provider | null {
   const google = (process.env.GOOGLE_MAPS_SERVER_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '').trim();
   if (google) return { kind: 'google', token: google };
   return null;
+}
+
+async function fetchJsonWithTimeout(url: string, timeoutMs = GEOCODE_TIMEOUT_MS): Promise<any | null> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // --- Geoapify --------------------------------------------------------------
@@ -65,9 +80,7 @@ async function geoapifyQuery(
       ? `&bias=proximity:${bias.lon},${bias.lat}`
       : '';
   const url = `https://api.geoapify.com/v1/geocode/${path}?text=${encodeURIComponent(text)}&format=json&limit=${limit}&filter=countrycode:us${biasParam}&apiKey=${encodeURIComponent(token)}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const json = await res.json().catch(() => null);
+  const json = await fetchJsonWithTimeout(url);
   return Array.isArray(json?.results) ? json.results : [];
 }
 
@@ -89,26 +102,20 @@ function mapboxComponents(feature: any): GeocodeResult['components'] {
 
 async function mapboxForward(token: string, query: string, limit: number): Promise<any[]> {
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?autocomplete=true&types=address,place,poi&limit=${limit}&access_token=${encodeURIComponent(token)}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const json = await res.json().catch(() => null);
+  const json = await fetchJsonWithTimeout(url);
   return Array.isArray(json?.features) ? json.features : [];
 }
 
 // --- Google ----------------------------------------------------------------
 async function googleAutocomplete(token: string, query: string): Promise<GeocodeSuggestion[]> {
   const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(query)}&types=address&key=${encodeURIComponent(token)}`;
-  const res = await fetch(url);
-  if (!res.ok) return [];
-  const json = await res.json().catch(() => null);
+  const json = await fetchJsonWithTimeout(url);
   return (json?.predictions ?? []).map((p: any) => ({ placeId: String(p.place_id), description: String(p.description) }));
 }
 
 async function googleDetails(token: string, placeId: string): Promise<GeocodeResult | null> {
   const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(placeId)}&fields=formatted_address,geometry,address_component&key=${encodeURIComponent(token)}`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const json = await res.json().catch(() => null);
+  const json = await fetchJsonWithTimeout(url);
   const r = json?.result;
   const loc = r?.geometry?.location;
   if (!r || !loc) return null;
@@ -233,9 +240,7 @@ export async function geocodeAddress(address: string): Promise<GeocodeResult | n
       };
     }
     const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&key=${encodeURIComponent(provider.token)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const json = await res.json().catch(() => null);
+    const json = await fetchJsonWithTimeout(url);
     const r = json?.results?.[0];
     const loc = r?.geometry?.location;
     if (!r || !loc) return null;

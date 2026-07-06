@@ -165,6 +165,33 @@ const pathForView = (view) => APP_VIEW_PATHS[String(view || '').toLowerCase()] |
 
 // WorkspaceLoadingScreen removed — replaced by ExcavatorLoader (see import above).
 
+const fetchWithTimeout = async (url, options = {}, timeoutMs = 8000) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal ?? controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
+
+const withTimeout = async (promise, timeoutMs, message = 'Timed out') => {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
+
 const WorkspaceStartupErrorScreen = ({ message, onRetry }) => (
   <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 dark:bg-[#050505] dark:text-gray-100">
     <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-md items-center justify-center">
@@ -957,7 +984,7 @@ const MobileAppShell = ({
           // are never shown the gate UI regardless of the result.
           try {
             setSubscriptionGate((prev) => ({ ...prev, loaded: false, error: '' }));
-            const response = await fetch('/api/billing/status', { cache: 'no-store' });
+            const response = await fetchWithTimeout('/api/billing/status', { cache: 'no-store' }, 8000);
             const payload = await response.json().catch(() => ({}));
             if (!active) return;
             if (!response.ok) {
@@ -1179,7 +1206,7 @@ const MobileAppShell = ({
         const dev = process.env.NODE_ENV !== 'production';
         try {
           setNavError(false);
-          let response = await fetch('/api/nav', { cache: 'no-store' });
+          let response = await fetchWithTimeout('/api/nav', { cache: 'no-store' }, 8000);
 
           // A 401/403 right after native login or during a token refresh means
           // the access token is stale/mid-rotation — NOT that the user lost
@@ -1187,7 +1214,7 @@ const MobileAppShell = ({
           if ((response.status === 401 || response.status === 403) && !isRetry) {
             if (dev) console.log('[loadNav] auth not ready (', response.status, ') — refreshing session and retrying');
             try { await supabaseBrowser().auth.refreshSession(); } catch { /* ignore */ }
-            response = await fetch('/api/nav', { cache: 'no-store' });
+            response = await fetchWithTimeout('/api/nav', { cache: 'no-store' }, 8000);
           }
 
           const payload = await response.json().catch(() => ({}));
@@ -1574,7 +1601,7 @@ const MobileAppShell = ({
         const loadJobs = async () => {
           try {
             setJobsLoading(true);
-            const response = await fetch('/api/jobs', { cache: 'no-store' });
+            const response = await fetchWithTimeout('/api/jobs', { cache: 'no-store' }, 10000);
             const payload = await response.json();
             if (!response.ok) {
               throw new Error(payload?.error || 'Failed to load jobs');
@@ -13463,9 +13490,15 @@ const MobileAppShell = ({
 	          } else {
 	            setAccessDecision(decision);
 	          }
-	        } catch {
-	          // Allow the app shell to recover even if setup status check fails or hangs.
-	        } finally {
+        } catch (error) {
+          // Allow the protected shell to recover even if setup/billing checks fail.
+          // Leaving accessDecision as "loading" here keeps Root rendering null forever
+          // under the splash overlay.
+          if (process.env.NODE_ENV !== 'production') {
+            console.warn('[verifySetup] startup check failed; rendering app shell fallback', error);
+          }
+          setAccessDecision('ready');
+        } finally {
 	          setupCheckInFlightRef.current = false;
 	          setSetupRefreshing(false);
 	          setSetupChecked(true);
@@ -13565,7 +13598,11 @@ const MobileAppShell = ({
         let isMounted = true;
         const supabase = supabaseBrowser();
 
-	        supabase.auth.getSession().then(({ data }) => {
+	        withTimeout(
+            supabase.auth.getSession(),
+            8000,
+            'Timed out resolving session on app launch'
+          ).then(({ data }) => {
 	          if (!isMounted) return;
 	          setIsAuthenticated(!!data.session);
 	          setAuthResolved(true);

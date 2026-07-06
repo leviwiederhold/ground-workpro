@@ -88,9 +88,11 @@ export async function GET(request: NextRequest) {
     }).catch(() => null);
 
     if (!acceptResponse?.ok) {
-      const loginUrl = buildRedirectUrl(request, "/login");
-      loginUrl.searchParams.set("error", "invite_accept_failed");
-      const response = NextResponse.redirect(loginUrl);
+      const signupUrl = buildRedirectUrl(request, "/signup");
+      signupUrl.searchParams.set("invite", "1");
+      signupUrl.searchParams.set("token", token);
+      signupUrl.searchParams.set("error", "invite_accept_failed");
+      const response = NextResponse.redirect(signupUrl);
       authCookiesToSet.forEach(({ name, value, options }) => {
         response.cookies.set(name, value, options);
       });

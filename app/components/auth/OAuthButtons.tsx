@@ -22,7 +22,14 @@ export default function OAuthButtons({ label = "or continue with" }: Props) {
     setError("");
     try {
       const origin = window.location.origin;
-      const redirectTo = `${origin}/auth/callback`;
+      const redirectUrl = new URL("/auth/callback", origin);
+      const currentParams = new URLSearchParams(window.location.search);
+      const inviteToken = currentParams.get("token");
+      if (currentParams.get("invite") === "1" && inviteToken) {
+        redirectUrl.searchParams.set("invite", "1");
+        redirectUrl.searchParams.set("token", inviteToken);
+      }
+      const redirectTo = redirectUrl.toString();
       const { error: oauthError } = await supabaseBrowser().auth.signInWithOAuth({
         provider,
         options: { redirectTo },

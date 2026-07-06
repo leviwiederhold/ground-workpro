@@ -2312,7 +2312,7 @@ const MobileAppShell = ({
                     <Icon name="bars" />
                   </button>
                   <div className="min-w-0 self-center">
-                    <h1 className="truncate text-lg font-semibold capitalize leading-tight text-gray-900 md:text-xl">{currentView.replace('-', ' ')}</h1>
+                    <h1 className="truncate text-lg font-semibold capitalize leading-tight text-gray-900 md:text-xl">{navItems.find((navItem) => navItem.id === currentView)?.label || currentView.replace(/[-_]/g, ' ')}</h1>
                     <p className="truncate text-xs leading-tight text-gray-500 sm:text-sm" suppressHydrationWarning>
                       {headerDateLabel || getUtcDateLabel()}
                     </p>

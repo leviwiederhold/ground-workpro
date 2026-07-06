@@ -293,14 +293,6 @@ export async function POST(request: Request) {
     );
     const userIsExistingCeo = ceoUserIds.has(userId);
     const resolvedIsCeo = isCeoMembershipRole(resolvedRole);
-    // Invites can never grant company owner/CEO access (CEO is also non-inviteable
-    // at creation). An invited user only ever receives an employee membership.
-    if (resolvedIsCeo) {
-      return NextResponse.json(
-        { error: "Invites cannot grant company owner/CEO access." },
-        { status: 422 }
-      );
-    }
     if (!resolvedIsCeo && ceoUserIds.size === 0) {
       return NextResponse.json({ error: "Company must always have at least one CEO membership" }, { status: 409 });
     }

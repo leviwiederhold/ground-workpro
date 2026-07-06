@@ -159,7 +159,8 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   }, [loadDashboardSummary]);
 
   useEffect(() => {
-    if (!['admin', 'pm'].includes(String(effectiveRole || ''))) {
+    const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
+    if (!['admin', 'ceo', 'executive', 'pm'].includes(normalizedEffectiveRole)) {
       setPayrollSummary(null);
       return;
     }
@@ -378,8 +379,9 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const alertsSection = dashboardSummary?.sections?.alerts;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
   const showGettingStarted = Boolean(gettingStartedSection);
-  const isAdminDashboard = effectiveRole === 'admin';
-  const isManagerDashboard = effectiveRole === 'admin' || effectiveRole === 'pm';
+  const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
+  const isAdminDashboard = ['admin', 'ceo', 'executive'].includes(normalizedEffectiveRole);
+  const isManagerDashboard = isAdminDashboard || normalizedEffectiveRole === 'pm';
   const estimatedPayrollLabel = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -478,7 +480,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                         <Button variant="secondary" size="sm" disabled={onboardingDismissSaving} onClick={() => setDismissedState(false)}>
                           Rehydrate checklist
                         </Button>
-                        {effectiveRole === 'admin' && (
+                        {isAdminDashboard && (
                           <Button variant="ghost" size="sm" disabled={onboardingResetLoading} onClick={resetChecklist}>
                             Reset
                           </Button>

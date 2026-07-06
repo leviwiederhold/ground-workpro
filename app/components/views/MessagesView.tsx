@@ -227,6 +227,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const getChannelDisplayName = useCallback(
     (channel) => {
       if (!channel) return 'Direct Message';
+      // Companywide chat name is ALWAYS the custom thread name, else the company
+      // name. It is never a sender/member-derived label, and it ignores any
+      // forcedDirectLabels override (which only applies to direct chats).
+      if (channel.is_companywide) {
+        const cwName = String(channel.name || '').trim();
+        return cwName || String(companyName || '').trim() || 'Company Chat';
+      }
       const forcedLabel = forcedDirectLabels[String(channel.id || '')];
       if (forcedLabel) return String(forcedLabel);
       if (isGroupChannel(channel)) {
@@ -245,7 +252,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       if (fallbackName && !looksLikeDmName(fallbackName)) return fallbackName;
       return 'Team Member';
     },
-    [forcedDirectLabels, isGroupChannel, isDirectChannel, userDisplayNameById, contactDisplayNameByUserId, looksLikeDmName]
+    [forcedDirectLabels, companyName, isGroupChannel, isDirectChannel, userDisplayNameById, contactDisplayNameByUserId, looksLikeDmName]
   );
 
   const loadUsers = useCallback(async () => {
@@ -908,21 +915,34 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         };
         return [nextChannel, ...prev.filter((channel) => String(channel.id) !== String(channelId))];
       });
-      if (channelId) {
+      // Only a REAL pending direct chat gets a forced display label + identity
+      // rebuild. For existing threads (companywide/group/DM) we must preserve the
+      // thread's own name/kind/is_companywide — otherwise the companywide chat
+      // would be renamed to the "Team Member" fallback on every send.
+      if (channelId && pendingUserId) {
         setForcedDirectLabels((prev) => ({
           ...prev,
           [String(channelId)]: pendingLabel,
         }));
       }
       setPendingDirectContact(null);
-      setActiveChannel((current) => ({
-        ...(current && String(current.id) === String(channelId) ? current : activeChannel || {}),
-        id: channelId,
-        kind: pendingUserId ? 'direct' : String(activeChannel?.kind || 'group'),
-        name: pendingLabel || String(activeChannel?.name || ''),
-        other_user_id: pendingUserId || activeChannel?.other_user_id || null,
-        message_count: Number(activeChannel?.message_count || 0) + 1,
-      }));
+      if (pendingUserId) {
+        setActiveChannel((current) => ({
+          ...(current && String(current.id) === String(channelId) ? current : activeChannel || {}),
+          id: channelId,
+          kind: 'direct',
+          name: pendingLabel,
+          other_user_id: pendingUserId,
+          message_count: Number(activeChannel?.message_count || 0) + 1,
+        }));
+      } else {
+        // Existing thread: keep its identity intact, just bump the message count.
+        setActiveChannel((current) => (
+          current && String(current.id) === String(channelId)
+            ? { ...current, message_count: Number(current.message_count || 0) + 1 }
+            : current
+        ));
+      }
       loadChannels(true);
     } catch (error) {
       setSendError(error instanceof Error ? error.message : 'Failed to send message');

@@ -4712,16 +4712,6 @@ const MobileAppShell = ({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
-                      <p className="text-xs text-gray-500 mb-1">Hourly Rate</p>
-                      <input
-                        type="number"
-                        value={employeeForm.hourlyRate}
-                        onChange={(e) => setEmployeeForm((prev) => ({ ...prev, hourlyRate: Number(e.target.value) || 0 }))}
-                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        disabled={!canEditPay}
-                      />
-                    </div>
-                    <div>
                       <p className="text-xs text-gray-500 mb-1">Status</p>
                       <select
                         value={employeeForm.status}
@@ -6674,7 +6664,6 @@ const MobileAppShell = ({
                 columns={[
                   { header: 'Employee', render: (row) => <span className="font-medium">{row.name}</span> },
                   { header: 'Role', key: 'role' },
-                  { header: 'Rate', render: (row) => `$${row.hourlyRate}/hr` },
                   { header: 'Status', render: (row) => <Badge className={getStatusColor(row.status)}>{row.status}</Badge> },
                   { header: 'Current Job', render: (row) => jobs.find(j => j.id === row.jobId)?.name || '-' },
                 ]}

@@ -10,6 +10,7 @@ import {
   getEffectiveScopedJobIds,
   resolveMembershipRole,
 } from "@/lib/jobs/roleScope";
+import { resolveJobLocation } from "@/lib/geocode/provider";
 
 const persistedJobStatusSchema = z.enum([
   "draft",
@@ -49,6 +50,10 @@ const createJobSchema = z.object({
   notes: z.string().default("").optional(),
   description: z.string().default("").optional(),
   budget: z.union([z.number(), z.string()]).nullable().optional(),
+  lat: z.union([z.number(), z.string()]).nullable().optional(),
+  lng: z.union([z.number(), z.string()]).nullable().optional(),
+  place_id: z.string().nullable().optional(),
+  address_verified: z.boolean().optional(),
 });
 
 type JobNotesMeta = {
@@ -111,6 +116,10 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+  place_id: row.place_id ?? null,
+  address_verified: Boolean(row.address_verified) && hasCoordinates,
+  // Attendance/geofence should only trust verified coordinates.
+  needs_address_verification: Boolean(siteAddress) && !(Boolean(row.address_verified) && hasCoordinates),
   geocoding_status: hasCoordinates ? "resolved" : siteAddress ? "not_configured" : "not_requested",
   source_bid_id: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   sourceBidId: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
@@ -566,6 +575,14 @@ export async function POST(request: Request) {
       target_end_date: targetEndDate,
     });
 
+    const location = await resolveJobLocation({
+      address: siteAddress,
+      lat: payload.lat,
+      lng: payload.lng,
+      place_id: payload.place_id,
+      address_verified: payload.address_verified,
+    });
+
     const baseInsertPayload = {
       company_id: companyId,
       created_by: userData?.user?.id ?? null,
@@ -576,8 +593,10 @@ export async function POST(request: Request) {
       start_date: startDate || null,
       target_end_date: targetEndDate || null,
       notes: encodedNotes,
-      lat: null,
-      lng: null,
+      lat: location.lat,
+      lng: location.lng,
+      place_id: location.place_id,
+      address_verified: location.address_verified,
       ...(canViewFinancials && budget !== null ? { budget } : {}),
     };
 

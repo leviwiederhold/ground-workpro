@@ -56,7 +56,14 @@ export default function SignupPage() {
       })
         .then((res) => (res.ok ? res.json() : null))
         .then((data) => {
-          if (!active || !data?.item) return;
+          if (!active) return;
+          if (!data?.item) {
+            setInviteBlock({
+              title: "Invite link unavailable",
+              message: "This invite link is invalid, expired, or has already been used. Ask your company administrator for a new invitation.",
+            });
+            return;
+          }
           setInviteInfo({
             companyName: String(data.item.company_name ?? "").trim(),
             role: String(data.item.role ?? "").trim(),
@@ -79,7 +86,13 @@ export default function SignupPage() {
             });
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!active) return;
+          setInviteBlock({
+            title: "Invite link unavailable",
+            message: "We couldn't validate this invite link. Ask your company administrator for a new invitation.",
+          });
+        });
     }
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setCheckoutSuccess(hasCheckoutSuccess);

@@ -4139,52 +4139,16 @@ const MobileAppShell = ({
         }
       };
 
-      const shareInviteLink = async (inviteLink) => {
-        if (!inviteLink) throw new Error('Create invite first');
-        if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-          try {
-            await navigator.share({
-              title: 'Join Groundwork Pro',
-              text: 'Use this invite link to join our Groundwork Pro workspace.',
-              url: inviteLink,
-            });
-            setInviteFeedback('Invite ready to share.');
-          } catch (error) {
-            if (error instanceof Error && error.name === 'AbortError') {
-              setInviteFeedback('Invite link generated. Share when ready.');
-              return;
-            }
-            setInviteFeedback('Invite link generated. Use Copy Link below if sharing is unavailable.');
-          }
-          return;
-        }
-        await copyText(inviteLink);
-        setInviteFeedback('Invite link copied.');
-      };
-
-      const handleShareInvite = async () => {
-        setInviteFeedback('');
-        try {
-          await shareInviteLink(inviteForm.invite_url);
-        } catch (error) {
-          setInviteFeedback(error instanceof Error ? error.message : 'Failed to share invite link.');
-        }
-      };
-
       const handleCopyInviteMessage = async () => {
         setInviteFeedback('');
         try {
-          const name = inviteForm.full_name;
-          const role = inviteForm.role;
-          const greeting = name ? `Hi ${name},` : 'Hi,';
-          const roleLine = role ? `role: ${role}` : 'role: team member';
           const inviteLink = inviteForm.invite_url;
           if (!inviteLink) throw new Error('Create invite first');
-          const message = `${greeting}\n\nYou are invited to Groundwork Pro (${roleLine}).\nUse this link to create your account:\n${inviteLink}`;
+          const message = `Join our Groundwork Pro workspace:\n\n${inviteLink}\n\nThis invitation is for your account only.`;
           await copyText(message);
-          setInviteFeedback('Invite message copied.');
+          setInviteFeedback('Invitation copied.');
         } catch (error) {
-          setInviteFeedback(error instanceof Error ? error.message : 'Failed to copy invite message.');
+          setInviteFeedback(error instanceof Error ? error.message : 'Failed to copy invitation.');
         }
       };
 
@@ -4852,7 +4816,7 @@ const MobileAppShell = ({
                         <Icon name="link" className="mr-1" /> Copy Invite Link
                       </Button>
                       <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage} disabled={!inviteForm.invite_url}>
-                        <Icon name="envelope" className="mr-1" /> Copy Invite Message
+                        <Icon name="envelope" className="mr-1" /> Copy Invitation
                       </Button>
                     </div>
                   )}
@@ -5049,11 +5013,11 @@ const MobileAppShell = ({
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button variant="brand" size="sm" onClick={handleShareInvite} disabled={!inviteForm.invite_url}>
-                  <Icon name="share-nodes" className="mr-1" /> Share Invite
+                <Button variant="brand" size="sm" onClick={handleCopyInviteLink} disabled={!inviteForm.invite_url}>
+                  <Icon name="link" className="mr-1" /> Copy Invite Link
                 </Button>
-                <Button variant="secondary" size="sm" onClick={handleCopyInviteLink} disabled={!inviteForm.invite_url}>
-                  <Icon name="link" className="mr-1" /> Copy Link
+                <Button variant="secondary" size="sm" onClick={handleCopyInviteMessage} disabled={!inviteForm.invite_url}>
+                  <Icon name="envelope" className="mr-1" /> Copy Invitation
                 </Button>
                 <Button variant="secondary" size="sm" onClick={() => setShowInviteResult(false)}>
                   Done

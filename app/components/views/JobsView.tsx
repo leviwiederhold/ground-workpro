@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { MobileSheet } from '@/app/components/ui/MobileSheet';
+import { AddressAutocomplete } from '@/app/components/AddressAutocomplete';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
@@ -24,6 +25,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     status: 'active',
     client: '',
     site_address: '',
+    lat: null,
+    lng: null,
+    place_id: null,
+    address_verified: false,
     start_date: '',
     target_end_date: '',
     notes: '',
@@ -210,6 +215,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       status: normalizeJobStatus(selectedJob.status),
       client: selectedJob.client || selectedJob.client_name || '',
       site_address: selectedJob.site_address || selectedJob.address || '',
+      lat: selectedJob.lat ?? null,
+      lng: selectedJob.lng ?? null,
+      place_id: selectedJob.place_id ?? null,
+      address_verified: Boolean(selectedJob.address_verified),
       start_date: selectedJob.start_date || selectedJob.startDate || '',
       target_end_date: selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '',
       notes: selectedJob.notes || '',
@@ -519,7 +528,15 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         updates.status = jobForm.status === 'completed' ? 'completed' : 'in_progress';
       }
       if (jobForm.client !== (selectedJob.client || selectedJob.client_name || '')) updates.client = jobForm.client;
-      if (jobForm.site_address !== (selectedJob.site_address || selectedJob.address || '')) updates.site_address = jobForm.site_address;
+      if (jobForm.site_address !== (selectedJob.site_address || selectedJob.address || '')) {
+        updates.site_address = jobForm.site_address;
+        // Send the verified provider result so coordinates persist instead of
+        // being wiped when the address changes.
+        updates.lat = jobForm.lat;
+        updates.lng = jobForm.lng;
+        updates.place_id = jobForm.place_id;
+        updates.address_verified = jobForm.address_verified;
+      }
       if (jobForm.start_date !== (selectedJob.start_date || selectedJob.startDate || '')) updates.start_date = jobForm.start_date;
       if (jobForm.target_end_date !== (selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '')) updates.target_end_date = jobForm.target_end_date;
       if (jobForm.notes !== (selectedJob.notes || '')) updates.notes = jobForm.notes;
@@ -852,12 +869,12 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
               <div>
                 <p className="text-xs text-gray-500 mb-1">Address</p>
-                <input
-                  type="text"
+                <AddressAutocomplete
                   value={jobForm.site_address}
-                  onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  verified={jobForm.address_verified}
                   disabled={!canEditJobs}
+                  inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  onSelect={(sel) => setJobForm({ ...jobForm, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified })}
                 />
               </div>
 
@@ -1018,7 +1035,13 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Address</p>
-                <input type="text" value={jobForm.site_address} onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
+                <AddressAutocomplete
+                  value={jobForm.site_address}
+                  verified={jobForm.address_verified}
+                  disabled={!canEditJobs}
+                  inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  onSelect={(sel) => setJobForm({ ...jobForm, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified })}
+                />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>

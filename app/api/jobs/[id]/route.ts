@@ -10,6 +10,7 @@ import {
   getEffectiveScopedJobIds,
   resolveMembershipRole,
 } from "@/lib/jobs/roleScope";
+import { resolveJobLocation } from "@/lib/geocode/provider";
 
 const jobStatusSchema = z.enum([
   "draft",
@@ -38,6 +39,10 @@ const updateJobSchema = z
     notes: z.string().nullable().optional(),
     description: z.string().nullable().optional(),
     budget: z.union([z.number(), z.string()]).nullable().optional(),
+    lat: z.union([z.number(), z.string()]).nullable().optional(),
+    lng: z.union([z.number(), z.string()]).nullable().optional(),
+    place_id: z.string().nullable().optional(),
+    address_verified: z.boolean().optional(),
   })
   .refine((value: any) => Object.keys(value).length > 0, {
     message: "At least one field is required",
@@ -104,6 +109,9 @@ const mapJob = (row: any) => {
   progress: Number(row.progress ?? 0),
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
+  place_id: row.place_id ?? null,
+  address_verified: Boolean(row.address_verified) && hasCoordinates,
+  needs_address_verification: Boolean(siteAddress) && !(Boolean(row.address_verified) && hasCoordinates),
   geocoding_status: hasCoordinates ? "resolved" : siteAddress ? "not_configured" : "not_requested",
   source_bid_id: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   sourceBidId: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
@@ -425,9 +433,21 @@ export async function PATCH(
       updatePayload.client_name = normalizeNullableText(clientUpdate);
     }
     if (addressUpdate !== undefined) {
-      updatePayload.site_address = normalizeNullableText(addressUpdate);
-      updatePayload.lat = null;
-      updatePayload.lng = null;
+      const nextAddress = normalizeNullableText(addressUpdate);
+      updatePayload.site_address = nextAddress;
+      // Resolve coordinates instead of blindly nulling them: trust a verified
+      // provider result, else server-geocode, else store unverified/null.
+      const location = await resolveJobLocation({
+        address: String(nextAddress ?? ''),
+        lat: updatesBody.lat,
+        lng: updatesBody.lng,
+        place_id: updatesBody.place_id,
+        address_verified: updatesBody.address_verified,
+      });
+      updatePayload.lat = location.lat;
+      updatePayload.lng = location.lng;
+      updatePayload.place_id = location.place_id;
+      updatePayload.address_verified = location.address_verified;
     }
     if (startDateUpdate !== undefined) updatePayload.start_date = normalizeText(startDateUpdate) || null;
     if (targetEndDateUpdate !== undefined) updatePayload.target_end_date = normalizeText(targetEndDateUpdate) || null;

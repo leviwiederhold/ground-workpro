@@ -529,9 +529,20 @@ const MobileAppShell = ({
       );
     };
 
-    const Modal = ({ isOpen, onClose, title, children, size = 'md', footer, portal = false, panelClassName }) => {
+    const Modal = ({ isOpen, onClose, title, subtitle, children, size = 'md', footer, portal = false, panelClassName, headerClassName, bodyClassName }) => {
       return (
-        <MobileSheet isOpen={isOpen} onClose={onClose} title={title} size={size} footer={footer} portal={portal} panelClassName={panelClassName}>
+        <MobileSheet
+          isOpen={isOpen}
+          onClose={onClose}
+          title={title}
+          subtitle={subtitle}
+          size={size}
+          footer={footer}
+          portal={portal}
+          panelClassName={panelClassName}
+          headerClassName={headerClassName}
+          bodyClassName={bodyClassName}
+        >
           {children}
         </MobileSheet>
       );
@@ -4177,6 +4188,11 @@ const MobileAppShell = ({
             .join(', '),
         [sensitivePermissionGrants]
       );
+      const sensitivePermissionDescriptions = {
+        finance: 'View financial summaries, costs, profitability, and related job financial details.',
+        reports: 'Open reports that may include revenue, cost, margin, and company performance details.',
+        billing: 'Access billing and subscription-related workspace information.',
+      };
 
       const executeSaveInvite = useCallback(async () => {
         setInviteSaveLoading(true);
@@ -5092,31 +5108,68 @@ const MobileAppShell = ({
           <Modal
             isOpen={showSensitiveInviteConfirm && !showInviteResult}
             onClose={() => setShowSensitiveInviteConfirm(false)}
-            title="Confirm Sensitive Access"
-            size="sm"
-          >
-            <div className="space-y-3">
-              <div className="border border-amber-200 bg-amber-50 rounded-lg p-3">
-                <p className="text-xs text-amber-800">{SENSITIVE_PERMISSION_WARNING_COPY}</p>
-              </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Sensitive access being granted</p>
-                <ul className="text-sm text-gray-800 space-y-1">
-                  {sensitivePermissionGrants.map((grant) => (
-                    <li key={`${grant.key}-${grant.accessLevel}`} className="flex items-center justify-between">
-                      <span>{grant.label}</span>
-                      <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 uppercase">{grant.accessLevel}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="flex justify-end gap-2 pt-1">
+            title="Sensitive Access"
+            subtitle="Review the permissions you're granting before continuing."
+            size="md"
+            panelClassName="!max-w-[680px] rounded-2xl"
+            headerClassName="pt-5 pb-4"
+            bodyClassName="!py-4"
+            footer={(
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button type="button" variant="secondary" size="sm" onClick={() => setShowSensitiveInviteConfirm(false)}>
                   Cancel
                 </Button>
                 <Button type="button" variant="brand" size="sm" onClick={handleConfirmSensitiveInvite} disabled={inviteSaveLoading}>
                   {inviteSaveLoading ? 'Saving...' : 'Confirm & Continue'}
                 </Button>
+              </div>
+            )}
+          >
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-100 text-sm text-amber-700">
+                    <i className="fa-solid fa-triangle-exclamation" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold">Sensitive permissions</p>
+                    <p className="mt-1 text-sm leading-5 text-amber-800">
+                      This employee will have access to financial and compensation-related information.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {sensitivePermissionGrants.map((grant) => (
+                  <div
+                    key={`${grant.key}-${grant.accessLevel}`}
+                    className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                  >
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-gray-900">{grant.label}</p>
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-gray-700">
+                            {grant.accessLevel}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-sm leading-5 text-gray-500">
+                          {sensitivePermissionDescriptions[grant.key] || 'Access to sensitive company information.'}
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="w-full sm:w-auto sm:shrink-0"
+                        onClick={() => setShowSensitiveInviteConfirm(false)}
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           </Modal>

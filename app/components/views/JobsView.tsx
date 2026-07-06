@@ -225,7 +225,12 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       budget: selectedJob.budget ?? '',
     });
     setJobActionError('');
-  }, [normalizeJobStatus, selectedJob]);
+    // Key on the job ID (not the selectedJob object) so a background jobs
+    // refetch — which creates a new object reference for the same job — does not
+    // re-run this and wipe in-progress edits (e.g. a just-selected verified
+    // address). It still resets when the user actually switches jobs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedJobId]);
 
   const getJobCrewCount = useCallback((job) => {
     if (String(selectedJobId ?? '') === String(job.id)) {

@@ -49,8 +49,22 @@ function geoapifyResult(r: any): GeocodeResult | null {
   };
 }
 
-async function geoapifyQuery(token: string, path: 'autocomplete' | 'search', text: string, limit: number): Promise<any[]> {
-  const url = `https://api.geoapify.com/v1/geocode/${path}?text=${encodeURIComponent(text)}&format=json&limit=${limit}&apiKey=${encodeURIComponent(token)}`;
+export type GeoBias = { lat: number; lon: number };
+
+async function geoapifyQuery(
+  token: string,
+  path: 'autocomplete' | 'search',
+  text: string,
+  limit: number,
+  bias?: GeoBias | null
+): Promise<any[]> {
+  // Always restrict to the United States; bias by proximity when we have a
+  // location so nearby (e.g. Ohio) results rank first instead of far-away ones.
+  const biasParam =
+    bias && Number.isFinite(bias.lat) && Number.isFinite(bias.lon)
+      ? `&bias=proximity:${bias.lon},${bias.lat}`
+      : '';
+  const url = `https://api.geoapify.com/v1/geocode/${path}?text=${encodeURIComponent(text)}&format=json&limit=${limit}&filter=countrycode:us${biasParam}&apiKey=${encodeURIComponent(token)}`;
   const res = await fetch(url);
   if (!res.ok) return [];
   const json = await res.json().catch(() => null);
@@ -114,13 +128,13 @@ async function googleDetails(token: string, placeId: string): Promise<GeocodeRes
 }
 
 // --- Public API ------------------------------------------------------------
-export async function suggestAddresses(query: string): Promise<GeocodeSuggestion[]> {
+export async function suggestAddresses(query: string, bias?: GeoBias | null): Promise<GeocodeSuggestion[]> {
   const q = query.trim();
   const provider = getProvider();
   if (!provider || q.length < 3) return [];
   try {
     if (provider.kind === 'geoapify') {
-      const results = await geoapifyQuery(provider.token, 'autocomplete', q, 5);
+      const results = await geoapifyQuery(provider.token, 'autocomplete', q, 5, bias);
       return results
         .filter((r) => r?.formatted)
         .map((r) => ({ placeId: String(r.place_id ?? r.formatted), description: String(r.formatted) }));

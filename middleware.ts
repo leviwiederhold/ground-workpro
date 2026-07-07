@@ -2,6 +2,7 @@ import type { NextRequest, NextFetchEvent } from "next/server";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseEnv } from "@/lib/supabase/env";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { normalizeAppRole, ROUTE_GUARDS, type AppRole } from "@/lib/nav/config";
 import { ACTING_ROLE_COOKIE, clampActingRole } from "@/lib/auth/effectiveRole";
 import {
@@ -218,9 +219,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
+        // Resolve the user's OWN membership with the service-role client so a
+        // memberships RLS SELECT gap can't make a valid member (CEO/co-CEO)
+        // unreadable → a blanket 403 on every guarded API. Scoped to this user
+        // id, so no cross-tenant exposure. Falls back to the RLS client.
+        const membershipClient = getSupabaseAdmin() ?? supabase;
         const { data: memberships, error: membershipError } = await withMiddlewareTimeout(
           "middleware membership lookup",
-          supabase
+          membershipClient
             .from("memberships")
             .select("company_id, role")
             .eq("user_id", userId)
@@ -243,9 +249,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         const actingRole = normalizeAppRole(request.cookies.get(ACTING_ROLE_COOKIE)?.value);
         resolvedRole = actingRole ? clampActingRole(realRole, actingRole) : realRole;
       } else if (userId) {
+        const companyLookupClient = getSupabaseAdmin() ?? supabase;
         const { data: memberships } = await withMiddlewareTimeout(
           "middleware company lookup",
-          supabase
+          companyLookupClient
             .from("memberships")
             .select("company_id")
             .eq("user_id", userId)

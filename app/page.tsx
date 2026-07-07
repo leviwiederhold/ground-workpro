@@ -992,8 +992,7 @@ const MobileAppShell = ({
         subscriptionGate.loaded &&
         subscriptionGate.active &&
         !subscriptionGate.noWorkspace &&
-        navEverLoaded &&
-        !navError;
+        navEverLoaded;
 
       useEffect(() => {
         let active = true;

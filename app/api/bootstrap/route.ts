@@ -49,6 +49,24 @@ const isMissingSchemaError = (message: string | undefined) =>
     message ?? ""
   );
 
+async function runBestEffort(label: string, task: () => Promise<unknown>, timeoutMs = 2500) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      task(),
+      new Promise((resolve) => {
+        timeoutId = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`[bootstrap] ${label} failed`, error);
+    }
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 async function loadStripeCheckoutBilling(stripeSessionId: string | null) {
   if (!stripeSessionId) return null;
 
@@ -167,20 +185,22 @@ export async function POST(request: Request) {
     }
 
     if ((existingMemberships ?? []).length > 0) {
-      await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
       const existingCompanyId = String(existingMemberships?.[0]?.company_id ?? "");
       if (existingCompanyId) {
-        await ensureCompanyBootstrapDefaults(supabase, existingCompanyId, userMetadata);
-        await applyStripeCheckoutBilling(supabase, existingCompanyId, stripeSessionId);
-        try {
-          await ensureCompanyHasAtLeastOneCeoMembership(supabase, existingCompanyId);
-        } catch {
-          await supabase
-            .from("memberships")
-            .update({ role: COMPANY_OWNER_MEMBERSHIP_ROLE })
-            .eq("company_id", existingCompanyId)
-            .eq("user_id", user.id);
-        }
+        void runBestEffort("existing member maintenance", async () => {
+          await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
+          await ensureCompanyBootstrapDefaults(supabase, existingCompanyId, userMetadata);
+          await applyStripeCheckoutBilling(supabase, existingCompanyId, stripeSessionId);
+          try {
+            await ensureCompanyHasAtLeastOneCeoMembership(supabase, existingCompanyId);
+          } catch {
+            await supabase
+              .from("memberships")
+              .update({ role: COMPANY_OWNER_MEMBERSHIP_ROLE })
+              .eq("company_id", existingCompanyId)
+              .eq("user_id", user.id);
+          }
+        });
       }
       return Response.json({ success: true, company_id: existingMemberships?.[0]?.company_id ?? null });
     }

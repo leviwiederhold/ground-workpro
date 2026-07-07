@@ -347,6 +347,11 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Run middleware ONLY where auth may be needed. Exclude Next internals,
+    // Vercel internals, static assets, fonts, and common public files so no
+    // auth/session work is triggered on non-protected requests (avoids adding
+    // load to Supabase Auth). Protected pages and /api/* still match; the
+    // handler itself short-circuits any non-guarded path before touching auth.
+    "/((?!_next/static|_next/image|_next/data|_vercel|favicon.ico|robots.txt|sitemap.xml|manifest.webmanifest|apple-touch-icon.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff|woff2|ttf|otf|eot|css|js|map|txt|xml|json)$).*)",
   ],
 };

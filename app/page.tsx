@@ -194,7 +194,7 @@ const withTimeout = async (promise, timeoutMs, message = 'Timed out') => {
   }
 };
 
-const WorkspaceStartupErrorScreen = ({ message, onRetry }) => (
+const WorkspaceStartupErrorScreen = ({ message, onRetry, onClearSession }) => (
   <main className="min-h-screen bg-gray-50 px-4 py-6 text-gray-900 dark:bg-[#050505] dark:text-gray-100">
     <div className="mx-auto flex min-h-[calc(100dvh-3rem)] max-w-md items-center justify-center">
       <div className="w-full rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
@@ -216,6 +216,15 @@ const WorkspaceStartupErrorScreen = ({ message, onRetry }) => (
         >
           Retry
         </button>
+        {onClearSession ? (
+          <button
+            type="button"
+            onClick={onClearSession}
+            className="mt-2 w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-900"
+          >
+            Clear session &amp; sign out
+          </button>
+        ) : null}
       </div>
     </div>
   </main>
@@ -13669,6 +13678,18 @@ const MobileAppShell = ({
 	        }).catch((error) => {
 	          if (!isMounted) return;
 	          console.error('[startup] Failed to resolve session on app launch', error);
+	          const sessionErrMessage = String(error?.message ?? error ?? '');
+	          if (/refresh token|invalid.*token|token not found/i.test(sessionErrMessage)) {
+	            // Stale/invalid refresh token: clear it ONCE so Supabase stops
+	            // auto-retrying the refresh (which storms Auth), then show the
+	            // logged-out state. Recovery is re-login, not a silent retry.
+	            supabaseBrowser().auth.signOut().catch(() => null);
+	            setStartupError(null);
+	            setIsAuthenticated(false);
+	            setAuthResolved(true);
+	            setSetupChecked(true);
+	            return;
+	          }
 	          setStartupError("We couldn't load your account. Please refresh and try again.");
 	          setIsAuthenticated(false);
 	          setAuthResolved(true);
@@ -13790,6 +13811,14 @@ const MobileAppShell = ({
                 setStartupError(null);
                 setAuthResolved(false);
                 window.location.reload();
+              }}
+              onClearSession={async () => {
+                // Full recovery from a stuck/black-screen session: clear the
+                // Supabase session + local storage, then reload to a clean
+                // logged-out state.
+                try { await supabaseBrowser().auth.signOut(); } catch { /* ignore */ }
+                try { window.localStorage.clear(); } catch { /* ignore */ }
+                window.location.href = '/login';
               }}
             />
           );

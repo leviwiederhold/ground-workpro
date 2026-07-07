@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
+import { isCeoMembershipRole } from "@/lib/auth/ceoGuard";
 import {
   normalizePermissionPayload,
   getDefaultPermissionsByRole,
@@ -91,7 +92,7 @@ export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { userId } = await requireModuleAccess("team_management", "edit");
+    const { userId, role } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);
@@ -119,6 +120,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     if (!existing.data) {
       return NextResponse.json({ error: "Invite not found" }, { status: 404 });
+    }
+    const existingRole = String(existing.data.role ?? "").trim().toLowerCase();
+    const nextRole = parsedBody.data.role ?? existingRole;
+    if ((nextRole === "ceo" || existingRole === "ceo") && !isCeoMembershipRole(role)) {
+      return NextResponse.json(
+        { error: "Only CEO/admin users can invite another CEO." },
+        { status: 403 }
+      );
     }
 
     const updatePayload: Record<string, unknown> = {};

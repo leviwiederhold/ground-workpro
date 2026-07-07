@@ -13,7 +13,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "schedule", label: "Schedule", href: "/schedule", iconKey: "calendar-week" },
   { key: "jobs", label: "Jobs", href: "/jobs", iconKey: "briefcase" },
   { key: "team", label: "Team", href: "/team", iconKey: "people-group" },
-  { key: "jobsite_time", label: "Jobsite Time", href: "/jobsite-time", iconKey: "clock" },
+  { key: "jobsite_time", label: "Attendance", href: "/jobsite-time", iconKey: "clock" },
   { key: "fleet", label: "Fleet", href: "/fleet", iconKey: "truck-field" },
   { key: "messages", label: "Messages", href: "/messages", iconKey: "comments" },
   { key: "maintenance", label: "Maintenance", href: "/maintenance", iconKey: "toolbox" },

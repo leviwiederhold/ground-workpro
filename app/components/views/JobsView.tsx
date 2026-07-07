@@ -2,10 +2,12 @@
 // @ts-nocheck
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MobileSheet } from '@/app/components/ui/MobileSheet';
+import { AddressAutocomplete } from '@/app/components/AddressAutocomplete';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
+const isTemporaryJobId = (id) => String(id ?? '').startsWith('temp-job-');
 export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
   const canEditJobs = String(moduleAccess?.jobs || 'none') === 'edit';
@@ -24,11 +26,17 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     status: 'active',
     client: '',
     site_address: '',
+    lat: null,
+    lng: null,
+    place_id: null,
+    address_verified: false,
     start_date: '',
     target_end_date: '',
     notes: '',
     budget: '',
   });
+  const jobFormRef = useRef(jobForm);
+  const selectedJobIdRef = useRef(selectedJobId);
   const [saveLoading, setSaveLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [jobActionError, setJobActionError] = useState('');
@@ -46,6 +54,15 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const [financialLoading, setFinancialLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [showMobileDetails, setShowMobileDetails] = useState(false);
+
+  useEffect(() => {
+    jobFormRef.current = jobForm;
+  }, [jobForm]);
+
+  useEffect(() => {
+    selectedJobIdRef.current = selectedJobId;
+  }, [selectedJobId]);
+
   const refreshJobsState = useCallback(async () => {
     const response = await fetch('/api/jobs', { cache: 'no-store' });
     const payload = await response.json().catch(() => ({}));
@@ -139,7 +156,26 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         return;
       }
 
-      setJobs((prev) => prev.map((job) => (String(job.id) === tempId ? payload.job : job)));
+      const draft = jobFormRef.current;
+      const shouldPreserveDraft = String(selectedJobIdRef.current ?? '') === tempId;
+      const resolvedJob = shouldPreserveDraft
+        ? {
+            ...payload.job,
+            name: draft.name || payload.job.name,
+            status: draft.status || payload.job.status,
+            client: draft.client,
+            site_address: draft.site_address,
+            lat: draft.lat,
+            lng: draft.lng,
+            place_id: draft.place_id,
+            address_verified: draft.address_verified,
+            start_date: draft.start_date,
+            target_end_date: draft.target_end_date,
+            notes: draft.notes,
+            ...(canViewJobFinancials ? { budget: draft.budget } : {}),
+          }
+        : payload.job;
+      setJobs((prev) => prev.map((job) => (String(job.id) === tempId ? resolvedJob : job)));
       setSelectedJobId(payload.job.id);
     } catch (error) {
       setJobs((prev) => prev.filter((job) => String(job.id) !== tempId));
@@ -171,6 +207,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   });
 
   const selectedJob = jobs.find(j => j.id === selectedJobId);
+  const selectedJobIsTemporary = isTemporaryJobId(selectedJob?.id);
   const availableEmployees = selectedJob
     ? employees.filter(
         (employee) => !jobEmployees.some((assigned) => String(assigned.id) === String(employee.id))
@@ -210,13 +247,22 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       status: normalizeJobStatus(selectedJob.status),
       client: selectedJob.client || selectedJob.client_name || '',
       site_address: selectedJob.site_address || selectedJob.address || '',
+      lat: selectedJob.lat ?? null,
+      lng: selectedJob.lng ?? null,
+      place_id: selectedJob.place_id ?? null,
+      address_verified: Boolean(selectedJob.address_verified),
       start_date: selectedJob.start_date || selectedJob.startDate || '',
       target_end_date: selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '',
       notes: selectedJob.notes || '',
       budget: selectedJob.budget ?? '',
     });
     setJobActionError('');
-  }, [normalizeJobStatus, selectedJob]);
+    // Key on the job ID (not the selectedJob object) so a background jobs
+    // refetch — which creates a new object reference for the same job — does not
+    // re-run this and wipe in-progress edits (e.g. a just-selected verified
+    // address). It still resets when the user actually switches jobs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedJobId]);
 
   const getJobCrewCount = useCallback((job) => {
     if (String(selectedJobId ?? '') === String(job.id)) {
@@ -237,7 +283,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   }, [equipment, jobEquipment.length, selectedJobId]);
 
   const refreshSelectedAssignments = useCallback(async () => {
-    if (!selectedJobId) return;
+    if (!selectedJobId || isTemporaryJobId(selectedJobId)) return;
     const [employeesResponse, equipmentResponse] = await Promise.all([
       fetch(`/api/jobs/${selectedJobId}/employees`, { cache: 'no-store' }),
       fetch(`/api/jobs/${selectedJobId}/equipment`, { cache: 'no-store' }),
@@ -263,7 +309,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     let isMounted = true;
 
     const loadJobEquipment = async () => {
-      if (!selectedJob) {
+      if (!selectedJob || isTemporaryJobId(selectedJob.id)) {
         if (isMounted) {
           setJobEquipment([]);
           setEquipmentToAssign([]);
@@ -294,7 +340,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     };
 
     const loadJobEmployees = async () => {
-      if (!selectedJob) {
+      if (!selectedJob || isTemporaryJobId(selectedJob.id)) {
         if (isMounted) {
           setJobEmployees([]);
           setEmployeeToAssign([]);
@@ -339,7 +385,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   useEffect(() => {
     let active = true;
     const loadFinancialSummary = async () => {
-      if (!selectedJob) {
+      if (!selectedJob || isTemporaryJobId(selectedJob.id)) {
         if (active) setFinancialSummary(null);
         return;
       }
@@ -519,7 +565,15 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
         updates.status = jobForm.status === 'completed' ? 'completed' : 'in_progress';
       }
       if (jobForm.client !== (selectedJob.client || selectedJob.client_name || '')) updates.client = jobForm.client;
-      if (jobForm.site_address !== (selectedJob.site_address || selectedJob.address || '')) updates.site_address = jobForm.site_address;
+      if (jobForm.site_address !== (selectedJob.site_address || selectedJob.address || '')) {
+        updates.site_address = jobForm.site_address;
+        // Send the verified provider result so coordinates persist instead of
+        // being wiped when the address changes.
+        updates.lat = jobForm.lat;
+        updates.lng = jobForm.lng;
+        updates.place_id = jobForm.place_id;
+        updates.address_verified = jobForm.address_verified;
+      }
       if (jobForm.start_date !== (selectedJob.start_date || selectedJob.startDate || '')) updates.start_date = jobForm.start_date;
       if (jobForm.target_end_date !== (selectedJob.target_end_date || selectedJob.targetEndDate || selectedJob.endDate || '')) updates.target_end_date = jobForm.target_end_date;
       if (jobForm.notes !== (selectedJob.notes || '')) updates.notes = jobForm.notes;
@@ -852,12 +906,12 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
               <div>
                 <p className="text-xs text-gray-500 mb-1">Address</p>
-                <input
-                  type="text"
+                <AddressAutocomplete
                   value={jobForm.site_address}
-                  onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  verified={jobForm.address_verified}
                   disabled={!canEditJobs}
+                  inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  onSelect={(sel) => setJobForm({ ...jobForm, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified })}
                 />
               </div>
 
@@ -944,7 +998,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
               {renderCrewAssignmentSection()}
 
-              <AttachmentPanel entityType="job" entityId={selectedJob.id} />
+              {!selectedJobIsTemporary && <AttachmentPanel entityType="job" entityId={selectedJob.id} />}
 
               {jobActionError && (
                 <p className="text-sm text-red-600">{jobActionError}</p>
@@ -1018,7 +1072,13 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
               </div>
               <div>
                 <p className="text-xs text-gray-500 mb-1">Address</p>
-                <input type="text" value={jobForm.site_address} onChange={(e) => setJobForm({ ...jobForm, site_address: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" disabled={!canEditJobs} />
+                <AddressAutocomplete
+                  value={jobForm.site_address}
+                  verified={jobForm.address_verified}
+                  disabled={!canEditJobs}
+                  inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  onSelect={(sel) => setJobForm({ ...jobForm, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified })}
+                />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
@@ -1049,7 +1109,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
               </div>
               {renderEquipmentAssignmentSection()}
               {renderCrewAssignmentSection()}
-              <AttachmentPanel entityType="job" entityId={selectedJob.id} />
+              {!selectedJobIsTemporary && <AttachmentPanel entityType="job" entityId={selectedJob.id} />}
               {jobActionError && <p className="text-sm text-red-600">{jobActionError}</p>}
           </div>
         </MobileSheet>

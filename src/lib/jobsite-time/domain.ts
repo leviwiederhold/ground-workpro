@@ -264,23 +264,38 @@ export type JobsiteTimeSettings = {
   manualFallbackEnabled: boolean;
 };
 
+// Default geofence radius is ~1 mile (5280 ft). A larger default reduces missed
+// arrivals from GPS drift while still bounding the jobsite. Existing companies
+// keep whatever radius they saved (the column default only affects new rows).
+export const DEFAULT_GEOFENCE_RADIUS_FEET = 5280;
+
 export const DEFAULT_JOBSITE_TIME_SETTINGS: JobsiteTimeSettings = {
   enabled: false,
   requireApproval: true,
-  geofenceRadiusFeet: 500,
+  geofenceRadiusFeet: DEFAULT_GEOFENCE_RADIUS_FEET,
   ignoreShortDepartureMinutes: 10,
   breakThresholdMinutes: 30,
   autoClockOutAfterEnd: true,
   manualFallbackEnabled: true,
 };
 
-export const ALLOWED_GEOFENCE_RADII_FEET = [250, 500, 750] as const;
+// Radius options in feet, labeled in miles for the UI.
+export const ALLOWED_GEOFENCE_RADII_FEET = [1320, 2640, 5280, 10560] as const;
+
+export function geofenceRadiusLabel(feet: number): string {
+  const miles = feet / 5280;
+  if (miles === 0.25) return "0.25 mile";
+  if (miles === 0.5) return "0.5 mile";
+  if (miles < 1) return `${miles} mile`;
+  return `${miles} mile${miles === 1 ? "" : "s"}`;
+}
 
 export function mapCompanyJobsiteSettings(row: any): JobsiteTimeSettings {
   return {
     enabled: Boolean(row?.jobsite_time_enabled),
     requireApproval: row?.jobsite_require_approval ?? true,
-    geofenceRadiusFeet: Number(row?.jobsite_geofence_radius_feet ?? 500),
+    // Preserve any saved radius; only fall back to the 1-mile default when unset.
+    geofenceRadiusFeet: Number(row?.jobsite_geofence_radius_feet ?? DEFAULT_GEOFENCE_RADIUS_FEET),
     ignoreShortDepartureMinutes: Number(row?.jobsite_ignore_short_departure_minutes ?? 10),
     breakThresholdMinutes: Number(row?.jobsite_break_threshold_minutes ?? 30),
     autoClockOutAfterEnd: row?.jobsite_auto_clockout_after_end ?? true,

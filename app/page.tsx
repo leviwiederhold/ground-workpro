@@ -3807,11 +3807,13 @@ const MobileAppShell = ({
       const permissionLevels = ['none', 'view', 'edit'];
       // Finance and Reports are Manager-or-above only. Below Manager they are
       // hidden in the invite form and force-stripped from the payload (server
-      // enforces too). CEO is the owner and is not inviteable.
+      // enforces too).
       const MANAGER_LEVEL_INVITE_ROLES = ['ceo', 'manager'];
       const SENSITIVE_MANAGER_ONLY_KEYS = ['finance', 'reports'];
       const isManagerLevelInviteRole = (role) =>
         MANAGER_LEVEL_INVITE_ROLES.includes(String(role || '').toLowerCase());
+      const isCeoLevelUiRole = (role) =>
+        ['admin', 'executive', 'ceo'].includes(String(role || '').toLowerCase());
       const canSeeSensitiveModule = (moduleKey, role) =>
         !SENSITIVE_MANAGER_ONLY_KEYS.includes(moduleKey) || isManagerLevelInviteRole(role);
       const roleTemplateDefaults = {
@@ -3896,6 +3898,7 @@ const MobileAppShell = ({
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
       const canManageTeamProfiles = String(moduleAccess?.team_management || 'none') === 'edit';
       const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
+      const canInviteCeo = isCeoLevelUiRole(currentRole);
 
       const stats = {
         total: teamItems.length,
@@ -4916,11 +4919,8 @@ const MobileAppShell = ({
                     setPermissionForm({ ...roleTemplateDefaults[nextRole] });
                   }}
                 >
-                  {/* CEO is only the company owner — not an inviteable role.
-                      Keep the option only when editing an EXISTING CEO member so
-                      their role displays correctly. */}
-                  {permissionModalMode === 'member-edit' && inviteForm.role === 'ceo' && (
-                    <option value="ceo">CEO</option>
+                  {(canInviteCeo || (permissionModalMode === 'member-edit' && inviteForm.role === 'ceo')) && (
+                    <option value="ceo">Co-CEO</option>
                   )}
                   <option value="manager">Manager</option>
                   <option value="foreman">Foreman</option>

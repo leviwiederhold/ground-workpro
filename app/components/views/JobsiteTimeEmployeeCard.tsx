@@ -3,7 +3,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { JOBSITE_TIME_PRIVACY_COPY } from '@/lib/jobsite-time/domain';
-import { requestJobsiteLocationPermission } from '@/lib/jobsite-time/geofence-client';
 
 // Employee-facing summary of Automatic Jobsite Time. Shows today's status, the
 // privacy explanation, and keeps a manual clock-in/out fallback. It is
@@ -12,7 +11,6 @@ export function JobsiteTimeEmployeeCard() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [manualFallback, setManualFallback] = useState(true);
   const [today, setToday] = useState<any | null>(null);
-  const [permission, setPermission] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -85,19 +83,6 @@ export function JobsiteTimeEmployeeCard() {
       <p className="mt-3 rounded-lg bg-gray-50 p-2.5 text-xs leading-relaxed text-gray-600 dark:bg-[#050505] dark:text-zinc-400">
         {JOBSITE_TIME_PRIVACY_COPY}
       </p>
-
-      {enabled && (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={async () => setPermission(await requestJobsiteLocationPermission())}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
-          >
-            Allow location
-          </button>
-          {permission && <span className="text-xs text-gray-500">Permission: {permission}</span>}
-        </div>
-      )}
 
       {manualFallback && (
         <p className="mt-2 text-xs text-gray-500 dark:text-zinc-500">

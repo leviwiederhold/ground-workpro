@@ -37,9 +37,6 @@ const MessagesView = dynamic(
 const JobsiteTimeView = dynamic(
   () => import('@/app/components/views/JobsiteTimeView').then((mod) => mod.JobsiteTimeView)
 );
-const JobsiteTimeEmployeeCard = dynamic(
-  () => import('@/app/components/views/JobsiteTimeEmployeeCard').then((mod) => mod.JobsiteTimeEmployeeCard)
-);
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
@@ -2200,12 +2197,7 @@ const MobileAppShell = ({
           );
         }
         switch(currentView) {
-          case 'dashboard': return (
-            <div className="space-y-4">
-              <JobsiteTimeEmployeeCard />
-              <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />
-            </div>
-          );
+          case 'dashboard': return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />;
           case 'messages': return <MessagesView employees={employees} availableUsersSeed={companyMembers} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
@@ -2635,8 +2627,7 @@ const MobileAppShell = ({
               </div>
             </div>
           </div>
-          {/* Location requirement — native field employees only; never blocks
-              managers or desktop web (self-gated inside the component). */}
+          {/* Location requirement — field roles only; never blocks managers. */}
           <LocationGate role={currentRole} />
         </MobileAppShell>
 

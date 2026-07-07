@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { canManageTimecards, mapTimecard } from "@/lib/jobsite-time/domain";
+import { canManageTimecards, mapCompanyJobsiteSettings, mapTimecard } from "@/lib/jobsite-time/domain";
+import { finalizePendingAttendance } from "@/lib/jobsite-time/finalizeAttendance";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,21 @@ export async function GET(request: Request) {
     const role = await getEffectiveRole();
     const isManager = canManageTimecards(role);
     const db = getSupabaseAdmin() ?? supabase;
+
+    const settingsRow = await db
+      .from("companies")
+      .select("jobsite_time_enabled,jobsite_arrival_confirmation_seconds,jobsite_departure_grace_minutes")
+      .eq("id", companyId)
+      .maybeSingle();
+    const settings = mapCompanyJobsiteSettings(settingsRow.data);
+    if (settings.enabled) {
+      await finalizePendingAttendance({
+        db,
+        companyId,
+        arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
+        departureGraceMinutes: settings.departureGraceMinutes,
+      });
+    }
 
     const url = new URL(request.url);
     const p = url.searchParams;

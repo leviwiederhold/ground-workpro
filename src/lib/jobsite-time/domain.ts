@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Shared domain logic for Automatic Jobsite Time. Pure/functional so it can be
-// unit-reasoned and reused by the API routes and the UI.
+// Shared domain logic for Attendance (two-zone jobsite geofencing). Pure/functional
+// so it can be unit-reasoned and reused by the API routes and the UI.
 
 export const TIMECARD_STATUSES = [
   "active",
@@ -29,6 +29,12 @@ export const TIMECARD_EVENT_TYPES = [
 ] as const;
 export type TimecardEventType = (typeof TIMECARD_EVENT_TYPES)[number];
 
+// The two zones a job's geofence is evaluated against. "wake" is a wide radius
+// that only starts closer monitoring; "arrival" is the small radius that is the
+// actual attendance event (see two-zone model below).
+export const GEOFENCE_ZONES = ["wake", "arrival"] as const;
+export type GeofenceZone = (typeof GEOFENCE_ZONES)[number];
+
 // Roles allowed to view/manage ALL company timecards. Everyone else is scoped
 // to their own records (or blocked).
 export function canManageTimecards(role: string | null | undefined): boolean {
@@ -38,6 +44,10 @@ export function canManageTimecards(role: string | null | undefined): boolean {
 
 export function feetToMeters(feet: number): number {
   return feet * 0.3048;
+}
+
+export function metersToMiles(meters: number): number {
+  return meters / 1609.34;
 }
 
 // Great-circle distance in meters between two lat/lng points.
@@ -99,12 +109,13 @@ export function computeTotalMinutes(row: {
   return Math.max(0, Math.round(minutes));
 }
 
-// Server-side verification of a native enter/exit event. We do NOT fully trust
-// the native transition: we recompute distance from the job's saved coordinates
-// and the submitted point, cross-check the configured radius (with a GPS-accuracy
-// slack), and enforce the scheduled window. Poor accuracy, questionable distance,
-// missing coordinates, or off-window events downgrade confidence and force
-// manager review; only grossly-off-location "enter" events are hard-rejected.
+// Server-side verification of a native enter/exit event for the ARRIVAL zone.
+// We do NOT fully trust the native transition: we recompute distance from the
+// job's saved coordinates and the submitted point, cross-check the configured
+// arrival radius (with a GPS-accuracy slack), and enforce the scheduled window.
+// Poor accuracy, questionable distance, missing coordinates, or off-window
+// events downgrade confidence and force manager review; only grossly-off-location
+// "enter" events are hard-rejected.
 export type JobsiteEvaluation = {
   reject: boolean;
   reason?: string;
@@ -220,6 +231,8 @@ export function mapTimecard(row: any) {
     geofenceRadiusFeet: row.geofence_radius_feet ?? null,
     detectedArrivalAt: row.detected_arrival_at ?? null,
     detectedDepartureAt: row.detected_departure_at ?? null,
+    pendingArrivalAt: row.pending_arrival_at ?? null,
+    pendingDepartureAt: row.pending_departure_at ?? null,
     clockInAt: row.clock_in_at ?? null,
     clockOutAt: row.clock_out_at ?? null,
     breakStartAt: row.break_start_at ?? null,
@@ -257,51 +270,159 @@ export function mapTimecardEvent(row: any) {
 export type JobsiteTimeSettings = {
   enabled: boolean;
   requireApproval: boolean;
-  geofenceRadiusFeet: number;
-  ignoreShortDepartureMinutes: number;
-  breakThresholdMinutes: number;
-  autoClockOutAfterEnd: boolean;
+  // Wake zone: wide radius that only wakes closer monitoring — never marks an
+  // arrival by itself.
+  wakeRadiusMeters: number;
+  // Arrival zone: small radius that is the actual attendance (clock-in/out) event.
+  arrivalRadiusFeet: number;
+  // How long an employee must stay outside the arrival radius before a
+  // departure is confirmed (avoids clocking someone out for a brief dip out of
+  // range).
+  departureGraceMinutes: number;
+  // How long an employee must stay inside the arrival radius before an arrival
+  // is confirmed (avoids clocking someone in for briefly driving past).
+  arrivalConfirmationSeconds: number;
   manualFallbackEnabled: boolean;
 };
 
-// Default geofence radius is ~1 mile (5280 ft). A larger default reduces missed
-// arrivals from GPS drift while still bounding the jobsite. Existing companies
-// keep whatever radius they saved (the column default only affects new rows).
-export const DEFAULT_GEOFENCE_RADIUS_FEET = 5280;
+// ~1 mile. Wakes the app / starts closer monitoring — does not mark arrival.
+export const DEFAULT_WAKE_RADIUS_METERS = 1609;
+// ~500 ft. The actual attendance (arrival/departure) event radius.
+export const DEFAULT_ARRIVAL_RADIUS_FEET = 500;
+export const DEFAULT_DEPARTURE_GRACE_MINUTES = 5;
+export const DEFAULT_ARRIVAL_CONFIRMATION_SECONDS = 45;
 
 export const DEFAULT_JOBSITE_TIME_SETTINGS: JobsiteTimeSettings = {
   enabled: false,
   requireApproval: true,
-  geofenceRadiusFeet: DEFAULT_GEOFENCE_RADIUS_FEET,
-  ignoreShortDepartureMinutes: 10,
-  breakThresholdMinutes: 30,
-  autoClockOutAfterEnd: true,
+  wakeRadiusMeters: DEFAULT_WAKE_RADIUS_METERS,
+  arrivalRadiusFeet: DEFAULT_ARRIVAL_RADIUS_FEET,
+  departureGraceMinutes: DEFAULT_DEPARTURE_GRACE_MINUTES,
+  arrivalConfirmationSeconds: DEFAULT_ARRIVAL_CONFIRMATION_SECONDS,
   manualFallbackEnabled: true,
 };
 
-// Radius options in feet, labeled in miles for the UI.
-export const ALLOWED_GEOFENCE_RADII_FEET = [1320, 2640, 5280, 10560] as const;
+// Wake radius options, labeled in miles for the UI.
+export const ALLOWED_WAKE_RADII_METERS = [805, 1609, 3219] as const; // 0.5, 1, 2 miles
 
-export function geofenceRadiusLabel(feet: number): string {
-  const miles = feet / 5280;
-  if (miles === 0.25) return "0.25 mile";
-  if (miles === 0.5) return "0.5 mile";
-  if (miles < 1) return `${miles} mile`;
+// Arrival radius options, labeled in feet for the UI.
+export const ALLOWED_ARRIVAL_RADII_FEET = [150, 250, 500, 1000] as const;
+
+// Departure grace period options, in minutes (3–5 min per product spec).
+export const ALLOWED_DEPARTURE_GRACE_MINUTES = [3, 4, 5] as const;
+
+// Arrival confirmation delay options, in seconds (30–60 sec per product spec).
+export const ALLOWED_ARRIVAL_CONFIRMATION_SECONDS = [30, 45, 60] as const;
+
+export function wakeRadiusLabel(meters: number): string {
+  const miles = Math.round(metersToMiles(meters) * 100) / 100;
   return `${miles} mile${miles === 1 ? "" : "s"}`;
+}
+
+export function arrivalRadiusLabel(feet: number): string {
+  if (feet >= 1000) return `${(feet / 1000).toFixed(feet % 1000 === 0 ? 0 : 1)}k ft`;
+  return `${feet} ft`;
+}
+
+export function departureGraceLabel(minutes: number): string {
+  return `${minutes} min`;
+}
+
+export function arrivalConfirmationLabel(seconds: number): string {
+  return `${seconds} sec`;
 }
 
 export function mapCompanyJobsiteSettings(row: any): JobsiteTimeSettings {
   return {
     enabled: Boolean(row?.jobsite_time_enabled),
     requireApproval: row?.jobsite_require_approval ?? true,
-    // Preserve any saved radius; only fall back to the 1-mile default when unset.
-    geofenceRadiusFeet: Number(row?.jobsite_geofence_radius_feet ?? DEFAULT_GEOFENCE_RADIUS_FEET),
-    ignoreShortDepartureMinutes: Number(row?.jobsite_ignore_short_departure_minutes ?? 10),
-    breakThresholdMinutes: Number(row?.jobsite_break_threshold_minutes ?? 30),
-    autoClockOutAfterEnd: row?.jobsite_auto_clockout_after_end ?? true,
+    wakeRadiusMeters: Number(row?.jobsite_wake_radius_meters ?? DEFAULT_WAKE_RADIUS_METERS),
+    // Preserve any saved radius; only fall back to the 500 ft default when unset.
+    arrivalRadiusFeet: Number(row?.jobsite_geofence_radius_feet ?? DEFAULT_ARRIVAL_RADIUS_FEET),
+    departureGraceMinutes: Number(row?.jobsite_departure_grace_minutes ?? DEFAULT_DEPARTURE_GRACE_MINUTES),
+    arrivalConfirmationSeconds: Number(
+      row?.jobsite_arrival_confirmation_seconds ?? DEFAULT_ARRIVAL_CONFIRMATION_SECONDS
+    ),
     manualFallbackEnabled: row?.jobsite_manual_fallback_enabled ?? true,
   };
 }
 
 export const JOBSITE_TIME_PRIVACY_COPY =
   "Location is only used during assigned shifts to verify arrival and departure from the jobsite. Groundwork Pro does not track your location outside work, and never stores your travel path.";
+
+// ---------------------------------------------------------------------------
+// Employee-facing display status. Kept deliberately non-technical: no mention
+// of confidence, source, geofence, or event ingestion.
+// ---------------------------------------------------------------------------
+export const ATTENDANCE_DISPLAY_STATUSES = [
+  "no_job",
+  "address_needs_verification",
+  "waiting",
+  "checked_in",
+  "checked_out",
+  "needs_review",
+  "missing_clock_out",
+] as const;
+export type AttendanceDisplayStatus = (typeof ATTENDANCE_DISPLAY_STATUSES)[number];
+
+export const ATTENDANCE_STATUS_LABEL: Record<AttendanceDisplayStatus, string> = {
+  no_job: "No assigned job",
+  address_needs_verification: "Address needs verification",
+  waiting: "Waiting for arrival",
+  checked_in: "Checked in",
+  checked_out: "Checked out",
+  needs_review: "Needs review",
+  missing_clock_out: "Missing clock-out",
+};
+
+// Derives the simple, employee/manager-facing status from a timecard + the
+// assigned job's verification state. Shared by the manager roster and the
+// employee status card so both always agree.
+export function deriveAttendanceStatus(params: {
+  hasAssignedJob: boolean;
+  assignedJobAddressVerified: boolean;
+  todayCard: { clockInAt: string | null; clockOutAt: string | null; status: string } | null;
+  hasStaleOpenCard: boolean;
+}): AttendanceDisplayStatus {
+  if (!params.hasAssignedJob) return "no_job";
+  if (!params.assignedJobAddressVerified) return "address_needs_verification";
+  if (params.hasStaleOpenCard) return "missing_clock_out";
+  const t = params.todayCard;
+  if (!t) return "waiting";
+  // "needs_review" is a genuine anomaly (bad GPS, off-schedule, unmatched
+  // location) — distinct from "pending_review", which is just the routine
+  // awaiting-manager-approval state every auto-tracked entry starts in when
+  // approval is required. Only the former should pull someone out of the
+  // normal On Site / Not Arrived / Recently Left roster view.
+  if (t.status === "needs_review") return "needs_review";
+  if (t.clockOutAt) return "checked_out";
+  if (t.clockInAt) return "checked_in";
+  return "waiting";
+}
+
+// ---------------------------------------------------------------------------
+// Nearest assigned-job matching (section 4: assigned jobs only, closest job
+// wins when several are in range). Shared by the server event evaluator and
+// the foreground client geofence fallback.
+// ---------------------------------------------------------------------------
+export type AssignedJobLocation = {
+  jobId: string;
+  lat: number | null;
+  lng: number | null;
+  addressVerified: boolean;
+};
+
+export function pickNearestAssignedJob(
+  jobs: AssignedJobLocation[],
+  point: { lat: number; lng: number }
+): { job: AssignedJobLocation; distanceMeters: number } | null {
+  let best: { job: AssignedJobLocation; distanceMeters: number } | null = null;
+  for (const job of jobs) {
+    if (!job.addressVerified || job.lat === null || job.lng === null) continue;
+    const distanceMeters = haversineMeters(job.lat, job.lng, point.lat, point.lng);
+    if (!best || distanceMeters < best.distanceMeters) {
+      best = { job, distanceMeters };
+    }
+  }
+  return best;
+}

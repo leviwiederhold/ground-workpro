@@ -1695,7 +1695,7 @@ const MobileAppShell = ({
       }, [canLoadProtectedData, loadNotifications]);
 
       useEffect(() => {
-        const shouldLoad = currentView === 'dashboard' || currentView === 'safety';
+        const shouldLoad = currentView === 'safety';
         if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.safety) return;
         loadSafetyLogs().finally(() => {
           moduleLoadedRef.current.safety = true;
@@ -1703,7 +1703,7 @@ const MobileAppShell = ({
       }, [canLoadProtectedData, currentView, loadSafetyLogs]);
 
       useEffect(() => {
-        const shouldLoad = currentView === 'dashboard' || currentView === 'training';
+        const shouldLoad = currentView === 'training';
         if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.training) return;
         loadTraining().finally(() => {
           moduleLoadedRef.current.training = true;
@@ -1712,7 +1712,7 @@ const MobileAppShell = ({
 
       useEffect(() => {
         let isMounted = true;
-        const shouldLoad = currentView === 'dashboard' || currentView === 'bids' || currentView === 'reports';
+        const shouldLoad = currentView === 'bids' || currentView === 'reports';
         if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.costCodes) return () => { isMounted = false; };
 
         const loadCostCodes = async () => {
@@ -1747,7 +1747,7 @@ const MobileAppShell = ({
 
       useEffect(() => {
         let isMounted = true;
-        const shouldLoad = currentView === 'dashboard' || currentView === 'bids';
+        const shouldLoad = currentView === 'bids';
         if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.bids) return () => { isMounted = false; };
 
         const loadBids = async () => {
@@ -1782,7 +1782,7 @@ const MobileAppShell = ({
 
       useEffect(() => {
         let isMounted = true;
-        const shouldLoad = currentView === 'dashboard' || currentView === 'vendors';
+        const shouldLoad = currentView === 'vendors';
         if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.vendors) return () => { isMounted = false; };
 
         const loadVendors = async () => {
@@ -1893,7 +1893,7 @@ const MobileAppShell = ({
 
       useEffect(() => {
         let isMounted = true;
-        const shouldLoad = currentView === 'dashboard' || currentView === 'reports';
+        const shouldLoad = currentView === 'reports';
         if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.dailyReports) return () => { isMounted = false; };
 
         const loadDailyReports = async () => {

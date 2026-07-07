@@ -1,5 +1,7 @@
+import { headers } from "next/headers";
 import { supabaseServer } from "@/lib/supabase/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { GW_VERIFIED_UID_HEADER, GW_VERIFIED_EMAIL_HEADER } from "@/lib/auth/verifiedIdentity";
 import {
   ensureCompanyHasAtLeastOneCeoMembership,
   isCeoMembershipRole,
@@ -94,9 +96,24 @@ export class TenantResolverError extends Error {
 export async function getCompanyId() {
   const supabase = await supabaseServer();
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData?.user) {
-    throw new TenantResolverError("Not authenticated", 401);
+  // Fast path: trust the identity the middleware already verified via getUser()
+  // and forwarded on a non-client-controllable header, to avoid a SECOND Auth
+  // call per request (halves per-request Supabase Auth load). Falls back to
+  // getUser() when the header is absent (e.g. a route reached without middleware).
+  const hdrs = await headers();
+  const forwardedUid = String(hdrs.get(GW_VERIFIED_UID_HEADER) ?? "").trim();
+  let user: { id: string; email: string };
+  if (forwardedUid) {
+    user = {
+      id: forwardedUid,
+      email: String(hdrs.get(GW_VERIFIED_EMAIL_HEADER) ?? "").trim().toLowerCase(),
+    };
+  } else {
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData?.user) {
+      throw new TenantResolverError("Not authenticated", 401);
+    }
+    user = { id: userData.user.id, email: String(userData.user.email ?? "").trim().toLowerCase() };
   }
 
   // Resolve the user's OWN membership with the service-role client (scoped to
@@ -110,7 +127,7 @@ export async function getCompanyId() {
     const preferred = await membershipReader
       .from("memberships")
       .select("company_id")
-      .eq("user_id", userData.user.id)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(1);
     if (
@@ -122,7 +139,7 @@ export async function getCompanyId() {
       return membershipReader
         .from("memberships")
         .select("company_id")
-        .eq("user_id", userData.user.id)
+        .eq("user_id", user.id)
         .order("company_id", { ascending: true })
         .limit(1);
     }
@@ -137,11 +154,11 @@ export async function getCompanyId() {
 
   let companyId = memberships?.[0]?.company_id;
   if (!companyId) {
-    const email = String(userData.user.email ?? "").trim().toLowerCase();
+    const email = user.email;
     if (email) {
       const admin = getSupabaseAdmin();
       const client = admin ?? supabase;
-      const acceptedInvite = await resolveAcceptedInviteContext(client, userData.user.id, email);
+      const acceptedInvite = await resolveAcceptedInviteContext(client, user.id, email);
 
       let inviteEmployee:
         | {
@@ -188,7 +205,7 @@ export async function getCompanyId() {
             user_id?: string | null;
           }>;
           const prioritizedRow =
-            rows.find((row) => String(row.user_id ?? "").trim() === String(userData.user.id)) ??
+            rows.find((row) => String(row.user_id ?? "").trim() === String(user.id)) ??
             (acceptedInvite
               ? rows.find((row) => String(row.company_id ?? "").trim() === acceptedInvite.companyId)
               : null) ??
@@ -220,7 +237,7 @@ export async function getCompanyId() {
           const membershipInsert = await client.from("memberships").upsert(
             {
               company_id: inviteEmployee.data.company_id,
-              user_id: userData.user.id,
+              user_id: user.id,
               role: safeMembershipRole,
             },
             { onConflict: "company_id,user_id" }
@@ -235,7 +252,7 @@ export async function getCompanyId() {
 
           const employeeUpdate = await client
             .from("employees")
-            .update({ user_id: userData.user.id, role: safeEmployeeRole })
+            .update({ user_id: user.id, role: safeEmployeeRole })
             .eq("id", inviteEmployee.data.id)
             .eq("company_id", inviteEmployee.data.company_id);
 
@@ -277,7 +294,7 @@ export async function getCompanyId() {
     // TEMP diagnostic: a 403 here means authenticated but no company membership.
     if (process.env.NODE_ENV !== "production") {
       console.warn("[getCompanyId] 403 denied", {
-        userId: userData.user.id,
+        userId: user.id,
         localUserFound: true,
         membershipFound: false,
         companyId: null,
@@ -287,7 +304,7 @@ export async function getCompanyId() {
     throw new TenantResolverError("No company workspace found", 403);
   }
 
-  return { supabase, companyId, userId: userData.user.id, userEmail: String(userData.user.email ?? "").trim().toLowerCase() };
+  return { supabase, companyId, userId: user.id, userEmail: user.email };
 }
 
 export async function getOptionalCompanyId() {

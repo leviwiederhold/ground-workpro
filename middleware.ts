@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseEnv } from "@/lib/supabase/env";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { GW_VERIFIED_UID_HEADER, GW_VERIFIED_EMAIL_HEADER } from "@/lib/auth/verifiedIdentity";
 import { normalizeAppRole, ROUTE_GUARDS, type AppRole } from "@/lib/nav/config";
 import { ACTING_ROLE_COOKIE, clampActingRole } from "@/lib/auth/effectiveRole";
 import {
@@ -118,6 +119,11 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   const requestStart = Date.now().toString();
 
   const requestHeaders = new Headers(request.headers);
+  // Anti-spoof: never let a client supply the verified-identity headers. Strip
+  // them before anything else, on every request (guarded or not). Only the
+  // getUser-verified values below may re-set them.
+  requestHeaders.delete(GW_VERIFIED_UID_HEADER);
+  requestHeaders.delete(GW_VERIFIED_EMAIL_HEADER);
   requestHeaders.set(REQUEST_ID_HEADER, requestId);
   requestHeaders.set(REQUEST_START_HEADER, requestStart);
 
@@ -200,6 +206,17 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   } catch {
     if (!isApi) return NextResponse.redirect(new URL("/login", request.url));
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Forward the verified identity to the route handler so getCompanyId can skip
+  // a second getUser(). Rebuild the response from the (identity-augmented)
+  // request headers, preserving any auth-refresh cookies already set on it.
+  if (authData?.user?.id) {
+    requestHeaders.set(GW_VERIFIED_UID_HEADER, authData.user.id);
+    requestHeaders.set(GW_VERIFIED_EMAIL_HEADER, String(authData.user.email ?? ""));
+    const withIdentity = NextResponse.next({ request: { headers: requestHeaders } });
+    response.cookies.getAll().forEach((cookie) => withIdentity.cookies.set(cookie));
+    response = withIdentity;
   }
 
   if (guardedPageRoles || guardedModule) {

@@ -15,6 +15,27 @@ import type { ModuleAccessLevel, ModulePermissionKey } from "@/lib/permissions/t
 const shouldLogRequests = process.env.REQUEST_LOGGING_ENABLED !== "false";
 const REQUEST_ID_HEADER = "x-request-id";
 const REQUEST_START_HEADER = "x-request-start";
+const MIDDLEWARE_AUTH_TIMEOUT_MS = 1500;
+const MIDDLEWARE_DB_TIMEOUT_MS = 1500;
+
+class MiddlewareTimeoutError extends Error {
+  constructor(label: string) {
+    super(`${label} timed out`);
+    this.name = "MiddlewareTimeoutError";
+  }
+}
+
+function withMiddlewareTimeout<T>(label: string, promise: PromiseLike<T>, timeoutMs: number): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new MiddlewareTimeoutError(label)), timeoutMs);
+    }),
+  ]).finally(() => {
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+}
 
 function buildRequestId(request: NextRequest) {
   const existing = request.headers.get(REQUEST_ID_HEADER);
@@ -92,8 +113,6 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     return NextResponse.redirect(canonicalUrl, 308);
   }
 
-  const { url, anonKey } = getSupabaseEnv();
-
   const requestId = buildRequestId(request);
   const requestStart = Date.now().toString();
 
@@ -104,6 +123,47 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   let response = NextResponse.next({
     request: { headers: requestHeaders },
   });
+
+  const isApi = request.nextUrl.pathname.startsWith("/api/");
+  const guardedPageRoles = !isApi ? findGuardedRoles(request.nextUrl.pathname) : null;
+  const guardedApi =
+    isApi && !shouldBypassApiModuleGuard(request.nextUrl.pathname, request.method)
+      ? resolveApiGuardedModule(request)
+      : null;
+  const guardedModule = guardedApi?.module ?? null;
+
+  if (!guardedPageRoles && !guardedModule) {
+    response.headers.set(REQUEST_ID_HEADER, requestId);
+
+    if (shouldLogRequests && request.nextUrl.pathname.startsWith("/api/")) {
+      const method = request.method;
+      const path = request.nextUrl.pathname;
+      const ip =
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        request.headers.get("x-real-ip") ??
+        "unknown";
+
+      event.waitUntil(
+        Promise.resolve().then(() => {
+          console.info(
+            JSON.stringify({
+              ts: new Date().toISOString(),
+              level: "info",
+              event: "api_request",
+              request_id: requestId,
+              method,
+              path,
+              ip,
+            })
+          );
+        })
+      );
+    }
+
+    return response;
+  }
+
+  const { url, anonKey } = getSupabaseEnv();
 
   const supabase = createServerClient(url, anonKey, {
     cookies: {
@@ -127,17 +187,22 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
   });
 
   // Required for Supabase SSR auth cookie refresh.
-  const { data: authData } = await supabase.auth.getUser();
-
-  const isApi = request.nextUrl.pathname.startsWith("/api/");
-  const guardedPageRoles = !isApi ? findGuardedRoles(request.nextUrl.pathname) : null;
-  const guardedApi =
-    isApi && !shouldBypassApiModuleGuard(request.nextUrl.pathname, request.method)
-      ? resolveApiGuardedModule(request)
-      : null;
-  const guardedModule = guardedApi?.module ?? null;
+  let authData: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"] | null = null;
+  try {
+    authData = (
+      await withMiddlewareTimeout(
+        "middleware auth",
+        supabase.auth.getUser(),
+        MIDDLEWARE_AUTH_TIMEOUT_MS
+      )
+    ).data;
+  } catch {
+    if (!isApi) return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   if (guardedPageRoles || guardedModule) {
+    try {
       const cookieRole =
         process.env.NODE_ENV !== "production" || process.env.E2E === "true"
           ? request.cookies.get("e2e_role")?.value
@@ -153,11 +218,15 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        const { data: memberships, error: membershipError } = await supabase
-          .from("memberships")
-          .select("company_id, role")
-          .eq("user_id", userId)
-          .limit(1);
+        const { data: memberships, error: membershipError } = await withMiddlewareTimeout(
+          "middleware membership lookup",
+          supabase
+            .from("memberships")
+            .select("company_id, role")
+            .eq("user_id", userId)
+            .limit(1),
+          MIDDLEWARE_DB_TIMEOUT_MS
+        );
 
         if (membershipError) {
           if (!isApi) return NextResponse.redirect(new URL("/", request.url));
@@ -174,11 +243,15 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         const actingRole = normalizeAppRole(request.cookies.get(ACTING_ROLE_COOKIE)?.value);
         resolvedRole = actingRole ? clampActingRole(realRole, actingRole) : realRole;
       } else if (userId) {
-        const { data: memberships } = await supabase
-          .from("memberships")
-          .select("company_id")
-          .eq("user_id", userId)
-          .limit(1);
+        const { data: memberships } = await withMiddlewareTimeout(
+          "middleware company lookup",
+          supabase
+            .from("memberships")
+            .select("company_id")
+            .eq("user_id", userId)
+            .limit(1),
+          MIDDLEWARE_DB_TIMEOUT_MS
+        );
         companyId = String(memberships?.[0]?.company_id ?? "");
       }
 
@@ -207,12 +280,16 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
       }
 
       if (guardedModule) {
-        permissions = await resolveUserModulePermissions({
-          supabase,
-          companyId,
-          userId,
-          role: resolvedRole,
-        });
+        permissions = await withMiddlewareTimeout(
+          "middleware permissions lookup",
+          resolveUserModulePermissions({
+            supabase,
+            companyId,
+            userId,
+            role: resolvedRole,
+          }),
+          MIDDLEWARE_DB_TIMEOUT_MS
+        );
         if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {
           permissions = applyPermissionOverrideFromCookie(
             permissions,
@@ -225,6 +302,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
       }
+    } catch {
+      if (!isApi) return NextResponse.redirect(new URL("/", request.url));
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   response.headers.set(REQUEST_ID_HEADER, requestId);

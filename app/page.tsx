@@ -1978,6 +1978,51 @@ const MobileAppShell = ({
         loadNav();
       }, [loadNav, accessRefreshNonce]);
 
+      // STARTUP WATCHDOG (nav): /api/nav is an OPTIONAL startup dependency — the
+      // app must render with role-based fallback navigation if it is slow or
+      // failing. navEverLoaded is a hard render gate (startupReady), so if it
+      // never flips true the shell hangs forever. This guarantees it fails OPEN
+      // after a bounded time: seed fallback nav by role and mark nav "loaded"
+      // (degraded) so the shell + protected-data effects proceed. Happy path is
+      // unaffected — nav normally resolves in well under this window.
+      useEffect(() => {
+        if (navEverLoaded) return undefined;
+        const timer = window.setTimeout(() => {
+          setServerNavItems((prev) => (Array.isArray(prev) && prev.length > 0 ? prev : fallbackNavByRole(currentRole)));
+          setNavLoaded(true);
+          setNavEverLoaded(true);
+        }, 10000);
+        return () => window.clearTimeout(timer);
+      }, [navEverLoaded, currentRole, fallbackNavByRole]);
+
+      // STARTUP WATCHDOG (protected data): module loading flags default to `true`
+      // and clear only when their loader effect runs to its finally block. If a
+      // loader never runs — e.g. it gets (re)coupled to an OPTIONAL signal, the
+      // exact class of regression seen previously — its flag stays `true` and
+      // that view spins forever. Once the shell is ready, guarantee every
+      // top-level module loading flag resolves within a bounded window so
+      // "loading = true forever" is structurally impossible. Legitimate loads
+      // (<=10s fetch timeout + finally) finish well before this fires; it only
+      // rescues flags whose loader never ran, degrading to an empty/error state
+      // instead of an infinite spinner.
+      useEffect(() => {
+        if (!navEverLoaded) return undefined;
+        const timer = window.setTimeout(() => {
+          setJobsLoading(false);
+          setEquipmentLoading(false);
+          setEmployeesLoading(false);
+          setWorkOrdersLoading(false);
+          setDailyReportsLoading(false);
+          setInventoryLoading(false);
+          setBidsLoading(false);
+          setVendorsLoading(false);
+          setCostCodesLoading(false);
+          setSafetyLogsLoading(false);
+          setTrainingLoading(false);
+        }, 20000);
+        return () => window.clearTimeout(timer);
+      }, [navEverLoaded]);
+
       useEffect(() => {
         if (typeof window === 'undefined') return undefined;
         const syncViewFromLocation = () => {

@@ -1061,7 +1061,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       <div className={`min-w-0 w-full md:w-80 md:shrink-0 bg-white border-r border-gray-200 dark:border-zinc-800 dark:bg-[#090909] flex-col ${showConversationPanel ? 'hidden md:flex' : 'flex'}`} data-testid="messages-sidebar">
         <div className="space-y-3 border-b border-gray-200 p-4 dark:border-zinc-800">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold tracking-wide text-gray-900 dark:text-zinc-100">Messages</h3>
+            <h3 className="font-semibold tracking-wide text-gray-900 dark:text-zinc-100">Chats</h3>
             <Button variant="secondary" size="sm" onClick={() => setShowNewChannel(true)} data-testid="messages-create-channel-open">
               <Icon name="pen-to-square" />
             </Button>

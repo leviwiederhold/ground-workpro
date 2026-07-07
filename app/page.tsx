@@ -158,6 +158,8 @@ const viewFromPathname = (pathname) => {
   const firstSegment = String(pathname || '/').split('/').filter(Boolean)[0] || '';
   if (!firstSegment) return 'dashboard';
   if (APP_VIEW_PATHS[firstSegment]) return firstSegment;
+  const matchedView = Object.entries(APP_VIEW_PATHS).find(([, path]) => path === `/${firstSegment}`)?.[0];
+  if (matchedView) return matchedView;
   return 'dashboard';
 };
 
@@ -1189,8 +1191,8 @@ const MobileAppShell = ({
           // subscribe intentionally omitted — billing accessed via profile dropdown
         };
         const byRole = {
-          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule', 'settings'],
-          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule', 'settings'],
+          executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'jobsite_time', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule', 'settings'],
+          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'jobsite_time', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule', 'settings'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
           operator: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],

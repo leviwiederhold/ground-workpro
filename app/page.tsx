@@ -1113,6 +1113,10 @@ const MobileAppShell = ({
       // Data State
       const [jobs, setJobs] = useState([]);
       const [jobsLoading, setJobsLoading] = useState(true);
+      // Explicit terminal error for the jobs loader so a failure/timeout is
+      // surfaced (retryable) instead of masked as an empty list.
+      const [jobsError, setJobsError] = useState('');
+      const [jobsReloadNonce, setJobsReloadNonce] = useState(0);
       const [equipment, setEquipment] = useState([]);
       const [equipmentLoading, setEquipmentLoading] = useState(true);
       const [employees, setEmployees] = useState([]);
@@ -1598,21 +1602,33 @@ const MobileAppShell = ({
           currentView === 'team';
         if (!shouldLoad || moduleLoadedRef.current.jobs) return () => { isMounted = false; };
 
+        // Explicit terminal states: loading -> success | error(timeout|failure).
+        // The finally always resolves the loading flag (this effect is reached
+        // once the shell is up — nav fails open — so it is guaranteed to run and
+        // terminate). Failures are recorded in jobsError and remain visible
+        // rather than being masked as an empty list.
         const loadJobs = async () => {
           try {
             setJobsLoading(true);
+            setJobsError('');
             const response = await fetchWithTimeout('/api/jobs', { cache: 'no-store' }, 10000);
-            const payload = await response.json();
+            const payload = await response.json().catch(() => ({}));
             if (!response.ok) {
               throw new Error(payload?.error || 'Failed to load jobs');
             }
             if (isMounted) {
               setJobs(payload.items || payload.jobs || []);
+              setJobsError('');
               moduleLoadedRef.current.jobs = true;
             }
-          } catch {
+          } catch (err) {
             if (isMounted) {
-              setJobs([]);
+              const message = err instanceof Error ? err.message : 'Failed to load jobs';
+              const isTimeout = (err && err.name === 'AbortError') || /time(d)?\s*out/i.test(message);
+              setJobsError(isTimeout ? 'Loading jobs timed out. Check your connection and try again.' : message);
+              // Do NOT overwrite with [] — keep any previously loaded jobs so a
+              // transient failure doesn't wipe the list; the error state is the
+              // signal, not an empty view.
             }
           } finally {
             if (isMounted) {
@@ -1626,7 +1642,7 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [currentView, jobsReloadNonce]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1995,33 +2011,6 @@ const MobileAppShell = ({
         return () => window.clearTimeout(timer);
       }, [navEverLoaded, currentRole, fallbackNavByRole]);
 
-      // STARTUP WATCHDOG (protected data): module loading flags default to `true`
-      // and clear only when their loader effect runs to its finally block. If a
-      // loader never runs — e.g. it gets (re)coupled to an OPTIONAL signal, the
-      // exact class of regression seen previously — its flag stays `true` and
-      // that view spins forever. Once the shell is ready, guarantee every
-      // top-level module loading flag resolves within a bounded window so
-      // "loading = true forever" is structurally impossible. Legitimate loads
-      // (<=10s fetch timeout + finally) finish well before this fires; it only
-      // rescues flags whose loader never ran, degrading to an empty/error state
-      // instead of an infinite spinner.
-      useEffect(() => {
-        if (!navEverLoaded) return undefined;
-        const timer = window.setTimeout(() => {
-          setJobsLoading(false);
-          setEquipmentLoading(false);
-          setEmployeesLoading(false);
-          setWorkOrdersLoading(false);
-          setDailyReportsLoading(false);
-          setInventoryLoading(false);
-          setBidsLoading(false);
-          setVendorsLoading(false);
-          setCostCodesLoading(false);
-          setSafetyLogsLoading(false);
-          setTrainingLoading(false);
-        }, 20000);
-        return () => window.clearTimeout(timer);
-      }, [navEverLoaded]);
 
       useEffect(() => {
         if (typeof window === 'undefined') return undefined;
@@ -2253,7 +2242,7 @@ const MobileAppShell = ({
           );
           case 'messages': return <MessagesView employees={employees} availableUsersSeed={companyMembers} ui={sharedViewUi} />;
           case 'schedule': return <ScheduleView equipment={equipment} employees={employees} scheduleData={scheduleData} setScheduleData={setScheduleData} currentRole={currentRole} setShowModal={setShowModal} ui={sharedViewUi} />;
-          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
+          case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} jobsError={jobsError} onRetryJobs={() => { moduleLoadedRef.current.jobs = false; setJobsError(''); setJobsReloadNonce((n) => n + 1); }} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'jobsite_time': return <JobsiteTimeView employees={employees} jobs={jobs} />;

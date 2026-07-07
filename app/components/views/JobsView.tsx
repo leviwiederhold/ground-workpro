@@ -8,7 +8,7 @@ import { AddressAutocomplete } from '@/app/components/AddressAutocomplete';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 const isTemporaryJobId = (id) => String(id ?? '').startsWith('temp-job-');
-export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
+export function JobsView({ jobs, jobsLoading, jobsError = '', onRetryJobs, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
   const canEditJobs = String(moduleAccess?.jobs || 'none') === 'edit';
   const canViewJobFinancials = ['view', 'edit'].includes(String(moduleAccess?.finance || 'none')) || ['view', 'edit'].includes(String(moduleAccess?.reports || 'none'));
@@ -803,6 +803,18 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Jobs List */}
         <div className="lg:col-span-2 space-y-4">
+          {jobsError && !jobsLoading ? (
+            <Card className="border-red-200 bg-red-50 p-4 dark:border-red-900/50 dark:bg-red-950/30">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-red-700 dark:text-red-300">{jobsError}</p>
+                {onRetryJobs ? (
+                  <button type="button" onClick={onRetryJobs} className="shrink-0 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-100 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/40">
+                    Retry
+                  </button>
+                ) : null}
+              </div>
+            </Card>
+          ) : null}
           {jobsLoading ? (
             <Card className="p-4">
               <p className="text-sm text-gray-500">Loading jobs...</p>

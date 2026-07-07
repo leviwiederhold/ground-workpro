@@ -168,14 +168,30 @@ export default function LoginPage() {
       return;
     }
 
-    const bootstrap = await fetch("/api/bootstrap", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stripeSessionId }),
-    });
-    if (!bootstrap.ok) {
-      // Never surface raw/internal bootstrap errors to the user.
-      throw new Error("We couldn't finish creating your workspace. Please try again or contact support.");
+    // /api/bootstrap is idempotent and self-healing, and the app shell re-runs
+    // setup verification (which bootstraps on demand) after redirect. It must
+    // therefore NEVER hang login: time it out and FAIL OPEN so a slow/stuck
+    // bootstrap can't leave the user pinned on "Signing in…" forever. Genuine
+    // gating (no workspace, needs setup) is handled by the shell's startup gates.
+    console.log(`[LOGIN] bootstrap start ${new Date().toISOString()}`);
+    try {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 8000);
+      try {
+        const bootstrap = await fetch("/api/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ stripeSessionId }),
+          signal: controller.signal,
+        });
+        console.log(`[LOGIN] bootstrap finished ${new Date().toISOString()} ok=${bootstrap.ok} status=${bootstrap.status}`);
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    } catch (bootstrapError) {
+      // Timeout or network failure — proceed to the app; the shell will finish
+      // setup/verification. Do not block or error the login on this.
+      console.warn(`[LOGIN] bootstrap failed/timed out ${new Date().toISOString()} — continuing`, bootstrapError);
     }
   }
 
@@ -190,20 +206,24 @@ export default function LoginPage() {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    console.log(`[LOGIN] submit ${new Date().toISOString()}`);
     setLoading(true);
     setError(null);
 
     const supabase = supabaseBrowser();
     try {
+      console.log(`[LOGIN] signIn start ${new Date().toISOString()}`);
       const { error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (signInError) {
+        console.warn(`[LOGIN] signIn error ${new Date().toISOString()}`, signInError.message);
         setError(signInError.message);
         return;
       }
+      console.log(`[LOGIN] signIn success ${new Date().toISOString()}`);
 
       // Ensure session cookies are in place before any checks.
       await supabase.auth.getSession();
@@ -240,6 +260,7 @@ export default function LoginPage() {
         await startStripeCheckout();
         return;
       }
+      console.log(`[LOGIN] redirect dashboard ${new Date().toISOString()}`);
       router.replace("/");
       router.refresh();
     } catch (submitError) {

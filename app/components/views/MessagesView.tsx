@@ -471,6 +471,19 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok) { setNamingError(payload?.error || 'Failed to save name.'); return; }
+      const savedName = String(payload?.item?.name || name).trim();
+      setActiveChannel((prev) => (
+        prev && prev.is_companywide
+          ? { ...prev, name: savedName, needs_naming: false }
+          : prev
+      ));
+      setChannels((prev) =>
+        prev.map((channel) =>
+          channel?.is_companywide
+            ? { ...channel, name: savedName, needs_naming: false }
+            : channel
+        )
+      );
       try { if (companywideChannel) window.localStorage.setItem(`gw_companywide_named_prompt_${companywideChannel.id}`, '1'); } catch { /* ignore */ }
       setShowNameModal(false);
       await loadChannels(true);

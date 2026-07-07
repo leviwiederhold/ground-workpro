@@ -79,8 +79,8 @@ function QuickActionsCard({ section, Button, Icon, runQuickAction }) {
 
 function CardShell({ title, children }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-      <h3 className="mb-4 font-semibold text-gray-900">{title}</h3>
+    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-[#090909]">
+      <h3 className="mb-4 font-semibold text-gray-900 dark:text-zinc-100">{title}</h3>
       {children}
     </div>
   );
@@ -428,8 +428,8 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {activeJobsSection && (
               <Card className="lg:col-span-2 p-0 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900">Active Jobs</h3>
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between dark:border-zinc-800">
+                  <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Active Jobs</h3>
                   <Button variant="ghost" size="sm" onClick={() => setCurrentView('jobs')}>
                     View All <Icon name="arrow-right" className="ml-1" />
                   </Button>
@@ -448,8 +448,8 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                       >
                         <div className="flex items-start justify-between mb-2">
                           <div>
-                            <h4 className="font-medium text-gray-900">{job.title}</h4>
-                            <p className="text-sm text-gray-500">{job.sublabel || 'Active project'}</p>
+                            <h4 className="font-medium text-gray-900 dark:text-zinc-100">{job.title}</h4>
+                            <p className="text-sm text-gray-500 dark:text-zinc-400">{job.sublabel || 'Active project'}</p>
                           </div>
                           <Badge variant="info">Active</Badge>
                         </div>
@@ -464,7 +464,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
               {showGettingStarted && (
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold text-gray-900">
+                    <h3 className="font-semibold text-gray-900 dark:text-zinc-100">
                       <Icon name="circle-check" className="mr-2 text-brand-500" />
                       Getting Started
                     </h3>
@@ -474,7 +474,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                   </div>
 
                   {onboardingDismissed ? (
-                    <div className="text-sm text-gray-600 space-y-3">
+                    <div className="text-sm text-gray-600 space-y-3 dark:text-zinc-400">
                       <p>Checklist hidden. Rehydrate it anytime.</p>
                       <div className="flex items-center gap-2">
                         <Button variant="secondary" size="sm" disabled={onboardingDismissSaving} onClick={() => setDismissedState(false)}>
@@ -489,7 +489,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between text-sm text-gray-600">
+                      <div className="flex items-center justify-between text-sm text-gray-600 dark:text-zinc-400">
                         <span>{completedCount} of {totalCount} complete</span>
                         <span>{completionPercent}%</span>
                       </div>
@@ -498,7 +498,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                         {activeOnboardingItems.map((item) => (
                           <div
                             key={item.key}
-                            className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50"
+                            className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 dark:border-zinc-800 dark:hover:bg-[#111111]"
                             data-testid={`onboarding-item-${item.key}`}
                             onClick={() => goToChecklistItem(item)}
                           >
@@ -515,7 +515,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                               <Icon name="check" className="text-[10px]" />
                             </button>
                             <div className="flex-1 min-w-0">
-                              <p className={`text-sm font-medium ${item.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                              <p className={`text-sm font-medium ${item.completed ? 'text-gray-500 line-through dark:text-zinc-500' : 'text-gray-900 dark:text-zinc-100'}`}>
                                 {item.label}
                               </p>
                             </div>
@@ -543,7 +543,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
               {quickActionsSection && (
                 <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">Quick Actions</h3>
+                  <h3 className="font-semibold text-gray-900 mb-4 dark:text-zinc-100">Quick Actions</h3>
                   <div className="grid grid-cols-2 gap-2">
                     {quickActionsSection.items.filter((action) => Boolean(QUICK_ACTION_MODAL_BY_KEY[action.key] || QUICK_ACTION_MODAL_BY_HREF[action.href] || String(action.href || '').startsWith('/'))).map((action) => {
                       const iconName = ACTION_ICON_BY_KEY[action.key] || 'bolt';
@@ -560,23 +560,23 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
               {isManagerDashboard && (
                 <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">Estimated Payroll</h3>
+                  <h3 className="font-semibold text-gray-900 mb-4 dark:text-zinc-100">Estimated Payroll</h3>
                   <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs text-gray-500">This Week</p>
-                      <p className="text-2xl font-semibold text-gray-900" data-testid="estimated-payroll-total">{estimatedPayrollLabel}</p>
+                    <div className="rounded-lg border border-gray-200 p-3 dark:border-zinc-800 dark:bg-[#050505]">
+                      <p className="text-xs text-gray-500 dark:text-zinc-400">This Week</p>
+                      <p className="text-2xl font-semibold text-gray-900 dark:text-zinc-100" data-testid="estimated-payroll-total">{estimatedPayrollLabel}</p>
                     </div>
-                    <div className="rounded-lg border border-gray-200 p-3">
-                      <p className="text-xs text-gray-500">Active Now</p>
-                      <p className="text-2xl font-semibold text-gray-900">{Number(payrollSummary?.activeEmployees || 0)}</p>
+                    <div className="rounded-lg border border-gray-200 p-3 dark:border-zinc-800 dark:bg-[#050505]">
+                      <p className="text-xs text-gray-500 dark:text-zinc-400">Active Now</p>
+                      <p className="text-2xl font-semibold text-gray-900 dark:text-zinc-100">{Number(payrollSummary?.activeEmployees || 0)}</p>
                     </div>
                   </div>
                   {Array.isArray(payrollSummary?.employees) && payrollSummary.employees.length > 0 && (
                     <div className="mt-3 max-h-44 space-y-2 overflow-y-auto">
                       {payrollSummary.employees.slice(0, 5).map((employee) => (
-                        <div key={employee.userId || employee.name} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 text-sm">
-                          <span className="min-w-0 truncate text-gray-900">{employee.name}</span>
-                          <span className="shrink-0 text-gray-600">{Number(employee.hours || 0).toFixed(2)}h</span>
+                        <div key={employee.userId || employee.name} className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-[#050505]">
+                          <span className="min-w-0 truncate text-gray-900 dark:text-zinc-100">{employee.name}</span>
+                          <span className="shrink-0 text-gray-600 dark:text-zinc-400">{Number(employee.hours || 0).toFixed(2)}h</span>
                         </div>
                       ))}
                     </div>
@@ -587,7 +587,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
               {alertsSection && (
                 <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">
+                  <h3 className="font-semibold text-gray-900 mb-4 dark:text-zinc-100">
                     <Icon name="triangle-exclamation" className="mr-2 text-yellow-500" />
                     Alerts
                   </h3>
@@ -617,25 +617,25 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
           {openWorkOrdersSection && (
             <div className="grid grid-cols-1 gap-6">
               <Card className="p-0 overflow-hidden">
-                <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-                  <h3 className="font-semibold text-gray-900">Open Work Orders</h3>
+                <div className="p-4 border-b border-gray-200 flex items-center justify-between dark:border-zinc-800">
+                  <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Open Work Orders</h3>
                   <Button variant="ghost" size="sm" onClick={() => setCurrentView('maintenance')}>
                     View All <Icon name="arrow-right" className="ml-1" />
                   </Button>
                 </div>
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-gray-100 dark:divide-zinc-800">
                   {openWorkOrdersSection.items.length === 0 ? (
                     <div className="p-4">
                       <EmptyState testId="dashboard-workorders-empty">No open work orders.</EmptyState>
                     </div>
                   ) : (
                     openWorkOrdersSection.items.map((wo) => (
-                      <div key={wo.id} className="p-4 hover:bg-gray-50" onClick={() => setCurrentView('maintenance')}>
+                      <div key={wo.id} className="p-4 hover:bg-gray-50 dark:hover:bg-[#111111]" onClick={() => setCurrentView('maintenance')}>
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
                               <Icon name="circle" className="text-yellow-600" />
-                              <span className="font-medium text-gray-900">{wo.title}</span>
+                              <span className="font-medium text-gray-900 dark:text-zinc-100">{wo.title}</span>
                             </div>
                           </div>
                           <Badge className="bg-yellow-100 text-yellow-800">open</Badge>
@@ -653,10 +653,10 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
           <div className="lg:col-span-2 space-y-6">
             {rolePrimaryItems.map((section, index) => (
               <Card key={`${section.type}-${index}`} className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-2">{section.title}</h3>
-                {section.subtitle && <p className="text-sm text-gray-600 mb-3">{section.subtitle}</p>}
+                <h3 className="font-semibold text-gray-900 mb-2 dark:text-zinc-100">{section.title}</h3>
+                {section.subtitle && <p className="text-sm text-gray-600 mb-3 dark:text-zinc-400">{section.subtitle}</p>}
                 {section.meta?.item && (
-                  <div className="text-sm text-gray-700 space-y-1">
+                  <div className="text-sm text-gray-700 space-y-1 dark:text-zinc-300">
                     <p><strong>{section.meta.item.jobName}</strong>{section.meta.item.address ? ` • ${section.meta.item.address}` : ''}</p>
                     <p>{section.meta.item.startTime} - {section.meta.item.endTime}</p>
                     {section.meta.item.equipment && <p>Equipment: {section.meta.item.equipment}</p>}
@@ -669,10 +669,10 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                       <EmptyState>No items.</EmptyState>
                     ) : (
                       section.meta.items.map((item) => (
-                        <div key={item.id || item.title || item.label} className="p-2 bg-gray-50 rounded-lg">
-                          <p className="text-sm font-medium text-gray-900">{item.title || item.label}</p>
+                        <div key={item.id || item.title || item.label} className="p-2 bg-gray-50 rounded-lg dark:bg-[#050505]">
+                          <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">{item.title || item.label}</p>
                           {(item.sublabel || item.status || item.priority) && (
-                            <p className="text-xs text-gray-600">{item.sublabel || `${item.priority || ''} ${item.status || ''}`.trim()}</p>
+                            <p className="text-xs text-gray-600 dark:text-zinc-400">{item.sublabel || `${item.priority || ''} ${item.status || ''}`.trim()}</p>
                           )}
                         </div>
                       ))
@@ -685,7 +685,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
           <div className="space-y-6">
             {quickActionsSection && (
               <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">Quick Actions</h3>
+                <h3 className="font-semibold text-gray-900 mb-4 dark:text-zinc-100">Quick Actions</h3>
                 <div className="grid grid-cols-2 gap-2">
                   {quickActionsSection.items.filter((action) => Boolean(QUICK_ACTION_MODAL_BY_KEY[action.key] || QUICK_ACTION_MODAL_BY_HREF[action.href] || String(action.href || '').startsWith('/'))).map((action) => {
                     const iconName = ACTION_ICON_BY_KEY[action.key] || 'bolt';
@@ -702,7 +702,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
             {showGettingStarted && (
               <Card className="p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-gray-900">
+                  <h3 className="font-semibold text-gray-900 dark:text-zinc-100">
                     <Icon name="circle-check" className="mr-2 text-brand-500" />
                     Getting Started
                   </h3>
@@ -714,7 +714,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                     activeOnboardingItems.map((item) => (
                       <div
                         key={item.key}
-                        className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50"
+                        className="flex items-start gap-2 p-2 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-50 dark:border-zinc-800 dark:hover:bg-[#111111]"
                         data-testid={`onboarding-item-${item.key}`}
                         onClick={() => goToChecklistItem(item)}
                       >
@@ -730,7 +730,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
                         >
                           <Icon name="check" className="text-[10px]" />
                         </button>
-                        <p className={`text-sm font-medium ${item.completed ? 'text-gray-500 line-through' : 'text-gray-900'}`}>
+                        <p className={`text-sm font-medium ${item.completed ? 'text-gray-500 line-through dark:text-zinc-500' : 'text-gray-900 dark:text-zinc-100'}`}>
                           {item.label}
                         </p>
                       </div>
@@ -741,7 +741,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
             )}
             {alertsSection && (
               <Card className="p-4">
-                <h3 className="font-semibold text-gray-900 mb-4">Alerts</h3>
+                <h3 className="font-semibold text-gray-900 mb-4 dark:text-zinc-100">Alerts</h3>
                 <div className="space-y-2">
                   {alertsSection.items.length === 0 ? <EmptyState>No alerts.</EmptyState> : alertsSection.items.map((alert) => (
                     <div

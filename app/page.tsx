@@ -988,6 +988,12 @@ const MobileAppShell = ({
                   ? 'Operator'
                   : 'Team Member';
       const isCeoRole = currentRole === 'executive';
+      const canLoadProtectedData =
+        subscriptionGate.loaded &&
+        subscriptionGate.active &&
+        !subscriptionGate.noWorkspace &&
+        navEverLoaded &&
+        !navError;
 
       useEffect(() => {
         let active = true;
@@ -1609,7 +1615,7 @@ const MobileAppShell = ({
           currentView === 'jobs' ||
           currentView === 'reports' ||
           currentView === 'team';
-        if (!shouldLoad || moduleLoadedRef.current.jobs) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.jobs) return () => { isMounted = false; };
 
         const loadJobs = async () => {
           try {
@@ -1639,7 +1645,7 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1650,7 +1656,7 @@ const MobileAppShell = ({
           currentView === 'messages' ||
           currentView === 'maintenance' ||
           currentView === 'fleet';
-        if (!shouldLoad || moduleLoadedRef.current.companyMembers) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.companyMembers) return () => { isMounted = false; };
 
         const loadCompanyMembers = async () => {
           try {
@@ -1673,32 +1679,33 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
+        if (!canLoadProtectedData) return;
         loadNotifications();
-      }, [loadNotifications]);
+      }, [canLoadProtectedData, loadNotifications]);
 
       useEffect(() => {
         const shouldLoad = currentView === 'dashboard' || currentView === 'safety';
-        if (!shouldLoad || moduleLoadedRef.current.safety) return;
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.safety) return;
         loadSafetyLogs().finally(() => {
           moduleLoadedRef.current.safety = true;
         });
-      }, [currentView, loadSafetyLogs]);
+      }, [canLoadProtectedData, currentView, loadSafetyLogs]);
 
       useEffect(() => {
         const shouldLoad = currentView === 'dashboard' || currentView === 'training';
-        if (!shouldLoad || moduleLoadedRef.current.training) return;
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.training) return;
         loadTraining().finally(() => {
           moduleLoadedRef.current.training = true;
         });
-      }, [currentView, loadTraining]);
+      }, [canLoadProtectedData, currentView, loadTraining]);
 
       useEffect(() => {
         let isMounted = true;
         const shouldLoad = currentView === 'dashboard' || currentView === 'bids' || currentView === 'reports';
-        if (!shouldLoad || moduleLoadedRef.current.costCodes) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.costCodes) return () => { isMounted = false; };
 
         const loadCostCodes = async () => {
           try {
@@ -1728,12 +1735,12 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
         const shouldLoad = currentView === 'dashboard' || currentView === 'bids';
-        if (!shouldLoad || moduleLoadedRef.current.bids) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.bids) return () => { isMounted = false; };
 
         const loadBids = async () => {
           try {
@@ -1763,12 +1770,12 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
         const shouldLoad = currentView === 'dashboard' || currentView === 'vendors';
-        if (!shouldLoad || moduleLoadedRef.current.vendors) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.vendors) return () => { isMounted = false; };
 
         const loadVendors = async () => {
           try {
@@ -1798,12 +1805,12 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
         const shouldLoad = currentView === 'dashboard' || currentView === 'inventory' || currentView === 'maintenance';
-        if (!shouldLoad || moduleLoadedRef.current.inventory) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.inventory) return () => { isMounted = false; };
 
         const loadInventory = async () => {
           try {
@@ -1833,7 +1840,7 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1844,7 +1851,7 @@ const MobileAppShell = ({
           currentView === 'schedule' ||
           currentView === 'messages' ||
           currentView === 'training';
-        if (!shouldLoad || moduleLoadedRef.current.employees) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.employees) return () => { isMounted = false; };
 
         const loadEmployees = async () => {
           try {
@@ -1874,12 +1881,12 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
         const shouldLoad = currentView === 'dashboard' || currentView === 'reports';
-        if (!shouldLoad || moduleLoadedRef.current.dailyReports) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.dailyReports) return () => { isMounted = false; };
 
         const loadDailyReports = async () => {
           try {
@@ -1909,12 +1916,12 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
         const shouldLoad = currentView === 'dashboard' || currentView === 'maintenance' || currentView === 'fleet';
-        if (!shouldLoad || moduleLoadedRef.current.workOrders) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.workOrders) return () => { isMounted = false; };
 
         const loadWorkOrders = async () => {
           try {
@@ -1944,7 +1951,7 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         let isMounted = true;
@@ -1954,7 +1961,7 @@ const MobileAppShell = ({
           currentView === 'jobs' ||
           currentView === 'schedule' ||
           currentView === 'maintenance';
-        if (!shouldLoad || moduleLoadedRef.current.equipment) return () => { isMounted = false; };
+        if (!canLoadProtectedData || !shouldLoad || moduleLoadedRef.current.equipment) return () => { isMounted = false; };
 
         const loadEquipment = async () => {
           try {
@@ -1985,7 +1992,7 @@ const MobileAppShell = ({
         return () => {
           isMounted = false;
         };
-      }, [currentView]);
+      }, [canLoadProtectedData, currentView]);
 
       useEffect(() => {
         loadNav();

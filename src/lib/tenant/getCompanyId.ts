@@ -99,8 +99,15 @@ export async function getCompanyId() {
     throw new TenantResolverError("Not authenticated", 401);
   }
 
+  // Resolve the user's OWN membership with the service-role client (scoped to
+  // this user id). A broken/recursive memberships RLS SELECT policy would make
+  // the RLS-scoped read ERROR — which this resolver maps to a 400, and which the
+  // route middleware maps to a 403 — producing a blanket failure of every
+  // protected API for a valid member. Reading via admin keeps tenancy resolution
+  // working regardless of RLS state; it never widens what THIS user can see.
+  const membershipReader = getSupabaseAdmin() ?? supabase;
   const loadMembership = async () => {
-    const preferred = await supabase
+    const preferred = await membershipReader
       .from("memberships")
       .select("company_id")
       .eq("user_id", userData.user.id)
@@ -112,7 +119,7 @@ export async function getCompanyId() {
         preferred.error.message || ""
       )
     ) {
-      return supabase
+      return membershipReader
         .from("memberships")
         .select("company_id")
         .eq("user_id", userData.user.id)

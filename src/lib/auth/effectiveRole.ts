@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 
 export const ACTING_ROLE_COOKIE = "gw_acting_role";
@@ -21,7 +22,15 @@ export async function resolveRealRole(
   companyId: string,
   userId: string
 ): Promise<AppRole | null> {
-  const { data, error } = await supabase
+  // Resolve the membership role with the service-role admin client (scoped to
+  // THIS user's own company + id, so no cross-tenant exposure). getCompanyId can
+  // self-heal tenancy via the admin client when a memberships RLS SELECT gap
+  // blocks the user from reading their own row; if role resolution used the
+  // RLS-scoped client it would then return null → every module API 403s for a
+  // valid member (CEO/co-CEO included). Reading role via admin keeps role
+  // resolution consistent with tenancy resolution. Falls back to the RLS client.
+  const client = getSupabaseAdmin() ?? supabase;
+  const { data, error } = await client
     .from("memberships")
     .select("role")
     .eq("company_id", companyId)

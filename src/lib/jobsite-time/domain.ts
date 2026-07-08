@@ -375,6 +375,53 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceDisplayStatus, string> = 
   missing_clock_out: "Missing clock-out",
 };
 
+// Short role codes / acronyms that read best fully uppercased in the UI
+// (e.g. "PM - Smith Excavation", not "Pm - …").
+const UPPERCASE_ROLE_LABELS = new Set([
+  "pm",
+  "ceo",
+  "cfo",
+  "coo",
+  "cto",
+  "vp",
+  "hr",
+  "it",
+  "admin",
+]);
+
+// Human-facing role label for the Attendance roster. Uppercases short role
+// codes/acronyms (PM, CEO, admin…), Title-cases everything else. Empty/unknown
+// falls back to "Employee".
+export function formatAttendanceRoleLabel(role: string | null | undefined): string {
+  const raw = String(role ?? "").trim();
+  if (!raw) return "Employee";
+  const lower = raw.toLowerCase();
+  if (UPPERCASE_ROLE_LABELS.has(lower) || (/^[a-z]+$/.test(lower) && lower.length <= 3)) {
+    return raw.toUpperCase();
+  }
+  return raw
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+// Roster subtitle: "{roleLabel} - {jobName}", e.g. "PM - Smith Excavation".
+// Only shows "Unassigned" when there is genuinely no job name/id — a bare jobId
+// with no resolvable name still counts as assigned (shows "Assigned job")
+// rather than wrongly reading as unassigned.
+export function formatAssignedJobSubtitle(params: {
+  role: string | null | undefined;
+  jobName?: string | null;
+  jobId?: string | number | null;
+}): string {
+  const roleLabel = formatAttendanceRoleLabel(params.role);
+  const name = String(params.jobName ?? "").trim();
+  const hasJobId = params.jobId !== null && params.jobId !== undefined && String(params.jobId).trim() !== "";
+  const jobLabel = name || (hasJobId ? "Assigned job" : "Unassigned");
+  return `${roleLabel} - ${jobLabel}`;
+}
+
 // Derives the simple, employee/manager-facing status from a timecard + the
 // assigned job's verification state. Shared by the manager roster and the
 // employee status card so both always agree.

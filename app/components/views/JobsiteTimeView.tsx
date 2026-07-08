@@ -2,7 +2,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
+import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
 
 type Timecard = {
   id: string;
@@ -77,7 +77,7 @@ export function JobsiteTimeView({
   employees = [],
   jobs = [],
 }: {
-  employees?: Array<{ id: string; name?: string; user_id?: string | null; role?: string; jobId?: any; status?: string }>;
+  employees?: Array<{ id: string; name?: string; user_id?: string | null; role?: string; jobId?: any; jobName?: string | null; status?: string }>;
   jobs?: Array<{ id: string; name?: string; address_verified?: boolean }>;
 }) {
   const [items, setItems] = useState<Timecard[]>([]);
@@ -160,8 +160,12 @@ export function JobsiteTimeView({
       const hasStaleOpenCard = !todayCard && cards.some((c) => c.clockInAt && !c.clockOutAt && c.workDate && c.workDate < today);
 
       const assignedJob = e.jobId != null && e.jobId !== '' ? jobById.get(String(e.jobId)) || null : null;
+      // Prefer the job name hydrated by the API; fall back to the jobs prop
+      // lookup. Either counts as "has an assigned job".
+      const assignedJobName = (e.jobName && String(e.jobName).trim()) || assignedJob?.name || '';
+      const hasAssignedJob = Boolean(assignedJobName) || (e.jobId != null && e.jobId !== '');
       const status = deriveAttendanceStatus({
-        hasAssignedJob: Boolean(assignedJob),
+        hasAssignedJob,
         assignedJobAddressVerified: Boolean(assignedJob?.address_verified),
         todayCard: todayCard ? { clockInAt: todayCard.clockInAt, clockOutAt: todayCard.clockOutAt, status: todayCard.status } : null,
         hasStaleOpenCard,
@@ -171,9 +175,10 @@ export function JobsiteTimeView({
         ? minutesSince(todayCard.clockInAt)
         : (todayCard?.totalMinutes ?? 0);
 
-      const assignedJobLabel = assignedJob?.name || 'Unassigned';
+      // Roster subtitle: "{roleLabel} - {jobName}" (e.g. "PM - Smith Excavation").
+      const rosterSubtitle = formatAssignedJobSubtitle({ role: e.role, jobName: assignedJobName, jobId: e.jobId });
       const lastActivity = lastCard ? (lastCard.clockOutAt || lastCard.clockInAt) : null;
-      return { e, cards, todayCard, lastCard, weekMinutes, status, assignedJobLabel, lastActivity, hoursSoFarMin };
+      return { e, cards, todayCard, lastCard, weekMinutes, status, rosterSubtitle, lastActivity, hoursSoFarMin };
     });
   }, [activeEmployees, items, jobById]);
 
@@ -338,7 +343,7 @@ export function JobsiteTimeView({
                 <div key={r.e.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-gray-900 dark:text-zinc-100">{r.e.name || 'Team member'}</p>
-                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.assignedJobLabel} · Arrived {fmtTime(r.todayCard?.clockInAt ?? null)}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.rosterSubtitle} · Arrived {fmtTime(r.todayCard?.clockInAt ?? null)}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <span className="text-xs tabular-nums text-gray-600 dark:text-zinc-300">{fmtHours(r.hoursSoFarMin)} so far</span>
@@ -361,7 +366,7 @@ export function JobsiteTimeView({
                 <div key={r.e.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-gray-900 dark:text-zinc-100">{r.e.name || 'Team member'}</p>
-                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.assignedJobLabel}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.rosterSubtitle}</p>
                   </div>
                   <RosterBadge status={r.status} />
                 </div>
@@ -386,7 +391,7 @@ export function JobsiteTimeView({
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-gray-900 dark:text-zinc-100">{r.e.name || 'Team member'}</p>
-                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.assignedJobLabel} · Left {fmtTime(r.todayCard?.clockOutAt ?? null)}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.rosterSubtitle} · Left {fmtTime(r.todayCard?.clockOutAt ?? null)}</p>
                   </div>
                   <span className="shrink-0 text-xs tabular-nums text-gray-600 dark:text-zinc-300">{fmtHours(r.todayCard?.totalMinutes ?? 0)}</span>
                 </button>

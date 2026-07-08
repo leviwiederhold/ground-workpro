@@ -38,6 +38,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const jobFormRef = useRef(jobForm);
   const selectedJobIdRef = useRef(selectedJobId);
   const [saveLoading, setSaveLoading] = useState(false);
+  const [savingAddress, setSavingAddress] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [jobActionError, setJobActionError] = useState('');
   const [jobEquipment, setJobEquipment] = useState([]);
@@ -607,6 +608,72 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     }
   };
 
+  // Selecting a suggestion only resolves coordinates locally — it does not by
+  // itself persist anything. For an existing job, save the verified address
+  // immediately so it survives switching jobs / refreshing without requiring
+  // a separate Save click, and so the "Verified Address" badge never claims a
+  // saved state that isn't actually saved yet. Manual typing (unverified) and
+  // edits to a not-yet-created job stay local-only, same as other fields.
+  const handleAddressSelect = useCallback(async (sel) => {
+    const targetJob = selectedJob;
+    const isExistingJob = Boolean(targetJob) && !isTemporaryJobId(targetJob.id);
+    if (!sel.verified || !isExistingJob || !canEditJobs) {
+      setJobForm((prev) => ({ ...prev, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified }));
+      return;
+    }
+
+    // Only apply the response to jobForm if the user is still looking at the
+    // job the save was for — otherwise a slow response could bleed one job's
+    // address into whatever job/draft is now on screen. The jobs list update
+    // is always safe since it's keyed by id regardless of current selection.
+    const stillOnTargetJob = () => String(selectedJobIdRef.current ?? '') === String(targetJob.id);
+
+    setJobForm((prev) => ({ ...prev, site_address: sel.address }));
+    setSavingAddress(true);
+    setJobActionError('');
+    try {
+      const response = await fetch(`/api/jobs/${targetJob.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          site_address: sel.address,
+          lat: sel.lat,
+          lng: sel.lng,
+          place_id: sel.placeId,
+          address_verified: true,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.job) {
+        if (stillOnTargetJob()) setJobActionError(payload?.error || 'Failed to save verified address');
+        // Keep the selected coordinates in the draft (so Save can retry) but
+        // never show the checkmark for state that isn't actually persisted.
+        if (stillOnTargetJob()) {
+          setJobForm((prev) => ({ ...prev, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: false }));
+        }
+        return;
+      }
+      setJobs((prev) => prev.map((job) => (String(job.id) === String(targetJob.id) ? payload.job : job)));
+      if (stillOnTargetJob()) {
+        setJobForm((prev) => ({
+          ...prev,
+          site_address: payload.job.site_address ?? payload.job.address ?? prev.site_address,
+          lat: payload.job.lat,
+          lng: payload.job.lng,
+          place_id: payload.job.place_id,
+          address_verified: Boolean(payload.job.address_verified),
+        }));
+      }
+    } catch {
+      if (stillOnTargetJob()) {
+        setJobActionError('Failed to save verified address');
+        setJobForm((prev) => ({ ...prev, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: false }));
+      }
+    } finally {
+      if (stillOnTargetJob()) setSavingAddress(false);
+    }
+  }, [selectedJob, canEditJobs, setJobs]);
+
   const handleDeleteJob = async () => {
     if (!canEditJobs) return;
     if (!selectedJob) return;
@@ -909,9 +976,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 <AddressAutocomplete
                   value={jobForm.site_address}
                   verified={jobForm.address_verified}
+                  saving={savingAddress}
                   disabled={!canEditJobs}
                   inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  onSelect={(sel) => setJobForm({ ...jobForm, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified })}
+                  onSelect={handleAddressSelect}
                 />
               </div>
 
@@ -1075,9 +1143,10 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                 <AddressAutocomplete
                   value={jobForm.site_address}
                   verified={jobForm.address_verified}
+                  saving={savingAddress}
                   disabled={!canEditJobs}
                   inputClassName="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  onSelect={(sel) => setJobForm({ ...jobForm, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified })}
+                  onSelect={handleAddressSelect}
                 />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">

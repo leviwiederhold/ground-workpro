@@ -24,6 +24,7 @@ export function AddressAutocomplete({
   disabled,
   biasLat,
   biasLng,
+  saving,
 }: {
   value: string;
   verified: boolean;
@@ -33,6 +34,10 @@ export function AddressAutocomplete({
   disabled?: boolean;
   biasLat?: number | null;
   biasLng?: number | null;
+  // True while the parent is persisting a just-selected verified address to
+  // the server. Overrides the verified badge so we never claim "Verified"
+  // before it's actually saved.
+  saving?: boolean;
 }) {
   const [suggestions, setSuggestions] = useState<Array<{ placeId: string; description: string }>>([]);
   const [open, setOpen] = useState(false);
@@ -178,6 +183,8 @@ export function AddressAutocomplete({
       <div className="mt-1 text-xs">
         {resolving ? (
           <span className="text-gray-500">Verifying address…</span>
+        ) : saving ? (
+          <span className="text-gray-500">Saving verified address…</span>
         ) : verified ? (
           <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><i className="fa-solid fa-circle-check" /> Verified Address</span>
         ) : value.trim() ? (

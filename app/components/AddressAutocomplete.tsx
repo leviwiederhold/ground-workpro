@@ -25,6 +25,7 @@ export function AddressAutocomplete({
   biasLat,
   biasLng,
   saving,
+  saveError,
 }: {
   value: string;
   verified: boolean;
@@ -38,6 +39,10 @@ export function AddressAutocomplete({
   // the server. Overrides the verified badge so we never claim "Verified"
   // before it's actually saved.
   saving?: boolean;
+  // Set by the parent when the auto-save of a selected verified address failed.
+  // Shown INSTEAD of the generic "needs verification" prompt so a save failure
+  // is never mistaken for the user not having selected a suggestion.
+  saveError?: string;
 }) {
   const [suggestions, setSuggestions] = useState<Array<{ placeId: string; description: string; lat?: number | null; lng?: number | null }>>([]);
   const [open, setOpen] = useState(false);
@@ -130,9 +135,12 @@ export function AddressAutocomplete({
     // pick is verifiable without a second network round-trip (the fragile step
     // that was silently returning unverified). Only Google (no coords in
     // autocomplete) needs the /lookup fallback below.
+    // NB: guard against null/undefined explicitly — Number(null) is 0, which is
+    // finite, so without this a coordless suggestion would be "verified" at
+    // (0, 0) in the ocean. Only take the fast path with genuine coordinates.
     const sLat = Number(s.lat);
     const sLng = Number(s.lng);
-    if (Number.isFinite(sLat) && Number.isFinite(sLng)) {
+    if (s.lat != null && s.lng != null && Number.isFinite(sLat) && Number.isFinite(sLng)) {
       console.info('[address] using coords from suggestion (verified)', { lat: sLat, lng: sLng, placeId: s.placeId });
       onSelect({ address: s.description, verified: true, lat: sLat, lng: sLng, placeId: s.placeId || null });
       return;
@@ -202,6 +210,8 @@ export function AddressAutocomplete({
           <span className="text-gray-500">Verifying address…</span>
         ) : saving ? (
           <span className="text-gray-500">Saving verified address…</span>
+        ) : saveError ? (
+          <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400"><i className="fa-solid fa-circle-exclamation" /> {saveError}</span>
         ) : verified ? (
           <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><i className="fa-solid fa-circle-check" /> Verified Address</span>
         ) : value.trim() ? (

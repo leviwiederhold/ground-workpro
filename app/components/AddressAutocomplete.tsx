@@ -39,7 +39,7 @@ export function AddressAutocomplete({
   // before it's actually saved.
   saving?: boolean;
 }) {
-  const [suggestions, setSuggestions] = useState<Array<{ placeId: string; description: string }>>([]);
+  const [suggestions, setSuggestions] = useState<Array<{ placeId: string; description: string; lat?: number | null; lng?: number | null }>>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -122,8 +122,22 @@ export function AddressAutocomplete({
     query(text);
   };
 
-  const choose = async (s: { placeId: string; description: string }) => {
+  const choose = async (s: { placeId: string; description: string; lat?: number | null; lng?: number | null }) => {
     setOpen(false);
+    console.info('[address] suggestion selected', { placeId: s.placeId, description: s.description, lat: s.lat, lng: s.lng });
+
+    // Fast path: Geoapify/Mapbox suggestions already carry coordinates, so the
+    // pick is verifiable without a second network round-trip (the fragile step
+    // that was silently returning unverified). Only Google (no coords in
+    // autocomplete) needs the /lookup fallback below.
+    const sLat = Number(s.lat);
+    const sLng = Number(s.lng);
+    if (Number.isFinite(sLat) && Number.isFinite(sLng)) {
+      console.info('[address] using coords from suggestion (verified)', { lat: sLat, lng: sLng, placeId: s.placeId });
+      onSelect({ address: s.description, verified: true, lat: sLat, lng: sLng, placeId: s.placeId || null });
+      return;
+    }
+
     lookupAbortRef.current?.abort();
     const controller = new AbortController();
     lookupAbortRef.current = controller;
@@ -133,13 +147,16 @@ export function AddressAutocomplete({
       const res = await fetch(`/api/geocode/lookup?placeId=${encodeURIComponent(s.placeId)}&q=${encodeURIComponent(s.description)}`, { cache: 'no-store', signal: controller.signal });
       const json = await res.json().catch(() => null);
       const r = json?.result;
+      console.info('[address] lookup response', { status: res.status, configured: json?.configured, result: r });
       if (r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng))) {
         onSelect({ address: String(r.formatted || s.description), verified: true, lat: Number(r.lat), lng: Number(r.lng), placeId: String(r.placeId || s.placeId) });
       } else {
         // Couldn't resolve coordinates — keep the text but unverified.
+        console.warn('[address] lookup returned no coordinates — marking unverified', json);
         onSelect({ address: s.description, verified: false, lat: null, lng: null, placeId: null });
       }
-    } catch {
+    } catch (err) {
+      console.warn('[address] lookup failed — marking unverified', err);
       onSelect({ address: s.description, verified: false, lat: null, lng: null, placeId: null });
     } finally {
       window.clearTimeout(timeoutId);

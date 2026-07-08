@@ -617,7 +617,15 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const handleAddressSelect = useCallback(async (sel) => {
     const targetJob = selectedJob;
     const isExistingJob = Boolean(targetJob) && !isTemporaryJobId(targetJob.id);
+    console.info('[jobs] handleAddressSelect', {
+      selectedJobIdAtStart: selectedJobIdRef.current,
+      targetJobId: targetJob?.id,
+      isExistingJob,
+      canEditJobs,
+      sel,
+    });
     if (!sel.verified || !isExistingJob || !canEditJobs) {
+      console.info('[jobs] address change kept local (unverified / new job / no edit access)', { verified: sel.verified, isExistingJob, canEditJobs });
       setJobForm((prev) => ({ ...prev, site_address: sel.address, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: sel.verified }));
       return;
     }
@@ -632,18 +640,21 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     setSavingAddress(true);
     setJobActionError('');
     try {
+      const patchBody = {
+        site_address: sel.address,
+        lat: sel.lat,
+        lng: sel.lng,
+        place_id: sel.placeId,
+        address_verified: true,
+      };
+      console.info('[jobs] PATCH /api/jobs/%s request', targetJob.id, patchBody);
       const response = await fetch(`/api/jobs/${targetJob.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          site_address: sel.address,
-          lat: sel.lat,
-          lng: sel.lng,
-          place_id: sel.placeId,
-          address_verified: true,
-        }),
+        body: JSON.stringify(patchBody),
       });
       const payload = await response.json().catch(() => null);
+      console.info('[jobs] PATCH response', { status: response.status, ok: response.ok, address_verified: payload?.job?.address_verified, lat: payload?.job?.lat, lng: payload?.job?.lng, place_id: payload?.job?.place_id, error: payload?.error });
       if (!response.ok || !payload?.job) {
         if (stillOnTargetJob()) setJobActionError(payload?.error || 'Failed to save verified address');
         // Keep the selected coordinates in the draft (so Save can retry) but
@@ -664,7 +675,9 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           address_verified: Boolean(payload.job.address_verified),
         }));
       }
-    } catch {
+      console.info('[jobs] address save applied', { selectedJobIdAtEnd: selectedJobIdRef.current, stillOnTargetJob: stillOnTargetJob(), address_verified: Boolean(payload.job.address_verified) });
+    } catch (err) {
+      console.warn('[jobs] address save failed', err);
       if (stillOnTargetJob()) {
         setJobActionError('Failed to save verified address');
         setJobForm((prev) => ({ ...prev, lat: sel.lat, lng: sel.lng, place_id: sel.placeId, address_verified: false }));

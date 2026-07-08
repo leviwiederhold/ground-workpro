@@ -3,16 +3,23 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
-  computeTotalMinutes,
   evaluateJobsiteEvent,
   mapCompanyJobsiteSettings,
   mapTimecard,
 } from "@/lib/jobsite-time/domain";
+import { finalizePendingAttendance } from "@/lib/jobsite-time/finalizeAttendance";
 
 export const dynamic = "force-dynamic";
 
+const SETTINGS_COLUMNS =
+  "jobsite_time_enabled,jobsite_require_approval,jobsite_geofence_radius_feet,jobsite_wake_radius_meters,jobsite_departure_grace_minutes,jobsite_arrival_confirmation_seconds,jobsite_manual_fallback_enabled";
+
 const bodySchema = z.object({
   jobId: z.union([z.string(), z.number()]),
+  // Which geofence fired. "wake" only starts closer monitoring; only "arrival"
+  // (the default, for backward compatibility with older native payloads) can
+  // create/update a timecard.
+  zone: z.enum(["wake", "arrival"]).default("arrival"),
   transition: z.enum(["enter", "exit"]),
   occurredAt: z.string().optional(),
   latitude: z.number().nullable().optional(),
@@ -43,27 +50,34 @@ export async function POST(request: Request) {
     const source = input.source ?? "jobsite_auto";
 
     // Company settings — auto events require the feature to be enabled.
-    const settingsRow = await db
-      .from("companies")
-      .select(
-        "jobsite_time_enabled,jobsite_require_approval,jobsite_geofence_radius_feet,jobsite_ignore_short_departure_minutes,jobsite_break_threshold_minutes,jobsite_auto_clockout_after_end,jobsite_manual_fallback_enabled"
-      )
-      .eq("id", companyId)
-      .maybeSingle();
+    const settingsRow = await db.from("companies").select(SETTINGS_COLUMNS).eq("id", companyId).maybeSingle();
     const settings = mapCompanyJobsiteSettings(settingsRow.data);
     if (source === "jobsite_auto" && !settings.enabled) {
-      return NextResponse.json({ error: "Automatic Jobsite Time is not enabled for this company." }, { status: 403 });
+      return NextResponse.json({ error: "Attendance is not enabled for this company." }, { status: 403 });
     }
 
-    // Validate job belongs to the company.
+    // Validate job belongs to the company AND has a verified address. Attendance
+    // must never silently fall back to fake/default coordinates.
     const jobResult = await db
       .from("jobs")
-      .select("id, lat, lng")
+      .select("id, lat, lng, address_verified")
       .eq("company_id", companyId)
       .eq("id", jobId)
       .maybeSingle();
     if (jobResult.error) return NextResponse.json({ error: jobResult.error.message }, { status: 400 });
     if (!jobResult.data) return NextResponse.json({ error: "Job not found in your company" }, { status: 404 });
+
+    // The verified-address requirement only gates AUTOMATIC tracking — manual
+    // clock-in/out must keep working as a fallback even at a job whose address
+    // hasn't been verified yet.
+    const hasVerifiedCoords =
+      Boolean(jobResult.data.address_verified) && jobResult.data.lat !== null && jobResult.data.lng !== null;
+    if (!hasVerifiedCoords && source === "jobsite_auto") {
+      return NextResponse.json(
+        { error: "Address needs verification", code: "address_unverified" },
+        { status: 422 }
+      );
+    }
 
     // Resolve the requesting employee within this company.
     const employeeResult = await db
@@ -78,7 +92,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No employee record for this user in the company" }, { status: 403 });
     }
 
-    // Validate the employee is ASSIGNED to the job before accepting auto events.
+    // Attendance only counts for jobs the employee is ASSIGNED to. An auto
+    // event at an unassigned job is ignored (not an error) rather than
+    // silently clocking anyone in.
     const assignmentResult = await db
       .from("job_employees")
       .select("job_id")
@@ -88,7 +104,26 @@ export async function POST(request: Request) {
       .limit(1)
       .maybeSingle();
     if (!assignmentResult.data) {
+      if (source === "jobsite_auto") {
+        return NextResponse.json({ ignored: true, reason: "not_assigned" });
+      }
       return NextResponse.json({ error: "Employee is not assigned to this job" }, { status: 403 });
+    }
+
+    // Wake zone only wakes closer monitoring — it never creates/updates a
+    // timecard by itself, so skip the (company-wide) pending-attendance sweep
+    // for it entirely.
+    if (input.zone === "wake") {
+      return NextResponse.json({ ok: true, zone: "wake" });
+    }
+
+    if (settings.enabled) {
+      await finalizePendingAttendance({
+        db,
+        companyId,
+        arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
+        departureGraceMinutes: settings.departureGraceMinutes,
+      });
     }
 
     const workDate = occurredAt.slice(0, 10);
@@ -113,9 +148,10 @@ export async function POST(request: Request) {
       scheduledEnd = scheduleResult.data.ends_at ?? null;
     }
 
-    // Server-side geofence + schedule-window verification. We do NOT fully trust
-    // the native enter/exit — recompute distance from the job's coords, enforce
-    // the assigned window, and reject grossly-invalid auto events.
+    // Server-side geofence + schedule-window verification against the ARRIVAL
+    // (small) radius. We do NOT fully trust the native enter/exit — recompute
+    // distance from the job's coords, enforce the assigned window, and reject
+    // grossly-invalid auto events.
     const evaluation = evaluateJobsiteEvent({
       transition: input.transition,
       occurredAt,
@@ -124,7 +160,7 @@ export async function POST(request: Request) {
       pointLat: input.latitude ?? null,
       pointLng: input.longitude ?? null,
       accuracyMeters: input.accuracyMeters,
-      radiusFeet: settings.geofenceRadiusFeet,
+      radiusFeet: settings.arrivalRadiusFeet,
       scheduledStart,
       scheduledEnd,
       hasSchedule,
@@ -135,7 +171,7 @@ export async function POST(request: Request) {
     const confidence = evaluation.confidence;
     const needsReview = evaluation.needsReview;
 
-    // Find today's open timecard for this employee+job (one per work day).
+    // Find today's timecard for this employee+job (one per work day).
     const existing = await db
       .from("jobsite_timecards")
       .select("*")
@@ -148,12 +184,60 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     let timecard = existing.data ?? null;
-    let eventType: string;
 
     if (input.transition === "enter") {
-      eventType = "auto_clock_in";
+      // If the employee arrived somewhere new while another assigned job was
+      // still open (or awaiting arrival confirmation) today, that's an
+      // unambiguous signal they left/never really stopped at the first one —
+      // resolve it rather than double-counting hours at two jobs (section 4:
+      // avoid double clock-in / handle Job A → Job B moves).
+      const otherOpen = await db
+        .from("jobsite_timecards")
+        .select("*")
+        .eq("company_id", companyId)
+        .eq("user_id", userId)
+        .eq("work_date", workDate)
+        .not("job_id", "eq", jobId)
+        .is("clock_out_at", null)
+        .limit(5);
+      for (const other of otherOpen.data ?? []) {
+        if (!other.clock_in_at) {
+          // Never actually confirmed arrived — cancel the pending arrival.
+          if (other.pending_arrival_at) {
+            await db
+              .from("jobsite_timecards")
+              .update({ pending_arrival_at: null })
+              .eq("id", other.id)
+              .eq("company_id", companyId);
+          }
+          continue;
+        }
+        if (other.pending_departure_at) continue; // already leaving; let it finalize normally
+        await db
+          .from("jobsite_timecards")
+          .update({ pending_departure_at: occurredAt, detected_departure_at: occurredAt })
+          .eq("id", other.id)
+          .eq("company_id", companyId);
+        await db.from("jobsite_timecard_events").insert({
+          company_id: companyId,
+          timecard_id: other.id,
+          event_type: "exited_geofence",
+          occurred_at: occurredAt,
+          job_id: other.job_id,
+          employee_id: employeeId,
+          user_id: userId,
+          source,
+          notes: "Employee arrived at another assigned job",
+        });
+      }
+
       const clockedInStatus = settings.requireApproval ? "pending_review" : "active";
-      if (!timecard) {
+      // No open timecard for this job today, OR the last one for today is
+      // already fully closed (e.g. a lunch break that finalized past the
+      // departure grace period) — start a new session rather than treating
+      // this as a no-op, so returning to the same job later the same day is
+      // still detected.
+      if (!timecard || (timecard.clock_in_at && timecard.clock_out_at)) {
         const insert = await db
           .from("jobsite_timecards")
           .insert({
@@ -164,9 +248,8 @@ export async function POST(request: Request) {
             work_date: workDate,
             scheduled_start: scheduledStart,
             scheduled_end: scheduledEnd,
-            geofence_radius_feet: settings.geofenceRadiusFeet,
-            detected_arrival_at: occurredAt,
-            clock_in_at: occurredAt,
+            geofence_radius_feet: settings.arrivalRadiusFeet,
+            pending_arrival_at: occurredAt,
             status: needsReview ? "needs_review" : clockedInStatus,
             source,
             confidence,
@@ -175,10 +258,21 @@ export async function POST(request: Request) {
           .maybeSingle();
         if (insert.error) return NextResponse.json({ error: insert.error.message }, { status: 400 });
         timecard = insert.data;
+      } else if (timecard.clock_in_at && timecard.pending_departure_at) {
+        // Re-entry before the departure grace period elapsed — cancel it.
+        const upd = await db
+          .from("jobsite_timecards")
+          .update({ pending_departure_at: null })
+          .eq("id", timecard.id)
+          .eq("company_id", companyId)
+          .select("*")
+          .maybeSingle();
+        if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
+        timecard = upd.data;
       } else if (!timecard.clock_in_at) {
         const upd = await db
           .from("jobsite_timecards")
-          .update({ detected_arrival_at: occurredAt, clock_in_at: occurredAt, confidence })
+          .update({ pending_arrival_at: timecard.pending_arrival_at ?? occurredAt, confidence })
           .eq("id", timecard.id)
           .eq("company_id", companyId)
           .select("*")
@@ -186,63 +280,73 @@ export async function POST(request: Request) {
         if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
         timecard = upd.data;
       }
+      // Otherwise: already checked in with no pending departure — duplicate
+      // enter, nothing to do.
+
+      await db.from("jobsite_timecard_events").insert({
+        company_id: companyId,
+        timecard_id: timecard?.id ?? null,
+        event_type: "entered_geofence",
+        occurred_at: occurredAt,
+        job_id: jobId,
+        employee_id: employeeId,
+        user_id: userId,
+        latitude: round4(input.latitude),
+        longitude: round4(input.longitude),
+        accuracy_meters: input.accuracyMeters ?? null,
+        source,
+      });
     } else {
       // exit
-      eventType = "auto_clock_out";
       if (!timecard) {
+        if (source === "jobsite_auto") {
+          return NextResponse.json({ ignored: true, reason: "no_open_timecard" });
+        }
         return NextResponse.json({ error: "No open jobsite time to close" }, { status: 409 });
       }
-      const scheduledEndMs = timecard.scheduled_end ? Date.parse(timecard.scheduled_end) : NaN;
-      const pastScheduledEnd = Number.isFinite(scheduledEndMs) && Date.parse(occurredAt) >= scheduledEndMs;
-      // Auto clock-out after leaving past scheduled end (or when no schedule is
-      // known). Otherwise flag for review as a possible break/short departure.
-      const shouldClockOut = settings.autoClockOutAfterEnd && (pastScheduledEnd || !Number.isFinite(scheduledEndMs));
-      const nextRow: Record<string, unknown> = { detected_departure_at: occurredAt, confidence };
-      if (shouldClockOut) {
-        nextRow.clock_out_at = occurredAt;
-        nextRow.total_minutes = computeTotalMinutes({ ...timecard, clock_out_at: occurredAt });
-        nextRow.status = needsReview ? "needs_review" : settings.requireApproval ? "pending_review" : "active";
-      } else {
-        // Short/questionable departure — flag as a possible break for review.
-        nextRow.status = "needs_review";
-        eventType = "break_suggested";
-      }
-      const upd = await db
-        .from("jobsite_timecards")
-        .update(nextRow)
-        .eq("id", timecard.id)
-        .eq("company_id", companyId)
-        .select("*")
-        .maybeSingle();
-      if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
-      timecard = upd.data;
-    }
 
-    // Append the audit event (coarse coords only; never a trail).
-    await db.from("jobsite_timecard_events").insert({
-      company_id: companyId,
-      timecard_id: timecard?.id ?? null,
-      event_type: input.transition === "enter" ? "entered_geofence" : "exited_geofence",
-      occurred_at: occurredAt,
-      job_id: jobId,
-      employee_id: employeeId,
-      user_id: userId,
-      latitude: round4(input.latitude),
-      longitude: round4(input.longitude),
-      accuracy_meters: input.accuracyMeters ?? null,
-      source,
-    });
-    // Also record the derived auto action for the timeline.
-    await db.from("jobsite_timecard_events").insert({
-      company_id: companyId,
-      timecard_id: timecard?.id ?? null,
-      event_type: eventType,
-      occurred_at: occurredAt,
-      job_id: jobId,
-      employee_id: employeeId,
-      user_id: userId,
-      source,
-    });
+      if (!timecard.clock_in_at && timecard.pending_arrival_at) {
+        // Left before the arrival confirmation delay elapsed — cancel it.
+        const upd = await db
+          .from("jobsite_timecards")
+          .update({ pending_arrival_at: null })
+          .eq("id", timecard.id)
+          .eq("company_id", companyId)
+          .select("*")
+          .maybeSingle();
+        if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
+        timecard = upd.data;
+      } else if (timecard.clock_in_at && !timecard.clock_out_at) {
+        const upd = await db
+          .from("jobsite_timecards")
+          .update({
+            pending_departure_at: timecard.pending_departure_at ?? occurredAt,
+            detected_departure_at: occurredAt,
+            confidence,
+            status: needsReview ? "needs_review" : timecard.status,
+          })
+          .eq("id", timecard.id)
+          .eq("company_id", companyId)
+          .select("*")
+          .maybeSingle();
+        if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
+        timecard = upd.data;
+      }
+
+      await db.from("jobsite_timecard_events").insert({
+        company_id: companyId,
+        timecard_id: timecard?.id ?? null,
+        event_type: "exited_geofence",
+        occurred_at: occurredAt,
+        job_id: jobId,
+        employee_id: employeeId,
+        user_id: userId,
+        latitude: round4(input.latitude),
+        longitude: round4(input.longitude),
+        accuracy_meters: input.accuracyMeters ?? null,
+        source,
+      });
+    }
 
     return NextResponse.json({ item: timecard ? mapTimecard(timecard) : null });
   } catch (error) {

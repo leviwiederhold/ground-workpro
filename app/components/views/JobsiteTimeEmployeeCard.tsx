@@ -1,38 +1,47 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { JOBSITE_TIME_PRIVACY_COPY } from '@/lib/jobsite-time/domain';
-import { requestJobsiteLocationPermission } from '@/lib/jobsite-time/geofence-client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ATTENDANCE_STATUS_LABEL, JOBSITE_TIME_PRIVACY_COPY, deriveAttendanceStatus } from '@/lib/jobsite-time/domain';
+import {
+  fetchAssignedJobs,
+  requestJobsiteLocationPermission,
+  startForegroundGeofenceWatch,
+} from '@/lib/jobsite-time/geofence-client';
 
-// Employee-facing summary of Automatic Jobsite Time. Shows today's status, the
-// privacy explanation, and keeps a manual clock-in/out fallback. It is
-// intentionally non-invasive: no map, no live location.
+// Employee-facing summary of Attendance. Shows today's status in plain
+// language, keeps a manual clock-in/out fallback, and (when location is
+// granted) runs the foreground geofence watcher so arrivals/departures at an
+// assigned job are detected automatically. No map, no live location, no
+// technical terms (confidence/source/geofence/event ingestion).
 export function JobsiteTimeEmployeeCard() {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [manualFallback, setManualFallback] = useState(true);
+  const [settings, setSettings] = useState<any>(null);
   const [today, setToday] = useState<any | null>(null);
+  const [hasStaleOpenCard, setHasStaleOpenCard] = useState(false);
+  const [assignedJobs, setAssignedJobs] = useState<Array<{ jobId: string; lat: number | null; lng: number | null; addressVerified: boolean; name?: string }>>([]);
   const [permission, setPermission] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const watchRef = useRef<{ stop: () => void } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [settingsRes, cardsRes] = await Promise.all([
+      const [settingsRes, cardsRes, jobsRes] = await Promise.all([
         fetch('/api/jobsite-time/settings', { cache: 'no-store' }).catch(() => null),
         fetch('/api/jobsite-time/timecards', { cache: 'no-store' }).catch(() => null),
+        fetchAssignedJobs(),
       ]);
+      setAssignedJobs(jobsRes);
       if (settingsRes?.ok) {
-        const s = (await settingsRes.json())?.item;
-        setEnabled(Boolean(s?.enabled));
-        setManualFallback(s?.manualFallbackEnabled ?? true);
+        setSettings((await settingsRes.json())?.item ?? null);
       } else {
-        setEnabled(false);
+        setSettings(null);
       }
       if (cardsRes?.ok) {
         const items = (await cardsRes.json())?.items || [];
         const t = new Date().toISOString().slice(0, 10);
         setToday(items.find((i: any) => i.workDate === t) || null);
+        setHasStaleOpenCard(items.some((i: any) => i.clockInAt && !i.clockOutAt && i.workDate && i.workDate < t));
       }
     } finally {
       setLoading(false);
@@ -43,36 +52,62 @@ export function JobsiteTimeEmployeeCard() {
     load();
   }, [load]);
 
-  if (loading || enabled === null) return null;
+  // Run the foreground geofence watcher whenever Attendance is on, we have at
+  // least one verified assigned job, and location permission is granted.
+  useEffect(() => {
+    watchRef.current?.stop();
+    watchRef.current = null;
+    if (!settings?.enabled || permission !== 'granted') return;
+    const verifiedJobs = assignedJobs.filter((j) => j.addressVerified);
+    if (verifiedJobs.length === 0) return;
+    watchRef.current = startForegroundGeofenceWatch({
+      jobs: verifiedJobs,
+      wakeRadiusMeters: settings.wakeRadiusMeters,
+      arrivalRadiusFeet: settings.arrivalRadiusFeet,
+      onEvent: () => load(),
+    });
+    return () => watchRef.current?.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.enabled, settings?.wakeRadiusMeters, settings?.arrivalRadiusFeet, permission, assignedJobs.length]);
+
+  if (loading || !settings) return null;
+
+  const enabled = Boolean(settings.enabled);
+  const hasAssignedJob = assignedJobs.length > 0;
+  const assignedJobAddressVerified = assignedJobs.some((j) => j.addressVerified);
 
   const status = !enabled
-    ? 'Not tracking'
-    : !today
-      ? 'Waiting for arrival'
-      : today.clockOutAt
-        ? 'Left'
-        : today.status === 'needs_review'
-          ? 'Needs review'
-          : today.clockInAt
-            ? 'Checked In'
-            : 'Waiting for arrival';
+    ? null
+    : deriveAttendanceStatus({
+        hasAssignedJob,
+        assignedJobAddressVerified,
+        todayCard: today ? { clockInAt: today.clockInAt, clockOutAt: today.clockOutAt, status: today.status } : null,
+        hasStaleOpenCard,
+      });
+
+  const statusText = status ? ATTENDANCE_STATUS_LABEL[status] : 'Not tracking';
 
   const statusStyle: Record<string, string> = {
     'Not tracking': 'bg-gray-100 text-gray-700',
+    'No assigned job': 'bg-gray-100 text-gray-700',
+    'Address needs verification': 'bg-red-100 text-red-700',
     'Waiting for arrival': 'bg-blue-100 text-blue-700',
-    'Checked In': 'bg-green-100 text-green-700',
-    'Left': 'bg-amber-100 text-amber-700',
+    'Checked in': 'bg-green-100 text-green-700',
+    'Checked out': 'bg-amber-100 text-amber-700',
     'Needs review': 'bg-orange-100 text-orange-700',
+    'Missing clock-out': 'bg-red-100 text-red-700',
   };
+
+  const jobName = today ? assignedJobs.find((j) => j.jobId === String(today.jobId))?.name : undefined;
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-[#090909]">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Attendance</p>
-          <p className="text-xs text-gray-500 dark:text-zinc-400">Assigned job · Arrived &amp; Left</p>
+          <p className="text-xs text-gray-500 dark:text-zinc-400">{jobName ? `Checked in at ${jobName}` : 'Assigned job · Arrived & Left'}</p>
         </div>
-        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyle[status] || 'bg-gray-100 text-gray-700'}`}>{status}</span>
+        <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${statusStyle[statusText] || 'bg-gray-100 text-gray-700'}`}>{statusText}</span>
       </div>
 
       {enabled && today && (
@@ -95,11 +130,12 @@ export function JobsiteTimeEmployeeCard() {
           >
             Allow location
           </button>
-          {permission && <span className="text-xs text-gray-500">Permission: {permission}</span>}
+          {permission === 'granted' && <span className="text-xs text-green-600 dark:text-green-400">Location on</span>}
+          {permission === 'denied' && <span className="text-xs text-red-600 dark:text-red-400">Location off</span>}
         </div>
       )}
 
-      {manualFallback && (
+      {settings.manualFallbackEnabled && (
         <p className="mt-2 text-xs text-gray-500 dark:text-zinc-500">
           Manual clock-in/out remains available if automatic tracking isn&apos;t working.
         </p>

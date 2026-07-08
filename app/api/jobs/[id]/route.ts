@@ -90,6 +90,16 @@ const mapJob = (row: any) => {
   const parsedNotes = parseJobNotes(row.notes);
   const siteAddress = row.site_address ?? row.address ?? "";
   const hasCoordinates = row.lat !== null && row.lat !== undefined && row.lng !== null && row.lng !== undefined;
+  // When the `address_verified` column is absent from the row — i.e. the
+  // migration hasn't been applied in this environment, so PATCH silently drops
+  // it and it can never persist as true — fall back to treating persisted
+  // coordinates as the verification signal. This app only ever writes lat/lng
+  // from a verified geocode/selection (see resolveJobLocation: coordinates are
+  // null unless the client result was trusted or a server geocode succeeded),
+  // so coordinates present ⟺ the address was verified at write time. When the
+  // column IS present, respect its stored value.
+  const verifiedColumnPresent = row.address_verified !== undefined && row.address_verified !== null;
+  const addressVerified = hasCoordinates && (verifiedColumnPresent ? Boolean(row.address_verified) : true);
   return {
   id: row.id,
   name: row.name ?? "",
@@ -110,8 +120,8 @@ const mapJob = (row: any) => {
   lat: row.lat === null || row.lat === undefined ? null : Number(row.lat),
   lng: row.lng === null || row.lng === undefined ? null : Number(row.lng),
   place_id: row.place_id ?? null,
-  address_verified: Boolean(row.address_verified) && hasCoordinates,
-  needs_address_verification: Boolean(siteAddress) && !(Boolean(row.address_verified) && hasCoordinates),
+  address_verified: addressVerified,
+  needs_address_verification: Boolean(siteAddress) && !addressVerified,
   geocoding_status: hasCoordinates ? "resolved" : siteAddress ? "not_configured" : "not_requested",
   source_bid_id: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,
   sourceBidId: row.source_bid_id ?? parsedNotes.meta.source_bid_id ?? null,

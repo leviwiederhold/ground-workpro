@@ -2,7 +2,7 @@
 // Native/mobile FOUNDATION for Attendance (two-zone jobsite geofencing).
 //
 // This intentionally separates the layers the manager/employee flow needs:
-//   1. frontend permission request         -> requestJobsiteLocationPermission()
+//   1. frontend permission request         -> requestLocationPermissionInteractive()
 //   2. native geofence detection            -> the native contract below (STUB)
 //   2b. foreground fallback detection       -> startForegroundGeofenceWatch()
 //   3. API event ingestion                  -> ingestJobsiteEvent()
@@ -62,36 +62,21 @@ export function isNativeGeofenceAvailable(): boolean {
   return Boolean(cap?.isNativePlatform?.() && cap?.Plugins?.Geolocation);
 }
 
-// Frontend permission request. On native, defers to the Capacitor Geolocation
-// plugin; on web, uses the standard Geolocation permission prompt. Returns a
-// coarse status the UI can display.
-export async function requestJobsiteLocationPermission(): Promise<
-  "granted" | "denied" | "unavailable" | "prompt"
-> {
-  const cap = getCapacitor();
-  const geo = cap?.Plugins?.Geolocation;
-  if (geo?.requestPermissions) {
-    try {
-      const res = await geo.requestPermissions();
-      const state = String(res?.location ?? res?.coarseLocation ?? "").toLowerCase();
-      if (state === "granted") return "granted";
-      if (state === "denied") return "denied";
-      return "prompt";
-    } catch {
-      return "unavailable";
-    }
-  }
-  if (typeof navigator !== "undefined" && navigator.permissions?.query) {
-    try {
-      const status = await navigator.permissions.query({ name: "geolocation" as PermissionName });
-      return (status.state as any) ?? "prompt";
-    } catch {
-      return "unavailable";
-    }
-  }
-  if (typeof navigator !== "undefined" && navigator.geolocation) return "prompt";
-  return "unavailable";
-}
+// Attendance location permission lives in a self-contained module (no relative
+// imports) so its four outcomes can be unit-tested directly. Re-exported here so
+// existing importers of geofence-client keep working.
+export {
+  checkLocationPermission,
+  requestLocationPermissionInteractive,
+  resolveLocationGateView,
+  mapCapacitorPermission,
+  mapGeolocationError,
+} from "./locationPermission";
+export type {
+  LocationPermissionResult,
+  LocationPermissionState,
+  LocationGateView,
+} from "./locationPermission";
 
 // API ingestion (layer 3). Native geofence code AND the web fallback both call
 // this. The server validates company/job/assignment/verified-address/schedule

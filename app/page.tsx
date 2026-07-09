@@ -43,8 +43,8 @@ const JobsiteTimeEmployeeCard = dynamic(
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
-const LocationGate = dynamic(
-  () => import('@/app/components/views/LocationGate').then((mod) => mod.LocationGate),
+const LocationPermissionGate = dynamic(
+  () => import('@/app/components/views/LocationPermissionGate').then((mod) => mod.LocationPermissionGate),
   { ssr: false }
 );
 const ScheduleView = dynamic(
@@ -2663,9 +2663,6 @@ const MobileAppShell = ({
               </div>
             </div>
           </div>
-          {/* Location requirement — native field employees only; never blocks
-              managers or desktop web (self-gated inside the component). */}
-          <LocationGate role={currentRole} />
         </MobileAppShell>
 
           {/* Modals */}
@@ -11921,16 +11918,22 @@ const MobileAppShell = ({
             {loading && <p className="text-sm text-gray-500">Loading time clock status...</p>}
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            <div className="flex justify-end gap-3">
-              <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
-              <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
-              <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
-                {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
-              </Button>
-              <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
-                {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
-              </Button>
-            </div>
+            {/* Location is required to clock in/out. The gate renders the action
+                buttons only once permission is granted; otherwise it shows the
+                pre-permission card / blocked / unavailable states. This gates
+                only the attendance action — not the rest of the app. */}
+            <LocationPermissionGate onNotNow={onClose}>
+              <div className="flex justify-end gap-3">
+                <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
+                <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
+                <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
+                  {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
+                </Button>
+                <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
+                  {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
+                </Button>
+              </div>
+            </LocationPermissionGate>
           </div>
         </Modal>
       );

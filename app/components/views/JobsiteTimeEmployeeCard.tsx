@@ -3,11 +3,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, JOBSITE_TIME_PRIVACY_COPY, deriveAttendanceStatus } from '@/lib/jobsite-time/domain';
-import {
-  fetchAssignedJobs,
-  requestJobsiteLocationPermission,
-  startForegroundGeofenceWatch,
-} from '@/lib/jobsite-time/geofence-client';
+import { fetchAssignedJobs, startForegroundGeofenceWatch } from '@/lib/jobsite-time/geofence-client';
+import { requestLocationPermissionInteractive } from '@/lib/jobsite-time/locationPermission';
 
 // Employee-facing summary of Attendance. Shows today's status in plain
 // language, keeps a manual clock-in/out fallback, and (when location is
@@ -125,13 +122,14 @@ export function JobsiteTimeEmployeeCard() {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={async () => setPermission(await requestJobsiteLocationPermission())}
+            onClick={async () => setPermission(await requestLocationPermissionInteractive())}
             className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-[#111]"
           >
             Allow location
           </button>
           {permission === 'granted' && <span className="text-xs text-green-600 dark:text-green-400">Location on</span>}
-          {permission === 'denied' && <span className="text-xs text-red-600 dark:text-red-400">Location off</span>}
+          {permission === 'denied' && <span className="text-xs text-red-600 dark:text-red-400">Location off — enable it in Settings</span>}
+          {permission === 'unavailable' && <span className="text-xs text-amber-600 dark:text-amber-400">Location unavailable on this device</span>}
         </div>
       )}
 

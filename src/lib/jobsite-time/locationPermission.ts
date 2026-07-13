@@ -18,13 +18,23 @@ function getCapacitor(): CapacitorLike | null {
 }
 
 // Map a Capacitor Geolocation PermissionStatus to our coarse state. Pure.
+// Considers BOTH the fine (`location`) and coarse (`coarseLocation`) grants:
+// on Android 12+ a user can grant Approximate location only, so coarse can be
+// granted while fine is not. Every position request here uses
+// enableHighAccuracy:false, so a coarse grant is sufficient — treat either
+// grant as granted, and prefer prompting over blocking when possible.
 export function mapCapacitorPermission(
   status: { location?: string; coarseLocation?: string } | null | undefined
 ): LocationPermissionState {
-  const s = String(status?.location ?? status?.coarseLocation ?? "").toLowerCase();
-  if (s === "granted") return "granted";
-  if (s === "denied") return "denied";
-  // "prompt" / "prompt-with-rationale" / unknown → still needs the OS dialog.
+  const states = [
+    String(status?.location ?? "").toLowerCase(),
+    String(status?.coarseLocation ?? "").toLowerCase(),
+  ];
+  if (states.includes("granted")) return "granted";
+  // Either alias still able to prompt → we can still surface the OS dialog.
+  if (states.some((s) => s === "prompt" || s === "prompt-with-rationale")) return "prompt";
+  if (states.includes("denied")) return "denied";
+  // Unknown/empty → needs the OS dialog.
   return "prompt";
 }
 

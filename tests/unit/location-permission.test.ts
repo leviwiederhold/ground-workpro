@@ -46,6 +46,16 @@ test("mapCapacitorPermission maps native statuses", () => {
   assert.equal(mapCapacitorPermission(null), "prompt");
 });
 
+test("mapCapacitorPermission honors an Android Approximate (coarse-only) grant", () => {
+  // fine denied/prompt but coarse granted → allowed through (we use low accuracy)
+  assert.equal(mapCapacitorPermission({ location: "denied", coarseLocation: "granted" }), "granted");
+  assert.equal(mapCapacitorPermission({ location: "prompt", coarseLocation: "granted" }), "granted");
+  // still promptable if either alias can prompt
+  assert.equal(mapCapacitorPermission({ location: "denied", coarseLocation: "prompt" }), "prompt");
+  // only blocked when both are denied
+  assert.equal(mapCapacitorPermission({ location: "denied", coarseLocation: "denied" }), "denied");
+});
+
 test("mapGeolocationError: only PERMISSION_DENIED(1) is denied, rest unavailable", () => {
   assert.equal(mapGeolocationError({ code: 1 }), "denied"); // PERMISSION_DENIED
   assert.equal(mapGeolocationError({ code: 2 }), "unavailable"); // POSITION_UNAVAILABLE

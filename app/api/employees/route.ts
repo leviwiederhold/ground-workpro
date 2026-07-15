@@ -26,6 +26,80 @@ const normalizeId = (id: unknown) => {
   return id;
 };
 
+const isMissingSchemaError = (message: string | undefined) =>
+  /(column .* does not exist|Could not find the '.*' column|relation .* does not exist|Could not find the table)/i.test(
+    message ?? ""
+  );
+
+// Resolve each employee's assigned job (id + name) so the UI never has to fall
+// back to "Unassigned" just because the bare job_id column was empty or a job
+// name was never joined. Assignments primarily live in the job_employees join
+// table (matching how attendance/scheduling read them); the employee row's own
+// job_id column is used as a fallback. Job names are looked up in one batch.
+// Mutates each employee in place, setting jobId + jobName. Degrades gracefully
+// (leaves the existing jobId, jobName null) if the join table is absent.
+async function hydrateAssignedJobs(
+  supabase: any,
+  companyId: string,
+  employees: Array<{ id: unknown; jobId: unknown; jobName?: string | null }>
+) {
+  if (employees.length === 0) return;
+  const employeeIds = employees.map((e) => e.id).filter((id) => id !== null && id !== undefined && id !== "");
+
+  const jobIdByEmployeeId = new Map<string, string>();
+  if (employeeIds.length > 0) {
+    const assignments = await supabase
+      .from("job_employees")
+      .select("employee_id, job_id, created_at")
+      .eq("company_id", companyId)
+      .in("employee_id", employeeIds as Array<string | number>)
+      .order("created_at", { ascending: true });
+    if (!assignments.error) {
+      for (const row of (assignments.data ?? []) as Array<Record<string, unknown>>) {
+        const eid = String(normalizeId(row.employee_id) ?? "");
+        const jid = normalizeId(row.job_id);
+        if (!eid || jid === null || jid === undefined || jid === "") continue;
+        if (!jobIdByEmployeeId.has(eid)) jobIdByEmployeeId.set(eid, String(jid));
+      }
+    } else if (!isMissingSchemaError(assignments.error.message)) {
+      // A real error (not just a missing table) — surface nothing, keep going
+      // with the row-level job_id fallback below.
+    }
+  }
+
+  // Final assigned jobId per employee: join assignment first, else the row's
+  // own job_id (already on e.jobId from mapEmployee).
+  const jobIds = new Set<string>();
+  for (const e of employees) {
+    const fromJoin = jobIdByEmployeeId.get(String(e.id));
+    const own = e.jobId !== null && e.jobId !== undefined && e.jobId !== "" ? String(e.jobId) : "";
+    const resolved = fromJoin || own;
+    e.jobId = resolved || null;
+    if (resolved) jobIds.add(resolved);
+  }
+
+  let jobNameById = new Map<string, string>();
+  if (jobIds.size > 0) {
+    const jobsResult = await supabase
+      .from("jobs")
+      .select("id, name")
+      .eq("company_id", companyId)
+      .in("id", Array.from(jobIds));
+    if (!jobsResult.error) {
+      jobNameById = new Map(
+        (jobsResult.data ?? []).map((job: Record<string, unknown>) => [
+          String(normalizeId(job.id) ?? job.id),
+          String(job.name ?? "Job"),
+        ])
+      );
+    }
+  }
+
+  for (const e of employees) {
+    e.jobName = e.jobId ? jobNameById.get(String(e.jobId)) ?? null : null;
+  }
+}
+
 const parseCertifications = (value: unknown) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -53,6 +127,8 @@ const mapEmployee = (row: any) => {
     email: row.email ?? "",
     certifications: parseCertifications(row.certifications),
     jobId: normalizeId(row.job_id ?? row.jobId),
+    // Hydrated by hydrateAssignedJobs() after the batch job-name lookup.
+    jobName: null as string | null,
     status: row.status ?? "off",
     clockedInAt: row.clocked_in_at ?? row.clockedInAt ?? null,
   };
@@ -122,7 +198,8 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const employees = (data ?? []).map(mapEmployee).filter(Boolean);
+    const employees = (data ?? []).map(mapEmployee).filter(Boolean) as Array<{ id: unknown; jobId: unknown; jobName?: string | null }>;
+    await hydrateAssignedJobs(supabase, companyId, employees);
     return NextResponse.json({ employees, ...getPaginationMeta(count ?? employees.length, page, pageSize) });
   } catch (error) {
     if (error instanceof TenantResolverError) {

@@ -38,4 +38,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Foreground-only for now: used to automatically detect jobsite attendance
+         arrival/departure while the app is open. Background location (needed for
+         true always-on geofencing) is not requested yet — see PR notes. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 </manifest>

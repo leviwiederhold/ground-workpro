@@ -24,6 +24,8 @@ export function AddressAutocomplete({
   disabled,
   biasLat,
   biasLng,
+  saving,
+  saveError,
 }: {
   value: string;
   verified: boolean;
@@ -33,8 +35,16 @@ export function AddressAutocomplete({
   disabled?: boolean;
   biasLat?: number | null;
   biasLng?: number | null;
+  // True while the parent is persisting a just-selected verified address to
+  // the server. Overrides the verified badge so we never claim "Verified"
+  // before it's actually saved.
+  saving?: boolean;
+  // Set by the parent when the auto-save of a selected verified address failed.
+  // Shown INSTEAD of the generic "needs verification" prompt so a save failure
+  // is never mistaken for the user not having selected a suggestion.
+  saveError?: string;
 }) {
-  const [suggestions, setSuggestions] = useState<Array<{ placeId: string; description: string }>>([]);
+  const [suggestions, setSuggestions] = useState<Array<{ placeId: string; description: string; lat?: number | null; lng?: number | null }>>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -117,8 +127,25 @@ export function AddressAutocomplete({
     query(text);
   };
 
-  const choose = async (s: { placeId: string; description: string }) => {
+  const choose = async (s: { placeId: string; description: string; lat?: number | null; lng?: number | null }) => {
     setOpen(false);
+    console.info('[address] suggestion selected', { placeId: s.placeId, description: s.description, lat: s.lat, lng: s.lng });
+
+    // Fast path: Geoapify/Mapbox suggestions already carry coordinates, so the
+    // pick is verifiable without a second network round-trip (the fragile step
+    // that was silently returning unverified). Only Google (no coords in
+    // autocomplete) needs the /lookup fallback below.
+    // NB: guard against null/undefined explicitly — Number(null) is 0, which is
+    // finite, so without this a coordless suggestion would be "verified" at
+    // (0, 0) in the ocean. Only take the fast path with genuine coordinates.
+    const sLat = Number(s.lat);
+    const sLng = Number(s.lng);
+    if (s.lat != null && s.lng != null && Number.isFinite(sLat) && Number.isFinite(sLng)) {
+      console.info('[address] using coords from suggestion (verified)', { lat: sLat, lng: sLng, placeId: s.placeId });
+      onSelect({ address: s.description, verified: true, lat: sLat, lng: sLng, placeId: s.placeId || null });
+      return;
+    }
+
     lookupAbortRef.current?.abort();
     const controller = new AbortController();
     lookupAbortRef.current = controller;
@@ -128,13 +155,16 @@ export function AddressAutocomplete({
       const res = await fetch(`/api/geocode/lookup?placeId=${encodeURIComponent(s.placeId)}&q=${encodeURIComponent(s.description)}`, { cache: 'no-store', signal: controller.signal });
       const json = await res.json().catch(() => null);
       const r = json?.result;
+      console.info('[address] lookup response', { status: res.status, configured: json?.configured, result: r });
       if (r && Number.isFinite(Number(r.lat)) && Number.isFinite(Number(r.lng))) {
         onSelect({ address: String(r.formatted || s.description), verified: true, lat: Number(r.lat), lng: Number(r.lng), placeId: String(r.placeId || s.placeId) });
       } else {
         // Couldn't resolve coordinates — keep the text but unverified.
+        console.warn('[address] lookup returned no coordinates — marking unverified', json);
         onSelect({ address: s.description, verified: false, lat: null, lng: null, placeId: null });
       }
-    } catch {
+    } catch (err) {
+      console.warn('[address] lookup failed — marking unverified', err);
       onSelect({ address: s.description, verified: false, lat: null, lng: null, placeId: null });
     } finally {
       window.clearTimeout(timeoutId);
@@ -178,6 +208,10 @@ export function AddressAutocomplete({
       <div className="mt-1 text-xs">
         {resolving ? (
           <span className="text-gray-500">Verifying address…</span>
+        ) : saving ? (
+          <span className="text-gray-500">Saving verified address…</span>
+        ) : saveError ? (
+          <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400"><i className="fa-solid fa-circle-exclamation" /> {saveError}</span>
         ) : verified ? (
           <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400"><i className="fa-solid fa-circle-check" /> Verified Address</span>
         ) : value.trim() ? (

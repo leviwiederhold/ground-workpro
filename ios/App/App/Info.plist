@@ -26,6 +26,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Groundwork Pro needs camera access so you can take a profile photo.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Groundwork Pro uses your location to automatically detect your arrival and departure at your assigned jobsite for attendance.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Groundwork Pro needs photo library access so you can choose a profile photo.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

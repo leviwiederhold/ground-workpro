@@ -41,5 +41,8 @@ export async function GET(request: Request) {
   }
 
   const result = await withTimeout(resolvePlace(placeId, q), null);
+  if (!result) {
+    console.warn("[geocode/lookup] resolvePlace returned no result", { placeId, q });
+  }
   return NextResponse.json({ configured: true, result });
 }

@@ -8,7 +8,17 @@
 // needed. If no key is set, isGeocodeConfigured() is false and the UI falls back
 // to plain manual entry (address stored unverified, no coordinates).
 
-export type GeocodeSuggestion = { placeId: string; description: string };
+// A suggestion MAY already carry verified coordinates. Geoapify and Mapbox
+// return lat/lng in their autocomplete/forward responses, so we pass them
+// straight through — the client can then treat the pick as verified without a
+// second round-trip. Google autocomplete has no coordinates (a details call is
+// required), so those come back lat/lng undefined and fall back to /lookup.
+export type GeocodeSuggestion = {
+  placeId: string;
+  description: string;
+  lat?: number | null;
+  lng?: number | null;
+};
 
 export type GeocodeResult = {
   placeId: string;
@@ -144,11 +154,30 @@ export async function suggestAddresses(query: string, bias?: GeoBias | null): Pr
       const results = await geoapifyQuery(provider.token, 'autocomplete', q, 5, bias);
       return results
         .filter((r) => r?.formatted)
-        .map((r) => ({ placeId: String(r.place_id ?? r.formatted), description: String(r.formatted) }));
+        .map((r) => {
+          const lat = Number(r.lat);
+          const lng = Number(r.lon);
+          return {
+            placeId: String(r.place_id ?? r.formatted),
+            description: String(r.formatted),
+            lat: Number.isFinite(lat) ? lat : null,
+            lng: Number.isFinite(lng) ? lng : null,
+          };
+        });
     }
     if (provider.kind === 'mapbox') {
       const features = await mapboxForward(provider.token, q, 5);
-      return features.map((f) => ({ placeId: String(f.id), description: String(f.place_name || f.text || '') }));
+      return features.map((f) => {
+        const center = Array.isArray(f?.center) ? f.center : null;
+        const lat = center ? Number(center[1]) : NaN;
+        const lng = center ? Number(center[0]) : NaN;
+        return {
+          placeId: String(f.id),
+          description: String(f.place_name || f.text || ''),
+          lat: Number.isFinite(lat) ? lat : null,
+          lng: Number.isFinite(lng) ? lng : null,
+        };
+      });
     }
     return await googleAutocomplete(provider.token, q);
   } catch {
@@ -203,8 +232,14 @@ export async function resolveJobLocation(payload: {
 }): Promise<{ lat: number | null; lng: number | null; place_id: string | null; address_verified: boolean }> {
   const clientLat = payload.lat === null || payload.lat === undefined || payload.lat === '' ? NaN : Number(payload.lat);
   const clientLng = payload.lng === null || payload.lng === undefined || payload.lng === '' ? NaN : Number(payload.lng);
+  // The coordinates ARE the verification: the client only sets
+  // address_verified when it got lat/lng from a real provider result (a
+  // suggestion that carried coords, or the /lookup resolution). place_id is
+  // optional provider metadata — requiring it here would force an unnecessary
+  // server re-geocode that can fail and wrongly flip a genuinely-verified
+  // address back to unverified.
   const trustedClient =
-    payload.address_verified === true && Boolean(payload.place_id) && Number.isFinite(clientLat) && Number.isFinite(clientLng);
+    payload.address_verified === true && Number.isFinite(clientLat) && Number.isFinite(clientLng);
 
   if (trustedClient) {
     return { lat: clientLat, lng: clientLng, place_id: payload.place_id ?? null, address_verified: true };

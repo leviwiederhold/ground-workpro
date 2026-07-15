@@ -10582,32 +10582,19 @@ const MobileAppShell = ({
 
       return (
         <div className="mx-auto w-full max-w-6xl space-y-5 pb-28 lg:space-y-6 lg:pb-0">
-          {/* Single Save Changes action for the whole page — sticky top-right on
-              desktop; there is a matching sticky bottom bar for mobile below. */}
-          <div className="sticky top-0 z-20 -mx-1 hidden items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/95 px-1 py-3 backdrop-blur lg:flex">
-            <div className="min-w-0">
-              <h2 className="text-lg font-semibold text-gray-900">Settings</h2>
-              <p className="truncate text-xs text-gray-500">
-                {saveState === 'error'
-                  ? saveError
-                  : saveState === 'saved' && !isDirty
-                    ? 'All changes saved.'
-                    : isDirty
-                      ? 'You have unsaved changes.'
-                      : 'Everything is up to date.'}
-              </p>
-            </div>
-            <Button variant="brand" size="sm" onClick={saveAll} disabled={!isDirty || saveState === 'saving' || loading}>
-              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' && !isDirty ? 'Saved' : 'Save Changes'}
-            </Button>
-          </div>
-
           {loadError && <InlineError>{loadError}</InlineError>}
 
-          {/* 1. My Profile */}
+          {/* 1. My Profile — the page's single Save Changes action lives in this
+              first card header (top-right) on desktop; mobile uses the sticky
+              bottom bar below. */}
           <Card className={cardClass}>
             <div className={cardHeaderClass}>
               <h3 className="font-semibold text-gray-900">My Profile</h3>
+              <div className="hidden lg:flex">
+                <Button variant="brand" size="sm" onClick={saveAll} disabled={!isDirty || saveState === 'saving' || loading}>
+                  {saveState === 'saving' ? 'Saving…' : saveState === 'saved' && !isDirty ? 'Saved' : 'Save Changes'}
+                </Button>
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
               <div><label className={label}>Full name</label><input className={field} value={profile.full_name} onChange={(e) => setProfile((p) => ({ ...p, full_name: e.target.value }))} /></div>

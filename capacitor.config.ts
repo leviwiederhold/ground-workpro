@@ -18,6 +18,17 @@ const config: CapacitorConfig = {
   ios: {
     contentInset: "never",
   },
+  plugins: {
+    SocialLogin: {
+      providers: {
+        apple: true,
+        google: true,
+        facebook: false,
+        twitter: false,
+      },
+      logLevel: 1,
+    },
+  },
 };
 
 export default config;

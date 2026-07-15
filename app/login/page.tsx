@@ -7,6 +7,14 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 import OAuthButtons from "@/app/components/auth/OAuthButtons";
 import { openGroundworkWebsite } from "@/lib/runtime/openWebsite";
+import {
+  readPendingInviteFromSearch,
+  readPendingInviteState,
+  signInWithAppleNative,
+  signInWithGoogleNative,
+  writePendingInviteState,
+  type NativeProvider,
+} from "@/lib/auth/nativeOAuth";
 
 /**
  * Opens the Groundwork Pro public website in the device's default external
@@ -54,6 +62,9 @@ export default function LoginPage() {
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
+  const [nativeProviderLoading, setNativeProviderLoading] = useState<NativeProvider | null>(null);
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [inviteCompanyName, setInviteCompanyName] = useState<string | null>(null);
 
   /**
    * In native app mode, check if the user has an accepted workspace membership.
@@ -74,6 +85,30 @@ export default function LoginPage() {
     }
   }
 
+  function getPendingInvite() {
+    if (typeof window === "undefined") return null;
+    return readPendingInviteFromSearch(window.location.search) ?? readPendingInviteState(window.sessionStorage);
+  }
+
+  async function routeAfterNativeAuth() {
+    const pendingInvite = getPendingInvite();
+    if (pendingInvite) {
+      await ensureTenantContext();
+      writePendingInviteState(null, window.sessionStorage);
+      router.replace("/");
+      router.refresh();
+      return;
+    }
+
+    const hasWorkspace = await checkNativeWorkspace();
+    if (!hasWorkspace) {
+      setShowNoWorkspace(true);
+      return;
+    }
+    router.replace("/");
+    router.refresh();
+  }
+
   useEffect(() => {
     let active = true;
     const supabase = supabaseBrowser();
@@ -90,6 +125,14 @@ export default function LoginPage() {
     setCheckoutSuccess(hasCheckoutSuccess);
     const isNative = isNativeAppRuntime();
     setNativeRuntime(isNative);
+    const pendingInvite = readPendingInviteFromSearch(window.location.search);
+    if (isNative && pendingInvite) {
+      writePendingInviteState(pendingInvite, window.sessionStorage);
+      setInviteCompanyName(pendingInvite.companyName ?? null);
+    } else if (isNative) {
+      const storedInvite = readPendingInviteState(window.sessionStorage);
+      setInviteCompanyName(storedInvite?.companyName ?? null);
+    }
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (hasCheckoutSuccess) {
@@ -105,7 +148,7 @@ export default function LoginPage() {
       if (isNative) {
         // Invited employees may not have a membership row yet — accept the
         // invite BEFORE the workspace check so the gate never blocks them.
-        if (params.get("invite") === "1") {
+        if (params.get("invite") === "1" || readPendingInviteState(window.sessionStorage)) {
           try {
             await ensureTenantContext();
             if (!active) return;
@@ -144,15 +187,18 @@ export default function LoginPage() {
     return () => {
       active = false;
     };
+    // Keep this mount-time auth redirect effect scoped to the current URL/session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   async function ensureTenantContext() {
     const params = new URLSearchParams(window.location.search);
-    const invite = params.get("invite") === "1";
-    const inviteRole = params.get("role") || undefined;
-    const inviteEmail = params.get("email") || undefined;
-    const inviteEmployeeId = params.get("employeeId") || undefined;
-    const inviteToken = params.get("token") || undefined;
+    const storedInvite = nativeRuntime && typeof window !== "undefined" ? readPendingInviteState(window.sessionStorage) : null;
+    const invite = params.get("invite") === "1" || storedInvite?.invite === "1";
+    const inviteRole = params.get("role") || storedInvite?.role || undefined;
+    const inviteEmail = params.get("email") || storedInvite?.email || undefined;
+    const inviteEmployeeId = params.get("employeeId") || storedInvite?.employeeId || undefined;
+    const inviteToken = params.get("token") || storedInvite?.token || undefined;
     const stripeSessionId = params.get("session_id") || undefined;
 
     if (invite) {
@@ -164,6 +210,9 @@ export default function LoginPage() {
       if (!accept.ok) {
         const payload = await accept.json().catch(() => ({}));
         throw new Error(payload?.error || "Failed to accept invite");
+      }
+      if (nativeRuntime && typeof window !== "undefined") {
+        writePendingInviteState(null, window.sessionStorage);
       }
       return;
     }
@@ -231,9 +280,10 @@ export default function LoginPage() {
       // Native app: invite-first, then workspace gate.
       if (nativeRuntime) {
         const params = new URLSearchParams(window.location.search);
+        const storedInvite = readPendingInviteState(window.sessionStorage);
         // Invited employees may not have a membership row yet — accept the
         // invite BEFORE the workspace check so the gate never blocks them.
-        if (params.get("invite") === "1") {
+        if (params.get("invite") === "1" || storedInvite) {
           await ensureTenantContext();
           router.replace("/");
           router.refresh();
@@ -272,6 +322,33 @@ export default function LoginPage() {
     }
   }
 
+  async function onNativeProviderSignIn(provider: NativeProvider) {
+    setNativeProviderLoading(provider);
+    setError(null);
+
+    try {
+      if (typeof window !== "undefined") {
+        writePendingInviteState(readPendingInviteFromSearch(window.location.search), window.sessionStorage);
+      }
+      const supabase = supabaseBrowser();
+      const result =
+        provider === "apple" ? await signInWithAppleNative(supabase) : await signInWithGoogleNative(supabase);
+
+      if (result.status === "cancelled") return;
+      if (result.status === "error") {
+        setError(result.message);
+        return;
+      }
+
+      await supabase.auth.getSession();
+      await routeAfterNativeAuth();
+    } catch (nativeError) {
+      setError(nativeError instanceof Error ? nativeError.message : "Unable to sign in. Please try again.");
+    } finally {
+      setNativeProviderLoading(null);
+    }
+  }
+
   // Native app — no workspace found after authentication.
   if (showNoWorkspace) {
     return <NativeNoWorkspaceScreen />;
@@ -287,7 +364,13 @@ export default function LoginPage() {
           </div>
         )}
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-          {nativeRuntime ? "Welcome to Groundwork Pro" : checkoutSuccess ? "Sign in to continue" : "Login"}
+          {nativeRuntime && getPendingInvite()
+            ? `Join ${inviteCompanyName || "your company"}`
+            : nativeRuntime
+              ? "Sign in to Groundwork Pro"
+              : checkoutSuccess
+                ? "Sign in to continue"
+                : "Login"}
         </h1>
         <p className="text-sm text-gray-500 mb-6">
           {nativeRuntime
@@ -310,7 +393,41 @@ export default function LoginPage() {
           </div>
         ) : null}
 
-        <form onSubmit={onSubmit} className="space-y-4">
+        {nativeRuntime ? (
+          <div className="mb-5 space-y-3">
+            <button
+              type="button"
+              onClick={() => onNativeProviderSignIn("apple")}
+              disabled={nativeProviderLoading !== null || loading}
+              className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-900 bg-gray-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-black disabled:opacity-60"
+            >
+              <i className="fa-brands fa-apple text-lg" />
+              {nativeProviderLoading === "apple" ? "Signing in..." : "Continue with Apple"}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNativeProviderSignIn("google")}
+              disabled={nativeProviderLoading !== null || loading}
+              className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+            >
+              <i className="fa-brands fa-google text-base text-brand-600" />
+              {nativeProviderLoading === "google" ? "Signing in..." : "Continue with Google"}
+            </button>
+            {!showEmailForm ? (
+              <button
+                type="button"
+                onClick={() => setShowEmailForm(true)}
+                disabled={nativeProviderLoading !== null}
+                className="flex w-full items-center justify-center gap-3 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50 disabled:opacity-60"
+              >
+                <i className="fa-solid fa-envelope text-sm text-gray-500" />
+                Continue with Email
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {(!nativeRuntime || showEmailForm) && <form onSubmit={onSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Email
@@ -353,7 +470,7 @@ export default function LoginPage() {
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
-        </form>
+        </form>}
 
         {!nativeRuntime && (
           <p className="mt-3 text-center text-sm">
@@ -363,8 +480,13 @@ export default function LoginPage() {
           </p>
         )}
 
-        {/* OAuth — web only. Native deep-link callback is not confirmed yet, so
-            native keeps email/password only. */}
+        {nativeRuntime && !showEmailForm && error ? (
+          <p className="text-sm text-red-600" role="alert" data-testid="login-error">
+            {error}
+          </p>
+        ) : null}
+
+        {/* OAuth — web only. Native uses provider ID tokens, not redirect OAuth. */}
         {!nativeRuntime && (
           <div className="mt-5">
             <OAuthButtons />

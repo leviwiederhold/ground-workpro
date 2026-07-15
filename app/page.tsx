@@ -2276,7 +2276,7 @@ const MobileAppShell = ({
               );
             }
             return <SubscribeView employees={employees} currentRole={currentRole} />;
-          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} navigateToView={navigateToView} />;
+          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} navigateToView={navigateToView} settingsDirtyRef={settingsDirtyRef} />;
           case 'marketing': return <MarketingView />;
           case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} jobs={jobs} />;
           default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
@@ -10271,7 +10271,7 @@ const MobileAppShell = ({
     // ============================================
     // SETTINGS VIEW
     // ============================================
-    const SettingsView = ({ employees = [], currentUser, currentRole, navigateToView }) => {
+    const SettingsView = ({ employees = [], currentUser, currentRole, navigateToView, settingsDirtyRef }) => {
       const isIosApp = useMemo(() => isIosNativeAppRuntime(), []);
       const isAdmin = currentRole === 'executive';
 

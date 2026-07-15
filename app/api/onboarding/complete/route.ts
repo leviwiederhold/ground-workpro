@@ -9,6 +9,14 @@ import {
   markSetupStepCompleted,
   markOptionalSetupStepsSkipped,
 } from "@/lib/onboarding/setupFlow";
+import {
+  earlyArrivalWindowField,
+  geofenceRadiusField,
+  lateGraceField,
+  timezoneField,
+  workDaysField,
+  workTimeField,
+} from "@/lib/company/companyConfig";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +38,19 @@ const bodySchema = z.object({
     })
     .partial()
     .optional(),
-  // Owner/admin company step
+  // Owner/admin company step. The work-schedule / timezone fields reuse the
+  // SAME canonical validators as the Settings API, so Setup and Settings
+  // validate timezone and work hours identically.
   company_name: z.string().trim().max(160).optional(),
   company_phone: z.string().trim().max(60).optional(),
   company_address: z.string().trim().max(500).optional(),
-  company_timezone: z.string().trim().max(120).optional(),
+  company_timezone: timezoneField.optional().or(z.literal("")),
+  company_default_work_days: workDaysField.optional(),
+  company_default_work_start_time: workTimeField.optional(),
+  company_default_work_end_time: workTimeField.optional(),
+  company_attendance_early_arrival_window_minutes: earlyArrivalWindowField.optional(),
+  company_attendance_late_grace_minutes: lateGraceField.optional(),
+  company_jobsite_geofence_radius_feet: geofenceRadiusField.optional(),
 });
 
 export async function POST(request: Request) {
@@ -100,6 +116,18 @@ export async function POST(request: Request) {
       if (data.company_timezone) companyPayload.timezone = data.company_timezone;
       if (data.company_phone !== undefined) companyPayload.phone = data.company_phone || null;
       if (data.company_address !== undefined) companyPayload.address = data.company_address || null;
+      if (data.company_default_work_days) companyPayload.default_work_days = data.company_default_work_days;
+      if (data.company_default_work_start_time) companyPayload.default_work_start_time = data.company_default_work_start_time;
+      if (data.company_default_work_end_time) companyPayload.default_work_end_time = data.company_default_work_end_time;
+      if (data.company_attendance_early_arrival_window_minutes !== undefined) {
+        companyPayload.attendance_early_arrival_window_minutes = data.company_attendance_early_arrival_window_minutes;
+      }
+      if (data.company_attendance_late_grace_minutes !== undefined) {
+        companyPayload.attendance_late_grace_minutes = data.company_attendance_late_grace_minutes;
+      }
+      if (data.company_jobsite_geofence_radius_feet !== undefined) {
+        companyPayload.jobsite_geofence_radius_feet = data.company_jobsite_geofence_radius_feet;
+      }
 
       // Tolerate environments missing newer columns.
       const keys = Object.keys(companyPayload);

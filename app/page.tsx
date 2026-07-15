@@ -40,6 +40,9 @@ const JobsiteTimeView = dynamic(
 const JobsiteTimeEmployeeCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeEmployeeCard').then((mod) => mod.JobsiteTimeEmployeeCard)
 );
+const CompanyConfigPrompt = dynamic(
+  () => import('@/app/components/company/CompanyConfigPrompt').then((mod) => mod.CompanyConfigPrompt)
+);
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
@@ -2230,6 +2233,7 @@ const MobileAppShell = ({
         switch(currentView) {
           case 'dashboard': return (
             <div className="space-y-4">
+              <CompanyConfigPrompt />
               <JobsiteTimeEmployeeCard />
               <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />
             </div>

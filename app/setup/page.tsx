@@ -99,11 +99,22 @@ export default async function SetupPage() {
       }
     }
 
-    let company: { name: string; phone: string; address: string; timezone: string } | null = null;
+    let company: {
+      name: string;
+      phone: string;
+      address: string;
+      timezone: string;
+      default_work_days: string[];
+      default_work_start_time: string;
+      default_work_end_time: string;
+      attendance_early_arrival_window_minutes: number;
+      attendance_late_grace_minutes: number;
+      jobsite_geofence_radius_feet: number;
+    } | null = null;
     if (status.role === "admin" && companyId) {
       let companyRow = await supabase
         .from("companies")
-        .select("name, phone, address, timezone")
+        .select("name, phone, address, timezone, default_work_days, default_work_start_time, default_work_end_time, attendance_early_arrival_window_minutes, attendance_late_grace_minutes, jobsite_geofence_radius_feet")
         .eq("id", companyId)
         .maybeSingle();
       if (companyRow.error) {
@@ -115,6 +126,12 @@ export default async function SetupPage() {
         phone: String(c.phone ?? "").trim(),
         address: String(c.address ?? "").trim(),
         timezone: String(c.timezone ?? "").trim(),
+        default_work_days: Array.isArray(c.default_work_days) ? c.default_work_days.map(String) : ["mon", "tue", "wed", "thu", "fri"],
+        default_work_start_time: String(c.default_work_start_time ?? "07:00").slice(0, 5),
+        default_work_end_time: String(c.default_work_end_time ?? "16:00").slice(0, 5),
+        attendance_early_arrival_window_minutes: Number(c.attendance_early_arrival_window_minutes ?? 120),
+        attendance_late_grace_minutes: Number(c.attendance_late_grace_minutes ?? 10),
+        jobsite_geofence_radius_feet: Number(c.jobsite_geofence_radius_feet ?? 5280),
       };
     }
 

@@ -12,13 +12,39 @@ type Prefill = {
   jobTitle: string;
   timezone: string;
   emergencyContact: string;
-  company: { name: string; phone: string; address: string; timezone: string } | null;
+  company: {
+    name: string;
+    phone: string;
+    address: string;
+    timezone: string;
+    default_work_days?: string[];
+    default_work_start_time?: string;
+    default_work_end_time?: string;
+    attendance_early_arrival_window_minutes?: number;
+    attendance_late_grace_minutes?: number;
+    jobsite_geofence_radius_feet?: number;
+  } | null;
 };
 
 const FIELD =
   "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500";
 const LABEL = "mb-1.5 block text-sm font-medium text-gray-700";
 const REQ = <span className="text-red-500"> *</span>;
+const WORK_DAYS = [
+  { label: "Sun", value: "sun" },
+  { label: "Mon", value: "mon" },
+  { label: "Tue", value: "tue" },
+  { label: "Wed", value: "wed" },
+  { label: "Thu", value: "thu" },
+  { label: "Fri", value: "fri" },
+  { label: "Sat", value: "sat" },
+] as const;
+const GEOFENCE_RADIUS_OPTIONS = [
+  { label: "0.25 mile", value: 1320 },
+  { label: "0.5 mile", value: 2640 },
+  { label: "1 mile", value: 5280 },
+  { label: "2 miles", value: 10560 },
+] as const;
 
 function guessTimezone(): string {
   try {
@@ -36,7 +62,7 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
   const steps = useMemo(
     () =>
       isOwner
-        ? ["Your Profile", "Company", "Preferences"]
+        ? ["Your Profile", "Company", "Company Work Schedule", "Preferences"]
         : ["Your Profile", "Work Profile"],
     [isOwner]
   );
@@ -67,6 +93,12 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
   const [companyTimezone, setCompanyTimezone] = useState(
     prefill.company?.timezone || guessTimezone()
   );
+  const [companyWorkDays, setCompanyWorkDays] = useState(prefill.company?.default_work_days ?? ["mon", "tue", "wed", "thu", "fri"]);
+  const [companyWorkStart, setCompanyWorkStart] = useState(prefill.company?.default_work_start_time ?? "07:00");
+  const [companyWorkEnd, setCompanyWorkEnd] = useState(prefill.company?.default_work_end_time ?? "16:00");
+  const [earlyArrivalWindow, setEarlyArrivalWindow] = useState(prefill.company?.attendance_early_arrival_window_minutes ?? 120);
+  const [lateGracePeriod, setLateGracePeriod] = useState(prefill.company?.attendance_late_grace_minutes ?? 10);
+  const [geofenceRadius, setGeofenceRadius] = useState(prefill.company?.jobsite_geofence_radius_feet ?? 5280);
 
   const isLast = step === steps.length - 1;
 
@@ -77,6 +109,10 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
     if (isOwner && step === 1) {
       if (!companyName.trim()) return "Company name is required.";
       if (!companyTimezone.trim()) return "Company timezone is required.";
+    }
+    if (isOwner && step === 2) {
+      if (companyWorkDays.length === 0) return "Select at least one work day.";
+      if (!companyWorkStart || !companyWorkEnd) return "Start and end times are required.";
     }
     return "";
   }
@@ -106,6 +142,12 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
                 company_phone: companyPhone.trim() || undefined,
                 company_address: companyAddress.trim() || undefined,
                 company_timezone: companyTimezone.trim() || undefined,
+                company_default_work_days: companyWorkDays,
+                company_default_work_start_time: companyWorkStart,
+                company_default_work_end_time: companyWorkEnd,
+                company_attendance_early_arrival_window_minutes: earlyArrivalWindow,
+                company_attendance_late_grace_minutes: lateGracePeriod,
+                company_jobsite_geofence_radius_feet: geofenceRadius,
               }
             : {}),
         }),
@@ -132,6 +174,10 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
     } else {
       setStep((s) => s + 1);
     }
+  }
+
+  function toggleWorkDay(day: string) {
+    setCompanyWorkDays((prev) => (prev.includes(day) ? prev.filter((item) => item !== day) : [...prev, day]));
   }
 
   return (
@@ -219,8 +265,58 @@ export default function SetupWizardClient({ prefill }: { prefill: Prefill }) {
             </div>
           )}
 
-          {/* STEP 2 (owner) — Preferences */}
+          {/* STEP 2 (owner) — Company Work Schedule */}
           {isOwner && step === 2 && (
+            <div className="space-y-4">
+              <div>
+                <label className={LABEL}>Timezone{REQ}</label>
+                <input className={FIELD} value={companyTimezone} onChange={(e) => setCompanyTimezone(e.target.value)} placeholder="e.g. America/New_York" />
+              </div>
+              <div>
+                <p className={LABEL}>Work days{REQ}</p>
+                <div className="flex flex-wrap gap-2">
+                  {WORK_DAYS.map((day) => (
+                    <label key={day.value} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700">
+                      <input type="checkbox" checked={companyWorkDays.includes(day.value)} onChange={() => toggleWorkDay(day.value)} className="accent-brand-500" />
+                      {day.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={LABEL}>Start time{REQ}</label>
+                  <input type="time" className={FIELD} value={companyWorkStart} onChange={(e) => setCompanyWorkStart(e.target.value)} />
+                </div>
+                <div>
+                  <label className={LABEL}>End time{REQ}</label>
+                  <input type="time" className={FIELD} value={companyWorkEnd} onChange={(e) => setCompanyWorkEnd(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className={LABEL}>Track arrivals up to X minutes early</label>
+                  <input type="number" min={0} max={720} className={FIELD} value={earlyArrivalWindow} onChange={(e) => setEarlyArrivalWindow(Number(e.target.value))} />
+                </div>
+                <div>
+                  <label className={LABEL}>Mark late after X minutes</label>
+                  <input type="number" min={0} max={240} className={FIELD} value={lateGracePeriod} onChange={(e) => setLateGracePeriod(Number(e.target.value))} />
+                </div>
+              </div>
+              <div>
+                <label className={LABEL}>Job geofence radius</label>
+                <select className={FIELD} value={geofenceRadius} onChange={(e) => setGeofenceRadius(Number(e.target.value))}>
+                  {GEOFENCE_RADIUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-gray-500">How close an employee must be to the jobsite to be counted as arrived.</p>
+              </div>
+            </div>
+          )}
+
+          {/* STEP 3 (owner) — Preferences */}
+          {isOwner && step === 3 && (
             <div className="space-y-4">
               <div>
                 <label className={LABEL}>Preferred landing page <span className="text-gray-400">(optional)</span></label>

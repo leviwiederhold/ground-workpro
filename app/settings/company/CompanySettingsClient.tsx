@@ -8,6 +8,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 type CompanySettings = {
   company_name: string;
   timezone: string;
+  default_work_days: string[];
+  default_work_start_time: string;
+  default_work_end_time: string;
+  attendance_early_arrival_window_minutes: number;
+  attendance_late_grace_minutes: number;
+  jobsite_geofence_radius_feet: number;
   phone: string;
   email: string;
   address: string;
@@ -23,6 +29,12 @@ type CompanySettings = {
 const EMPTY_SETTINGS: CompanySettings = {
   company_name: "",
   timezone: "",
+  default_work_days: ["mon", "tue", "wed", "thu", "fri"],
+  default_work_start_time: "07:00",
+  default_work_end_time: "16:00",
+  attendance_early_arrival_window_minutes: 120,
+  attendance_late_grace_minutes: 10,
+  jobsite_geofence_radius_feet: 5280,
   phone: "",
   email: "",
   address: "",
@@ -40,6 +52,23 @@ const TIMEZONE_OPTIONS = [
   { label: "Central Time (CT)", value: "America/Chicago" },
   { label: "Mountain Time (MT)", value: "America/Denver" },
   { label: "Pacific Time (PT)", value: "America/Los_Angeles" },
+] as const;
+
+const WORK_DAY_OPTIONS = [
+  { label: "Sun", value: "sun" },
+  { label: "Mon", value: "mon" },
+  { label: "Tue", value: "tue" },
+  { label: "Wed", value: "wed" },
+  { label: "Thu", value: "thu" },
+  { label: "Fri", value: "fri" },
+  { label: "Sat", value: "sat" },
+] as const;
+
+const GEOFENCE_RADIUS_OPTIONS = [
+  { label: "0.25 mile", value: 1320 },
+  { label: "0.5 mile", value: 2640 },
+  { label: "1 mile", value: 5280 },
+  { label: "2 miles", value: 10560 },
 ] as const;
 
 const initialsFromName = (name: string) => {
@@ -83,6 +112,14 @@ export function CompanySettingsClient() {
       setSettings({
         company_name: String(item.company_name ?? ""),
         timezone: String(item.timezone ?? ""),
+        default_work_days: Array.isArray(item.default_work_days) && item.default_work_days.length > 0
+          ? item.default_work_days.map(String)
+          : ["mon", "tue", "wed", "thu", "fri"],
+        default_work_start_time: String(item.default_work_start_time ?? "07:00").slice(0, 5),
+        default_work_end_time: String(item.default_work_end_time ?? "16:00").slice(0, 5),
+        attendance_early_arrival_window_minutes: Number(item.attendance_early_arrival_window_minutes ?? 120),
+        attendance_late_grace_minutes: Number(item.attendance_late_grace_minutes ?? 10),
+        jobsite_geofence_radius_feet: Number(item.jobsite_geofence_radius_feet ?? 5280),
         phone: String(item.phone ?? ""),
         email: String(item.email ?? ""),
         address: String(item.address ?? ""),
@@ -120,6 +157,9 @@ export function CompanySettingsClient() {
       const nextFieldErrors: Record<string, string> = {};
       if (!settings.company_name.trim()) nextFieldErrors.company_name = "Company name is required.";
       if (isOnboarding && !settings.timezone.trim()) nextFieldErrors.timezone = "Please select a timezone.";
+      if (settings.default_work_days.length === 0) nextFieldErrors.default_work_days = "Select at least one work day.";
+      if (!settings.default_work_start_time) nextFieldErrors.default_work_start_time = "Start time is required.";
+      if (!settings.default_work_end_time) nextFieldErrors.default_work_end_time = "End time is required.";
       if (Object.keys(nextFieldErrors).length > 0) {
         setFieldErrors(nextFieldErrors);
         setError("Please fix the highlighted fields.");
@@ -196,6 +236,18 @@ export function CompanySettingsClient() {
     }
   };
 
+  const toggleWorkDay = (day: string) => {
+    setSettings((prev) => {
+      const hasDay = prev.default_work_days.includes(day);
+      return {
+        ...prev,
+        default_work_days: hasDay
+          ? prev.default_work_days.filter((item) => item !== day)
+          : [...prev.default_work_days, day],
+      };
+    });
+  };
+
   return (
     <div className="mx-auto max-w-4xl space-y-4">
       <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -269,6 +321,97 @@ export function CompanySettingsClient() {
                 </select>
                 {fieldErrors.timezone ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.timezone}</span> : null}
               </label>
+
+              <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 sm:col-span-2">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Company / Attendance</h2>
+                  <p className="mt-1 text-sm text-gray-600">Company work schedule defaults for attendance tracking.</p>
+                </div>
+
+                <div>
+                  <span className="mb-2 block text-sm font-medium text-gray-700">Work days</span>
+                  <div className="flex flex-wrap gap-2">
+                    {WORK_DAY_OPTIONS.map((day) => (
+                      <label key={day.value} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">
+                        <input
+                          type="checkbox"
+                          checked={settings.default_work_days.includes(day.value)}
+                          onChange={() => toggleWorkDay(day.value)}
+                          className="accent-brand-600"
+                        />
+                        {day.label}
+                      </label>
+                    ))}
+                  </div>
+                  {fieldErrors.default_work_days ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.default_work_days}</span> : null}
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="text-sm">
+                    <span className="mb-1 block text-gray-600">Start time</span>
+                    <input
+                      type="time"
+                      className={getFieldClassName("default_work_start_time")}
+                      value={settings.default_work_start_time}
+                      onChange={(event) => setSettings((prev) => ({ ...prev, default_work_start_time: event.target.value }))}
+                      aria-invalid={fieldErrors.default_work_start_time ? "true" : "false"}
+                    />
+                    {fieldErrors.default_work_start_time ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.default_work_start_time}</span> : null}
+                  </label>
+
+                  <label className="text-sm">
+                    <span className="mb-1 block text-gray-600">End time</span>
+                    <input
+                      type="time"
+                      className={getFieldClassName("default_work_end_time")}
+                      value={settings.default_work_end_time}
+                      onChange={(event) => setSettings((prev) => ({ ...prev, default_work_end_time: event.target.value }))}
+                      aria-invalid={fieldErrors.default_work_end_time ? "true" : "false"}
+                    />
+                    {fieldErrors.default_work_end_time ? <span className="mt-1 block text-xs text-red-600">{fieldErrors.default_work_end_time}</span> : null}
+                  </label>
+
+                  <label className="text-sm">
+                    <span className="mb-1 block text-gray-600">Track arrivals up to X minutes early</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={720}
+                      className={getFieldClassName("attendance_early_arrival_window_minutes")}
+                      value={settings.attendance_early_arrival_window_minutes}
+                      onChange={(event) => setSettings((prev) => ({ ...prev, attendance_early_arrival_window_minutes: Number(event.target.value) }))}
+                      aria-invalid={fieldErrors.attendance_early_arrival_window_minutes ? "true" : "false"}
+                    />
+                  </label>
+
+                  <label className="text-sm">
+                    <span className="mb-1 block text-gray-600">Mark late after X minutes</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      className={getFieldClassName("attendance_late_grace_minutes")}
+                      value={settings.attendance_late_grace_minutes}
+                      onChange={(event) => setSettings((prev) => ({ ...prev, attendance_late_grace_minutes: Number(event.target.value) }))}
+                      aria-invalid={fieldErrors.attendance_late_grace_minutes ? "true" : "false"}
+                    />
+                  </label>
+
+                  <label className="text-sm sm:col-span-2">
+                    <span className="mb-1 block text-gray-600">Job geofence radius</span>
+                    <select
+                      className={getFieldClassName("jobsite_geofence_radius_feet")}
+                      value={settings.jobsite_geofence_radius_feet}
+                      onChange={(event) => setSettings((prev) => ({ ...prev, jobsite_geofence_radius_feet: Number(event.target.value) }))}
+                      aria-invalid={fieldErrors.jobsite_geofence_radius_feet ? "true" : "false"}
+                    >
+                      {GEOFENCE_RADIUS_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
 
               <label className="text-sm">
                 <span className="mb-1 block text-gray-600">Phone (optional)</span>

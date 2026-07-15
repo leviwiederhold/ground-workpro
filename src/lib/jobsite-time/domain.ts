@@ -17,6 +17,16 @@ export type TimecardSource = (typeof TIMECARD_SOURCES)[number];
 export const TIMECARD_CONFIDENCE = ["high", "medium", "low"] as const;
 export type TimecardConfidence = (typeof TIMECARD_CONFIDENCE)[number];
 
+export const ATTENDANCE_ARRIVAL_STATUSES = ["early", "on_time", "late"] as const;
+export type AttendanceArrivalStatus = (typeof ATTENDANCE_ARRIVAL_STATUSES)[number];
+
+export const DEFAULT_COMPANY_TIMEZONE = "America/New_York";
+export const DEFAULT_WORK_DAYS = ["mon", "tue", "wed", "thu", "fri"] as const;
+export const DEFAULT_WORK_START_TIME = "07:00";
+export const DEFAULT_WORK_END_TIME = "16:00";
+export const DEFAULT_EARLY_ARRIVAL_WINDOW_MINUTES = 120;
+export const DEFAULT_LATE_GRACE_MINUTES = 10;
+
 export const TIMECARD_EVENT_TYPES = [
   "entered_geofence",
   "exited_geofence",
@@ -118,12 +128,149 @@ export function computeTotalMinutes(row: {
 // "enter" events are hard-rejected.
 export type JobsiteEvaluation = {
   reject: boolean;
+  ignore?: boolean;
   reason?: string;
   confidence: TimecardConfidence;
   needsReview: boolean;
   distanceMeters: number | null;
   withinSchedule: boolean | null;
+  arrivalStatus: AttendanceArrivalStatus | null;
 };
+
+export type CompanyWorkScheduleSettings = {
+  timezone: string;
+  workDays: string[];
+  workStartTime: string;
+  workEndTime: string;
+  earlyArrivalWindowMinutes: number;
+  lateGraceMinutes: number;
+};
+
+export type AttendanceScheduleWindow = {
+  workDate: string;
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  hasSchedule: boolean;
+  isWorkDay: boolean;
+};
+
+const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+function safeTimezone(value: unknown): string {
+  const timezone = String(value ?? "").trim() || DEFAULT_COMPANY_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: timezone }).format(new Date());
+    return timezone;
+  } catch {
+    return DEFAULT_COMPANY_TIMEZONE;
+  }
+}
+
+function clampInt(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+export function normalizeWorkTime(value: unknown, fallback: string): string {
+  const raw = String(value ?? "").trim();
+  const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!match) return fallback;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return fallback;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+export function normalizeWorkDays(value: unknown): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+  const normalized = raw
+    .map((day) => String(day).trim().toLowerCase().slice(0, 3))
+    .filter((day): day is (typeof DAY_KEYS)[number] => DAY_KEYS.includes(day as any));
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : [...DEFAULT_WORK_DAYS];
+}
+
+// NOTE: The canonical, no-defaults-invented loader lives in
+// src/lib/company/companyConfig.ts (resolveCompanyWorkSchedule). This module
+// intentionally does NOT provide a lenient "always returns a value" mapper, so
+// attendance can never compute status against fabricated work hours.
+
+function localParts(date: Date, timezone: string) {
+  const timeZone = safeTimezone(timezone);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    weekday: "short",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour,
+    minute: get("minute"),
+    second: get("second"),
+    weekday: get("weekday").toLowerCase().slice(0, 3),
+  };
+}
+
+export function getCompanyLocalDateKey(iso: string, timezone: string): string {
+  const date = new Date(iso);
+  const parts = localParts(date, safeTimezone(timezone));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function zonedTimeToUtcIso(dateKey: string, time: string, timezone: string): string {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const [hour, minute] = normalizeWorkTime(time, DEFAULT_WORK_START_TIME).split(":").map(Number);
+  let utcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+  for (let i = 0; i < 3; i += 1) {
+    const parts = localParts(new Date(utcMs), safeTimezone(timezone));
+    const renderedMs = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute),
+      Number(parts.second)
+    );
+    const targetMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+    utcMs += targetMs - renderedMs;
+  }
+  return new Date(utcMs).toISOString();
+}
+
+export function buildCompanyScheduleWindow(
+  occurredAt: string,
+  settings: CompanyWorkScheduleSettings
+): AttendanceScheduleWindow {
+  const timezone = safeTimezone(settings.timezone);
+  const workDate = getCompanyLocalDateKey(occurredAt, timezone);
+  const weekday = localParts(new Date(occurredAt), timezone).weekday;
+  const isWorkDay = settings.workDays.includes(weekday);
+  if (!isWorkDay) {
+    return { workDate, scheduledStart: null, scheduledEnd: null, hasSchedule: false, isWorkDay };
+  }
+  const scheduledStart = zonedTimeToUtcIso(workDate, settings.workStartTime, timezone);
+  let scheduledEnd = zonedTimeToUtcIso(workDate, settings.workEndTime, timezone);
+  if (Date.parse(scheduledEnd) <= Date.parse(scheduledStart)) {
+    scheduledEnd = new Date(Date.parse(scheduledEnd) + 24 * 60 * 60000).toISOString();
+  }
+  return { workDate, scheduledStart, scheduledEnd, hasSchedule: true, isWorkDay };
+}
 
 const CONF_RANK: Record<TimecardConfidence, number> = { low: 0, medium: 1, high: 2 };
 
@@ -139,6 +286,8 @@ export function evaluateJobsiteEvent(params: {
   scheduledStart: string | null;
   scheduledEnd: string | null;
   hasSchedule: boolean;
+  earlyArrivalWindowMinutes?: number;
+  lateGraceMinutes?: number;
 }): JobsiteEvaluation {
   let confidence: TimecardConfidence = confidenceForAccuracy(params.accuracyMeters);
   let needsReview = false;
@@ -170,6 +319,7 @@ export function evaluateJobsiteEvent(params: {
           needsReview: true,
           distanceMeters,
           withinSchedule: null,
+          arrivalStatus: null,
         };
       }
       if (distanceMeters > radiusM) {
@@ -191,12 +341,38 @@ export function evaluateJobsiteEvent(params: {
 
   // --- Scheduled window enforcement -----------------------------------------
   let withinSchedule: boolean | null = null;
+  let arrivalStatus: AttendanceArrivalStatus | null = null;
   const t = Date.parse(params.occurredAt);
-  const graceMs = 30 * 60000;
+  // Arrival status (early/on_time/late) and the early-arrival "ignore" window
+  // are ONLY computed when the caller passes company work-schedule tuning
+  // (i.e. the company has valid, configured work hours + timezone). Without it
+  // we never invent a status — see req: "Do not calculate late/early attendance
+  // status until valid work hours and timezone exist."
+  const hasCompanySchedule =
+    params.earlyArrivalWindowMinutes != null && params.lateGraceMinutes != null;
+  const earlyMs = clampInt(params.earlyArrivalWindowMinutes, DEFAULT_EARLY_ARRIVAL_WINDOW_MINUTES, 0, 720) * 60000;
+  const graceMs = clampInt(params.lateGraceMinutes, DEFAULT_LATE_GRACE_MINUTES, 0, 240) * 60000;
   if (params.hasSchedule && params.scheduledStart && params.scheduledEnd) {
     const s = Date.parse(params.scheduledStart);
     const e = Date.parse(params.scheduledEnd);
-    withinSchedule = Number.isFinite(s) && Number.isFinite(e) && t >= s - graceMs && t <= e + graceMs;
+    if (hasCompanySchedule && params.transition === "enter" && Number.isFinite(s) && t < s - earlyMs) {
+      return {
+        reject: false,
+        ignore: true,
+        reason: "Arrival is before the company's early arrival tracking window",
+        confidence,
+        needsReview: false,
+        distanceMeters,
+        withinSchedule: false,
+        arrivalStatus: null,
+      };
+    }
+    withinSchedule = Number.isFinite(s) && Number.isFinite(e) && t >= s - earlyMs && t <= e + graceMs;
+    if (hasCompanySchedule && params.transition === "enter" && Number.isFinite(s)) {
+      if (t < s) arrivalStatus = "early";
+      else if (t <= s + graceMs) arrivalStatus = "on_time";
+      else arrivalStatus = "late";
+    }
     if (!withinSchedule) {
       downgrade("low");
       needsReview = true; // outside the assigned shift window
@@ -214,7 +390,7 @@ export function evaluateJobsiteEvent(params: {
     if (day === 0 || day === 6 || hour >= 21 || hour < 5) downgrade("low");
   }
 
-  return { reject: false, confidence, needsReview, distanceMeters, withinSchedule };
+  return { reject: false, confidence, needsReview, distanceMeters, withinSchedule, arrivalStatus };
 }
 
 export function mapTimecard(row: any) {
@@ -231,6 +407,7 @@ export function mapTimecard(row: any) {
     geofenceRadiusFeet: row.geofence_radius_feet ?? null,
     detectedArrivalAt: row.detected_arrival_at ?? null,
     detectedDepartureAt: row.detected_departure_at ?? null,
+    arrivalStatus: row.arrival_status ?? null,
     pendingArrivalAt: row.pending_arrival_at ?? null,
     pendingDepartureAt: row.pending_departure_at ?? null,
     clockInAt: row.clock_in_at ?? null,

@@ -58,7 +58,7 @@ export async function GET(request: Request) {
 
     // Derived filters (need scheduled window comparison).
     if (p.get("lateArrival") === "1") {
-      items = items.filter((t) => t.scheduledStart && t.clockInAt && Date.parse(t.clockInAt) > Date.parse(t.scheduledStart) + 5 * 60000);
+      items = items.filter((t) => t.arrivalStatus === "late");
     }
     if (p.get("earlyDeparture") === "1") {
       items = items.filter((t) => t.scheduledEnd && t.clockOutAt && Date.parse(t.clockOutAt) < Date.parse(t.scheduledEnd) - 5 * 60000);

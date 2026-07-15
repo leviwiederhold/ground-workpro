@@ -3,11 +3,13 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
+  buildCompanyScheduleWindow,
   computeTotalMinutes,
   evaluateJobsiteEvent,
   mapCompanyJobsiteSettings,
   mapTimecard,
 } from "@/lib/jobsite-time/domain";
+import { resolveCompanyWorkSchedule } from "@/lib/company/companyConfig";
 
 export const dynamic = "force-dynamic";
 
@@ -46,11 +48,14 @@ export async function POST(request: Request) {
     const settingsRow = await db
       .from("companies")
       .select(
-        "jobsite_time_enabled,jobsite_require_approval,jobsite_geofence_radius_feet,jobsite_ignore_short_departure_minutes,jobsite_break_threshold_minutes,jobsite_auto_clockout_after_end,jobsite_manual_fallback_enabled"
+        "timezone,default_work_days,default_work_start_time,default_work_end_time,attendance_early_arrival_window_minutes,attendance_late_grace_minutes,jobsite_time_enabled,jobsite_require_approval,jobsite_geofence_radius_feet,jobsite_ignore_short_departure_minutes,jobsite_break_threshold_minutes,jobsite_auto_clockout_after_end,jobsite_manual_fallback_enabled"
       )
       .eq("id", companyId)
       .maybeSingle();
     const settings = mapCompanyJobsiteSettings(settingsRow.data);
+    // Null until the company has valid, configured work hours + timezone. When
+    // null we never derive a scheduled window or an arrival status.
+    const workSchedule = resolveCompanyWorkSchedule(settingsRow.data);
     if (source === "jobsite_auto" && !settings.enabled) {
       return NextResponse.json({ error: "Automatic Jobsite Time is not enabled for this company." }, { status: 403 });
     }
@@ -91,12 +96,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Employee is not assigned to this job" }, { status: 403 });
     }
 
-    const workDate = occurredAt.slice(0, 10);
+    const companyWindow = workSchedule ? buildCompanyScheduleWindow(occurredAt, workSchedule) : null;
+    // Fall back to a UTC calendar date only for record-keeping when no company
+    // schedule/timezone is configured — this does NOT drive attendance status.
+    const workDate = companyWindow?.workDate ?? occurredAt.slice(0, 10);
 
     // Look up the assigned shift window for this day (if the schedule exists).
-    let scheduledStart: string | null = null;
-    let scheduledEnd: string | null = null;
-    let hasSchedule = false;
+    let scheduledStart: string | null = companyWindow?.scheduledStart ?? null;
+    let scheduledEnd: string | null = companyWindow?.scheduledEnd ?? null;
+    let hasSchedule = companyWindow?.hasSchedule ?? false;
     const scheduleResult = await db
       .from("schedule_assignments")
       .select("starts_at, ends_at")
@@ -128,9 +136,20 @@ export async function POST(request: Request) {
       scheduledStart,
       scheduledEnd,
       hasSchedule,
+      // Only pass tuning when the company has valid work hours — this is what
+      // gates late/early computation in evaluateJobsiteEvent.
+      earlyArrivalWindowMinutes: workSchedule?.earlyArrivalWindowMinutes,
+      lateGraceMinutes: workSchedule?.lateGraceMinutes,
     });
     if (evaluation.reject && source === "jobsite_auto") {
       return NextResponse.json({ error: evaluation.reason || "Invalid jobsite event" }, { status: 422 });
+    }
+    if (evaluation.ignore && source === "jobsite_auto") {
+      return NextResponse.json({
+        item: null,
+        ignored: true,
+        reason: evaluation.reason || "Event is outside the company's attendance tracking window",
+      });
     }
     const confidence = evaluation.confidence;
     const needsReview = evaluation.needsReview;
@@ -166,6 +185,7 @@ export async function POST(request: Request) {
             scheduled_end: scheduledEnd,
             geofence_radius_feet: settings.geofenceRadiusFeet,
             detected_arrival_at: occurredAt,
+            arrival_status: evaluation.arrivalStatus,
             clock_in_at: occurredAt,
             status: needsReview ? "needs_review" : clockedInStatus,
             source,
@@ -178,7 +198,7 @@ export async function POST(request: Request) {
       } else if (!timecard.clock_in_at) {
         const upd = await db
           .from("jobsite_timecards")
-          .update({ detected_arrival_at: occurredAt, clock_in_at: occurredAt, confidence })
+          .update({ detected_arrival_at: occurredAt, arrival_status: evaluation.arrivalStatus, clock_in_at: occurredAt, confidence })
           .eq("id", timecard.id)
           .eq("company_id", companyId)
           .select("*")

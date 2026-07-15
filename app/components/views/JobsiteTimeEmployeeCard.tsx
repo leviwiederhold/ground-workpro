@@ -41,6 +41,15 @@ export function JobsiteTimeEmployeeCard() {
 
   useEffect(() => {
     load();
+    // Re-read company work hours / attendance state when the tab regains focus,
+    // so changes saved in Settings show up here without a full page reload.
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
   }, [load]);
 
   if (loading || enabled === null) return null;

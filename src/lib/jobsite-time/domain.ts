@@ -470,7 +470,7 @@ export const DEFAULT_DEPARTURE_GRACE_MINUTES = 5;
 export const DEFAULT_ARRIVAL_CONFIRMATION_SECONDS = 45;
 
 export const DEFAULT_JOBSITE_TIME_SETTINGS: JobsiteTimeSettings = {
-  enabled: false,
+  enabled: true,
   requireApproval: true,
   wakeRadiusMeters: DEFAULT_WAKE_RADIUS_METERS,
   arrivalRadiusFeet: DEFAULT_ARRIVAL_RADIUS_FEET,
@@ -511,7 +511,10 @@ export function arrivalConfirmationLabel(seconds: number): string {
 
 export function mapCompanyJobsiteSettings(row: any): JobsiteTimeSettings {
   return {
-    enabled: Boolean(row?.jobsite_time_enabled),
+    // Attendance is permanent for every company. The legacy jobsite_time_enabled
+    // column is no longer a product gate — a false/null value must NOT disable
+    // Attendance — so it is always reported enabled. (Column kept, not dropped.)
+    enabled: true,
     requireApproval: row?.jobsite_require_approval ?? true,
     wakeRadiusMeters: Number(row?.jobsite_wake_radius_meters ?? DEFAULT_WAKE_RADIUS_METERS),
     // Preserve any saved radius; only fall back to the 500 ft default when unset.

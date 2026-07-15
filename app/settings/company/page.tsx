@@ -1,17 +1,9 @@
 import { redirect } from "next/navigation";
-import { requireRole } from "@/lib/auth/requireRole";
-import { CompanySettingsClient } from "./CompanySettingsClient";
 
-export default async function CompanySettingsPage() {
-  try {
-    await requireRole(["admin"]);
-  } catch {
-    redirect("/");
-  }
-
-  return (
-    <main className="min-h-screen bg-gray-50 p-6">
-      <CompanySettingsClient />
-    </main>
-  );
+// The company/work-hours configuration now lives in the single in-app Settings
+// experience reached from the app navigation (renders SettingsView). This route
+// used to render a separate, disconnected form; it now redirects so there is
+// exactly ONE Settings surface and no duplicated company form.
+export default function CompanySettingsPage() {
+  redirect("/settings");
 }

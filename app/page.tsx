@@ -16,6 +16,7 @@ import {
 } from '@/lib/permissions/sensitivity';
 import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib/theme/appearance';
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
+import { runUnifiedSave } from '@/lib/settings/unifiedSave';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
 import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
@@ -1317,8 +1318,20 @@ const MobileAppShell = ({
         return String(moduleAccess?.[moduleKey] || 'none') === 'edit';
       }, [moduleAccess]);
 
+      // True only while the Settings page is mounted AND has unsaved edits.
+      // Read by navigateToView (in-app guard) and set by SettingsView.
+      const settingsDirtyRef = useRef(false);
       const navigateToView = useCallback((view, { replace = false } = {}) => {
         const nextView = String(view || 'dashboard');
+        // Guard: unsaved Settings edits. settingsDirtyRef is true only while the
+        // Settings page is mounted AND dirty.
+        if (settingsDirtyRef.current && nextView !== 'settings') {
+          if (typeof window !== 'undefined' &&
+              !window.confirm('You have unsaved changes in Settings. Leave without saving?')) {
+            return;
+          }
+          settingsDirtyRef.current = false;
+        }
         setCurrentView(nextView);
         if (typeof window === 'undefined') return;
         const nextPath = pathForView(nextView);
@@ -10269,13 +10282,36 @@ const MobileAppShell = ({
       const [loadError, setLoadError] = useState('');
       const [loading, setLoading] = useState(true);
 
-      const [profile, setProfile] = useState({ full_name: '', phone: '', job_title: '', timezone: '' });
-      const [profileSaving, setProfileSaving] = useState(false);
-      const [profileMsg, setProfileMsg] = useState('');
+      // One unified save for the whole page. No per-section save buttons/state.
+      // saveState: 'idle' | 'saving' | 'saved' | 'error'. We NEVER show "Saved"
+      // unless every dirty section's request succeeded.
+      const [saveState, setSaveState] = useState('idle');
+      const [saveError, setSaveError] = useState('');
 
-      const [company, setCompany] = useState({ company_name: '', timezone: '', phone: '', email: '', address: '' });
-      const [companySaving, setCompanySaving] = useState(false);
-      const [companyMsg, setCompanyMsg] = useState('');
+      const EMPTY_PROFILE = { full_name: '', phone: '', job_title: '', timezone: '' };
+      const EMPTY_COMPANY = {
+        company_name: '', timezone: '', phone: '', email: '', address: '',
+        default_work_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+        default_work_start_time: '', default_work_end_time: '',
+        attendance_early_arrival_window_minutes: 120,
+        attendance_late_grace_minutes: 10,
+        jobsite_geofence_radius_feet: 5280,
+      };
+      const EMPTY_PRICING = {
+        operator_labor_rate: 0, labor_burden_percent: 0, hauling_rate_per_hour: 0,
+        dump_fee_per_load: 0, target_margin_percent: 0, contingency_percent: 0, markup_percent: 0,
+      };
+
+      const [profile, setProfile] = useState(EMPTY_PROFILE);
+      const [company, setCompany] = useState(EMPTY_COMPANY);
+      const [pricingSettings, setPricingSettings] = useState(EMPTY_PRICING);
+      const [attendance, setAttendance] = useState(null);
+
+      // Baselines captured at load; a section is "dirty" when it differs.
+      const [initialProfile, setInitialProfile] = useState(EMPTY_PROFILE);
+      const [initialCompany, setInitialCompany] = useState(EMPTY_COMPANY);
+      const [initialPricing, setInitialPricing] = useState(EMPTY_PRICING);
+      const [initialAttendance, setInitialAttendance] = useState(null);
 
       const [billingStatus, setBillingStatus] = useState(null);
       const [portalLoading, setPortalLoading] = useState(false);
@@ -10285,15 +10321,7 @@ const MobileAppShell = ({
       const [pwdMsg, setPwdMsg] = useState('');
       const [signingOut, setSigningOut] = useState(false);
 
-      // Cost defaults (operational config — kept so nothing is lost).
       const [pricingLoading, setPricingLoading] = useState(false);
-      const [pricingSaving, setPricingSaving] = useState(false);
-      const [pricingError, setPricingError] = useState('');
-      const [pricingSuccess, setPricingSuccess] = useState('');
-      const [pricingSettings, setPricingSettings] = useState({
-        operator_labor_rate: 0, labor_burden_percent: 0, hauling_rate_per_hour: 0,
-        dump_fee_per_load: 0, target_margin_percent: 0, contingency_percent: 0, markup_percent: 0,
-      });
 
       useEffect(() => {
         let active = true;
@@ -10301,33 +10329,53 @@ const MobileAppShell = ({
           setLoading(true);
           setLoadError('');
           try {
-            const [profileRes, companyRes, billingRes] = await Promise.all([
+            const [profileRes, companyRes, billingRes, attendanceRes] = await Promise.all([
               fetch('/api/profile', { cache: 'no-store' }),
               isAdmin ? fetch('/api/company/settings', { cache: 'no-store' }) : Promise.resolve(null),
               isIosApp ? Promise.resolve(null) : fetch('/api/billing/status', { cache: 'no-store' }),
+              isAdmin ? fetch('/api/jobsite-time/settings', { cache: 'no-store' }) : Promise.resolve(null),
             ]);
             if (!active) return;
             if (profileRes && profileRes.ok) {
               const p = (await profileRes.json().catch(() => ({})))?.item || {};
-              setProfile({
+              const nextProfile = {
                 full_name: String(p.full_name || ''),
                 phone: String(p.phone || ''),
                 job_title: String(p.job_title || ''),
                 timezone: String(p.timezone || ''),
-              });
+              };
+              setProfile(nextProfile);
+              setInitialProfile(nextProfile);
             }
             if (companyRes && companyRes.ok) {
               const c = (await companyRes.json().catch(() => ({})))?.item || {};
-              setCompany({
+              const nextCompany = {
                 company_name: String(c.company_name || c.name || ''),
                 timezone: String(c.timezone || ''),
                 phone: String(c.phone || ''),
                 email: String(c.email || ''),
                 address: String(c.address || ''),
-              });
+                default_work_days: Array.isArray(c.default_work_days) && c.default_work_days.length > 0
+                  ? c.default_work_days.map(String)
+                  : ['mon', 'tue', 'wed', 'thu', 'fri'],
+                default_work_start_time: String(c.default_work_start_time || ''),
+                default_work_end_time: String(c.default_work_end_time || ''),
+                attendance_early_arrival_window_minutes: Number(c.attendance_early_arrival_window_minutes ?? 120),
+                attendance_late_grace_minutes: Number(c.attendance_late_grace_minutes ?? 10),
+                jobsite_geofence_radius_feet: Number(c.jobsite_geofence_radius_feet ?? 5280),
+              };
+              setCompany(nextCompany);
+              setInitialCompany(nextCompany);
             }
             if (billingRes && billingRes.ok) {
               setBillingStatus((await billingRes.json().catch(() => ({})))?.item || null);
+            }
+            if (attendanceRes && attendanceRes.ok) {
+              const a = (await attendanceRes.json().catch(() => ({})))?.item || null;
+              if (a) {
+                setAttendance(a);
+                setInitialAttendance(a);
+              }
             }
           } catch {
             if (active) setLoadError('Failed to load settings.');
@@ -10348,7 +10396,7 @@ const MobileAppShell = ({
             const payload = await response.json().catch(() => ({}));
             if (!active || !response.ok) return;
             const row = payload?.pricing_settings || {};
-            setPricingSettings({
+            const nextPricing = {
               operator_labor_rate: Number(row.operator_labor_rate) || 0,
               labor_burden_percent: Number(row.labor_burden_percent) || 0,
               hauling_rate_per_hour: Number(row.hauling_rate_per_hour) || 0,
@@ -10356,7 +10404,9 @@ const MobileAppShell = ({
               target_margin_percent: Number(row.target_margin_percent) || 0,
               contingency_percent: Number(row.contingency_percent) || 0,
               markup_percent: Number(row.markup_percent) || 0,
-            });
+            };
+            setPricingSettings(nextPricing);
+            setInitialPricing(nextPricing);
           } finally {
             if (active) setPricingLoading(false);
           }
@@ -10365,58 +10415,117 @@ const MobileAppShell = ({
         return () => { active = false; };
       }, []);
 
-      const saveProfile = async () => {
-        setProfileSaving(true); setProfileMsg('');
-        try {
-          const res = await fetch('/api/profile', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              full_name: profile.full_name.trim(),
-              phone: profile.phone.trim(),
-              job_title: profile.job_title.trim(),
-              timezone: profile.timezone.trim(),
-            }),
-          });
-          const payload = await res.json().catch(() => ({}));
-          if (!res.ok) { setProfileMsg(payload?.error || 'Failed to save profile.'); return; }
-          setProfileMsg('Profile saved.');
-        } catch { setProfileMsg('Failed to save profile.'); }
-        finally { setProfileSaving(false); }
-      };
+      // ── Dirty tracking across every editable section ──────────────────────
+      const jsonEq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+      const profileDirty = !jsonEq(profile, initialProfile);
+      const companyDirty = isAdmin && !jsonEq(company, initialCompany);
+      const pricingDirty = isAdmin && !jsonEq(pricingSettings, initialPricing);
+      const attendanceDirty = Boolean(isAdmin && attendance && initialAttendance && !jsonEq(attendance, initialAttendance));
+      const isDirty = Boolean(profileDirty || companyDirty || pricingDirty || attendanceDirty);
 
-      const saveCompany = async () => {
-        setCompanySaving(true); setCompanyMsg('');
-        try {
-          const res = await fetch('/api/company/settings', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              company_name: company.company_name.trim(),
-              timezone: company.timezone.trim(),
-              phone: company.phone.trim(),
-              email: company.email.trim(),
-              address: company.address.trim(),
-            }),
-          });
-          const payload = await res.json().catch(() => ({}));
-          if (!res.ok) { setCompanyMsg(payload?.error || 'Failed to save company.'); return; }
-          setCompanyMsg('Company information saved.');
-        } catch { setCompanyMsg('Failed to save company.'); }
-        finally { setCompanySaving(false); }
-      };
+      // Warn before leaving (refresh/close/in-app view switch) with unsaved edits.
+      useEffect(() => {
+        settingsDirtyRef.current = isDirty;
+        const beforeUnload = (e) => { if (!settingsDirtyRef.current) return; e.preventDefault(); e.returnValue = ''; };
+        window.addEventListener('beforeunload', beforeUnload);
+        return () => {
+          window.removeEventListener('beforeunload', beforeUnload);
+          settingsDirtyRef.current = false;
+        };
+      }, [isDirty]);
 
-      const savePricingSettings = async () => {
-        try {
-          setPricingSaving(true); setPricingError(''); setPricingSuccess('');
-          const response = await fetch('/api/pricing-settings', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pricingSettings),
-          });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) { setPricingError(payload?.error || 'Failed to save pricing settings'); return; }
-          setPricingSuccess('Cost defaults saved.');
-        } catch { setPricingError('Failed to save pricing settings'); }
-        finally { setPricingSaving(false); }
+      // Editing again after a successful save resets the confirmation state.
+      useEffect(() => {
+        if (isDirty && saveState === 'saved') setSaveState('idle');
+      }, [isDirty, saveState]);
+
+      const updateAttendance = (patch) => setAttendance((prev) => ({ ...(prev || {}), ...patch }));
+
+      // Single Save Changes: patch each DIRTY section via the pure orchestrator
+      // (runUnifiedSave). It never claims success if any request fails — those
+      // sections keep their unsaved edits.
+      const saveAll = async () => {
+        if (!isDirty || saveState === 'saving') return;
+        setSaveState('saving'); setSaveError('');
+
+        const sections = [
+          {
+            label: 'Profile', dirty: profileDirty, run: async () => {
+              const res = await fetch('/api/profile', {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  full_name: profile.full_name.trim(), phone: profile.phone.trim(),
+                  job_title: profile.job_title.trim(), timezone: profile.timezone.trim(),
+                }),
+              });
+              if (!res.ok) return false;
+              setInitialProfile(profile);
+              return true;
+            },
+          },
+          {
+            label: 'Company & work hours', dirty: companyDirty, run: async () => {
+              const companyBody = {
+                company_name: company.company_name.trim(), timezone: company.timezone.trim(),
+                phone: company.phone.trim(), email: company.email.trim(), address: company.address.trim(),
+                default_work_days: company.default_work_days,
+                attendance_early_arrival_window_minutes: company.attendance_early_arrival_window_minutes,
+                attendance_late_grace_minutes: company.attendance_late_grace_minutes,
+                jobsite_geofence_radius_feet: company.jobsite_geofence_radius_feet,
+              };
+              // Omit empty times (a legacy company that hasn't set them yet) — the
+              // setup-parity validator only accepts a valid HH:MM, never "".
+              if (company.default_work_start_time) companyBody.default_work_start_time = company.default_work_start_time;
+              if (company.default_work_end_time) companyBody.default_work_end_time = company.default_work_end_time;
+              const res = await fetch('/api/company/settings', {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(companyBody),
+              });
+              if (!res.ok) return false;
+              setInitialCompany(company);
+              return true;
+            },
+          },
+          {
+            label: 'Attendance', dirty: attendanceDirty, run: async () => {
+              const res = await fetch('/api/jobsite-time/settings', {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  requireApproval: attendance.requireApproval,
+                  wakeRadiusMeters: attendance.wakeRadiusMeters,
+                  departureGraceMinutes: attendance.departureGraceMinutes,
+                  arrivalConfirmationSeconds: attendance.arrivalConfirmationSeconds,
+                  manualFallbackEnabled: attendance.manualFallbackEnabled,
+                }),
+              });
+              if (!res.ok) return false;
+              const json = await res.json().catch(() => null);
+              const next = json?.item || attendance;
+              setAttendance(next);
+              setInitialAttendance(next);
+              return true;
+            },
+          },
+          {
+            label: 'Cost defaults', dirty: pricingDirty, run: async () => {
+              const res = await fetch('/api/pricing-settings', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(pricingSettings),
+              });
+              if (!res.ok) return false;
+              setInitialPricing(pricingSettings);
+              return true;
+            },
+          },
+        ];
+
+        const result = await runUnifiedSave(sections);
+        if (!result.ok) {
+          setSaveState('error');
+          setSaveError(`Couldn't save: ${result.failed.join(', ')}. Those changes are still unsaved.`);
+          return;
+        }
+        setSaveState('saved');
       };
 
       const openBillingPortal = async () => {
@@ -10472,16 +10581,33 @@ const MobileAppShell = ({
         billingDisplayStatus.trim().toLowerCase() !== rawStripeStatus.trim().toLowerCase();
 
       return (
-        <div className="mx-auto w-full max-w-6xl space-y-5 lg:space-y-6">
+        <div className="mx-auto w-full max-w-6xl space-y-5 pb-28 lg:space-y-6 lg:pb-0">
+          {/* Single Save Changes action for the whole page — sticky top-right on
+              desktop; there is a matching sticky bottom bar for mobile below. */}
+          <div className="sticky top-0 z-20 -mx-1 hidden items-center justify-between gap-3 border-b border-gray-200 bg-gray-50/95 px-1 py-3 backdrop-blur lg:flex">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-gray-900">Settings</h2>
+              <p className="truncate text-xs text-gray-500">
+                {saveState === 'error'
+                  ? saveError
+                  : saveState === 'saved' && !isDirty
+                    ? 'All changes saved.'
+                    : isDirty
+                      ? 'You have unsaved changes.'
+                      : 'Everything is up to date.'}
+              </p>
+            </div>
+            <Button variant="brand" size="sm" onClick={saveAll} disabled={!isDirty || saveState === 'saving' || loading}>
+              {saveState === 'saving' ? 'Saving…' : saveState === 'saved' && !isDirty ? 'Saved' : 'Save Changes'}
+            </Button>
+          </div>
+
           {loadError && <InlineError>{loadError}</InlineError>}
 
           {/* 1. My Profile */}
           <Card className={cardClass}>
             <div className={cardHeaderClass}>
               <h3 className="font-semibold text-gray-900">My Profile</h3>
-              <Button variant="brand" size="sm" className="w-full sm:w-auto" onClick={saveProfile} disabled={profileSaving || loading}>
-                {profileSaving ? 'Saving…' : 'Save'}
-              </Button>
             </div>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
               <div><label className={label}>Full name</label><input className={field} value={profile.full_name} onChange={(e) => setProfile((p) => ({ ...p, full_name: e.target.value }))} /></div>
@@ -10490,7 +10616,6 @@ const MobileAppShell = ({
               <div><label className={label}>Timezone</label><input className={field} value={profile.timezone} onChange={(e) => setProfile((p) => ({ ...p, timezone: e.target.value }))} placeholder="e.g. America/New_York" /></div>
               <div className="sm:col-span-2"><label className={label}>Email</label><input className={`${field} bg-gray-50 text-gray-500`} value={String(currentUser?.email || '')} readOnly /></div>
             </div>
-            {profileMsg && <p className="mt-3 text-sm text-gray-600">{profileMsg}</p>}
           </Card>
 
           {/* 2. Company Information (admin) */}
@@ -10498,9 +10623,6 @@ const MobileAppShell = ({
             <Card className={cardClass}>
               <div className={cardHeaderClass}>
                 <h3 className="font-semibold text-gray-900">Company Information</h3>
-                <Button variant="brand" size="sm" className="w-full sm:w-auto" onClick={saveCompany} disabled={companySaving || loading}>
-                  {companySaving ? 'Saving…' : 'Save'}
-                </Button>
               </div>
               <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
                 <div><label className={label}>Company name</label><input className={field} value={company.company_name} onChange={(e) => setCompany((c) => ({ ...c, company_name: e.target.value }))} /></div>
@@ -10509,12 +10631,59 @@ const MobileAppShell = ({
                 <div><label className={label}>Company email</label><input className={field} value={company.email} onChange={(e) => setCompany((c) => ({ ...c, email: e.target.value }))} inputMode="email" /></div>
                 <div className="sm:col-span-2"><label className={label}>Address</label><textarea className={field} rows={2} value={company.address} onChange={(e) => setCompany((c) => ({ ...c, address: e.target.value }))} /></div>
               </div>
-              {companyMsg && <p className="mt-3 text-sm text-gray-600">{companyMsg}</p>}
+
+              {/* Company work hours — same fields & company record as Setup. */}
+              <div className="mt-5 border-t border-gray-100 pt-4">
+                <h4 className="text-sm font-semibold text-gray-900">Work hours &amp; attendance</h4>
+                <p className="mt-0.5 text-xs text-gray-500">Used to detect on-time / late arrivals. Same settings collected during setup.</p>
+                <div className="mt-3">
+                  <label className={label}>Active work days</label>
+                  <div className="flex flex-wrap gap-2">
+                    {[['sun', 'Sun'], ['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat']].map(([val, lbl]) => {
+                      const on = (company.default_work_days || []).includes(val);
+                      return (
+                        <label key={val} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700">
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            className="accent-brand-500"
+                            onChange={() => setCompany((c) => ({
+                              ...c,
+                              default_work_days: on
+                                ? (c.default_work_days || []).filter((d) => d !== val)
+                                : [...(c.default_work_days || []), val],
+                            }))}
+                          />
+                          {lbl}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 lg:gap-4">
+                  <div><label className={label}>Default start time</label><input type="time" className={field} value={company.default_work_start_time} onChange={(e) => setCompany((c) => ({ ...c, default_work_start_time: e.target.value }))} /></div>
+                  <div><label className={label}>Default end time</label><input type="time" className={field} value={company.default_work_end_time} onChange={(e) => setCompany((c) => ({ ...c, default_work_end_time: e.target.value }))} /></div>
+                  <div><label className={label}>Track arrivals up to X minutes early</label><input type="number" min={0} max={720} className={field} value={company.attendance_early_arrival_window_minutes} onChange={(e) => setCompany((c) => ({ ...c, attendance_early_arrival_window_minutes: Number(e.target.value) }))} /></div>
+                  <div><label className={label}>Mark late after X minutes</label><input type="number" min={0} max={240} className={field} value={company.attendance_late_grace_minutes} onChange={(e) => setCompany((c) => ({ ...c, attendance_late_grace_minutes: Number(e.target.value) }))} /></div>
+                  <div className="md:col-span-2">
+                    <label className={label}>Jobsite geofence radius</label>
+                    <select className={field} value={company.jobsite_geofence_radius_feet} onChange={(e) => setCompany((c) => ({ ...c, jobsite_geofence_radius_feet: Number(e.target.value) }))}>
+                      {[[1320, '0.25 mile'], [2640, '0.5 mile'], [5280, '1 mile'], [10560, '2 miles']].map(([v, lbl]) => (
+                        <option key={v} value={v}>{lbl}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
             </Card>
           )}
 
-          {/* Attendance (admin only) */}
-          {isAdmin && <JobsiteTimeSettingsCard />}
+          {/* Attendance tuning (admin only) — controlled by this page's single save. */}
+          {isAdmin && attendance && (
+            <Card className={cardClass}>
+              <JobsiteTimeSettingsCard values={attendance} onChange={updateAttendance} disabled={saveState === 'saving' || loading} />
+            </Card>
+          )}
 
           {/* 3. Team / Role Summary */}
           <Card className={cardClass}>
@@ -10567,9 +10736,6 @@ const MobileAppShell = ({
             <Card className={cardClass}>
               <div className={cardHeaderClass}>
                 <h3 className="font-semibold text-gray-900">Cost Defaults</h3>
-                <Button variant="brand" size="sm" className="w-full sm:w-auto" onClick={savePricingSettings} disabled={pricingSaving || pricingLoading}>
-                  {pricingSaving ? 'Saving…' : 'Save'}
-                </Button>
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 lg:gap-4">
                 {[
@@ -10587,8 +10753,6 @@ const MobileAppShell = ({
                   </div>
                 ))}
               </div>
-              {pricingError && <p className="text-sm text-red-600 mt-3">{pricingError}</p>}
-              {pricingSuccess && <p className="text-sm text-green-600 mt-3">{pricingSuccess}</p>}
             </Card>
           )}
 
@@ -10605,6 +10769,24 @@ const MobileAppShell = ({
             </div>
             {pwdMsg && <p className="mt-3 text-sm text-gray-600">{pwdMsg}</p>}
           </Card>
+
+          {/* Sticky bottom Save Changes action for mobile (desktop uses the top bar). */}
+          <div className="fixed inset-x-0 bottom-0 z-30 border-t border-gray-200 bg-white/95 px-4 py-3 backdrop-blur lg:hidden">
+            <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+              <p className="min-w-0 flex-1 truncate text-xs text-gray-500">
+                {saveState === 'error'
+                  ? saveError
+                  : saveState === 'saved' && !isDirty
+                    ? 'All changes saved.'
+                    : isDirty
+                      ? 'You have unsaved changes.'
+                      : 'Everything is up to date.'}
+              </p>
+              <Button variant="brand" size="sm" onClick={saveAll} disabled={!isDirty || saveState === 'saving' || loading}>
+                {saveState === 'saving' ? 'Saving…' : saveState === 'saved' && !isDirty ? 'Saved' : 'Save Changes'}
+              </Button>
+            </div>
+          </div>
         </div>
       );
     };

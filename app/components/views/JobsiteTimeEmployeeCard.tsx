@@ -50,25 +50,26 @@ export function JobsiteTimeEmployeeCard() {
     };
   }, [load]);
 
-  // Run the foreground geofence watcher whenever Attendance is on, we have at
-  // least one verified assigned job, and location permission is granted.
+  // Run the foreground geofence watcher whenever we have at least one verified
+  // assigned job and location permission is granted. Attendance is permanent —
+  // it is never gated on an enable/disable flag.
   useEffect(() => {
     watchRef.current?.stop();
     watchRef.current = null;
-    if (!settings?.enabled || permission !== 'granted') return;
+    if (permission !== 'granted') return;
     const verifiedJobs = assignedJobs.filter((j) => j.addressVerified);
     if (verifiedJobs.length === 0) return;
     watchRef.current = startForegroundGeofenceWatch({
       jobs: verifiedJobs,
-      wakeRadiusMeters: settings.wakeRadiusMeters,
-      arrivalRadiusFeet: settings.arrivalRadiusFeet,
+      wakeRadiusMeters: settings?.wakeRadiusMeters,
+      arrivalRadiusFeet: settings?.arrivalRadiusFeet,
       onEvent: () => load(),
     });
     return () => watchRef.current?.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings?.enabled, settings?.wakeRadiusMeters, settings?.arrivalRadiusFeet, permission, assignedJobs.length]);
+  }, [settings?.wakeRadiusMeters, settings?.arrivalRadiusFeet, permission, assignedJobs.length]);
 
-  if (loading || !settings || !settings.enabled) return null;
+  if (loading || !settings) return null;
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-[#090909]">

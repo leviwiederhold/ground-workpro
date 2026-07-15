@@ -20,14 +20,13 @@ export async function GET(request: Request) {
       .eq("id", companyId)
       .maybeSingle();
     const settings = mapCompanyJobsiteSettings(settingsRow.data);
-    if (settings.enabled) {
-      await finalizePendingAttendance({
-        db,
-        companyId,
-        arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
-        departureGraceMinutes: settings.departureGraceMinutes,
-      });
-    }
+    // Attendance is permanent — always finalize pending arrivals/departures.
+    await finalizePendingAttendance({
+      db,
+      companyId,
+      arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
+      departureGraceMinutes: settings.departureGraceMinutes,
+    });
 
     const url = new URL(request.url);
     const p = url.searchParams;

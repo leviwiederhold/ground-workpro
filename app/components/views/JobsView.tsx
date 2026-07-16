@@ -261,6 +261,21 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     setJobActionError('');
     setAddressSaveError('');
     setSavingAddress(false);
+    // Reset all transient, per-job state so nothing leaks from the previously
+    // selected job into this one. The per-job load effects only cleared these
+    // when deselecting (no job / temp job); switching directly from one real
+    // job to another left pending checkbox selections, stale assigned lists,
+    // and the old financial summary in place — which is exactly the reported
+    // "every job shares the same state" bug. Clearing here (keyed on the job
+    // ID) resets them on a real switch without flickering on background
+    // refetches (which only change the selectedJob object reference).
+    setEquipmentToAssign([]);
+    setEmployeeToAssign([]);
+    setJobEquipment([]);
+    setJobEmployees([]);
+    setFinancialSummary(null);
+    setCrewActionError('');
+    setEquipmentActionError('');
     // Key on the job ID (not the selectedJob object) so a background jobs
     // refetch — which creates a new object reference for the same job — does not
     // re-run this and wipe in-progress edits (e.g. a just-selected verified
@@ -920,7 +935,8 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
               <Card
                 key={`${job.id || job.name || 'job'}-${jobIndex}`}
                 data-testid={`job-row-${job.id}`}
-                className={`p-4 cursor-pointer transition-all ${selectedJobId === job.id ? 'ring-2 ring-brand-500' : 'hover:shadow-md'}`}
+                aria-selected={selectedJobId === job.id}
+                className={`p-4 cursor-pointer transition-all border-l-4 ${selectedJobId === job.id ? 'ring-2 ring-brand-500 border-l-brand-500 bg-brand-50 shadow-md' : 'border-l-transparent hover:shadow-md'}`}
                 onClick={() => {
                   setSelectedJobId(job.id);
                   if (isMobile) setShowMobileDetails(true);
@@ -969,7 +985,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
         {/* Job Detail Panel */}
         {!isMobile && (selectedJob ? (
-          <Card className="p-4 h-fit sticky top-4 max-h-[calc(100dvh-140px)] overflow-y-auto">
+          <Card key={selectedJob.id} className="p-4 h-fit sticky top-4 max-h-[calc(100dvh-140px)] overflow-y-auto">
             <h3 className="font-semibold text-gray-900 mb-4">{selectedJob.name}</h3>
 
             <div className="space-y-4">
@@ -1143,6 +1159,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
 
       {isMobile && showMobileDetails && selectedJob && (
         <MobileSheet
+          key={selectedJob.id}
           isOpen={showMobileDetails}
           onClose={() => setShowMobileDetails(false)}
           title={selectedJob.name}

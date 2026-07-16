@@ -276,6 +276,18 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     setFinancialSummary(null);
     setCrewActionError('');
     setEquipmentActionError('');
+    // Also clear the previous job's in-flight mutation flags. These track an
+    // operation against the job that was selected when it started, so a switch
+    // mid-save/delete/assign would otherwise leave the new job's buttons stuck
+    // in a disabled "Saving…/Deleting…/Updating…" state. The original request
+    // still resolves and targets its own (old) job; its finally() setting these
+    // false again is a harmless no-op. (The per-section load flags —
+    // job{Equipment,Employees}Loading, financialLoading — self-correct because
+    // their load effects re-run on the switch, so they don't need clearing.)
+    setSaveLoading(false);
+    setDeleteLoading(false);
+    setCrewActionLoading(false);
+    setEquipmentActionLoading(false);
     // Key on the job ID (not the selectedJob object) so a background jobs
     // refetch — which creates a new object reference for the same job — does not
     // re-run this and wipe in-progress edits (e.g. a just-selected verified

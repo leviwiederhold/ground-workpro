@@ -1,0 +1,8 @@
+#include "Shared.xcconfig"
+
+// Release / Archive / TestFlight configuration.
+//
+// This file exists so Google Sign-In config resolves in Archive builds. Before
+// it, only Debug had a baseConfigurationReference, so archives silently built
+// with an empty GIDClientID and an empty CFBundleURLSchemes entry.
+CAPACITOR_DEBUG = false

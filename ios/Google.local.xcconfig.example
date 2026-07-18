@@ -1,0 +1,19 @@
+// Template for ios/Google.local.xcconfig (untracked — see .gitignore).
+//
+//   cp ios/Google.local.xcconfig.example ios/Google.local.xcconfig
+//
+// Fill in the values from Google Cloud Console > APIs & Services > Credentials,
+// using the OAuth 2.0 Client ID of type **iOS** whose bundle ID matches
+// com.leviwiederhold.groundworkpro.
+//
+// The values below are PLACEHOLDERS with the right shape and are not valid
+// credentials. Never put an OAuth client *secret* in this file — the iOS client
+// type has no secret, and the Web client secret belongs only in Supabase.
+
+// The iOS OAuth client ID.
+GOOGLE_IOS_CLIENT_ID = 000000000000-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.apps.googleusercontent.com
+
+// The same value with the dot-separated parts reversed. Google Cloud shows this
+// as "iOS URL scheme". Used as the app's CFBundleURLSchemes entry so Google can
+// return to the app after the native sheet.
+GOOGLE_IOS_REVERSED_CLIENT_ID = com.googleusercontent.apps.000000000000-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

@@ -11,3 +11,9 @@ capacitor-cordova-ios-plugins
 # Generated Config files
 App/App/capacitor.config.json
 App/App/config.xml
+
+# Local Google Sign-In client configuration.
+# Copy Google.local.xcconfig.example -> Google.local.xcconfig and fill in the
+# iOS OAuth client ID. Kept out of git so the repo stays environment-agnostic;
+# Shared.xcconfig pulls it in via an optional #include?.
+Google.local.xcconfig

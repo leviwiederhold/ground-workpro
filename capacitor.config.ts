@@ -4,7 +4,12 @@ const liveUrl = String(process.env.CAPACITOR_SERVER_URL ?? "https://ground-workp
 const liveUrlHost = liveUrl ? new URL(liveUrl).host : null;
 
 const config: CapacitorConfig = {
-  appId: "com.groundworkpro.app",
+  // Must match ios/App/App.xcodeproj PRODUCT_BUNDLE_IDENTIFIER, which is the
+  // identity of the shipped app (verified against Xcode archives). This file
+  // previously said "com.groundworkpro.app" while the Xcode project said
+  // com.leviwiederhold.groundworkpro; the Xcode project is what actually ships,
+  // so this is aligned to it rather than the other way around.
+  appId: "com.leviwiederhold.groundworkpro",
   appName: "Groundwork Pro",
   webDir: "capacitor-shell",
   server: liveUrl

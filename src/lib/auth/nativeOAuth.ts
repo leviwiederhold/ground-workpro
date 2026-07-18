@@ -24,9 +24,20 @@ export type NativeSignInResult =
   | { status: "cancelled" }
   | { status: "error"; message: string };
 
-// The app's iOS bundle identifier (must match capacitor.config.ts `appId` and
-// the Apple "Sign in with Apple" App ID / Supabase authorized client id).
-export const IOS_BUNDLE_ID = "com.groundworkpro.app";
+// The app's PRODUCTION iOS bundle identifier.
+//
+// This is the identity of the already-shipped Groundwork Pro app — verified
+// against the Xcode archives on record (latest: 2026-05-12), all of which have
+// CFBundleIdentifier = com.leviwiederhold.groundworkpro. It must stay in sync
+// with:
+//   - ios/App/App.xcodeproj PRODUCT_BUNDLE_IDENTIFIER (Debug + Release)
+//   - capacitor.config.ts `appId`
+//   - the Apple App ID that has "Sign in with Apple" enabled
+//   - Supabase's Apple "authorized client IDs"
+//
+// It is also the `aud` claim of the Apple identity token, which is why Supabase
+// rejects the token if this and the Supabase setting disagree.
+export const IOS_BUNDLE_ID = "com.leviwiederhold.groundworkpro";
 export const NATIVE_PENDING_INVITE_STORAGE_KEY = "groundwork:native-pending-invite";
 
 export type PendingInviteState = {
@@ -136,6 +147,84 @@ export function isUserCancelledError(err: unknown): boolean {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Google client configuration + validation
+// ---------------------------------------------------------------------------
+
+export type GoogleClientConfig = { iosClientId: string; webClientId: string };
+
+export type GoogleClientConfigResult =
+  | { ok: true; config: GoogleClientConfig }
+  | { ok: false; message: string };
+
+const GOOGLE_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com";
+
+// Validate the two public Google client IDs the native flow needs.
+//
+// These are inlined by Next.js at BUILD time, so they must be set in the Vercel
+// project (the iOS app loads the deployed site, not a local build) and the
+// project must be REDEPLOYED after adding them — setting them without a rebuild
+// leaves the shipped bundle with `undefined`. The error messages below name the
+// exact variables so a failed sign-in on a device is self-diagnosing instead of
+// a generic "not configured".
+//
+// Split from the env read so it can be unit-tested without mutating process.env.
+export function validateGoogleClientConfig(input: {
+  iosClientId: string | undefined;
+  webClientId: string | undefined;
+}): GoogleClientConfigResult {
+  const iosClientId = String(input.iosClientId ?? "").trim();
+  const webClientId = String(input.webClientId ?? "").trim();
+
+  const missing: string[] = [];
+  if (!iosClientId) missing.push("NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID");
+  if (!webClientId) missing.push("NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID");
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      message: `Google sign-in is not configured for this build: missing ${missing.join(
+        " and ",
+      )}. Set them in the Vercel project and redeploy.`,
+    };
+  }
+
+  // A client ID that doesn't look like one is almost always a copy/paste of the
+  // wrong field (project number, client secret, or the reversed iOS ID).
+  const malformed = [
+    ["NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID", iosClientId],
+    ["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId],
+  ].filter(([, value]) => !value.endsWith(GOOGLE_CLIENT_ID_SUFFIX));
+  if (malformed.length > 0) {
+    return {
+      ok: false,
+      message: `Google sign-in is misconfigured: ${malformed
+        .map(([name]) => name)
+        .join(" and ")} must end with "${GOOGLE_CLIENT_ID_SUFFIX}".`,
+    };
+  }
+
+  // The iOS and Web client IDs are different OAuth clients. If they match, the
+  // iOS one was never created, and Supabase would reject the token's audience.
+  if (iosClientId === webClientId) {
+    return {
+      ok: false,
+      message:
+        "Google sign-in is misconfigured: NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID and NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID are the same value. The iOS client ID must come from an OAuth client of type iOS.",
+    };
+  }
+
+  return { ok: true, config: { iosClientId, webClientId } };
+}
+
+// Read + validate in one step. The env vars are referenced as static literals
+// because Next.js only inlines NEXT_PUBLIC_* on literal member access.
+export function readGoogleClientConfig(): GoogleClientConfigResult {
+  return validateGoogleClientConfig({
+    iosClientId: process.env.NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+    webClientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+  });
+}
+
 // Post-authentication route decision — the SAME rule the native email/password
 // path already uses, extracted so email, Apple, and Google all route
 // identically. An invited user ALWAYS goes through invite acceptance and is
@@ -196,21 +285,26 @@ export async function signInWithAppleNative(supabase: SupabaseClient): Promise<N
 
 export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<NativeSignInResult> {
   try {
-    const iOSClientId = process.env.NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID;
-    const webClientId = process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID;
-    if (!iOSClientId || !webClientId) {
-      return {
-        status: "error",
-        message: "Google sign-in is not configured for this app build.",
-      };
+    const configResult = readGoogleClientConfig();
+    if (!configResult.ok) {
+      return { status: "error", message: configResult.message };
     }
+    const { iosClientId, webClientId } = configResult.config;
 
     const { SocialLogin } = (await import("@capgo/capacitor-social-login")) as any;
     await SocialLogin.initialize({
       google: {
-        iOSClientId,
+        // The OAuth client of type iOS. This is the audience (`aud`) of the ID
+        // token Google returns, so it must also be listed in Supabase's Google
+        // "authorized client IDs".
+        iOSClientId: iosClientId,
+        // The Web client, which Supabase itself is configured with. Google
+        // requires the server client ID to be the Web client.
         iOSServerClientId: webClientId,
         webClientId,
+        // "online" returns GoogleLoginResponseOnline, which carries `idToken`.
+        // "offline" would return only `serverAuthCode` — no ID token — and the
+        // signInWithIdToken exchange below would have nothing to send.
         mode: "online",
       },
     });
@@ -221,8 +315,20 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
         scopes: ["email", "profile"],
       },
     });
+    // Documented shape: { provider: "google", result: GoogleLoginResponse }.
+    // GoogleLoginResponse is a union — GoogleLoginResponseOnline has `idToken`,
+    // GoogleLoginResponseOffline has only `serverAuthCode`. We initialize with
+    // mode "online", so anything else means the plugin config drifted; say so
+    // rather than reporting a generic "no token".
     const response = user?.result ?? {};
-    const idToken: string | undefined = response.idToken ?? response.authentication?.idToken;
+    if (response.responseType === "offline" || (!response.idToken && response.serverAuthCode)) {
+      return {
+        status: "error",
+        message: "Google returned an authorization code instead of an ID token. The plugin must be initialized with mode \"online\".",
+      };
+    }
+
+    const idToken: string | undefined = response.idToken ?? undefined;
     if (!idToken) {
       return { status: "error", message: "Google did not return an ID token. Please try again." };
     }

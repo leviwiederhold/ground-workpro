@@ -1,0 +1,36 @@
+// Shared build settings applied to BOTH Debug and Release.
+//
+// debug.xcconfig and release.xcconfig each `#include` this file, so anything
+// defined here resolves identically in local builds, Archive builds, and
+// TestFlight/App Store builds. Do NOT put Google client configuration only in
+// debug.xcconfig — a Release archive would then build with empty values and
+// fail Google Sign-In at runtime with no build-time signal.
+
+// ---------------------------------------------------------------------------
+// Google Sign-In native client configuration
+// ---------------------------------------------------------------------------
+// These are consumed by App/Info.plist:
+//   GIDClientID                   <- GOOGLE_IOS_CLIENT_ID
+//   CFBundleURLTypes[0].schemes[0] <- GOOGLE_IOS_REVERSED_CLIENT_ID
+//
+// Real values are NOT committed. They are not secrets (an OAuth *client ID* is
+// public and ships inside the app binary), but they are per-project config, so
+// they live in an untracked local file to keep the repo environment-agnostic.
+//
+// Provide them by copying the template:
+//   cp ios/Google.local.xcconfig.example ios/Google.local.xcconfig
+// then filling in the values from Google Cloud Console (OAuth client, type iOS).
+//
+// CI/Xcode Cloud may instead pass them as build settings, which override these.
+//
+// Empty defaults exist so a fresh clone still *configures* cleanly. A Release
+// build with empty values is rejected by the "Validate Google Sign-In config"
+// build phase (ios/Scripts/validate-google-config.sh) rather than silently
+// producing an app with an empty URL scheme.
+GOOGLE_IOS_CLIENT_ID =
+GOOGLE_IOS_REVERSED_CLIENT_ID =
+
+// Local overrides. `#include?` is the optional form: a missing file is not an
+// error, so a fresh clone builds without manual setup. Included AFTER the empty
+// defaults above so its assignments win.
+#include? "Google.local.xcconfig"

@@ -190,6 +190,120 @@ is tracked in git so a fresh clone resolves the same native dependency versions
 Promises, Alamofire, Facebook SDK). Commit it whenever a Capacitor plugin is
 added or upgraded.
 
+## Testing against a PR preview deployment
+
+The iOS app is a remote-URL shell: it loads a deployed site rather than bundling
+the web app. Production (`https://ground-workpro.vercel.app`) does not contain
+unmerged UI, so to test native auth from a PR you must point the app at that
+PR's Vercel preview deployment.
+
+Which deployment the app loads is baked into `ios/App/App/capacitor.config.json`
+by `npx cap sync ios`, driven by `CAPACITOR_SERVER_URL`. Production remains the
+default; nothing is hardcoded to a preview.
+
+### 1. Find the PR preview URL
+
+On the PR, open the Vercel bot comment or the "View deployment" link, or:
+
+```sh
+gh pr view 56 --json url
+```
+
+Use the bare origin — `https://<something>.vercel.app`, no path or query string.
+
+### 2. Make sure Preview has the Google variables
+
+Vercel scopes environment variables per environment. Variables set only for
+Production are **absent** from Preview builds, so Google sign-in fails on a
+preview with the "not configured for this build" error even though production
+works.
+
+In Vercel > Settings > Environment Variables, confirm both exist with the
+**Preview** environment checked:
+
+```
+NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID
+NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID
+```
+
+If you add them now, **redeploy the preview** — these are inlined at build time.
+
+### 3. Sync the app to the preview
+
+```sh
+CAPACITOR_SERVER_URL=https://<pr-56-preview>.vercel.app pnpm ios:preview
+```
+
+Or persist it so you don't retype it each time:
+
+```sh
+cp .env.capacitor.local.example .env.capacitor.local
+# edit CAPACITOR_SERVER_URL, then:
+pnpm ios:preview
+```
+
+`.env.capacitor.local` is gitignored — preview URLs are branch-scoped and
+short-lived, so they are never committed.
+
+`ios:preview` requires the variable, rejects a malformed value, prints the URL
+being synced, runs `cap sync ios`, and then **reads the generated config back**
+to prove the URL actually landed. A successful run means the app really will
+load that URL.
+
+### 4. Build to a physical device
+
+```sh
+pnpm ios:open
+```
+
+Then in Xcode:
+
+1. **Delete the existing Groundwork Pro app from the iPhone.** The WebView
+   caches aggressively, and a stale install is the most common reason a "new"
+   build appears to show the old login screen.
+2. Product > Clean Build Folder (⇧⌘K).
+3. Select your physical device and Run (⌘R). A Debug build on device is
+   required — the native Apple/Google sheets do not work in the Simulator.
+
+### 5. Confirm the app is on the preview
+
+In the Xcode console, look for the debug-only diagnostics:
+
+```
+[Groundwork] Loading app at https://<preview>.vercel.app/?gw_native=1
+[Groundwork] capacitor.config.json server.url: https://<preview>.vercel.app
+[Groundwork] Bundle identifier: com.leviwiederhold.groundworkpro
+[Groundwork] Native runtime detection: {"marker":true,"platform":"ios","capacitorNative":true,...}
+```
+
+If the URL is production, the sync did not take effect — re-run step 3 and
+confirm the "Verified" line. If `marker` is `false`, the web app will not treat
+this as a native runtime and the Apple/Google buttons will not render.
+
+These logs are compiled out of Release builds and contain no tokens or secrets.
+
+### 6. Return to production when done
+
+```sh
+pnpm ios:sync
+```
+
+`ios:sync` always targets production and ignores any `CAPACITOR_SERVER_URL` left
+in your environment or `.env.capacitor.local`.
+
+You do not have to remember this before shipping: the `Validate native build
+config` build phase **fails any Release/archive build** whose synced URL is not
+the production URL. To archive against another host deliberately, set
+`ALLOW_NON_PRODUCTION_SERVER_URL=1`.
+
+### Script reference
+
+| Script | Purpose |
+| --- | --- |
+| `pnpm ios:preview` | Sync to `CAPACITOR_SERVER_URL` (required); verifies the result |
+| `pnpm ios:sync` | Sync back to production; verifies the result |
+| `pnpm ios:open` | Open the Xcode project |
+
 ## Real-device checks
 
 Run these on a physical iPhone after the Apple/Google/Supabase setup is complete:

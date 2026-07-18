@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { IOS_BUNDLE_ID, validateGoogleClientConfig } from "../../src/lib/auth/nativeOAuth.ts";
@@ -17,6 +18,17 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (rel: string) => readFileSync(join(repoRoot, rel), "utf8");
 
 const PRODUCTION_BUNDLE_ID = "com.leviwiederhold.groundworkpro";
+
+// Whether git tracks a path. Local files holding real credentials are expected
+// to EXIST on a configured machine — what must never happen is them being
+// committed, which is what this checks.
+function trackedByGit(relativePath: string): boolean {
+  const output = execFileSync("git", ["ls-files", "--", relativePath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  return output.trim().length > 0;
+}
 
 // ── Bundle identity ──────────────────────────────────────────────────────────
 // The shipped app is com.leviwiederhold.groundworkpro (verified against the
@@ -127,9 +139,12 @@ test("Sign in with Apple entitlement is wired for both configurations", () => {
 
 // ── No committed secrets ─────────────────────────────────────────────────────
 test("no real Google credentials are committed", () => {
-  assert.ok(
-    !existsSync(join(repoRoot, "ios/Google.local.xcconfig")),
-    "ios/Google.local.xcconfig holds real values and must stay untracked",
+  // The property that matters is that the file is not TRACKED — a correctly
+  // configured machine always has it on disk with real values.
+  assert.equal(
+    trackedByGit("ios/Google.local.xcconfig"),
+    false,
+    "ios/Google.local.xcconfig holds real client IDs and must never be tracked",
   );
   assert.match(read("ios/.gitignore"), /^Google\.local\.xcconfig$/m);
 

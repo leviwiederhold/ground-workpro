@@ -90,7 +90,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
 			buildPhases = (
-				AA01000000000000000000C1 /* Validate Google Sign-In config */,
+				AA01000000000000000000C1 /* Validate native build config */,
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
@@ -163,7 +163,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		AA01000000000000000000C1 /* Validate Google Sign-In config */ = {
+		AA01000000000000000000C1 /* Validate native build config */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -172,15 +172,18 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
+				"$(SRCROOT)/../Scripts/validate-google-config.sh",
+				"$(SRCROOT)/../Scripts/validate-server-url.sh",
+				"$(SRCROOT)/App/capacitor.config.json",
 			);
-			name = "Validate Google Sign-In config";
+			name = "Validate native build config";
 			outputFileListPaths = (
 			);
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/../Scripts/validate-google-config.sh\"\n";
+			shellScript = "\"${SRCROOT}/../Scripts/validate-google-config.sh\"\n\"${SRCROOT}/../Scripts/validate-server-url.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

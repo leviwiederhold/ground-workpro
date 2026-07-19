@@ -185,8 +185,8 @@ test("no token, raw nonce, or hashed nonce value is ever logged", () => {
   }
 
   // The comparisons that ARE logged are booleans.
-  assert.match(google, /nonce claim present:", claimedNonce !== null/);
-  assert.match(google, /matches hashed nonce:", claimedNonce === hashedNonce/);
+  assert.match(google, /Google ID token nonce claim present:", claimedNonce !== null/);
+  assert.match(google, /Google ID token nonce matches hashed nonce:", claimedNonce === hashedNonce/);
 });
 
 test("a dropped nonce is reported rather than silently tolerated", () => {

@@ -356,6 +356,32 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
     const rawNonce = generateRawNonce();
     const hashedNonce = await sha256Hex(rawNonce);
 
+    // Pre-flight diagnostics (development only).
+    //
+    // Answers the question the nonce diagnostics below cannot: did the NATIVE
+    // plugin handle this call, or did Capacitor fall back to the plugin's web
+    // implementation? The web implementation generates its own nonce
+    // (google-provider.js:44), so if it runs, the token's claim will not match
+    // the nonce we supplied.
+    if (process.env.NODE_ENV !== "production") {
+      const capacitor = (globalThis as any)?.Capacitor;
+      let platform = "unavailable";
+      let nativePluginInvoked = false;
+      try {
+        platform = String(capacitor?.getPlatform?.() ?? "unavailable");
+        // True only when the native bridge is present AND the SocialLogin plugin
+        // is registered natively — i.e. the call will not fall through to web.
+        nativePluginInvoked =
+          capacitor?.isNativePlatform?.() === true && capacitor?.isPluginAvailable?.("SocialLogin") === true;
+      } catch {
+        // Diagnostics must never break sign-in.
+      }
+
+      console.log("[native-auth] Google login starting");
+      console.log("[native-auth] Platform:", platform);
+      console.log("[native-auth] Native plugin invoked:", nativePluginInvoked);
+    }
+
     const user = await SocialLogin.login({
       provider: "google",
       options: {
@@ -398,8 +424,8 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
     // Logs booleans only: never the token, the raw nonce, or the hashed nonce.
     if (process.env.NODE_ENV !== "production") {
       const claimedNonce = readIdTokenNonce(idToken);
-      console.log("[native-auth] google id_token nonce claim present:", claimedNonce !== null);
-      console.log("[native-auth] google id_token nonce matches hashed nonce:", claimedNonce === hashedNonce);
+      console.log("[native-auth] Google ID token nonce claim present:", claimedNonce !== null);
+      console.log("[native-auth] Google ID token nonce matches hashed nonce:", claimedNonce === hashedNonce);
 
       if (claimedNonce === null) {
         // The plugin dropped the nonce we supplied. Supabase will reject this

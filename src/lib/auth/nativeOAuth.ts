@@ -262,17 +262,10 @@ export function readGoogleClientConfig(): GoogleClientConfigResult {
   });
 }
 
-// Post-authentication route decision — the SAME rule the native email/password
-// path already uses, extracted so email, Apple, and Google all route
-// identically. An invited user ALWAYS goes through invite acceptance and is
-// therefore NEVER sent through company bootstrap (safeguard: invited employees
-// can't create a company).
-export type PostAuthRoute = "accept-invite" | "dashboard" | "no-workspace";
-
-export function resolvePostAuthRoute(params: { isInvite: boolean; hasWorkspace: boolean }): PostAuthRoute {
-  if (params.isInvite) return "accept-invite";
-  return params.hasWorkspace ? "dashboard" : "no-workspace";
-}
+// Post-authentication routing now lives in src/lib/auth/loginFlow.ts as
+// resolveNativePostAuthDestination(), shared by the native login route. The
+// earlier resolvePostAuthRoute() helper here became unreachable when the
+// dedicated /native routes replaced the runtime-detected login screen.
 
 // ---------------------------------------------------------------------------
 // Runtime flows (native only) — thin glue over the plugins + Supabase.

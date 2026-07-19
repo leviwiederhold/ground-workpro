@@ -7,7 +7,6 @@ import {
   isUserCancelledError,
   readPendingInviteFromSearch,
   readPendingInviteState,
-  resolvePostAuthRoute,
   writePendingInviteState,
 } from "../../src/lib/auth/nativeOAuth.ts";
 
@@ -99,17 +98,5 @@ test("pending invite state round-trips through storage and invalid JSON is clear
 
 // ── Post-auth routing is identical for email/Apple/Google, and invited users
 //    never reach company bootstrap ──────────────────────────────────────────
-test("resolvePostAuthRoute: invite always goes to invite acceptance (never bootstrap)", () => {
-  assert.equal(resolvePostAuthRoute({ isInvite: true, hasWorkspace: false }), "accept-invite");
-  // Even if the user somehow already has a workspace, an invite is still accepted
-  // via the idempotent path — never routed to create a new company.
-  assert.equal(resolvePostAuthRoute({ isInvite: true, hasWorkspace: true }), "accept-invite");
-});
 
-test("resolvePostAuthRoute: returning user with a workspace reaches the dashboard", () => {
-  assert.equal(resolvePostAuthRoute({ isInvite: false, hasWorkspace: true }), "dashboard");
-});
 
-test("resolvePostAuthRoute: no invite + no workspace shows the no-workspace screen (no silent company creation)", () => {
-  assert.equal(resolvePostAuthRoute({ isInvite: false, hasWorkspace: false }), "no-workspace");
-});

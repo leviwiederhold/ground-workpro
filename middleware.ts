@@ -83,7 +83,11 @@ function resolveApiGuardedModule(request: NextRequest) {
 
 // Pages that must bypass role guards — they handle auth themselves (e.g. post-Stripe
 // redirect where membership may not exist yet).
-const PAGE_GUARD_BYPASSES = new Set(["/settings/billing/success"]);
+// Explicitly public pages. `/native/login` is the iOS app's entry point: it must
+// stay reachable while signed out, and an unauthenticated native user must never
+// be bounced to the website's /login (which would strand them on the web UI
+// inside the app).
+const PAGE_GUARD_BYPASSES = new Set(["/settings/billing/success", "/native", "/native/login"]);
 
 function findGuardedRoles(pathname: string): AppRole[] | null {
   if (PAGE_GUARD_BYPASSES.has(pathname)) return null;

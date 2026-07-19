@@ -20,6 +20,9 @@ importers:
       '@capacitor/ios':
         specifier: ^8.3.0
         version: 8.3.0(@capacitor/core@8.3.0)
+      '@capgo/capacitor-social-login':
+        specifier: ^8.3.37
+        version: 8.3.37(@capacitor/core@8.3.0)
       '@fortawesome/fontawesome-free':
         specifier: ^6.7.2
         version: 6.7.2
@@ -198,6 +201,11 @@ packages:
 
   '@capacitor/synapse@1.0.4':
     resolution: {integrity: sha512-/C1FUo8/OkKuAT4nCIu/34ny9siNHr9qtFezu4kxm6GY1wNFxrCFWjfYx5C1tUhVGz3fxBABegupkpjXvjCHrw==}
+
+  '@capgo/capacitor-social-login@8.3.37':
+    resolution: {integrity: sha512-IGLIy8bBPf8ocWJB5XZAzGlsecKetaZyMuyXla7EZ8eSsNLjWeNsWDdEXUdZxTL3rFjRfBuyOTII9in7/EzivQ==}
+    peerDependencies:
+      '@capacitor/core': '>=8.0.0'
 
   '@emnapi/core@1.8.1':
     resolution: {integrity: sha512-AvT9QFpxK0Zd8J0jopedNm+w/2fIzvtPKPjqyw9jwvBaReTTqPBk9Hixaz7KbjimP+QNz605/XnjFcDAL2pqBg==}
@@ -3393,6 +3401,11 @@ snapshots:
       '@capacitor/core': 8.3.0
 
   '@capacitor/synapse@1.0.4': {}
+
+  '@capgo/capacitor-social-login@8.3.37(@capacitor/core@8.3.0)':
+    dependencies:
+      '@capacitor/core': 8.3.0
+      tslib: 2.8.1
 
   '@emnapi/core@1.8.1':
     dependencies:

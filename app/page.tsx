@@ -18,6 +18,7 @@ import { applyAppearancePreference, FORCE_PUBLIC_THEME_SESSION_KEY } from '@/lib
 import { navigateNotificationHref } from '@/lib/notifications/navigation';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
+import { resolveSignOutRoute } from '@/lib/auth/loginFlow';
 import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
@@ -10447,7 +10448,9 @@ const MobileAppShell = ({
         setSigningOut(true);
         try { await fetch('/api/logout', { method: 'POST' }).catch(() => {}); } catch { /* ignore */ }
         try { await supabaseBrowser().auth.signOut(); } catch { /* ignore */ }
-        window.location.assign('/login');
+        // Native sessions return to the native login route so the app never
+        // drops the user on the website's sign-in screen; web returns to /login.
+        window.location.assign(resolveSignOutRoute(window.location.pathname));
       };
 
       const teamByRole = employees.reduce((acc, emp) => {

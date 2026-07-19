@@ -1,1 +1,5 @@
+#include "Shared.xcconfig"
+
+// Debug configuration. Google client configuration lives in Shared.xcconfig so
+// Debug and Release cannot drift apart.
 CAPACITOR_DEBUG = true

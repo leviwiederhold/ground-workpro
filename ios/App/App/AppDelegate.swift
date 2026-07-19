@@ -7,9 +7,31 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
     private let appBackgroundColor = UIColor(red: 249.0 / 255.0, green: 250.0 / 255.0, blue: 251.0 / 255.0, alpha: 1)
-    private let productionAppURL = URL(string: "https://ground-workpro.vercel.app/?gw_native=1")!
+
+    /// Used only if capacitor.config.json is missing or unreadable, which should
+    /// not happen in a synced build.
+    private static let fallbackServerURL = "https://ground-workpro.vercel.app"
+
+    /// The app's entry point: the native ONBOARDING route (feature slides, then
+    /// the sign-up / join-team / log-in choices). Must match NATIVE_ENTRY_ROUTE
+    /// in src/lib/auth/loginFlow.ts.
+    ///
+    /// Deliberately NOT /native/login. The login step is reached by choosing
+    /// "Sign In" from onboarding; starting there would skip the slides and the
+    /// entry choices, which is what briefly happened on this branch.
+    private static let nativeEntryPath = "/native"
+
+    /// The URL this build loads.
+    ///
+    /// Read from the bundled capacitor.config.json that `npx cap sync ios`
+    /// generates, so `CAPACITOR_SERVER_URL=<preview> npx cap sync ios` actually
+    /// takes effect. This was previously a hardcoded production URL, which meant
+    /// the WebView force-loaded production and silently overrode any synced
+    /// preview URL — testing a PR deployment on device was impossible.
+    private lazy var appURL: URL = AppDelegate.resolveAppURL()
+
     private var didInstallNativeMarker = false
-    private var didLoadProductionAppURL = false
+    private var didLoadAppURL = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         clearWebViewAssetCache()
@@ -68,7 +90,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         if let webView = view as? WKWebView {
             installNativeMarker(in: webView)
-            loadProductionAppIfNeeded(in: webView)
+            loadAppIfNeeded(in: webView)
             webView.isOpaque = false
             webView.backgroundColor = appBackgroundColor
             webView.scrollView.backgroundColor = appBackgroundColor
@@ -96,19 +118,104 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         webView.evaluateJavaScript(source, completionHandler: nil)
     }
 
-    private func loadProductionAppIfNeeded(in webView: WKWebView) {
-        guard !didLoadProductionAppURL else {
+    /// Resolve the server URL from the bundled Capacitor config, appending the
+    /// `gw_native=1` marker the web app uses for native-runtime detection.
+    private static func resolveAppURL() -> URL {
+        let configuredURL = readConfiguredServerURL() ?? fallbackServerURL
+
+        guard var components = URLComponents(string: configuredURL), components.host != nil else {
+            // Unparseable config value — fall back rather than crash on launch.
+            return URL(string: "\(fallbackServerURL)/?gw_native=1")!
+        }
+
+        // The native app opens the native ONBOARDING entry route. Explicit
+        // /native/* routes are the authoritative native/web distinction, so the
+        // native UI never depends on runtime detection, bridge timing, or
+        // origin-scoped storage. If the user already has a session, that route
+        // redirects into the dashboard itself.
+        components.path = nativeEntryPath
+
+        // The marker is kept only as a FALLBACK diagnostic signal (it still lets
+        // plugin-availability checks and preview diagnostics identify the app).
+        // It is no longer what decides whether the native UI renders.
+        var queryItems = components.queryItems ?? []
+        if !queryItems.contains(where: { $0.name == "gw_native" }) {
+            queryItems.append(URLQueryItem(name: "gw_native", value: "1"))
+        }
+        components.queryItems = queryItems
+
+        return components.url ?? URL(string: "\(fallbackServerURL)\(nativeEntryPath)?gw_native=1")!
+    }
+
+    /// `server.url` from ios/App/App/capacitor.config.json (written by cap sync).
+    private static func readConfiguredServerURL() -> String? {
+        guard
+            let configURL = Bundle.main.url(forResource: "capacitor.config", withExtension: "json"),
+            let data = try? Data(contentsOf: configURL),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let server = root["server"] as? [String: Any],
+            let urlString = server["url"] as? String,
+            !urlString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            return nil
+        }
+
+        return urlString
+    }
+
+    /// Debug-only startup diagnostics.
+    ///
+    /// Prints the resolved server URL and the native-runtime detection result so
+    /// a device build can be confirmed to be pointing at the intended
+    /// deployment. Compiled out of Release, and prints no tokens or secrets —
+    /// only the origin the app loads, which is not sensitive.
+    private func logStartupDiagnostics(webView: WKWebView) {
+        #if DEBUG
+        let configured = AppDelegate.readConfiguredServerURL() ?? "(none — using fallback)"
+        NSLog("[Groundwork] Loading app at %@", appURL.absoluteString)
+        NSLog("[Groundwork] capacitor.config.json server.url: %@", configured)
+        NSLog("[Groundwork] Bundle identifier: %@", Bundle.main.bundleIdentifier ?? "(unknown)")
+
+        // Native-runtime detection is a JS-side decision (isNativeAppRuntime);
+        // read back what the web app will actually see.
+        let probe = """
+        JSON.stringify({
+          marker: window.__GROUNDWORK_NATIVE_APP__ === true,
+          platform: window.__GROUNDWORK_NATIVE_PLATFORM__ || null,
+          capacitorNative: !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()),
+          href: window.location.href
+        })
+        """
+        webView.evaluateJavaScript(probe) { result, error in
+            if let error = error {
+                NSLog("[Groundwork] Native runtime probe failed: %@", error.localizedDescription)
+            } else if let result = result {
+                NSLog("[Groundwork] Native runtime detection: %@", String(describing: result))
+            }
+        }
+        #endif
+    }
+
+    private func loadAppIfNeeded(in webView: WKWebView) {
+        guard !didLoadAppURL else {
             return
         }
 
-        if webView.url?.host == productionAppURL.host {
-            didLoadProductionAppURL = true
+        // Capacitor loads `server.url` at the ORIGIN ROOT, so at startup the
+        // WebView is on "/" rather than the native login route. Send it to
+        // /native/login explicitly. This runs once (guarded by didLoadAppURL), so
+        // it only applies at launch and never yanks an authenticated user out of
+        // an app route they have navigated to.
+        if webView.url?.host == appURL.host && webView.url?.path == AppDelegate.nativeEntryPath {
+            didLoadAppURL = true
+            logStartupDiagnostics(webView: webView)
             return
         }
 
-        didLoadProductionAppURL = true
+        didLoadAppURL = true
         webView.stopLoading()
-        webView.load(URLRequest(url: productionAppURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+        webView.load(URLRequest(url: appURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30))
+        logStartupDiagnostics(webView: webView)
     }
 
     private func clearWebViewAssetCache() {

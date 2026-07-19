@@ -54,18 +54,33 @@ export default function NativeLoginDiagnostics() {
 
   if (!snapshot) return null;
 
+  // Collapsed by default so it never displaces the onboarding/login UI. The
+  // same values are always written to the console, so console-only debugging
+  // works without expanding anything.
   return (
-    <div
+    <details
       data-testid="native-login-diagnostics"
-      className="mb-4 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-left font-mono text-[11px] leading-relaxed text-blue-900"
+      style={{
+        marginTop: 20,
+        borderRadius: 10,
+        border: "1px solid #1e1e1e",
+        background: "#111",
+        padding: "8px 10px",
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 11,
+        lineHeight: 1.6,
+        color: "#666",
+      }}
     >
-      <div className="font-semibold">NATIVE ROUTE DIAGNOSTICS (non-production only)</div>
-      <div>pathname: {snapshot.pathname}</div>
-      <div>hostname: {snapshot.host}</div>
-      <div>server URL: {snapshot.serverUrl}</div>
-      <div>bridge: {String(snapshot.bridgeAvailable)}</div>
-      <div>platform: {String(snapshot.platform)}</div>
-      <div>native runtime: {String(snapshot.isNative)}</div>
-    </div>
+      <summary style={{ cursor: "pointer", color: "#555" }}>diagnostics (preview only)</summary>
+      <div style={{ marginTop: 6 }}>
+        <div>pathname: {snapshot.pathname}</div>
+        <div>hostname: {snapshot.host}</div>
+        <div>server URL: {snapshot.serverUrl}</div>
+        <div>bridge: {String(snapshot.bridgeAvailable)}</div>
+        <div>platform: {String(snapshot.platform)}</div>
+        <div>native runtime: {String(snapshot.isNative)}</div>
+      </div>
+    </details>
   );
 }

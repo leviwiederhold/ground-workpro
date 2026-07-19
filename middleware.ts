@@ -87,7 +87,7 @@ function resolveApiGuardedModule(request: NextRequest) {
 // stay reachable while signed out, and an unauthenticated native user must never
 // be bounced to the website's /login (which would strand them on the web UI
 // inside the app).
-const PAGE_GUARD_BYPASSES = new Set(["/settings/billing/success", "/native/login"]);
+const PAGE_GUARD_BYPASSES = new Set(["/settings/billing/success", "/native", "/native/login"]);
 
 function findGuardedRoles(pathname: string): AppRole[] | null {
   if (PAGE_GUARD_BYPASSES.has(pathname)) return null;

@@ -64,7 +64,7 @@ test("/native/login hides email fields until Continue with Email is tapped", () 
 
   // The inputs must live INSIDE the conditional block, not above it.
   const formIndex = page.indexOf('data-testid="native-email-form"');
-  const emailInput = page.indexOf('id="native-email"');
+  const emailInput = page.indexOf('data-testid="onboarding-login-email"');
   assert.ok(formIndex > 0 && emailInput > formIndex, "email input must be inside the gated form");
 });
 
@@ -204,14 +204,16 @@ test("browser access to /native/login is handled without invoking native plugins
 });
 
 // ── Native shell points at the route ─────────────────────────────────────────
-test("AppDelegate opens the dedicated native login route", () => {
+test("AppDelegate opens the native ONBOARDING route, not the login route", () => {
   const appDelegate = read("ios/App/App/AppDelegate.swift");
 
-  assert.match(appDelegate, /nativeLoginPath = "\/native\/login"/, "the shell must target the native route");
-  assert.match(appDelegate, /components\.path = nativeLoginPath/, "the resolved URL must carry the route path");
+  // The app must land on the onboarding slides first; /native/login is reached
+  // only by choosing Sign In.
+  assert.match(appDelegate, /nativeEntryPath = "\/native"/, "the shell must target the onboarding route");
+  assert.match(appDelegate, /components\.path = nativeEntryPath/, "the resolved URL must carry the entry path");
   assert.match(
     appDelegate,
-    /webView\.url\?\.path == AppDelegate\.nativeLoginPath/,
-    "the startup load must be skipped only when already on the native route",
+    /webView\.url\?\.path == AppDelegate\.nativeEntryPath/,
+    "the startup load must be skipped only when already on the entry route",
   );
 });

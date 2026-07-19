@@ -160,9 +160,10 @@ test("the web login route does not use the native detector at all", () => {
 test("AppDelegate targets the native route, keeping the marker only as a fallback", () => {
   const appDelegate = read("ios/App/App/AppDelegate.swift");
 
-  // The route is now the primary distinction.
-  assert.match(appDelegate, /nativeLoginPath = "\/native\/login"/);
-  assert.match(appDelegate, /components\.path = nativeLoginPath/);
+  // Explicit /native/* routes are the primary distinction; the app enters at
+  // the onboarding route.
+  assert.match(appDelegate, /nativeEntryPath = "\/native"/);
+  assert.match(appDelegate, /components\.path = nativeEntryPath/);
 
   // The marker survives only as a diagnostic fallback signal.
   assert.match(appDelegate, /gw_native/, "the marker may remain as a fallback signal");

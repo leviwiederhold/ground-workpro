@@ -12,9 +12,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// not happen in a synced build.
     private static let fallbackServerURL = "https://ground-workpro.vercel.app"
 
-    /// Dedicated native login route. Must match NATIVE_LOGIN_ROUTE in
-    /// src/lib/auth/loginFlow.ts.
-    private static let nativeLoginPath = "/native/login"
+    /// The app's entry point: the native ONBOARDING route (feature slides, then
+    /// the sign-up / join-team / log-in choices). Must match NATIVE_ENTRY_ROUTE
+    /// in src/lib/auth/loginFlow.ts.
+    ///
+    /// Deliberately NOT /native/login. The login step is reached by choosing
+    /// "Sign In" from onboarding; starting there would skip the slides and the
+    /// entry choices, which is what briefly happened on this branch.
+    private static let nativeEntryPath = "/native"
 
     /// The URL this build loads.
     ///
@@ -123,12 +128,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return URL(string: "\(fallbackServerURL)/?gw_native=1")!
         }
 
-        // The native app opens the DEDICATED native login route. The route is the
-        // authoritative native/web distinction: /native/login always renders the
-        // native provider UI, so the buttons no longer depend on runtime
-        // detection, bridge timing, or origin-scoped storage. If the user already
-        // has a session, that route redirects into the dashboard itself.
-        components.path = nativeLoginPath
+        // The native app opens the native ONBOARDING entry route. Explicit
+        // /native/* routes are the authoritative native/web distinction, so the
+        // native UI never depends on runtime detection, bridge timing, or
+        // origin-scoped storage. If the user already has a session, that route
+        // redirects into the dashboard itself.
+        components.path = nativeEntryPath
 
         // The marker is kept only as a FALLBACK diagnostic signal (it still lets
         // plugin-availability checks and preview diagnostics identify the app).
@@ -139,7 +144,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         components.queryItems = queryItems
 
-        return components.url ?? URL(string: "\(fallbackServerURL)\(nativeLoginPath)?gw_native=1")!
+        return components.url ?? URL(string: "\(fallbackServerURL)\(nativeEntryPath)?gw_native=1")!
     }
 
     /// `server.url` from ios/App/App/capacitor.config.json (written by cap sync).
@@ -201,7 +206,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // /native/login explicitly. This runs once (guarded by didLoadAppURL), so
         // it only applies at launch and never yanks an authenticated user out of
         // an app route they have navigated to.
-        if webView.url?.host == appURL.host && webView.url?.path == AppDelegate.nativeLoginPath {
+        if webView.url?.host == appURL.host && webView.url?.path == AppDelegate.nativeEntryPath {
             didLoadAppURL = true
             logStartupDiagnostics(webView: webView)
             return

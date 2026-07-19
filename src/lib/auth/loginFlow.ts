@@ -18,6 +18,17 @@ import {
 // The two login entry points. The ROUTE is now the authoritative distinction
 // between native and web — not a runtime flag.
 export const WEB_LOGIN_ROUTE = "/login";
+
+/**
+ * The native app's ENTRY point: the original onboarding (feature slides, then
+ * the sign-up / join-team / log-in choices). The iOS app starts here.
+ */
+export const NATIVE_ENTRY_ROUTE = "/native";
+
+/**
+ * The native "log into an existing account" step, reached by choosing Sign In
+ * from onboarding. Never the first screen shown.
+ */
 export const NATIVE_LOGIN_ROUTE = "/native/login";
 
 /**

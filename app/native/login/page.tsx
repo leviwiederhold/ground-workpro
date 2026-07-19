@@ -31,7 +31,7 @@ import {
   WEB_LOGIN_ROUTE,
 } from "@/lib/auth/loginFlow";
 import { detectNativeLoginRuntime } from "@/lib/runtime/detectNativeLoginRuntime";
-import NativeLoginDiagnostics from "@/app/components/debug/NativeLoginDiagnostics";
+import { useNativeLoginDiagnostics } from "@/app/components/debug/useNativeLoginDiagnostics";
 
 function BackArrow() {
   return (
@@ -85,6 +85,9 @@ function NativeNoWorkspaceScreen() {
 
 export default function NativeLoginPage() {
   const router = useRouter();
+
+  // Console-only; renders nothing.
+  useNativeLoginDiagnostics();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -350,7 +353,6 @@ export default function NativeLoginPage() {
             ) : null}
 
             <BrowserFallbackNotice />
-            <NativeLoginDiagnostics />
           </div>
         </div>
       </div>

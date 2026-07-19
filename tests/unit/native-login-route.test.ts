@@ -150,7 +150,7 @@ test("/login keeps web behaviour and carries no native-only UI", () => {
   for (const nativeOnly of [
     "signInWithAppleNative",
     "signInWithGoogleNative",
-    "NativeLoginDiagnostics",
+    "useNativeLoginDiagnostics",
     "NativeAuthDebugBadge",
     "detectNativeLoginRuntime",
   ]) {
@@ -158,14 +158,20 @@ test("/login keeps web behaviour and carries no native-only UI", () => {
   }
 });
 
-test("diagnostics render only on the native route and never on production", () => {
-  const diagnostics = read("app/components/debug/NativeLoginDiagnostics.tsx");
+test("diagnostics are console-only and never rendered into the UI", () => {
+  const diagnostics = read("app/components/debug/useNativeLoginDiagnostics.ts");
   assert.match(diagnostics, /ground-workpro\.vercel\.app/, "production host must be excluded");
   assert.match(diagnostics, /if \(!isDiagnosticsHost\(window\.location\.host\)\) return/);
 
-  // Only the native page mounts it.
-  assert.match(nativePage(), /<NativeLoginDiagnostics \/>/);
-  assert.ok(!webPage().includes("NativeLoginDiagnostics"), "the web route must not mount diagnostics");
+  // A hook that returns void — it cannot contribute markup.
+  assert.match(diagnostics, /export function useNativeLoginDiagnostics\(\): void/);
+  assert.ok(!diagnostics.includes("return ("), "diagnostics must not render any element");
+  assert.ok(!diagnostics.includes("<details"), "the visible diagnostics panel must be gone");
+
+  // The native login route uses it, but renders nothing for it.
+  assert.match(nativePage(), /useNativeLoginDiagnostics\(\);/);
+  assert.ok(!nativePage().includes("<NativeLoginDiagnostics"), "no diagnostics element may be rendered");
+  assert.ok(!webPage().includes("iagnostics"), "the web route must not reference diagnostics");
 });
 
 // ── Middleware ───────────────────────────────────────────────────────────────

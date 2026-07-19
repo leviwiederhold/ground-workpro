@@ -212,7 +212,7 @@ test("web /login is unchanged and shows no native slides or providers", () => {
   const web = read("app/login/page.tsx");
   assert.equal(WEB_LOGIN_ROUTE, "/login");
   assert.match(web, /OAuthButtons/, "web OAuth must remain");
-  for (const nativeOnly of ["gw-onboarding", "signInWithAppleNative", "NativeLoginDiagnostics", "OnboardingGate"]) {
+  for (const nativeOnly of ["gw-onboarding", "signInWithAppleNative", "useNativeLoginDiagnostics", "OnboardingGate"]) {
     assert.ok(!web.includes(nativeOnly), `/login must not contain ${nativeOnly}`);
   }
 });
@@ -225,13 +225,21 @@ test("the native slides never render on the web", () => {
 });
 
 // ── Diagnostics ──────────────────────────────────────────────────────────────
-test("diagnostics are collapsed and confined to the native login route", () => {
-  const diagnostics = read("app/components/debug/NativeLoginDiagnostics.tsx");
-  assert.match(diagnostics, /<details/, "diagnostics must be collapsible so they don't displace the UI");
+test("no diagnostics UI is rendered on any native screen", () => {
+  const diagnostics = read("app/components/debug/useNativeLoginDiagnostics.ts");
   assert.match(diagnostics, /ground-workpro\.vercel\.app/, "production must be excluded");
+  assert.ok(!diagnostics.includes("<details"), "the visible diagnostics panel must be removed");
+  assert.ok(!diagnostics.includes("diagnostics (preview only)"), "the visible summary label must be gone");
 
-  assert.ok(!entry().includes("NativeLoginDiagnostics"), "onboarding slides must not be disrupted by diagnostics");
-  assert.match(login(), /<NativeLoginDiagnostics \/>/);
+  // Neither native screen renders a diagnostics element.
+  for (const [name, source] of [["onboarding", entry()], ["login", login()]] as const) {
+    assert.ok(!source.includes("<NativeLoginDiagnostics"), `${name} must not render diagnostics`);
+    assert.ok(!source.includes("preview only"), `${name} must not show a diagnostics panel`);
+  }
+
+  // Logging is retained for development.
+  assert.match(login(), /useNativeLoginDiagnostics\(\);/);
+  assert.match(diagnostics, /console\.log/, "console diagnostics must be retained");
 });
 
 // ── Middleware ───────────────────────────────────────────────────────────────

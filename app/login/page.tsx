@@ -7,6 +7,8 @@ import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
 import OAuthButtons from "@/app/components/auth/OAuthButtons";
 import { openGroundworkWebsite } from "@/lib/runtime/openWebsite";
+// TEMPORARY DIAGNOSTIC — remove once native login is confirmed on device.
+import NativeAuthDebugBadge from "@/app/components/debug/NativeAuthDebugBadge";
 import {
   readPendingInviteFromSearch,
   readPendingInviteState,
@@ -363,6 +365,10 @@ export default function LoginPage() {
             <span className="text-sm font-medium text-green-800">Payment successful — workspace is ready</span>
           </div>
         )}
+        {/* TEMPORARY DIAGNOSTIC — non-production hosts only. Remove once
+            native login is confirmed working on device. `nativeRuntime` is the
+            exact condition that gates the native provider buttons below. */}
+        <NativeAuthDebugBadge nativeRuntime={nativeRuntime} nativeAuthUiRendered={nativeRuntime} />
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
           {nativeRuntime && getPendingInvite()
             ? `Join ${inviteCompanyName || "your company"}`

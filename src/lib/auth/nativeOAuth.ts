@@ -70,6 +70,43 @@ export function generateRawNonce(length = 32): string {
   return out;
 }
 
+// Decode a JWT payload WITHOUT verifying it.
+//
+// This is only ever used to read the `nonce` claim so the value we hand Supabase
+// matches the token. Supabase performs the real signature/issuer/audience
+// verification server-side; nothing here is trusted for authorization.
+export function decodeIdTokenPayload(token: string): Record<string, unknown> | null {
+  const parts = String(token ?? "").split(".");
+  if (parts.length < 2 || !parts[1]) return null;
+
+  try {
+    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    const decode = (globalThis as any).atob as ((value: string) => string) | undefined;
+    if (typeof decode !== "function") return null;
+
+    const binary = decode(padded);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    const parsed = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// The `nonce` claim of an ID token, or null when absent/blank.
+//
+// Supabase rejects an asymmetric request: "Passed nonce and nonce in id_token
+// should either both exist or not." Reading the claim lets the caller stay
+// symmetric no matter what the provider plugin did.
+export function readIdTokenNonce(token: string): string | null {
+  const payload = decodeIdTokenPayload(token);
+  const nonce = payload?.nonce;
+  if (typeof nonce !== "string") return null;
+  const trimmed = nonce.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
   const digest = await (globalThis as any).crypto.subtle.digest("SHA-256", data);
@@ -333,7 +370,35 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
       return { status: "error", message: "Google did not return an ID token. Please try again." };
     }
 
-    const { error } = await supabase.auth.signInWithIdToken({ provider: "google", token: idToken });
+    // Google nonce handling.
+    //
+    // We deliberately pass NO nonce to the Google login request above — Supabase
+    // documents the Google nonce as optional, and the native iOS path
+    // (GoogleProvider.swift) forwards `nil` when none is supplied, producing a
+    // token with no `nonce` claim.
+    //
+    // But the plugin's WEB implementation does not honour that: google-provider.js
+    // does `const nonce = options.nonce || Math.random().toString(36).substring(2)`
+    // and puts it in the OAuth request, so that token DOES carry a nonce claim.
+    // If that path runs, sending no nonce makes Supabase fail with:
+    //   "Passed nonce and nonce in id_token should either both exist or not."
+    //
+    // So rather than assume which implementation ran, we mirror the token: send a
+    // nonce if and only if the token has one. That is symmetric by construction
+    // and cannot produce the error in either direction. (Google echoes the nonce
+    // verbatim rather than hashing it, so the claim is the value to send.)
+    const tokenNonce = readIdTokenNonce(idToken);
+
+    if (process.env.NODE_ENV !== "production") {
+      // Presence only — never the token or the nonce value itself.
+      console.log("[native-auth] google id_token nonce claim present:", tokenNonce !== null);
+    }
+
+    const { error } = await supabase.auth.signInWithIdToken(
+      tokenNonce
+        ? { provider: "google", token: idToken, nonce: tokenNonce }
+        : { provider: "google", token: idToken },
+    );
     if (error) return { status: "error", message: error.message };
 
     const profile = response.profile ?? response;

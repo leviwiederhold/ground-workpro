@@ -183,7 +183,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        if webView.url?.host == appURL.host {
+        // Only skip the explicit load when the page ALREADY carries the native
+        // marker query. Capacitor loads `server.url` bare, so matching on host
+        // alone used to short-circuit here and the page never received
+        // `gw_native=1` — leaving web-side detection dependent on the injected
+        // marker (racy) or a localStorage flag that only exists on an origin the
+        // app has run against before. That is why a fresh preview origin lost
+        // native detection entirely while production kept working.
+        let currentQuery = webView.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
+        let alreadyMarked = currentQuery?.contains { $0.name == "gw_native" && $0.value == "1" } ?? false
+
+        if webView.url?.host == appURL.host && alreadyMarked {
             didLoadAppURL = true
             logStartupDiagnostics(webView: webView)
             return

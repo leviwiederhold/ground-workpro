@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { isNativeAppRuntime } from "@/lib/runtime/isNativeApp";
+import { detectNativeLoginRuntime } from "@/lib/runtime/detectNativeLoginRuntime";
 import OAuthButtons from "@/app/components/auth/OAuthButtons";
 import { openGroundworkWebsite } from "@/lib/runtime/openWebsite";
 // TEMPORARY DIAGNOSTIC — remove once native login is confirmed on device.
@@ -59,7 +60,12 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [nativeRuntime, setNativeRuntime] = useState(false);
+  // Detected synchronously so the FIRST client render is already correct.
+  // Starting at `false` and only setting it in an effect is what previously let
+  // the native provider buttons disappear: if any signal was late or missing,
+  // the page stayed stuck on the web layout. Rechecked after hydration below,
+  // once the Capacitor bridge has definitely been injected.
+  const [nativeRuntime, setNativeRuntime] = useState<boolean>(() => detectNativeLoginRuntime());
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
@@ -125,8 +131,11 @@ export default function LoginPage() {
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setTrialMode(shouldStartTrial);
     setCheckoutSuccess(hasCheckoutSuccess);
-    const isNative = isNativeAppRuntime();
-    setNativeRuntime(isNative);
+    // Recheck after hydration: the Capacitor bridge may not have been evaluated
+    // when the lazy initializer ran. Never downgrade a positive detection to
+    // false — a signal going quiet must not tear the native UI back down.
+    const isNative = detectNativeLoginRuntime() || isNativeAppRuntime();
+    if (isNative) setNativeRuntime(true);
     const pendingInvite = readPendingInviteFromSearch(window.location.search);
     if (isNative && pendingInvite) {
       writePendingInviteState(pendingInvite, window.sessionStorage);

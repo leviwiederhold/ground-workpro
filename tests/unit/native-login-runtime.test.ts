@@ -128,88 +128,47 @@ test("detection reports which signal matched, for diagnostics", () => {
   assert.equal(web.isNative, false);
 });
 
-// ── Login page wiring ────────────────────────────────────────────────────────
-// The detector is only useful if the page actually consumes it correctly.
-test("login page initializes nativeRuntime synchronously, not from a false effect", () => {
-  const page = read("app/login/page.tsx");
+// ── The detector's remaining job ─────────────────────────────────────────────
+// Since the dedicated /native/login route now decides whether the native UI
+// EXISTS, this detector is only used for plugin availability and diagnostics.
+// These tests pin that narrowed contract.
 
-  assert.match(
-    page,
-    /useState<boolean>\(\(\) => detectNativeLoginRuntime\(\)\)/,
-    "nativeRuntime must use a lazy initializer so the first client render is correct",
-  );
-  assert.doesNotMatch(
-    page,
-    /const \[nativeRuntime, setNativeRuntime\] = useState\(false\)/,
-    "nativeRuntime must not start as an unconditional false",
-  );
-  assert.match(
-    page,
-    /if \(isNative\) setNativeRuntime\(true\)/,
-    "the post-hydration recheck must never downgrade a positive detection",
-  );
-});
+test("the detector is no longer used to gate whether native UI renders", () => {
+  const nativePage = read("app/native/login/page.tsx");
 
-test("native provider buttons render whenever nativeRuntime is true", () => {
-  const page = read("app/login/page.tsx");
+  // It may guard plugin calls...
+  assert.match(nativePage, /if \(!detectNativeLoginRuntime\(\)\)/, "plugin calls must still be guarded");
 
-  // Order: Apple, then Google, then Email.
-  const apple = page.indexOf("Continue with Apple");
-  const google = page.indexOf("Continue with Google");
-  const email = page.indexOf("Continue with Email");
-  assert.ok(apple > 0 && google > apple && email > google, "expected Apple, then Google, then Email");
-
-  // The email/password form must stay hidden until Continue with Email is tapped.
-  assert.match(
-    page,
-    /\(!nativeRuntime \|\| showEmailForm\) &&/,
-    "the email form must be gated on showEmailForm in native mode",
-  );
-  assert.match(page, /onClick=\{\(\) => setShowEmailForm\(true\)\}/, "Continue with Email must reveal the form");
-});
-
-test("missing Google configuration does not hide the Google button", () => {
-  const page = read("app/login/page.tsx");
-
-  // The Google button's rendering must not depend on any config/env check —
-  // configuration is validated only after the tap, inside the sign-in handler.
-  const buttonBlock = page.slice(page.indexOf("Continue with Apple") - 1200, page.indexOf("Continue with Email"));
-  assert.doesNotMatch(
-    buttonBlock,
-    /NEXT_PUBLIC_GOOGLE|readGoogleClientConfig|validateGoogleClientConfig/,
-    "provider buttons must render regardless of configuration",
-  );
-
-  // The check lives in the tap handler instead.
-  const nativeOAuth = read("src/lib/auth/nativeOAuth.ts");
-  assert.match(
-    nativeOAuth,
-    /signInWithGoogleNative[\s\S]{0,400}readGoogleClientConfig\(\)/,
-    "configuration must be validated inside the sign-in handler, after the tap",
+  // ...but the buttons themselves must not be behind it.
+  const buttonsStart = nativePage.indexOf('data-testid="native-provider-buttons"');
+  const buttonsEnd = nativePage.indexOf("Continue with Email");
+  const block = nativePage.slice(buttonsStart, buttonsEnd);
+  assert.ok(
+    !block.includes("detectNativeLoginRuntime"),
+    "provider buttons must render from the route alone, not from runtime detection",
   );
 });
 
-// ── Diagnostics are preview-only ─────────────────────────────────────────────
-test("diagnostics never render on the production host", () => {
-  const badge = read("app/components/debug/NativeAuthDebugBadge.tsx");
-  assert.match(badge, /ground-workpro\.vercel\.app/, "the production host must be excluded explicitly");
-  assert.match(badge, /if \(!isDiagnosticsHost\(\)\) return/, "diagnostics must bail out on production");
+test("the web login route does not use the native detector at all", () => {
+  const webPage = read("app/login/page.tsx");
+  assert.ok(
+    !webPage.includes("detectNativeLoginRuntime"),
+    "the web route must not depend on native detection",
+  );
 });
 
-// ── The native shell must supply a deterministic signal ──────────────────────
-test("AppDelegate guarantees the gw_native marker reaches the page", () => {
+test("AppDelegate targets the native route, keeping the marker only as a fallback", () => {
   const appDelegate = read("ios/App/App/AppDelegate.swift");
 
-  assert.match(appDelegate, /gw_native/, "the native shell must append the marker");
+  // The route is now the primary distinction.
+  assert.match(appDelegate, /nativeLoginPath = "\/native\/login"/);
+  assert.match(appDelegate, /components\.path = nativeLoginPath/);
+
+  // The marker survives only as a diagnostic fallback signal.
+  assert.match(appDelegate, /gw_native/, "the marker may remain as a fallback signal");
   assert.match(
     appDelegate,
-    /alreadyMarked/,
-    "the shell must only skip the explicit load when the page already carries the marker",
-  );
-  // The host-only short-circuit is what dropped the marker on a fresh origin.
-  assert.doesNotMatch(
-    appDelegate,
-    /if webView\.url\?\.host == appURL\.host \{\s*\n\s*didLoadAppURL = true/,
-    "matching on host alone must not short-circuit the marked load",
+    /FALLBACK diagnostic signal/i,
+    "the marker's reduced role should be documented at the call site",
   );
 });

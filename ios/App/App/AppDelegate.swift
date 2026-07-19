@@ -12,6 +12,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     /// not happen in a synced build.
     private static let fallbackServerURL = "https://ground-workpro.vercel.app"
 
+    /// Dedicated native login route. Must match NATIVE_LOGIN_ROUTE in
+    /// src/lib/auth/loginFlow.ts.
+    private static let nativeLoginPath = "/native/login"
+
     /// The URL this build loads.
     ///
     /// Read from the bundled capacitor.config.json that `npx cap sync ios`
@@ -119,14 +123,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return URL(string: "\(fallbackServerURL)/?gw_native=1")!
         }
 
-        components.path = "/"
+        // The native app opens the DEDICATED native login route. The route is the
+        // authoritative native/web distinction: /native/login always renders the
+        // native provider UI, so the buttons no longer depend on runtime
+        // detection, bridge timing, or origin-scoped storage. If the user already
+        // has a session, that route redirects into the dashboard itself.
+        components.path = nativeLoginPath
+
+        // The marker is kept only as a FALLBACK diagnostic signal (it still lets
+        // plugin-availability checks and preview diagnostics identify the app).
+        // It is no longer what decides whether the native UI renders.
         var queryItems = components.queryItems ?? []
         if !queryItems.contains(where: { $0.name == "gw_native" }) {
             queryItems.append(URLQueryItem(name: "gw_native", value: "1"))
         }
         components.queryItems = queryItems
 
-        return components.url ?? URL(string: "\(fallbackServerURL)/?gw_native=1")!
+        return components.url ?? URL(string: "\(fallbackServerURL)\(nativeLoginPath)?gw_native=1")!
     }
 
     /// `server.url` from ios/App/App/capacitor.config.json (written by cap sync).
@@ -183,17 +196,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             return
         }
 
-        // Only skip the explicit load when the page ALREADY carries the native
-        // marker query. Capacitor loads `server.url` bare, so matching on host
-        // alone used to short-circuit here and the page never received
-        // `gw_native=1` — leaving web-side detection dependent on the injected
-        // marker (racy) or a localStorage flag that only exists on an origin the
-        // app has run against before. That is why a fresh preview origin lost
-        // native detection entirely while production kept working.
-        let currentQuery = webView.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems }
-        let alreadyMarked = currentQuery?.contains { $0.name == "gw_native" && $0.value == "1" } ?? false
-
-        if webView.url?.host == appURL.host && alreadyMarked {
+        // Capacitor loads `server.url` at the ORIGIN ROOT, so at startup the
+        // WebView is on "/" rather than the native login route. Send it to
+        // /native/login explicitly. This runs once (guarded by didLoadAppURL), so
+        // it only applies at launch and never yanks an authenticated user out of
+        // an app route they have navigated to.
+        if webView.url?.host == appURL.host && webView.url?.path == AppDelegate.nativeLoginPath {
             didLoadAppURL = true
             logStartupDiagnostics(webView: webView)
             return

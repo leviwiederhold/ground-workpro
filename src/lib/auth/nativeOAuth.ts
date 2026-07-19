@@ -346,10 +346,24 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
       },
     });
 
+    // Supabase's documented Google ID-token nonce contract, identical in shape to
+    // the Apple flow above: generate a cryptographically random RAW nonce, send
+    // SHA-256(raw) as lowercase hex to the provider, and send the RAW value to
+    // Supabase, which re-hashes and compares against the token's `nonce` claim.
+    //
+    // Both values come from one generation per login attempt — the raw nonce is
+    // never derived from anything the provider returned.
+    const rawNonce = generateRawNonce();
+    const hashedNonce = await sha256Hex(rawNonce);
+
     const user = await SocialLogin.login({
       provider: "google",
       options: {
         scopes: ["email", "profile"],
+        // GoogleLoginOptions.nonce — forwarded by GoogleProvider.swift to
+        // GIDSignIn, and used by the web implementation instead of the random
+        // one it would otherwise invent.
+        nonce: hashedNonce,
       },
     });
     // Documented shape: { provider: "google", result: GoogleLoginResponse }.
@@ -370,35 +384,48 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
       return { status: "error", message: "Google did not return an ID token. Please try again." };
     }
 
-    // Google nonce handling.
+    // DEVELOPMENT DIAGNOSTICS ONLY.
     //
-    // We deliberately pass NO nonce to the Google login request above — Supabase
-    // documents the Google nonce as optional, and the native iOS path
-    // (GoogleProvider.swift) forwards `nil` when none is supplied, producing a
-    // token with no `nonce` claim.
+    // Decoding the returned token tells us whether the provider actually honoured
+    // the nonce we supplied. It is never used as authentication input: the value
+    // sent to Supabase below is always our own `rawNonce`.
     //
-    // But the plugin's WEB implementation does not honour that: google-provider.js
-    // does `const nonce = options.nonce || Math.random().toString(36).substring(2)`
-    // and puts it in the OAuth request, so that token DOES carry a nonce claim.
-    // If that path runs, sending no nonce makes Supabase fail with:
-    //   "Passed nonce and nonce in id_token should either both exist or not."
+    // An earlier revision passed the decoded claim straight back to Supabase.
+    // That satisfied Supabase's symmetry check but was circular — a token's own
+    // nonce proves nothing about who requested it, so it provided no replay
+    // protection. Only a nonce we generated and retained can do that.
     //
-    // So rather than assume which implementation ran, we mirror the token: send a
-    // nonce if and only if the token has one. That is symmetric by construction
-    // and cannot produce the error in either direction. (Google echoes the nonce
-    // verbatim rather than hashing it, so the claim is the value to send.)
-    const tokenNonce = readIdTokenNonce(idToken);
-
+    // Logs booleans only: never the token, the raw nonce, or the hashed nonce.
     if (process.env.NODE_ENV !== "production") {
-      // Presence only — never the token or the nonce value itself.
-      console.log("[native-auth] google id_token nonce claim present:", tokenNonce !== null);
+      const claimedNonce = readIdTokenNonce(idToken);
+      console.log("[native-auth] google id_token nonce claim present:", claimedNonce !== null);
+      console.log("[native-auth] google id_token nonce matches hashed nonce:", claimedNonce === hashedNonce);
+
+      if (claimedNonce === null) {
+        // The plugin dropped the nonce we supplied. Supabase will reject this
+        // with "Passed nonce and nonce in id_token should either both exist or
+        // not." We deliberately do NOT paper over it by omitting the nonce —
+        // that would silently disable replay protection.
+        console.warn(
+          "[native-auth] Google returned a token with NO nonce claim despite one being supplied. " +
+            "The native plugin did not forward it — check whether the plugin's web implementation " +
+            "is running instead of the native iOS one (bridge unavailable).",
+        );
+      } else if (claimedNonce !== hashedNonce) {
+        console.warn(
+          "[native-auth] Google's nonce claim does not match the nonce supplied. " +
+            "Something replaced it — likely the plugin's web implementation generating its own.",
+        );
+      }
     }
 
-    const { error } = await supabase.auth.signInWithIdToken(
-      tokenNonce
-        ? { provider: "google", token: idToken, nonce: tokenNonce }
-        : { provider: "google", token: idToken },
-    );
+    const { error } = await supabase.auth.signInWithIdToken({
+      provider: "google",
+      token: idToken,
+      // The RAW nonce. Supabase hashes this and compares against the token's
+      // claim, which is SHA-256(rawNonce) because that is what we sent Google.
+      nonce: rawNonce,
+    });
     if (error) return { status: "error", message: error.message };
 
     const profile = response.profile ?? response;

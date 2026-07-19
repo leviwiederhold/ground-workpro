@@ -103,16 +103,62 @@ test("unavailable localStorage does not break detection", () => {
   assert.equal(detectNativeLoginRuntime(noStorage), true);
 });
 
-test("a live signal is persisted so later navigations stay native", () => {
+test("detection NEVER persists a native marker", () => {
+  // Persisting was the bug: one visit permanently marked an origin as native,
+  // after which ordinary web routes rendered the native UI.
   const win = makeWindow({ search: "?gw_native=1" });
   assert.equal(detectNativeLoginRuntime(win), true);
-  assert.equal(win.localStorage?.getItem(NATIVE_RUNTIME_STORAGE_KEY), "1");
+  assert.equal(
+    win.localStorage?.getItem(NATIVE_RUNTIME_STORAGE_KEY),
+    null,
+    "detectNativeLoginRuntime must not write groundwork.nativeApp",
+  );
 
-  // Same origin, param gone, bridge quiet — still native via the stored flag.
-  const later: WindowLike = { ...win, location: { search: "" } };
-  const detection = readNativeRuntimeSignals(later);
-  assert.equal(detection.isNative, true);
+  // Nor for any other live signal.
+  for (const overrides of [
+    { Capacitor: { isNativePlatform: () => true } },
+    { Capacitor: { getPlatform: () => "ios" } },
+    { __GROUNDWORK_NATIVE_APP__: true },
+  ]) {
+    const w = makeWindow(overrides);
+    assert.equal(detectNativeLoginRuntime(w), true);
+    assert.equal(w.localStorage?.getItem(NATIVE_RUNTIME_STORAGE_KEY), null);
+  }
+});
+
+test("a stale stored flag ALONE never counts as native", () => {
+  // A leftover key from a previous visit must not make a plain browser look
+  // native — that would flip web routes to native UI and, worse, green-light
+  // invoking native plugins outside the app.
+  const store = new Map([[NATIVE_RUNTIME_STORAGE_KEY, "1"]]);
+  const stale = makeWindow({
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    },
+  });
+
+  assert.equal(detectNativeLoginRuntime(stale), false, "stale flag alone must not be sufficient");
+
+  // The signal is still reported for diagnostics...
+  const detection = readNativeRuntimeSignals(stale);
+  assert.equal(detection.signals["stored-flag"], true);
   assert.equal(detection.matched, "stored-flag");
+
+  // ...but a LIVE signal alongside it still wins.
+  const live = makeWindow({ search: "?gw_native=1" });
+  assert.equal(detectNativeLoginRuntime(live), true);
+});
+
+test("only isNativeAppRuntime writes the native key, exactly as on main", () => {
+  const detect = read("src/lib/runtime/detectNativeLoginRuntime.ts");
+  assert.ok(!/\.setItem\(/.test(detect), "detectNativeLoginRuntime must never write storage");
+
+  const legacy = read("src/lib/runtime/isNativeApp.ts");
+  assert.match(legacy, /setItem\("groundwork\.nativeApp", "1"\)/, "pre-existing writer is unchanged");
+  // And only in the gw_native branch, as on main.
+  const before = legacy.slice(0, legacy.indexOf('setItem("groundwork.nativeApp"'));
+  assert.match(before.slice(-260), /gw_native/, "the only write stays behind the gw_native param");
 });
 
 test("detection reports which signal matched, for diagnostics", () => {

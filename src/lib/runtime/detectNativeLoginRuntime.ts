@@ -24,8 +24,9 @@
 // never render.
 //
 // This module checks every signal synchronously so the FIRST client render can
-// already be correct, and persists a positive result so later navigations on
-// the same origin stay native even if the live signals go quiet.
+// already be correct. It does NOT persist anything: the /native routes are
+// native by ROUTE, so nothing here needs a durable marker, and writing one made
+// ordinary web routes render native UI on any origin that had been visited once.
 
 export type NativeRuntimeSignal =
   | "gw-native-param"
@@ -77,14 +78,6 @@ function readStoredFlag(win: WindowLike): boolean {
     return win.localStorage?.getItem(NATIVE_RUNTIME_STORAGE_KEY) === "1";
   } catch {
     return false;
-  }
-}
-
-function persistFlag(win: WindowLike): void {
-  try {
-    win.localStorage?.setItem(NATIVE_RUNTIME_STORAGE_KEY, "1");
-  } catch {
-    // Storage can be unavailable in locked-down WebViews — non-fatal.
   }
 }
 
@@ -149,19 +142,30 @@ export function readNativeRuntimeSignals(win: WindowLike | undefined): NativeRun
 }
 
 /**
- * True when any trusted native signal is present.
+ * True when a LIVE native signal is present.
  *
- * Safe to call during render (including the lazy `useState` initializer) and on
- * the server, where it returns false. A positive result from a LIVE signal is
- * persisted so later navigations on the same origin remain native.
+ * Deliberately does NOT write `groundwork.nativeApp`, and does NOT accept the
+ * stored flag as sufficient on its own.
+ *
+ * Both of those were mistakes in an earlier revision. Persisting on any signal
+ * meant a single visit could permanently mark an origin as native, after which
+ * ordinary web routes rendered the native UI — `/` served the native onboarding
+ * slideshow instead of the marketing landing page, and the only cure was
+ * clearing site data. Accepting a stale flag as proof of nativeness compounded
+ * it, and would let this function green-light invoking native plugins inside a
+ * plain browser.
+ *
+ * Nothing needs the persistence: `/native` and `/native/login` are native
+ * because of the ROUTE, and this helper's only jobs are guarding plugin calls
+ * and development diagnostics — both of which want the live truth.
+ *
+ * `isNativeAppRuntime()` still honours the stored flag; that is pre-existing
+ * behaviour the native shell relies on, and only it writes the key (via the
+ * `gw_native` branch), exactly as on main.
+ *
+ * Safe to call during render and on the server, where it returns false.
  */
 export function detectNativeLoginRuntime(win: WindowLike | undefined = typeof window === "undefined" ? undefined : (window as WindowLike)): boolean {
   const detection = readNativeRuntimeSignals(win);
-
-  // Don't re-persist when the only reason we're native is the stored flag.
-  if (win && detection.isNative && detection.matched !== "stored-flag") {
-    persistFlag(win);
-  }
-
-  return detection.isNative;
+  return detection.isNative && detection.matched !== "stored-flag";
 }

@@ -20,6 +20,7 @@ import { runUnifiedSave } from '@/lib/settings/unifiedSave';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
 import { resolveSignOutRoute } from '@/lib/auth/loginFlow';
+import { useLocationPermissionPrompt } from '@/app/components/location/useLocationPermissionPrompt';
 import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
@@ -47,10 +48,6 @@ const CompanyConfigPrompt = dynamic(
 );
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
-);
-const LocationPermissionGate = dynamic(
-  () => import('@/app/components/views/LocationPermissionGate').then((mod) => mod.LocationPermissionGate),
-  { ssr: false }
 );
 const ScheduleView = dynamic(
   () => import('@/app/components/views/ScheduleView').then((mod) => mod.ScheduleView)
@@ -12003,6 +12000,9 @@ const MobileAppShell = ({
       const [activeShiftStartAt, setActiveShiftStartAt] = useState(null);
       const [todayHours, setTodayHours] = useState(0);
       const [weekHours, setWeekHours] = useState(0);
+      // Location gate for the clock-in/out actions. `modal` renders nothing
+      // until an action actually needs permission.
+      const { ensureLocation, modal: locationModal } = useLocationPermissionPrompt();
 
       const loadStatus = useCallback(async () => {
         setLoading(true);
@@ -12030,6 +12030,9 @@ const MobileAppShell = ({
       }, [isOpen, loadStatus]);
 
       const handleClockIn = async () => {
+        // Location is required to clock in. Ask at the moment of the action —
+        // not on dashboard load — and stay blocked until it is granted.
+        if (!(await ensureLocation())) return;
         setActionLoading(true);
         setError('');
         try {
@@ -12047,6 +12050,7 @@ const MobileAppShell = ({
       };
 
       const handleClockOut = async () => {
+        if (!(await ensureLocation())) return;
         setActionLoading(true);
         setError('');
         try {
@@ -12094,22 +12098,22 @@ const MobileAppShell = ({
             {loading && <p className="text-sm text-gray-500">Loading time clock status...</p>}
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            {/* Location is required to clock in/out. The gate renders the action
-                buttons only once permission is granted; otherwise it shows the
-                pre-permission card / blocked / unavailable states. This gates
-                only the attendance action — not the rest of the app. */}
-            <LocationPermissionGate onNotNow={onClose}>
-              <div className="flex justify-end gap-3">
+            {/* Location is required to clock in/out, but it is requested at the
+                moment of the action rather than up front: the buttons always
+                render, and handleClockIn/handleClockOut call ensureLocation()
+                first, which opens the modal and blocks the action until
+                permission is granted. */}
+            {locationModal}
+            <div className="flex justify-end gap-3">
                 <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
                 <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
                 <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
                   {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
                 </Button>
-                <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
-                  {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
-                </Button>
-              </div>
-            </LocationPermissionGate>
+              <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
+                {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
+              </Button>
+            </div>
           </div>
         </Modal>
       );

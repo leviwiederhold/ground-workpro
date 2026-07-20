@@ -50,6 +50,11 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const [employeeToAssign, setEmployeeToAssign] = useState([]);
   const [crewActionLoading, setCrewActionLoading] = useState(false);
   const [crewActionError, setCrewActionError] = useState('');
+  // Assignment-conflict → reassignment confirmation. Null when no conflict is
+  // pending; otherwise holds the employee + the job they're currently on.
+  const [reassignPrompt, setReassignPrompt] = useState(null);
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [reassignError, setReassignError] = useState('');
   const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
   const [equipmentActionError, setEquipmentActionError] = useState('');
   const [financialSummary, setFinancialSummary] = useState(null);
@@ -437,6 +442,25 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           payload = null;
         }
 
+        // Assignment conflict: the employee is already on another active job.
+        // Pause the batch and ask the user to confirm a reassignment. Any
+        // employees already assigned before this one keep their assignment.
+        if (response.status === 409 && payload?.code === 'EMPLOYEE_ASSIGNMENT_CONFLICT') {
+          const emp = employees.find((candidate) => String(candidate.id) === String(employeeId));
+          const conflictingJobId = payload.conflictingJob?.id ?? '';
+          setReassignPrompt({
+            employeeId: String(employeeId),
+            employeeName: emp?.name || 'This employee',
+            conflictingJobId: String(conflictingJobId),
+            conflictingJobName: payload.conflictingJob?.name || getAssignedJobName(conflictingJobId),
+          });
+          setReassignError('');
+          setCrewActionLoading(false);
+          // Reflect any employees assigned before the conflict was hit.
+          await refreshAssignmentState();
+          return;
+        }
+
         if (!response.ok || !payload?.employee) {
           setCrewActionError(payload?.error || raw || 'Failed to assign employee');
           setCrewActionLoading(false);
@@ -450,6 +474,62 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       setCrewActionError('Failed to assign employee');
     } finally {
       setCrewActionLoading(false);
+    }
+  };
+
+  // Cancel the reassignment: leaves BOTH jobs unchanged and clears the stale
+  // pending selection so the checkbox state can't misrepresent what happened.
+  const handleCancelReassign = () => {
+    setReassignPrompt(null);
+    setReassignError('');
+    setEmployeeToAssign([]);
+  };
+
+  // Confirm: atomically remove the employee from their current job and assign
+  // them to the selected job. Only clears state / refreshes on real success —
+  // no optimistic UI that could falsely show success before the write lands.
+  const handleConfirmReassign = async () => {
+    if (!reassignPrompt || !selectedJob) return;
+    setReassignLoading(true);
+    setReassignError('');
+    try {
+      const response = await fetch(`/api/jobs/${selectedJob.id}/employees/reassign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: reassignPrompt.employeeId,
+          from_job_id: reassignPrompt.conflictingJobId,
+        }),
+      });
+      const raw = await response.text();
+      let payload = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || !payload?.success) {
+        if (response.status === 409 && payload?.code === 'EMPLOYEE_ASSIGNMENT_CONFLICT') {
+          setReassignError(
+            `${reassignPrompt.employeeName} still conflicts with ${
+              payload.conflictingJob?.name || 'another active job'
+            }.`
+          );
+        } else {
+          setReassignError(payload?.error || raw || 'Reassignment failed. Please try again.');
+        }
+        return; // Keep the dialog open; do not clear or show success.
+      }
+
+      // Success: refresh both jobs (lists + counts) and clear pending state.
+      setReassignPrompt(null);
+      setEmployeeToAssign([]);
+      await refreshAssignmentState();
+    } catch {
+      setReassignError('Reassignment failed. Please try again.');
+    } finally {
+      setReassignLoading(false);
     }
   };
 
@@ -871,8 +951,49 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     </div>
   );
 
+  const renderReassignDialog = () => {
+    if (!reassignPrompt) return null;
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reassign-dialog-title"
+        onClick={reassignLoading ? undefined : handleCancelReassign}
+      >
+        <div
+          className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 id="reassign-dialog-title" className="text-lg font-semibold text-gray-900">
+            Employee already assigned
+          </h3>
+          <p className="mt-2 text-sm text-gray-600">
+            <span className="font-medium">{reassignPrompt.employeeName}</span> is currently assigned to{' '}
+            <span className="font-medium">{reassignPrompt.conflictingJobName}</span>. Remove them from that
+            job and assign them here?
+          </p>
+          {reassignError && (
+            <p className="mt-3 text-sm text-red-600" role="alert">
+              {reassignError}
+            </p>
+          )}
+          <div className="mt-5 flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={handleCancelReassign} disabled={reassignLoading}>
+              Cancel
+            </Button>
+            <Button variant="brand" size="sm" onClick={handleConfirmReassign} disabled={reassignLoading}>
+              {reassignLoading ? 'Reassigning…' : 'Remove and reassign'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
+      {renderReassignDialog()}
       {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">

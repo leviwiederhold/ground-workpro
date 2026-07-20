@@ -61,9 +61,8 @@ export async function POST(request: Request) {
     // Null until the company has valid, configured work hours + timezone. When
     // null we never derive a company scheduled window or an arrival status.
     const workSchedule = resolveCompanyWorkSchedule(settingsRow.data as unknown as CompanyConfigRow | null);
-    if (source === "jobsite_auto" && !settings.enabled) {
-      return NextResponse.json({ error: "Attendance is not enabled for this company." }, { status: 403 });
-    }
+    // Attendance is permanent — auto events are never rejected on an
+    // enable/disable gate.
 
     // Validate job belongs to the company AND has a verified address. Attendance
     // must never silently fall back to fake/default coordinates.
@@ -126,14 +125,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, zone: "wake" });
     }
 
-    if (settings.enabled) {
-      await finalizePendingAttendance({
-        db,
-        companyId,
-        arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
-        departureGraceMinutes: settings.departureGraceMinutes,
-      });
-    }
+    await finalizePendingAttendance({
+      db,
+      companyId,
+      arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
+      departureGraceMinutes: settings.departureGraceMinutes,
+    });
 
     // Prefer the company-local work date (from configured timezone) so a late
     // shift never rolls onto the wrong UTC day; fall back to a UTC calendar

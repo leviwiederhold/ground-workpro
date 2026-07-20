@@ -59,7 +59,7 @@ export function CompanyConfigPrompt() {
           </p>
         </div>
         <Link
-          href="/settings/company?focus=work-schedule"
+          href="/settings"
           className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700"
         >
           Complete setup

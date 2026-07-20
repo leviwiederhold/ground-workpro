@@ -43,8 +43,10 @@ export async function GET() {
   }
 }
 
+// NOTE: `enabled` is intentionally NOT accepted here. Attendance is permanent
+// for every company; the legacy jobsite_time_enabled column is no longer a
+// product gate and is never written from the UI.
 const patchSchema = z.object({
-  enabled: z.boolean().optional(),
   requireApproval: z.boolean().optional(),
   wakeRadiusMeters: z.number().refine((v) => ALLOWED_WAKE_RADII_METERS.includes(v as any), {
     message: "wakeRadiusMeters must be 805, 1609, or 3219",
@@ -76,7 +78,6 @@ export async function PATCH(request: Request) {
     }
     const d = parsed.data;
     const update: Record<string, unknown> = {};
-    if (d.enabled !== undefined) update.jobsite_time_enabled = d.enabled;
     if (d.requireApproval !== undefined) update.jobsite_require_approval = d.requireApproval;
     if (d.wakeRadiusMeters !== undefined) update.jobsite_wake_radius_meters = d.wakeRadiusMeters;
     if (d.arrivalRadiusFeet !== undefined) update.jobsite_geofence_radius_feet = d.arrivalRadiusFeet;

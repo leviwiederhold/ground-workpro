@@ -2,8 +2,42 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchAssignedJobs, startForegroundGeofenceWatch } from '@/lib/jobsite-time/geofence-client';
+import { fetchAssignedJobs, ingestJobsiteEvent, startForegroundGeofenceWatch } from '@/lib/jobsite-time/geofence-client';
 import { checkLocationPermission } from '@/lib/jobsite-time/locationPermission';
+import { pickNearestAssignedJob } from '@/lib/jobsite-time/domain';
+import { reconcileAttendanceState } from '@/lib/jobsite-time/reconcileAttendance';
+import type { DiagnosticsLocationFix } from '@/lib/jobsite-time/attendanceDiagnostics';
+
+// One fresh, high-accuracy fix (never a cached/continuous stream). Resolves null
+// on any failure so reconciliation degrades gracefully rather than throwing.
+function getFreshLocationFix(): Promise<DiagnosticsLocationFix | null> {
+  if (typeof navigator === 'undefined' || !navigator.geolocation?.getCurrentPosition) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v: DiagnosticsLocationFix | null) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    navigator.geolocation.getCurrentPosition(
+      (pos) =>
+        done({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracyMeters: pos.coords.accuracy ?? null,
+          capturedAt: new Date().toISOString(),
+        }),
+      () => done(null),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+    setTimeout(() => done(null), 12000);
+  });
+}
+
+const todayKey = () => new Date().toISOString().slice(0, 10);
 
 // Headless Attendance runner. Renders NOTHING.
 //
@@ -36,19 +70,94 @@ export function JobsiteTimeEmployeeCard() {
     setPermission(await checkLocationPermission());
   }, []);
 
+  // Foreground reconciliation (PR: basic correctness layer). On launch/resume,
+  // take ONE fresh fix and reconcile the attendance state so opening the app
+  // while already onsite repairs the clock-in instead of sitting on "Waiting for
+  // arrival". The server (jobsite-time/events) stays authoritative: it
+  // re-validates distance + schedule, so we only ask it to record an arrival.
+  const reconcileForeground = useCallback(async () => {
+    const perm = await checkLocationPermission();
+    if (perm !== 'granted') return;
+
+    const jobs = await fetchAssignedJobs();
+    const verified = jobs.filter((j) => j.addressVerified && j.lat !== null && j.lng !== null);
+    if (verified.length === 0) return; // missing coords → surfaced by status derivation, not here
+
+    const [settingsRes, cardsRes, fix] = await Promise.all([
+      fetch('/api/jobsite-time/settings', { cache: 'no-store' }).catch(() => null),
+      fetch('/api/jobsite-time/timecards', { cache: 'no-store' }).catch(() => null),
+      getFreshLocationFix(),
+    ]);
+    if (!fix) return; // no usable fix → cannot prove onsite; leave state as-is
+
+    const settingsItem = settingsRes && settingsRes.ok ? (await settingsRes.json())?.item ?? null : null;
+    const arrivalRadiusFeet =
+      settingsItem && typeof settingsItem.arrivalRadiusFeet === 'number' ? settingsItem.arrivalRadiusFeet : null;
+
+    const nearest = pickNearestAssignedJob(
+      verified.map((j) => ({ jobId: j.jobId, lat: j.lat, lng: j.lng, addressVerified: j.addressVerified })),
+      { lat: fix.lat as number, lng: fix.lng as number }
+    );
+    if (!nearest) return;
+
+    // Today's own open card, if any (the timecards endpoint is self-scoped).
+    let todayCard: { clockInAt: string | null; clockOutAt: string | null; status: string } | null = null;
+    if (cardsRes && cardsRes.ok) {
+      const items: any[] = (await cardsRes.json())?.items ?? [];
+      const t = items.find((c) => String(c.workDate ?? '').slice(0, 10) === todayKey());
+      if (t) todayCard = { clockInAt: t.clockInAt ?? null, clockOutAt: t.clockOutAt ?? null, status: String(t.status ?? '') };
+    }
+
+    const result = reconcileAttendanceState({
+      assignedJob: {
+        jobId: nearest.job.jobId,
+        lat: nearest.job.lat,
+        lng: nearest.job.lng,
+        addressVerified: nearest.job.addressVerified,
+      },
+      arrivalRadiusFeet,
+      location: fix,
+      // Schedule/timezone come from company attendance settings (added
+      // separately); until then the server arbitrates the early-arrival window.
+      schedule: null,
+      monitoringLeadMinutes: null,
+      todayCard,
+    });
+
+    if (result.shouldCreateClockIn) {
+      await ingestJobsiteEvent({
+        jobId: nearest.job.jobId,
+        zone: 'arrival',
+        transition: 'enter',
+        occurredAt: fix.capturedAt ?? new Date().toISOString(),
+        latitude: fix.lat,
+        longitude: fix.lng,
+        accuracyMeters: fix.accuracyMeters,
+        source: 'jobsite_auto',
+      });
+      await load();
+    }
+  }, [load]);
+
   useEffect(() => {
     load();
     syncPermission();
-    // Re-read company work hours / attendance state when the tab regains focus,
-    // so changes saved in Settings show up here without a full page reload.
-    const onFocus = () => { load(); syncPermission(); };
+    // Launch: reconcile onsite state from a fresh fix.
+    void reconcileForeground();
+    // Resume/focus: re-read settings + reconcile again (app launch and resume
+    // are the two moments the foreground fallback must correct the state).
+    const onFocus = () => {
+      load();
+      syncPermission();
+      if (document.visibilityState !== 'hidden') void reconcileForeground();
+    };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
     return () => {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [load, syncPermission]);
+  }, [load, syncPermission, reconcileForeground]);
 
   // Run the foreground geofence watcher whenever we have at least one verified
   // assigned job and location permission is granted. Attendance is permanent —

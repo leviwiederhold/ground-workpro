@@ -48,8 +48,8 @@ const CompanyConfigPrompt = dynamic(
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
-const LocationPermissionGate = dynamic(
-  () => import('@/app/components/views/LocationPermissionGate').then((mod) => mod.LocationPermissionGate),
+const RequireLocationAccess = dynamic(
+  () => import('@/app/components/location/RequireLocationAccess').then((mod) => mod.RequireLocationAccess),
   { ssr: false }
 );
 const ScheduleView = dynamic(
@@ -12094,22 +12094,19 @@ const MobileAppShell = ({
             {loading && <p className="text-sm text-gray-500">Loading time clock status...</p>}
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            {/* Location is required to clock in/out. The gate renders the action
-                buttons only once permission is granted; otherwise it shows the
-                pre-permission card / blocked / unavailable states. This gates
-                only the attendance action — not the rest of the app. */}
-            <LocationPermissionGate onNotNow={onClose}>
-              <div className="flex justify-end gap-3">
+            {/* No permission gating here: location is a prerequisite for
+                entering the app at all (see LocationRequiredGate), so by the
+                time these controls render it has already been granted. */}
+            <div className="flex justify-end gap-3">
                 <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
                 <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
                 <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
                   {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
                 </Button>
-                <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
-                  {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
-                </Button>
-              </div>
-            </LocationPermissionGate>
+              <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
+                {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
+              </Button>
+            </div>
           </div>
         </Modal>
       );
@@ -14058,7 +14055,16 @@ const MobileAppShell = ({
         return null;
       }
 
-      return <App currentUser={currentUser} onLogout={handleLogout} />;
+      // Location is required to USE the app. The wrapper renders nothing while
+      // checking, the blocking gate when not granted, and the app only once
+      // permission is in place. /setup is deliberately NOT wrapped, so invited
+      // users can finish account setup; the gate meets them the moment setup
+      // redirects them here.
+      return (
+        <RequireLocationAccess>
+          <App currentUser={currentUser} onLogout={handleLogout} />
+        </RequireLocationAccess>
+      );
     };
 
 

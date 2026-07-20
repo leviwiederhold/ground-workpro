@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
+import { AttendanceDiagnosticsPanel } from '@/app/components/debug/AttendanceDiagnosticsPanel';
 
 type Timecard = {
   id: string;
@@ -87,6 +88,14 @@ export function JobsiteTimeView({
   const [detail, setDetail] = useState<{ card: Timecard; events: any[] } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ from: '', to: '', employee: 'all', job: 'all', status: 'all', needsReview: false });
+  // Opt-in internal diagnostics: this view is already admin/pm-gated by route
+  // guards; the ?debug=attendance flag keeps the panel out of the way otherwise.
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const flag = new URLSearchParams(window.location.search).get('debug');
+    setShowDiagnostics(flag === 'attendance' || process.env.NODE_ENV !== 'production');
+  }, []);
 
   const nameByUser = useMemo(() => {
     const m = new Map<string, string>();
@@ -283,6 +292,8 @@ export function JobsiteTimeView({
           <i className="fa-solid fa-sliders text-xs" /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </button>
       </div>
+
+      <AttendanceDiagnosticsPanel enabled={showDiagnostics} />
 
       {showFilters && (
         <div className={`${cardCls} flex flex-wrap items-center gap-2 p-3`}>

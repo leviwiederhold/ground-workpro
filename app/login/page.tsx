@@ -52,6 +52,7 @@ export default function LoginPage() {
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+  const [passwordReset, setPasswordReset] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
 
@@ -88,6 +89,7 @@ export default function LoginPage() {
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setTrialMode(shouldStartTrial);
     setCheckoutSuccess(hasCheckoutSuccess);
+    setPasswordReset(params.get("reset") === "1");
     const isNative = isNativeAppRuntime();
     setNativeRuntime(isNative);
 
@@ -284,6 +286,14 @@ export default function LoginPage() {
           <div className="flex items-center gap-2 mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
             <i className="fa-solid fa-circle-check text-green-600 text-sm" />
             <span className="text-sm font-medium text-green-800">Payment successful — workspace is ready</span>
+          </div>
+        )}
+        {passwordReset && (
+          <div className="flex items-center gap-2 mb-4 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+            <i className="fa-solid fa-circle-check text-green-600 text-sm" />
+            <span className="text-sm font-medium text-green-800">
+              Password updated — sign in with your new password.
+            </span>
           </div>
         )}
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">

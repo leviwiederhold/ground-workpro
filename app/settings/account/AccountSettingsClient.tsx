@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { recoveryRedirectUrl } from "@/lib/auth/passwordReset";
 import { normalizeTimezoneOption, PROFILE_TIMEZONE_OPTIONS } from "@/lib/user/profileFields";
 import {
   normalizeAppearancePreference,
@@ -146,7 +147,7 @@ export function AccountSettingsClient() {
       return;
     }
     const { error: resetError } = await supabaseBrowser().auth.resetPasswordForEmail(settings.email, {
-      redirectTo: `${window.location.origin}/login`,
+      redirectTo: recoveryRedirectUrl(window.location.origin),
     });
     if (resetError) {
       setError(resetError.message);

@@ -9,6 +9,27 @@ function buildRedirectUrl(request: NextRequest, pathname: string) {
   return new URL(pathname, request.nextUrl.origin);
 }
 
+/**
+ * Restrict post-callback redirects to internal, absolute paths so a crafted
+ * `next` can't turn the callback into an open redirect. Protocol-relative
+ * (`//host`) and absolute URLs are rejected.
+ */
+function safeNextPath(raw: string | null): string | null {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+  return raw;
+}
+
+/**
+ * When a recovery link is bad (missing/expired/already-used code), send the
+ * user back to the reset page with a recovery-specific error instead of the
+ * generic login error, so they see a clear "request a new link" message.
+ */
+function recoveryError(request: NextRequest, nextPath: string) {
+  const target = buildRedirectUrl(request, nextPath);
+  target.searchParams.set("error", "recovery_link_invalid");
+  return NextResponse.redirect(target);
+}
+
 function buildCookieHeader(
   request: NextRequest,
   cookiesToSet: Array<{ name: string; value: string }>
@@ -26,10 +47,15 @@ function buildCookieHeader(
 }
 
 export async function GET(request: NextRequest) {
+  // Recovery emails route through here with `next=/reset-password`. When set,
+  // failures return to the reset page with a recovery error rather than /login.
+  const nextPath = safeNextPath(request.nextUrl.searchParams.get("next"));
+
   const providerError =
     request.nextUrl.searchParams.get("error_description") ||
     request.nextUrl.searchParams.get("error");
   if (providerError) {
+    if (nextPath) return recoveryError(request, nextPath);
     const loginUrl = buildRedirectUrl(request, "/login");
     loginUrl.searchParams.set("error", "oauth_failed");
     return NextResponse.redirect(loginUrl);
@@ -37,6 +63,7 @@ export async function GET(request: NextRequest) {
 
   const code = request.nextUrl.searchParams.get("code");
   if (!code) {
+    if (nextPath) return recoveryError(request, nextPath);
     return NextResponse.redirect(buildRedirectUrl(request, "/login"));
   }
 
@@ -59,6 +86,7 @@ export async function GET(request: NextRequest) {
 
   const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
   if (exchangeError) {
+    if (nextPath) return recoveryError(request, nextPath);
     const loginUrl = buildRedirectUrl(request, "/login");
     loginUrl.searchParams.set("error", "oauth_exchange_failed");
     return NextResponse.redirect(loginUrl);
@@ -69,9 +97,21 @@ export async function GET(request: NextRequest) {
     error: userError,
   } = await supabase.auth.getUser();
   if (userError || !user) {
+    if (nextPath) return recoveryError(request, nextPath);
     const loginUrl = buildRedirectUrl(request, "/login");
     loginUrl.searchParams.set("error", "oauth_session_missing");
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Recovery flow: session cookies are now set from the exchange above. Land the
+  // user on the reset page (via `next`) with those cookies attached so the
+  // update-password call is authenticated. No invite handling for recovery.
+  if (nextPath) {
+    const response = NextResponse.redirect(buildRedirectUrl(request, nextPath));
+    authCookiesToSet.forEach(({ name, value, options }) => {
+      response.cookies.set(name, value, options);
+    });
+    return response;
   }
 
   const invite = request.nextUrl.searchParams.get("invite") === "1";

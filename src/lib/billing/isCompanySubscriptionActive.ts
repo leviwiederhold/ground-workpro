@@ -3,7 +3,7 @@ import {
   evaluateBillingOverride,
   readableBillingStatus,
   type BillingOverrideEvaluation,
-} from "@/lib/billing/billingOverride";
+} from "./billingOverride.ts";
 
 const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
 
@@ -16,6 +16,8 @@ type CompanyBillingRow = {
   billing_override_value?: number | string | null;
   billing_override_until?: string | null;
   billing_override_reason?: string | null;
+  complimentary_access?: boolean | null;
+  complimentary_access_reason?: string | null;
 };
 
 type SupabaseQueryResult = {
@@ -40,15 +42,21 @@ export type CompanyBillingStatus = {
   current_period_end: string | null;
   // Stripe-only active state (active | trialing), unchanged from before.
   stripe_active: boolean;
-  // Effective access: Stripe active OR a complimentary override grants access.
+  // Effective access: Stripe active OR a complimentary override grants access OR
+  // the company has the first-class complimentary-access entitlement.
   is_active: boolean;
   // Override summary. `reason` is intentionally omitted from anything employee-facing.
   override: BillingOverrideEvaluation;
+  // Company-level complimentary entitlement (decoupled from Stripe/overrides).
+  complimentary_access: boolean;
+  // INTERNAL reason for the complimentary entitlement — never expose to employees.
+  complimentary_reason: string | null;
   // Employee-safe readable label (Active / Complimentary / Discounted x% ...).
   display_status: string;
 };
 
 const BASE_COLUMNS = "plan_type, subscription_status, trial_ends_at, current_period_end";
+const COMPLIMENTARY_SELECT_COLUMNS = "complimentary_access, complimentary_access_reason";
 
 export async function getCompanyBillingStatus(
   supabase: unknown,
@@ -56,20 +64,27 @@ export async function getCompanyBillingStatus(
 ): Promise<CompanyBillingStatus> {
   const client = supabase as SupabaseLike;
 
-  // Prefer selecting override columns too; gracefully fall back if the billing
-  // overrides migration has not been applied yet (older environments).
-  let { data, error } = await client
-    .from("companies")
-    .select(`${BASE_COLUMNS}, ${BILLING_OVERRIDE_SELECT_COLUMNS}`)
-    .eq("id", companyId)
-    .maybeSingle();
+  // Prefer selecting the complimentary + override columns too, but gracefully
+  // fall back column-tier by column-tier so older environments that have not yet
+  // applied the complimentary and/or override migrations keep working.
+  const selectVariants = [
+    `${BASE_COLUMNS}, ${BILLING_OVERRIDE_SELECT_COLUMNS}, ${COMPLIMENTARY_SELECT_COLUMNS}`,
+    `${BASE_COLUMNS}, ${BILLING_OVERRIDE_SELECT_COLUMNS}`,
+    BASE_COLUMNS,
+  ];
 
-  if (error && /billing_override/i.test(error.message || "")) {
+  let data: CompanyBillingRow | null = null;
+  let error: { message?: string | null } | null = null;
+  for (const columns of selectVariants) {
     ({ data, error } = await client
       .from("companies")
-      .select(BASE_COLUMNS)
+      .select(columns)
       .eq("id", companyId)
       .maybeSingle());
+    if (!error) break;
+    // Only retry with fewer columns when a column is missing (older schema);
+    // any other error is real and should surface.
+    if (!/column|complimentary_access|billing_override/i.test(error.message || "")) break;
   }
 
   if (error) {
@@ -79,7 +94,24 @@ export async function getCompanyBillingStatus(
   const subscriptionStatus = String(data?.subscription_status ?? "inactive").toLowerCase();
   const stripeActive = ACTIVE_SUBSCRIPTION_STATUSES.has(subscriptionStatus);
   const override = evaluateBillingOverride(data ?? null);
-  const isActive = stripeActive || override.grantsFreeAccess;
+  const complimentaryAccess = Boolean(data?.complimentary_access);
+  const isActive = stripeActive || override.grantsFreeAccess || complimentaryAccess;
+
+  // The first-class complimentary entitlement reads as "Complimentary" too, even
+  // when there is no billing override backing it.
+  const displayStatus =
+    complimentaryAccess && !override.grantsFreeAccess
+      ? "Complimentary"
+      : readableBillingStatus({
+          subscriptionStatus,
+          override,
+          untilLabel: (iso) => {
+            const t = Date.parse(iso);
+            return Number.isFinite(t)
+              ? new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+              : iso;
+          },
+        });
 
   return {
     plan_type: String(data?.plan_type ?? "groundwork_pro"),
@@ -89,16 +121,9 @@ export async function getCompanyBillingStatus(
     stripe_active: stripeActive,
     is_active: isActive,
     override,
-    display_status: readableBillingStatus({
-      subscriptionStatus,
-      override,
-      untilLabel: (iso) => {
-        const t = Date.parse(iso);
-        return Number.isFinite(t)
-          ? new Date(t).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
-          : iso;
-      },
-    }),
+    complimentary_access: complimentaryAccess,
+    complimentary_reason: data?.complimentary_access_reason ?? null,
+    display_status: displayStatus,
   };
 }
 

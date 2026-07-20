@@ -31,6 +31,8 @@ type CompanyRow = {
   plan_type: string;
   stripe_active: boolean;
   grants_free_access: boolean;
+  complimentary_access?: boolean;
+  complimentary_access_reason?: string | null;
   display_status: string;
   override: OverrideInfo;
 };
@@ -278,6 +280,15 @@ function OverrideDrawer({
           <div className="flex justify-between"><dt className="text-gray-500">Stripe status</dt><dd className="font-medium">{company.subscription_status}</dd></div>
           <div className="flex justify-between"><dt className="text-gray-500">Effective</dt><dd className="font-medium">{company.display_status}</dd></div>
         </dl>
+
+        {company.complimentary_access && (
+          <div className="mt-3 rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-sm">
+            <p className="font-medium text-purple-900">Complimentary access (company entitlement)</p>
+            <p className="mt-0.5 text-xs text-purple-800">
+              {company.complimentary_access_reason || "No reason recorded."}
+            </p>
+          </div>
+        )}
 
         {err && <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
 

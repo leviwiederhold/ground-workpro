@@ -146,8 +146,10 @@ export async function GET(request: Request) {
     console.log("[billing/status] userId:", userId, "companyId:", companyId);
     const status = await getCompanyBillingStatus(supabase, companyId);
     console.log("[billing/status] subscription_status:", status.subscription_status, "is_active:", status.is_active, "plan_type:", status.plan_type);
+    const isComplimentary = status.override.grantsFreeAccess || status.complimentary_access;
     const hasActiveOverrideDisplay =
       status.override.grantsFreeAccess ||
+      status.complimentary_access ||
       status.override.isDiscount ||
       (status.override.type === "free_until" && !status.override.isExpired && Boolean(status.override.until));
 
@@ -165,14 +167,20 @@ export async function GET(request: Request) {
       override_type: status.override.type,
       override_until: status.override.until,
       override_display_status: hasActiveOverrideDisplay ? status.display_status : null,
-      is_complimentary: status.override.grantsFreeAccess,
+      is_complimentary: isComplimentary,
       discount_percent: status.override.discountPercent,
       discount_amount_cents: status.override.discountAmountCents,
       active: status.is_active,
       needsTrial: !status.is_active,
       hasCompany: true,
       status: status.subscription_status,
-      reason: status.is_active ? "subscription_active" : "subscription_inactive",
+      // Internal indication of WHY access is (or isn't) granted. `reason` never
+      // includes the complimentary note text — only the machine-readable cause.
+      reason: !status.is_active
+        ? "subscription_inactive"
+        : isComplimentary
+          ? "complimentary_access"
+          : "subscription_active",
     };
     return NextResponse.json({ ...billingStatus, item: billingStatus });
   } catch (error) {

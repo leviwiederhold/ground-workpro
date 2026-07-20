@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
+import { AutoAttendanceSetupCard } from '@/app/components/views/AutoAttendanceSetupCard';
 
 type Timecard = {
   id: string;
@@ -283,6 +284,8 @@ export function JobsiteTimeView({
           <i className="fa-solid fa-sliders text-xs" /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </button>
       </div>
+
+      <AutoAttendanceSetupCard employees={employees} />
 
       {showFilters && (
         <div className={`${cardCls} flex flex-wrap items-center gap-2 p-3`}>

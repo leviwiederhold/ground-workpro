@@ -48,8 +48,8 @@ const CompanyConfigPrompt = dynamic(
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
-const LocationPermissionGate = dynamic(
-  () => import('@/app/components/views/LocationPermissionGate').then((mod) => mod.LocationPermissionGate),
+const LocationRequiredGate = dynamic(
+  () => import('@/app/components/location/LocationRequiredGate').then((mod) => mod.LocationRequiredGate),
   { ssr: false }
 );
 const ScheduleView = dynamic(
@@ -12094,22 +12094,19 @@ const MobileAppShell = ({
             {loading && <p className="text-sm text-gray-500">Loading time clock status...</p>}
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            {/* Location is required to clock in/out. The gate renders the action
-                buttons only once permission is granted; otherwise it shows the
-                pre-permission card / blocked / unavailable states. This gates
-                only the attendance action — not the rest of the app. */}
-            <LocationPermissionGate onNotNow={onClose}>
-              <div className="flex justify-end gap-3">
+            {/* No permission gating here: location is a prerequisite for
+                entering the app at all (see LocationRequiredGate), so by the
+                time these controls render it has already been granted. */}
+            <div className="flex justify-end gap-3">
                 <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
                 <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
                 <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
                   {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
                 </Button>
-                <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
-                  {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
-                </Button>
-              </div>
-            </LocationPermissionGate>
+              <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
+                {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
+              </Button>
+            </div>
           </div>
         </Modal>
       );
@@ -13567,7 +13564,30 @@ const MobileAppShell = ({
 	        return Boolean(new URLSearchParams(window.location.search).get('code'));
 	      });
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
+      // Location is a prerequisite for entering the app. 'checking' renders
+      // NOTHING (not the dashboard, not the gate) so there is no flicker either
+      // way; the gate replaces all application content until it is granted.
+      const [locationGate, setLocationGate] = useState('checking');
 	      const [authResolved, setAuthResolved] = useState(false);
+
+      // Non-prompting read of the current permission. The OS dialog is only
+      // ever raised by the user's tap inside LocationRequiredGate.
+      useEffect(() => {
+        if (!isAuthenticated) {
+          setLocationGate('checking');
+          return;
+        }
+        let active = true;
+        import('@/lib/jobsite-time/locationPermission')
+          .then(({ checkLocationPermission }) => checkLocationPermission())
+          .then((state) => {
+            if (active) setLocationGate(state === 'granted' ? 'granted' : 'blocked');
+          })
+          .catch(() => {
+            if (active) setLocationGate('blocked');
+          });
+        return () => { active = false; };
+      }, [isAuthenticated]);
 	      const [nativeRuntime, setNativeRuntime] = useState(false);
 	      const [nativeRuntimeResolved, setNativeRuntimeResolved] = useState(false);
 	      const [currentUser, setCurrentUser] = useState(null);
@@ -14056,6 +14076,15 @@ const MobileAppShell = ({
 
       if (accessDecision !== 'ready') {
         return null;
+      }
+
+      // Location prerequisite. Rendering NOTHING while checking guarantees the
+      // dashboard never appears before permission is satisfied.
+      if (locationGate === 'checking') {
+        return null;
+      }
+      if (locationGate !== 'granted') {
+        return <LocationRequiredGate onGranted={() => setLocationGate('granted')} />;
       }
 
       return <App currentUser={currentUser} onLogout={handleLogout} />;

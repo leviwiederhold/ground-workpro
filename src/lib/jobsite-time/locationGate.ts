@@ -61,8 +61,9 @@ export function resolveGateAction(params: {
 
 export const LOCATION_GATE_COPY = {
   title: "Enable location",
-  /** Shown before any denial. */
-  body: "Please enable location to improve your experience with Groundwork Pro.",
+  /** Shown before any denial. States the requirement plainly, without
+   *  referencing attendance, jobsites, or tracking. */
+  body: "Please enable location to continue using Groundwork Pro.",
   /** Shown once the user has denied. */
   deniedBody: "Location is required to continue using Groundwork Pro.",
   request: "Enable location",

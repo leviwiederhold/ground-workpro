@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { navigateNotificationHref } from "@/lib/notifications/navigation";
+import { RequireLocationAccess } from "@/app/components/location/RequireLocationAccess";
 
 type NotificationItem = {
   id: string;
@@ -35,7 +36,7 @@ function formatNotificationTime(value: string) {
   });
 }
 
-export default function NotificationsPage() {
+function NotificationsContent() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -287,5 +288,15 @@ export default function NotificationsPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+// Location is required to use the app after onboarding. Wrapping the whole
+// component means notification fetching never runs behind the gate.
+export default function NotificationsPage() {
+  return (
+    <RequireLocationAccess>
+      <NotificationsContent />
+    </RequireLocationAccess>
   );
 }

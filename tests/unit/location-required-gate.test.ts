@@ -42,27 +42,70 @@ test("status resolves so the dashboard never renders before permission", () => {
   }
 });
 
-test("app/page.tsx renders nothing while checking, then the gate, then the app", () => {
-  const source = code(page());
+test("the wrapper renders nothing while checking, the gate when blocked, the route when granted", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
 
-  const checking = source.indexOf("if (locationGate === 'checking')");
-  const blocked = source.indexOf("if (locationGate !== 'granted')");
-  const app = source.indexOf("return <App currentUser={currentUser}");
+  assert.match(source, /if \(status === 'checking'\) return null;/, "checking renders nothing");
+  assert.match(source, /if \(status !== 'granted'\)[\s\S]{0,120}<LocationRequiredGate/, "blocked renders the gate");
+  assert.match(source, /return <>\{children\}<\/>;/, "granted renders the route");
 
-  assert.ok(checking > 0 && blocked > checking, "the checking branch must precede the gate branch");
-  assert.ok(app > blocked, "the app must render only after both location branches");
-  assert.match(source, /if \(locationGate === 'checking'\) \{\s*return null;/, "checking renders nothing");
-  assert.match(source, /return <LocationRequiredGate onGranted=/, "blocked renders the gate");
+  // Order matters: neither the content nor the gate may render before the answer.
+  const checking = source.indexOf("status === 'checking'");
+  const blocked = source.indexOf("status !== 'granted'");
+  const content = source.indexOf("{children}");
+  assert.ok(checking < blocked && blocked < content, "checking must be handled first");
 });
 
-test("permission is checked after authentication, without prompting", () => {
-  const source = code(page());
-  assert.match(source, /if \(!isAuthenticated\)[\s\S]{0,120}setLocationGate\('checking'\)/);
+test("the wrapper checks permission without ever prompting", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
   assert.match(source, /checkLocationPermission/, "must use the non-prompting check");
   assert.ok(
     !source.includes("requestLocationPermissionInteractive"),
-    "app/page.tsx must never trigger the OS dialog itself",
+    "the wrapper must never trigger the OS dialog itself",
   );
+});
+
+test("revoking permission raises the gate on focus or visibility change", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
+  assert.match(source, /addEventListener\('focus'/, "must re-check on focus");
+  assert.match(source, /visibilitychange/, "must re-check on visibility change");
+  // sync() sets status from the fresh read in BOTH directions, so a revoke
+  // downgrades a granted session rather than being ignored.
+  assert.match(source, /setStatus\(resolveLocationGateStatus\(await checkLocationPermission\(\)\)\)/);
+});
+
+// ── Which routes are gated, and which are deliberately not ───────────────────
+test("every protected route uses the shared wrapper, not duplicated logic", () => {
+  const gated = {
+    "app/page.tsx": "/ (and /settings, which re-exports it)",
+    "app/profile/page.tsx": "/profile",
+    "app/notifications/page.tsx": "/notifications",
+  };
+  for (const [rel, label] of Object.entries(gated)) {
+    assert.match(read(rel), /RequireLocationAccess/, `${label} must be wrapped`);
+  }
+
+  // /settings re-exports the root page, so it inherits the gate.
+  assert.match(read("app/settings/page.tsx"), /from "\.\.\/page"/, "/settings must re-export the root page");
+
+  // The logic lives in ONE component.
+  const wrapperCount = Object.keys(gated).filter((rel) =>
+    /status === 'checking'/.test(read(rel)),
+  ).length;
+  assert.equal(wrapperCount, 0, "no route may reimplement the gate logic inline");
+});
+
+test("onboarding and auth routes are deliberately NOT gated", () => {
+  const exempt = {
+    "app/setup/page.tsx": "invited users must be able to finish account setup",
+    "app/login/page.tsx": "sign-in must be reachable without location",
+    "app/native/page.tsx": "native onboarding must be reachable without location",
+    "app/native/login/page.tsx": "native sign-in must be reachable without location",
+    "app/signup/page.tsx": "invite acceptance happens before setup",
+  };
+  for (const [rel, why] of Object.entries(exempt)) {
+    assert.ok(!read(rel).includes("RequireLocationAccess"), `${rel} must NOT be gated — ${why}`);
+  }
 });
 
 // ── Exactly one permission experience ────────────────────────────────────────
@@ -125,10 +168,7 @@ test("the geofence watcher still starts automatically once granted", () => {
 // ── Copy ─────────────────────────────────────────────────────────────────────
 test("the gate uses the exact required copy", () => {
   assert.equal(LOCATION_GATE_COPY.title, "Enable location");
-  assert.equal(
-    LOCATION_GATE_COPY.body,
-    "Please enable location to improve your experience with Groundwork Pro.",
-  );
+  assert.equal(LOCATION_GATE_COPY.body, "Please enable location to continue using Groundwork Pro.");
   assert.equal(LOCATION_GATE_COPY.request, "Enable location");
   assert.equal(LOCATION_GATE_COPY.deniedBody, "Location is required to continue using Groundwork Pro.");
   assert.equal(LOCATION_GATE_COPY.retry, "Try Again");

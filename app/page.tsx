@@ -48,8 +48,8 @@ const CompanyConfigPrompt = dynamic(
 const JobsiteTimeSettingsCard = dynamic(
   () => import('@/app/components/views/JobsiteTimeSettingsCard').then((mod) => mod.JobsiteTimeSettingsCard)
 );
-const LocationRequiredGate = dynamic(
-  () => import('@/app/components/location/LocationRequiredGate').then((mod) => mod.LocationRequiredGate),
+const RequireLocationAccess = dynamic(
+  () => import('@/app/components/location/RequireLocationAccess').then((mod) => mod.RequireLocationAccess),
   { ssr: false }
 );
 const ScheduleView = dynamic(
@@ -13564,30 +13564,7 @@ const MobileAppShell = ({
 	        return Boolean(new URLSearchParams(window.location.search).get('code'));
 	      });
 	      const [isAuthenticated, setIsAuthenticated] = useState(false);
-      // Location is a prerequisite for entering the app. 'checking' renders
-      // NOTHING (not the dashboard, not the gate) so there is no flicker either
-      // way; the gate replaces all application content until it is granted.
-      const [locationGate, setLocationGate] = useState('checking');
 	      const [authResolved, setAuthResolved] = useState(false);
-
-      // Non-prompting read of the current permission. The OS dialog is only
-      // ever raised by the user's tap inside LocationRequiredGate.
-      useEffect(() => {
-        if (!isAuthenticated) {
-          setLocationGate('checking');
-          return;
-        }
-        let active = true;
-        import('@/lib/jobsite-time/locationPermission')
-          .then(({ checkLocationPermission }) => checkLocationPermission())
-          .then((state) => {
-            if (active) setLocationGate(state === 'granted' ? 'granted' : 'blocked');
-          })
-          .catch(() => {
-            if (active) setLocationGate('blocked');
-          });
-        return () => { active = false; };
-      }, [isAuthenticated]);
 	      const [nativeRuntime, setNativeRuntime] = useState(false);
 	      const [nativeRuntimeResolved, setNativeRuntimeResolved] = useState(false);
 	      const [currentUser, setCurrentUser] = useState(null);
@@ -14078,16 +14055,16 @@ const MobileAppShell = ({
         return null;
       }
 
-      // Location prerequisite. Rendering NOTHING while checking guarantees the
-      // dashboard never appears before permission is satisfied.
-      if (locationGate === 'checking') {
-        return null;
-      }
-      if (locationGate !== 'granted') {
-        return <LocationRequiredGate onGranted={() => setLocationGate('granted')} />;
-      }
-
-      return <App currentUser={currentUser} onLogout={handleLogout} />;
+      // Location is required to USE the app. The wrapper renders nothing while
+      // checking, the blocking gate when not granted, and the app only once
+      // permission is in place. /setup is deliberately NOT wrapped, so invited
+      // users can finish account setup; the gate meets them the moment setup
+      // redirects them here.
+      return (
+        <RequireLocationAccess>
+          <App currentUser={currentUser} onLogout={handleLogout} />
+        </RequireLocationAccess>
+      );
     };
 
 

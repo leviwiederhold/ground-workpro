@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
+import { assignEmployeeToJob } from "@/lib/jobs/assignmentService";
 
 const assignEmployeeSchema = z.object({
   employee_id: z.union([z.number(), z.string()]),
@@ -153,6 +154,57 @@ export async function GET(
   }
 }
 
+/**
+ * Best-effort side effects after a successful assignment: notify the assigned
+ * employee and mirror the assignment into today's schedule. Never fails the
+ * assignment — missing notification/schedule tables are tolerated.
+ */
+async function mirrorAssignmentSideEffects(args: {
+  supabase: any;
+  companyId: string;
+  userId: string;
+  jobId: string | number;
+  employeeId: string | number;
+  jobName: string;
+  employeeUserId: string;
+}) {
+  const { supabase, companyId, userId, jobId, employeeId, jobName, employeeUserId } = args;
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (employeeUserId) {
+    try {
+      await enqueueNotifications({
+        supabase,
+        companyId,
+        userIds: [employeeUserId],
+        type: "job_assigned",
+        payload: { jobId: String(jobId), jobName, date: today, href: "/schedule" },
+      });
+    } catch {
+      // Keep assignment successful even if notifications table is unavailable.
+    }
+  }
+
+  const existingScheduleResult = await supabase
+    .from("schedule_assignments")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("job_id", jobId)
+    .eq("employee_id", employeeId)
+    .eq("date", today)
+    .limit(1);
+  if (!existingScheduleResult.error && (existingScheduleResult.data ?? []).length === 0) {
+    await supabase.from("schedule_assignments").insert({
+      company_id: companyId,
+      job_id: jobId,
+      employee_id: employeeId,
+      date: today,
+      created_by: userId,
+      notes: "Auto-added from job assignment",
+    });
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -178,7 +230,7 @@ export async function POST(
 
     const { data: jobRows, error: jobError } = await supabase
       .from("jobs")
-      .select("id")
+      .select("id, name")
       .eq("company_id", companyId)
       .eq("id", jobId)
       .limit(1);
@@ -194,97 +246,46 @@ export async function POST(
     }
     const employee = employeeRows[0];
 
-    // Preferred schema: join table
-    const checkExisting = await supabase
-      .from("job_employees")
-      .select("id, employee_id")
-      .eq("company_id", companyId)
-      .eq("job_id", jobId)
-      .eq("employee_id", employeeId)
-      .limit(1);
+    // Preferred schema: conflict-checked, concurrency-safe assignment via the
+    // job_employees join table. The service enforces the conflict rule inside a
+    // per-employee advisory-locked transaction (RPC), with a JS fallback when
+    // the RPC is unavailable.
+    const assignResult = await assignEmployeeToJob({
+      supabase,
+      companyId,
+      jobId: jobId as string | number,
+      employeeId: employeeId as string | number,
+      assignedRole: parsed.data.assigned_role ?? null,
+    });
 
-    if (!checkExisting.error) {
-      if ((checkExisting.data ?? []).length > 0) {
+    if (assignResult.status !== "unsupported") {
+      if (assignResult.status === "job_not_found") {
+        return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      }
+      if (assignResult.status === "already_assigned") {
         return NextResponse.json({ error: "Employee is already assigned to this job" }, { status: 409 });
       }
-
-      const insertPayload: Record<string, unknown> = {
-        company_id: companyId,
-        job_id: jobId,
-        employee_id: employeeId,
-      };
-      if (parsed.data.assigned_role) insertPayload.assigned_role = parsed.data.assigned_role;
-
-      let insertResult = await supabase
-        .from("job_employees")
-        .insert(insertPayload)
-        .select("employee_id")
-        .limit(1);
-
-      if (insertResult.error && /assigned_role/i.test(insertResult.error.message || "")) {
-        delete insertPayload.assigned_role;
-        insertResult = await supabase
-          .from("job_employees")
-          .insert(insertPayload)
-          .select("employee_id")
-          .limit(1);
+      if (assignResult.status === "conflict") {
+        // Structured conflict: the client shows a reassignment confirmation.
+        return NextResponse.json(assignResult.conflict, { status: 409 });
+      }
+      if (assignResult.status === "error") {
+        return NextResponse.json({ error: assignResult.message }, { status: 400 });
       }
 
-      if (insertResult.error) {
-        const message = insertResult.error.message || "";
-        if (/duplicate key|unique/i.test(message)) {
-          return NextResponse.json({ error: "Employee is already assigned to this job" }, { status: 409 });
-        }
-        return NextResponse.json({ error: message }, { status: 400 });
-      }
-
-      const employeeUserId = String((employee as any).user_id ?? "").trim();
-      if (employeeUserId) {
-        try {
-          await enqueueNotifications({
-            supabase,
-            companyId,
-            userIds: [employeeUserId],
-            type: "job_assigned",
-            payload: {
-              jobId: String(jobId),
-              jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
-              date: new Date().toISOString().slice(0, 10),
-              href: "/schedule",
-            },
-          });
-        } catch {
-          // Keep assignment successful even if notifications table is unavailable.
-        }
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-      const existingScheduleResult = await supabase
-        .from("schedule_assignments")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("job_id", jobId)
-        .eq("employee_id", employeeId)
-        .eq("date", today)
-        .limit(1);
-      if (!existingScheduleResult.error && (existingScheduleResult.data ?? []).length === 0) {
-        await supabase.from("schedule_assignments").insert({
-          company_id: companyId,
-          job_id: jobId,
-          employee_id: employeeId,
-          date: today,
-          created_by: userId,
-          notes: "Auto-added from job assignment",
-        });
-      }
+      await mirrorAssignmentSideEffects({
+        supabase,
+        companyId,
+        userId,
+        jobId: jobId as string | number,
+        employeeId: employeeId as string | number,
+        jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
+        employeeUserId: String((employee as any).user_id ?? "").trim(),
+      });
 
       return NextResponse.json({
         employee: { ...mapEmployee(employee), assigned_role: parsed.data.assigned_role ?? null, jobId: jobId },
       });
-    }
-
-    if (!isMissingColumnOrTable(checkExisting.error?.message || "")) {
-      return NextResponse.json({ error: checkExisting.error?.message || "Failed to assign employee" }, { status: 400 });
     }
 
     // Fallback schema: assignment column on employees table

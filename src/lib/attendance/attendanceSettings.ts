@@ -181,6 +181,23 @@ export function resolveArrivalConfirmationSeconds(
   return Number.isFinite(legacy) ? Math.max(dwellSeconds, legacy) : dwellSeconds;
 }
 
+/**
+ * The departure grace period the pipeline actually enforces, in minutes.
+ *
+ * Same two-column situation as the arrival dwell: `attendance_departure_grace_
+ * minutes` (this module) and the older `jobsite_departure_grace_minutes`. The
+ * LONGER of the two wins, which is the conservative direction — a longer grace
+ * means fewer employees wrongly clocked out for a brief step off site.
+ */
+export function resolveDepartureGraceMinutes(
+  attendance: Pick<AutomaticAttendanceSettings, "departureGraceMinutes">,
+  legacyDepartureGraceMinutes: number | null | undefined
+): number {
+  const configured = Math.max(0, attendance.departureGraceMinutes);
+  const legacy = Number(legacyDepartureGraceMinutes);
+  return Number.isFinite(legacy) ? Math.max(configured, legacy) : configured;
+}
+
 /** Build a company-columns update object from a validated settings patch. */
 export function buildAttendanceSettingsUpdate(patch: Partial<AutomaticAttendanceSettings>): Record<string, unknown> {
   const update: Record<string, unknown> = {};

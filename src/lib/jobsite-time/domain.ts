@@ -42,6 +42,12 @@ export const TIMECARD_EVENT_TYPES = [
   "clock_in_backfilled",
   "clock_in_rejected",
   "duplicate_suppressed",
+  // Automatic departure / clock-out audit trail.
+  "departure_pending",
+  "departure_cancelled",
+  "fallback_clock_out",
+  "clock_out_rejected",
+  "monitoring_stopped",
 ] as const;
 export type TimecardEventType = (typeof TIMECARD_EVENT_TYPES)[number];
 

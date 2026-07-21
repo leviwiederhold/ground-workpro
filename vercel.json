@@ -4,7 +4,7 @@
   "buildCommand": "pnpm build",
   "crons": [
     {
-      "path": "/api/attendance/scheduled-clock-in",
+      "path": "/api/attendance/reconcile",
       "schedule": "* * * * *"
     }
   ]

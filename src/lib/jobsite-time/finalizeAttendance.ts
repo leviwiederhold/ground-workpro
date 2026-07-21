@@ -2,18 +2,20 @@
 // Server-side finalization of pending arrivals/departures, run opportunistically
 // from the read/write API routes.
 //
-// The arrival half now delegates to decideArrivalClockIn() — the same engine the
-// scheduled process uses — so an arrival before the scheduled start is held as
-// "onsite before shift" instead of being clocked in early, and so a foreground
-// request can never race the scheduler into two clock-ins.
+// Both halves delegate to the same engines the scheduled process uses —
+// decideArrivalClockIn() and decideClockOut() — so an arrival before the
+// scheduled start is held as "onsite before shift" rather than clocked in
+// early, a brief exit never ends a shift, and a foreground request can never
+// race the scheduler into a duplicate record.
 //
 // This pass is a FALLBACK, not the mechanism: with the app closed nothing calls
-// it, which is exactly why /api/attendance/scheduled-clock-in exists. Departures
-// are still finalized here (PR 12 moves them to the scheduled process too).
+// it, which is exactly why /api/attendance/reconcile exists.
 
-import { computeTotalMinutes, scheduledWindowForWorkDate, type CompanyWorkScheduleSettings } from "./domain";
+import { scheduledWindowForWorkDate, type CompanyWorkScheduleSettings } from "./domain";
 import { decideArrivalClockIn, type EarlyArrivalMode } from "../attendance/scheduledClockIn";
 import { applyClockInDecision, buildOpenElsewhere } from "../attendance/scheduledClockInRunner";
+import { decideClockOut } from "../attendance/departure";
+import { applyClockOutDecision } from "../attendance/departureRunner";
 
 type TimecardRow = {
   id: string;
@@ -23,6 +25,7 @@ type TimecardRow = {
   user_id: string | null;
   work_date: string | null;
   scheduled_start: string | null;
+  scheduled_end: string | null;
   clock_in_at: string | null;
   clock_out_at: string | null;
   break_start_at: string | null;
@@ -31,11 +34,15 @@ type TimecardRow = {
   pending_departure_at: string | null;
   onsite_before_shift_at: string | null;
   detected_arrival_at: string | null;
+  detected_departure_at: string | null;
+  status: string | null;
+  monitoring_stopped_at: string | null;
 };
 
 const SELECT_COLUMNS =
-  "id, company_id, job_id, employee_id, user_id, work_date, scheduled_start, clock_in_at, clock_out_at," +
-  " break_start_at, break_end_at, pending_arrival_at, pending_departure_at, onsite_before_shift_at, detected_arrival_at";
+  "id, company_id, job_id, employee_id, user_id, work_date, scheduled_start, scheduled_end, clock_in_at," +
+  " clock_out_at, break_start_at, break_end_at, pending_arrival_at, pending_departure_at," +
+  " onsite_before_shift_at, detected_arrival_at, detected_departure_at, status, monitoring_stopped_at";
 
 export async function finalizePendingAttendance({
   db,
@@ -72,7 +79,6 @@ export async function finalizePendingAttendance({
   // Which employees already have an open clock-in at some other job — a second
   // concurrent clock-in must be refused rather than created.
   const openElsewhere = buildOpenElsewhere(rows);
-  const nowMs = Date.parse(now);
 
   for (const row of rows) {
     if (row.pending_arrival_at && !row.clock_in_at) {
@@ -102,40 +108,22 @@ export async function finalizePendingAttendance({
       continue;
     }
 
-    if (row.pending_departure_at && row.clock_in_at && !row.clock_out_at) {
-      const readyAt = Date.parse(row.pending_departure_at) + departureGraceMinutes * 60000;
-      if (Number.isFinite(readyAt) && nowMs >= readyAt) {
-        const totalMinutes = computeTotalMinutes({ ...row, clock_out_at: row.pending_departure_at });
-        const upd = await db
-          .from("jobsite_timecards")
-          .update({
-            clock_out_at: row.pending_departure_at,
-            detected_departure_at: row.pending_departure_at,
-            pending_departure_at: null,
-            total_minutes: totalMinutes,
-          })
-          .eq("id", row.id)
-          .eq("company_id", companyId)
-          .is("clock_out_at", null)
-          .select("id")
-          .maybeSingle();
-        // Only log the audit event if THIS call actually applied the
-        // transition — a concurrent request may have already finalized it
-        // (the `.is("clock_out_at", null)` guard above would then match zero
-        // rows), which would otherwise double-insert the audit event.
-        if (upd.data) {
-          await db.from("jobsite_timecard_events").insert({
-            company_id: companyId,
-            timecard_id: row.id,
-            event_type: "auto_clock_out",
-            occurred_at: row.pending_departure_at,
-            job_id: row.job_id,
-            employee_id: row.employee_id,
-            user_id: row.user_id,
-            source: "jobsite_auto",
-          });
-        }
-      }
+    if (row.clock_in_at && !row.clock_out_at) {
+      // Departures go through the same engine as the scheduled pass. The
+      // end-of-day fallback is deliberately NOT run here: closing a shift that
+      // produced no exit event is a scheduled-process responsibility, not
+      // something an incidental foreground request should trigger.
+      const decision = decideClockOut({
+        now,
+        card: {
+          clockInAt: row.clock_in_at,
+          clockOutAt: row.clock_out_at,
+          pendingDepartureAt: row.pending_departure_at,
+        },
+        departureGraceMinutes,
+        endOfDayCutoffMinutes: 0,
+      });
+      await applyClockOutDecision(db, row, decision, now);
     }
   }
 }

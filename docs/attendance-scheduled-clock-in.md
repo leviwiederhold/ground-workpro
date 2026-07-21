@@ -10,7 +10,7 @@ How an employee who arrives at 6:50 AM for a 7:00 AM shift gets clocked in at
 | Arrival detection | native geofence (PR 9) → `POST /api/jobsite-time/events` | Records the arrival at 6:50 and sets `pending_arrival_at` |
 | Decision engine (pure) | `src/lib/attendance/scheduledClockIn.ts` | Decides clock in / hold / refuse. One implementation, four callers |
 | DB pass | `src/lib/attendance/scheduledClockInRunner.ts` | Loads candidates + settings, applies decisions, writes audit events |
-| Scheduled process | `GET/POST /api/attendance/scheduled-clock-in` | Runs the pass every minute via Vercel Cron |
+| Scheduled process | `GET/POST /api/attendance/reconcile` | Runs the pass every minute via Vercel Cron |
 | Foreground fallback | `src/lib/jobsite-time/finalizeAttendance.ts` | Same engine, run opportunistically when a request happens to arrive |
 
 The scheduled process is the **mechanism**, not an optimization. Nothing here
@@ -121,7 +121,7 @@ fact.
 | Requirement | Value |
 | --- | --- |
 | Migration | `supabase/migrations/20260721_01_attendance_scheduled_clock_in.sql` |
-| Cron | `vercel.json` → `/api/attendance/scheduled-clock-in`, `* * * * *` |
+| Cron | `vercel.json` → `/api/attendance/reconcile`, `* * * * *` |
 | Required env | `SUPABASE_SERVICE_ROLE_KEY` (already required) |
 | Optional env | `CRON_SECRET` — set it; without it the cron route falls through to admin-session auth and Vercel Cron requests are rejected |
 | Optional env | `ATTENDANCE_SCHEDULER_SECRET` — for an external scheduler posting `x-attendance-scheduler-secret` |
@@ -138,7 +138,8 @@ companies.
 
 ## Not covered by this PR
 
-- Automatic **departure**/clock-out and the departure grace period (PR 12).
+- Automatic **departure**/clock-out and the departure grace period — see
+  [attendance-departure-clock-out.md](./attendance-departure-clock-out.md).
 - Offline queue durability and retry policy (PR 13).
 - Employee/manager UI for these states (PR 14).
 - Physical-device background verification (PR 16). **Nothing in this PR has been

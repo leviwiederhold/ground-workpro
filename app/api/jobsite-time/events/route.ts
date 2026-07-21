@@ -16,6 +16,7 @@ import { verifyAttendanceCredential } from "@/lib/attendance/deviceCredentialSer
 import {
   mapRowToAttendanceSettings,
   resolveArrivalConfirmationSeconds,
+  resolveDepartureGraceMinutes,
 } from "@/lib/attendance/attendanceSettings";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,8 @@ export const dynamic = "force-dynamic";
 const SETTINGS_COLUMNS =
   "jobsite_time_enabled,jobsite_require_approval,jobsite_geofence_radius_feet,jobsite_wake_radius_meters,jobsite_departure_grace_minutes,jobsite_arrival_confirmation_seconds,jobsite_manual_fallback_enabled" +
   ",timezone,default_work_days,default_work_start_time,default_work_end_time,attendance_early_arrival_window_minutes,attendance_late_grace_minutes" +
-  ",attendance_automatic_enabled,attendance_arrival_dwell_minutes,attendance_early_arrival_mode";
+  ",attendance_automatic_enabled,attendance_arrival_dwell_minutes,attendance_early_arrival_mode" +
+  ",attendance_departure_grace_minutes,attendance_end_of_day_cutoff_minutes";
 
 const bodySchema = z.object({
   jobId: z.union([z.string(), z.number()]),
@@ -49,6 +51,18 @@ const round4 = (v: number | null | undefined) =>
   v === null || v === undefined ? null : Math.round(v * 10000) / 10000;
 
 const normalizeId = (id: string | number) => (/^\d+$/.test(String(id)) ? Number(id) : id);
+
+// The earliest of two timestamps, tolerating nulls. Used so an out-of-order or
+// offline event can only ever move a departure EARLIER (to when it actually
+// happened), never later.
+function earliestIso(a: string | null | undefined, b: string): string {
+  if (!a) return b;
+  const aMs = Date.parse(a);
+  const bMs = Date.parse(b);
+  if (!Number.isFinite(aMs)) return b;
+  if (!Number.isFinite(bMs)) return a;
+  return aMs <= bMs ? a : b;
+}
 
 export async function POST(request: Request) {
   try {
@@ -159,6 +173,10 @@ export async function POST(request: Request) {
       attendanceSettings,
       settings.arrivalConfirmationSeconds
     );
+    const departureGraceMinutes = resolveDepartureGraceMinutes(
+      attendanceSettings,
+      settings.departureGraceMinutes
+    );
     // Attendance is permanent — auto events are never rejected on an
     // enable/disable gate.
 
@@ -227,7 +245,7 @@ export async function POST(request: Request) {
       db,
       companyId,
       arrivalConfirmationSeconds,
-      departureGraceMinutes: settings.departureGraceMinutes,
+      departureGraceMinutes,
       earlyArrivalMode: attendanceSettings.earlyArrivalMode,
       workSchedule,
       // Finalization is always evaluated against real time, never the event's
@@ -383,16 +401,36 @@ export async function POST(request: Request) {
         if (insert.error) return NextResponse.json({ error: insert.error.message }, { status: 400 });
         timecard = insert.data;
       } else if (timecard.clock_in_at && timecard.pending_departure_at) {
-        // Re-entry before the departure grace period elapsed — cancel it.
-        const upd = await db
-          .from("jobsite_timecards")
-          .update({ pending_departure_at: null })
-          .eq("id", timecard.id)
-          .eq("company_id", companyId)
-          .select("*")
-          .maybeSingle();
-        if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
-        timecard = upd.data;
+        // Re-entry during the departure grace period cancels it — a brief exit
+        // is not a departure. The window is checked against the RE-ENTRY's own
+        // timestamp, not the current time, so a delayed or out-of-order event
+        // cannot cancel a departure that had already been confirmed.
+        const graceEndsAt = Date.parse(timecard.pending_departure_at) + departureGraceMinutes * 60000;
+        if (Date.parse(occurredAt) <= graceEndsAt) {
+          const upd = await db
+            .from("jobsite_timecards")
+            .update({ pending_departure_at: null, detected_departure_at: null })
+            .eq("id", timecard.id)
+            .eq("company_id", companyId)
+            .is("clock_out_at", null)
+            .select("*")
+            .maybeSingle();
+          if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
+          if (upd.data) {
+            timecard = upd.data;
+            await db.from("jobsite_timecard_events").insert({
+              company_id: companyId,
+              timecard_id: timecard.id,
+              event_type: "departure_cancelled",
+              occurred_at: occurredAt,
+              job_id: jobId,
+              employee_id: employeeId,
+              user_id: userId,
+              source,
+              notes: "Employee returned to the jobsite during the departure grace period",
+            });
+          }
+        }
       } else if (!timecard.clock_in_at) {
         const upd = await db
           .from("jobsite_timecards")
@@ -427,6 +465,20 @@ export async function POST(request: Request) {
     } else {
       // exit
       if (!timecard) {
+        // Nothing to close. Audited (without a timecard) so a stream of exits
+        // for an employee who was never clocked in is visible rather than
+        // silently dropped.
+        await db.from("jobsite_timecard_events").insert({
+          company_id: companyId,
+          timecard_id: null,
+          event_type: "clock_out_rejected",
+          occurred_at: occurredAt,
+          job_id: jobId,
+          employee_id: employeeId,
+          user_id: userId,
+          source,
+          notes: "Exit event with no open timecard for this job and work date",
+        });
         if (source === "jobsite_auto") {
           return NextResponse.json({ ignored: true, reason: "no_open_timecard" });
         }
@@ -445,20 +497,42 @@ export async function POST(request: Request) {
         if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
         timecard = upd.data;
       } else if (timecard.clock_in_at && !timecard.clock_out_at) {
+        // The ORIGINAL validated departure anchors both the grace period and
+        // the eventual clock-out timestamp. An offline queue that flushes
+        // out of order must not push the departure later than it happened, so
+        // the EARLIEST observed exit wins.
+        const departureAt = earliestIso(timecard.pending_departure_at, occurredAt);
+        const alreadyPending = Boolean(timecard.pending_departure_at);
         const upd = await db
           .from("jobsite_timecards")
           .update({
-            pending_departure_at: timecard.pending_departure_at ?? occurredAt,
-            detected_departure_at: occurredAt,
+            pending_departure_at: departureAt,
+            detected_departure_at: earliestIso(timecard.detected_departure_at, occurredAt),
             confidence,
             status: needsReview ? "needs_review" : timecard.status,
           })
           .eq("id", timecard.id)
           .eq("company_id", companyId)
+          .is("clock_out_at", null)
           .select("*")
           .maybeSingle();
         if (upd.error) return NextResponse.json({ error: upd.error.message }, { status: 400 });
-        timecard = upd.data;
+        if (upd.data) timecard = upd.data;
+        // The grace period starts once, on the first exit — a duplicate native
+        // delivery must not re-log it.
+        if (upd.data && !alreadyPending) {
+          await db.from("jobsite_timecard_events").insert({
+            company_id: companyId,
+            timecard_id: timecard.id,
+            event_type: "departure_pending",
+            occurred_at: departureAt,
+            job_id: jobId,
+            employee_id: employeeId,
+            user_id: userId,
+            source,
+            notes: `Departure grace period started (${departureGraceMinutes} min)`,
+          });
+        }
       }
 
       await db.from("jobsite_timecard_events").insert({

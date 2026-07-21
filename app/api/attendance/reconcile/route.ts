@@ -1,21 +1,26 @@
-// Server-side scheduled reconciliation for automatic attendance.
+// Server-side scheduled reconciliation for automatic attendance — BOTH halves.
 //
 // Invoked by Vercel Cron every minute (GET with `Authorization: Bearer
 // $CRON_SECRET`), by an external scheduler (POST with
 // `x-attendance-scheduler-secret`), or manually by a company admin for
-// diagnostics. It is what creates the 7:00 AM clock-in for an employee who
-// arrived at 6:50 and never opened the app — NOT a WebView timer, and not
-// anything that requires the phone to be awake.
+// diagnostics. It creates the 7:00 AM clock-in for an employee who arrived at
+// 6:50 and never opened the app, and it confirms the clock-out once a departure
+// has survived the grace period — NOT a WebView timer, and not anything that
+// requires the phone to be awake.
 //
-// The handler is intentionally thin: all decisions live in
-// src/lib/attendance/scheduledClockIn.ts (pure) and the DB pass lives in
-// scheduledClockInRunner.ts, so both are unit-testable without a request.
+// The handler is intentionally thin: all decisions live in the pure modules
+// (scheduledClockIn.ts, departure.ts) and the DB passes live in their runners,
+// so both are unit-testable without a request.
+//
+// Order matters: arrivals run first, so an employee who arrives and departs
+// within a single tick is clocked in before the departure pass considers them.
 
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import { runScheduledAttendanceClockIn } from "@/lib/attendance/scheduledClockInRunner";
+import { runScheduledAttendanceClockOut } from "@/lib/attendance/departureRunner";
 
 export const dynamic = "force-dynamic";
 // The pass is a bounded sweep (500 candidates); 60s is ample headroom.
@@ -87,7 +92,12 @@ async function run(request: Request) {
   const runId = runRow.data?.id ?? null;
 
   try {
-    const summary = await runScheduledAttendanceClockIn({
+    const arrivals = await runScheduledAttendanceClockIn({
+      db: admin,
+      now: startedAt,
+      companyId: auth.companyId,
+    });
+    const departures = await runScheduledAttendanceClockOut({
       db: admin,
       now: startedAt,
       companyId: auth.companyId,
@@ -97,16 +107,19 @@ async function run(request: Request) {
         .from("attendance_scheduler_runs")
         .update({
           finished_at: new Date().toISOString(),
-          candidates: summary.candidates,
-          clocked_in: summary.clockedIn,
-          backfilled: summary.backfilled,
-          rejected: summary.rejected,
-          suppressed: summary.suppressed,
-          waiting: summary.waiting,
+          candidates: arrivals.candidates + departures.candidates,
+          clocked_in: arrivals.clockedIn,
+          backfilled: arrivals.backfilled,
+          rejected: arrivals.rejected,
+          suppressed: arrivals.suppressed + departures.suppressed,
+          waiting: arrivals.waiting + departures.holding,
+          clocked_out: departures.clockedOut,
+          fallback_clocked_out: departures.fallbackClockedOut,
+          departures_cancelled: departures.cancelled,
         })
         .eq("id", runId);
     }
-    return NextResponse.json({ ok: true, trigger: auth.trigger, ...summary });
+    return NextResponse.json({ ok: true, trigger: auth.trigger, arrivals, departures });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Scheduled clock-in failed";
     if (runId) {

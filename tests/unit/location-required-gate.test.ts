@@ -131,11 +131,22 @@ test("all feature-level permission UI is gone", () => {
 test("no location ribbon remains, and the dashboard never prompts", () => {
   const source = code(card());
   assert.ok(!source.includes("Allow location"), "the ribbon must be removed");
-  assert.ok(!source.includes("<button"), "the component must render no controls");
-  assert.match(source, /return null;/, "the component must render nothing");
+  // The card DOES render now — the attendance lifecycle state and a manual
+  // fallback (PR 14). What it must never do is ask for permission itself: the
+  // one permission experience is LocationRequiredGate. The non-prompting
+  // checkLocationPermission() read is what belongs here.
   assert.ok(
     !source.includes("requestLocationPermissionInteractive"),
     "the dashboard must never raise the OS dialog",
+  );
+  assert.ok(
+    source.includes("checkLocationPermission"),
+    "the card must read permission non-prompting",
+  );
+  // No control on this card may be a permission request in disguise.
+  assert.ok(
+    !/onClick=\{[^}]*[Pp]ermission/.test(source),
+    "no control on the card may trigger a permission request",
   );
 });
 

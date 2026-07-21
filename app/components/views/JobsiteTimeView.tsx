@@ -4,6 +4,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
 import { AttendanceDiagnosticsPanel } from '@/app/components/debug/AttendanceDiagnosticsPanel';
+import {
+  SETUP_PROBLEM_FIX,
+  SETUP_PROBLEM_LABEL,
+  type EmployeeSetupHealth,
+  type SetupProblem,
+} from '@/lib/attendance/setupHealth';
 
 type Timecard = {
   id: string;
@@ -145,6 +151,22 @@ export function JobsiteTimeView({
   }, [filters]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Automatic-attendance setup health. Derived server-side from assignment,
+  // jobsite verification, and device enrollment — so a manager finds out that
+  // an employee's attendance will not record BEFORE payroll day, and without
+  // that employee needing to have the app open.
+  const [setupHealth, setSetupHealth] = useState<{ items: EmployeeSetupHealth[]; brokenCount: number; healthyCount: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch('/api/attendance/setup-health', { cache: 'no-store' }).catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const json = await res.json().catch(() => null);
+      if (json) setSetupHealth(json);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Employee attendance roster — always computed when there are employees, even
   // before any timecards exist. Statuses/hours are derived from real timecards;
@@ -292,6 +314,45 @@ export function JobsiteTimeView({
           <i className="fa-solid fa-sliders text-xs" /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </button>
       </div>
+
+      {/* Broken automatic-attendance setup. Shown above the roster because an
+          employee whose phone cannot report is invisible in every panel below
+          — they look like they simply haven't arrived. */}
+      {setupHealth && setupHealth.brokenCount > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 px-4 py-3 dark:border-amber-900/40">
+            <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+              <i className="fa-solid fa-triangle-exclamation mr-1.5" />
+              Automatic attendance needs setup ({setupHealth.brokenCount})
+            </h3>
+            <p className="text-xs text-amber-800 dark:text-amber-300">
+              {setupHealth.healthyCount} {setupHealth.healthyCount === 1 ? 'employee is' : 'employees are'} set up correctly
+            </p>
+          </div>
+          <div className="divide-y divide-amber-200 dark:divide-amber-900/40">
+            {setupHealth.items.map((item) => (
+              <div key={item.employeeId} className="px-4 py-2.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-medium text-amber-950 dark:text-amber-100">{item.name}</p>
+                  {item.jobName && <p className="text-xs text-amber-800 dark:text-amber-300">{item.jobName}</p>}
+                </div>
+                <ul className="mt-1 space-y-0.5">
+                  {item.problems.map((problem: SetupProblem) => (
+                    <li key={problem} className="text-xs text-amber-900 dark:text-amber-200">
+                      <span className="font-medium">{SETUP_PROBLEM_LABEL[problem]}</span>
+                      {' — '}
+                      <span className="opacity-80">{SETUP_PROBLEM_FIX[problem]}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <p className="border-t border-amber-200 px-4 py-2 text-[11px] text-amber-700 dark:border-amber-900/40 dark:text-amber-400">
+            Setup status only — this shows whether attendance can be recorded, never where anyone is.
+          </p>
+        </div>
+      )}
 
       <AttendanceDiagnosticsPanel enabled={showDiagnostics} />
 

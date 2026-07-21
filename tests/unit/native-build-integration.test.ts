@@ -227,3 +227,33 @@ test("the native secure store is the credential's only home", () => {
   assert.ok(kotlin.includes("SecureAttendanceStorePlugin.loadToken"));
   assert.ok(!kotlin.includes('prefs.getString("gw_attendance_token"'));
 });
+
+// ── Scheduler configuration ──────────────────────────────────────────────────
+
+test("vercel.json declares no sub-daily cron", () => {
+  // This project is on Vercel Hobby, where cron is capped at once per day.
+  // A `crons` entry at "* * * * *" would look configured, be silently
+  // downgraded or rejected, and clock nobody in — the exact failure mode this
+  // whole stack exists to avoid. The scheduler runs from Supabase pg_cron
+  // instead (scripts/setup-attendance-scheduler.sql).
+  const vercel = JSON.parse(read("vercel.json")) as { crons?: Array<{ schedule?: string }> };
+  const crons = vercel.crons ?? [];
+  for (const cron of crons) {
+    assert.ok(
+      /^0 \d+ \* \* \*$|^@daily$/.test(String(cron.schedule ?? "")),
+      `Hobby cannot run "${cron.schedule}" — use the pg_cron scheduler instead`
+    );
+  }
+});
+
+test("the pg_cron setup script targets the reconcile route every minute", () => {
+  const sql = read("scripts/setup-attendance-scheduler.sql");
+  assert.ok(sql.includes("/api/attendance/reconcile"), "the scheduler must target the reconcile route");
+  assert.ok(sql.includes("'* * * * *'"), "attendance reconciliation must run every minute");
+  // The secret must not be inlined into the cron command, where anyone able to
+  // read cron.job could see it.
+  assert.ok(
+    !/cron\.schedule\([^)]*secret/i.test(sql),
+    "the scheduler secret must not appear in the cron command"
+  );
+});

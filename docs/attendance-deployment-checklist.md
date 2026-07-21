@@ -4,40 +4,42 @@ Status of the five deployment items raised against PRs #68 and #70–#75.
 
 | # | Item | Status |
 | --- | --- | --- |
-| 1 | Vercel Pro or an external scheduler | **NEEDS A DECISION** — account fact I cannot read |
+| 1 | Vercel Pro or an external scheduler | **RESOLVED** — Hobby, so the scheduler runs from Supabase pg_cron |
 | 2 | Will PR 11 ever deploy alone? | **RESOLVED** — keep 11 and 12 stacked |
 | 3 | Append-only triggers on staging | **NOT RUN** — needs a staging database |
 | 4 | Nothing updates/deletes `jobsite_timecard_events` | **VERIFIED CLEAN** (with one finding) |
-| 5 | Arrival dwell 2 min / departure grace 10 min | **NEEDS PRODUCT CONFIRMATION** |
+| 5 | Arrival dwell 2 min / departure grace 10 min | **CONFIRMED** — both kept |
 
 ---
 
-## 1. Scheduler — needs a decision
+## 1. Scheduler — resolved: Supabase pg_cron
 
-`vercel.json` registers `/api/attendance/reconcile` at `* * * * *`. **Minute
-granularity requires Vercel Pro or above.** On Hobby, cron frequency is capped
-at once per day, which is useless for clock-in accuracy — a 7:00 AM shift would
-be clocked in whenever the daily run happened to fire.
+Production is on **Vercel Hobby**, which caps cron frequency at once per day.
+A daily run makes clock-in timing meaningless, so the Vercel cron has been
+**removed from `vercel.json`** and the scheduler runs from the database.
 
-**If production is on Pro:** set `CRON_SECRET` in the Vercel project. Without
-it, the route falls through to admin-session auth and rejects every cron
-request — the scheduler would appear configured and do nothing.
+pg_cron is the better home for it regardless of plan: it sits beside the data,
+fires on time, and does not depend on the hosting tier. (GitHub Actions `schedule:`
+was considered and rejected — it is best-effort and routinely runs 5–15 minutes
+late, which is exactly the error budget a clock-in does not have.)
 
-**If production is not on Pro:** delete the `crons` block from `vercel.json`,
-set `ATTENDANCE_SCHEDULER_SECRET`, and drive the endpoint externally every
-minute:
+### Setup
 
-```bash
-curl -fsS -X POST https://<host>/api/attendance/reconcile \
-  -H "x-attendance-scheduler-secret: $ATTENDANCE_SCHEDULER_SECRET"
-```
+1. Set `ATTENDANCE_SCHEDULER_SECRET` in the Vercel project (any long random
+   string: `openssl rand -hex 32`).
+2. Run [`scripts/setup-attendance-scheduler.sql`](../scripts/setup-attendance-scheduler.sql)
+   in the Supabase SQL editor, replacing the endpoint and the secret. It
+   installs `pg_cron` + `pg_net`, stores the endpoint and secret in a
+   service-role-only table (so the secret is not visible in `cron.job.command`),
+   and schedules `/api/attendance/reconcile` every minute.
 
-Any of GitHub Actions (`schedule:` is best-effort and often runs late — not
-recommended for this), Supabase `pg_cron` + `net.http_post` (recommended: it
-lives beside the database and fires reliably), or Upstash QStash.
+`CRON_SECRET` is not needed on this path — that variable only authenticates
+Vercel's own cron.
 
-**Verify it is actually running** after deploy — a silent scheduler is
-indistinguishable from a working one until payroll:
+### Verify after deploy
+
+A green pg_cron run only proves the request was *dispatched*. The one that
+matters is whether the app received it:
 
 ```sql
 select started_at, finished_at, trigger, candidates, clocked_in, clocked_out, error
@@ -46,9 +48,9 @@ order by started_at desc
 limit 20;
 ```
 
-Expect a row per minute. Gaps are missed clock-ins.
-
----
+Expect roughly one row per minute with `trigger = 'scheduler_secret'`. **Gaps
+are missed clock-ins**, and nothing else in the system will report them — this
+query is the monitoring.
 
 ## 2. PR 11 deploying alone — resolved
 
@@ -128,22 +130,17 @@ is not reachable from the application.
 
 ---
 
-## 5. Resolved defaults — needs product confirmation
+## 5. Resolved defaults — confirmed
 
-Both changed as a side effect of resolving two overlapping settings columns.
-Each took the **more conservative** value so neither knob could silently loosen
-the other — but conservative is a judgement, not a product decision.
+Both kept. Confirmed as matching intended product behavior.
 
-| Setting | Was | Now | Effect of the change |
+| Setting | Was | Now | Effect |
 | --- | --- | --- | --- |
-| Arrival dwell | 45 s | **2 min** | An employee must stay inside the radius for 2 minutes before arrival counts. Fewer false clock-ins from driving past; a genuine arrival is recorded up to ~75 s later than before. Because early arrivals are held until the scheduled start anyway, this is usually invisible — it only shifts the clock-in for someone arriving *after* their shift began. |
-| Departure grace | 5 min | **10 min** | An employee must be outside the radius for 10 minutes before clocking out. Fewer wrong clock-outs from stepping to a truck or a GPS wobble; the recorded clock-out time is **unaffected** (it is always the original exit), so this costs no paid time — it only delays when the record closes. |
+| Arrival dwell | 45 s | **2 min** | An employee must stay inside the radius for 2 minutes before arrival counts. Fewer false clock-ins from driving past. Early arrivals are unaffected (they are held until scheduled start anyway); this only shifts the clock-in for someone arriving *after* their shift began. |
+| Departure grace | 5 min | **10 min** | An employee must be outside the radius for 10 minutes before clocking out. Fewer wrong clock-outs from stepping to a truck or a GPS wobble. **Costs no paid time** — the clock-out is always recorded at the original exit; this only delays when the record closes. |
 
-Neither is load-bearing for correctness; both are single-column changes if you
-want different numbers. The question is whether 2 minutes and 10 minutes match
-how your crews actually move on a jobsite.
-
----
+Both are single-column changes (`attendance_arrival_dwell_minutes`,
+`attendance_departure_grace_minutes`) if a company needs different values.
 
 ## Merge gate
 
@@ -155,6 +152,6 @@ The attendance stack (#68, #70–#75) stays blocked until **all** of:
 - [ ] Physical iPhone arrival and departure verified
       ([test plan](./attendance-device-test-plan.md))
 - [ ] Physical Android arrival and departure verified
-- [ ] Scheduler confirmed operational in production (item 1)
+- [ ] pg_cron scheduler running and `attendance_scheduler_runs` filling (item 1)
 - [ ] Migrations run cleanly on staging, triggers verified (item 3)
-- [ ] Defaults confirmed (item 5)
+- [x] Defaults confirmed (item 5)

@@ -121,15 +121,15 @@ fact.
 | Requirement | Value |
 | --- | --- |
 | Migration | `supabase/migrations/20260721_01_attendance_scheduled_clock_in.sql` |
-| Cron | `vercel.json` → `/api/attendance/reconcile`, `* * * * *` |
+| Scheduler | Supabase pg_cron → `/api/attendance/reconcile`, every minute. See [`scripts/setup-attendance-scheduler.sql`](../scripts/setup-attendance-scheduler.sql) |
 | Required env | `SUPABASE_SERVICE_ROLE_KEY` (already required) |
-| Optional env | `CRON_SECRET` — set it; without it the cron route falls through to admin-session auth and Vercel Cron requests are rejected |
-| Optional env | `ATTENDANCE_SCHEDULER_SECRET` — for an external scheduler posting `x-attendance-scheduler-secret` |
+| Required env | `ATTENDANCE_SCHEDULER_SECRET` — the pg_cron job authenticates with `x-attendance-scheduler-secret` |
+| Optional env | `CRON_SECRET` — only needed if a Vercel cron is ever added back |
 
-**Minute-granularity crons require a Vercel Pro plan or above.** On Hobby, cron
-frequency is limited to once per day, which is not sufficient for clock-in
-accuracy; use `ATTENDANCE_SCHEDULER_SECRET` with an external scheduler
-(GitHub Actions, Supabase `pg_cron` + `net.http_post`, Upstash QStash) instead.
+**There is deliberately no Vercel cron.** Minute granularity requires Vercel Pro
+or above; this project is on Hobby, where cron is capped at once per day —
+useless for clock-in timing. The scheduler runs from Supabase pg_cron instead.
+See [`attendance-deployment-checklist.md`](./attendance-deployment-checklist.md).
 
 Auth on the route, in order: Vercel Cron bearer (`CRON_SECRET`) → scheduler
 secret header → an authenticated `admin`/`pm` session. The session path is

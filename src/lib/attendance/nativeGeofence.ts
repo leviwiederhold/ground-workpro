@@ -37,11 +37,24 @@ export type GeofenceTransitionEvent = {
   occurredAt: string; // ISO
 };
 
+// Health/registration status the native layer reports up to the web layer, so
+// the app (and diagnostics) can confirm monitoring is actually live.
+export type NativeGeofenceHealth = {
+  supported: boolean;
+  authorized: boolean; // background location authorized natively
+  registeredCount: number;
+  lastEventAt: string | null;
+  lastEventTransition: "enter" | "exit" | null;
+  lastError: string | null;
+  pendingQueuedCount: number; // native offline queue depth
+};
+
 // The native plugin contract. A native implementation registers under this name.
 export interface JobsiteGeofencePlugin {
   register(options: { regions: GeofenceRegion[] }): Promise<void>;
   removeAll(): Promise<void>;
   getRegistered(): Promise<{ regions: GeofenceRegion[] }>;
+  getHealth(): Promise<NativeGeofenceHealth>;
   addListener(
     eventName: "geofenceTransition",
     listener: (event: GeofenceTransitionEvent) => void
@@ -97,6 +110,27 @@ export async function getRegisteredGeofences(): Promise<GeofenceRegion[]> {
     return (await plugin.getRegistered()).regions ?? [];
   } catch {
     return [];
+  }
+}
+
+const UNAVAILABLE_HEALTH: NativeGeofenceHealth = {
+  supported: false,
+  authorized: false,
+  registeredCount: 0,
+  lastEventAt: null,
+  lastEventTransition: null,
+  lastError: null,
+  pendingQueuedCount: 0,
+};
+
+/** Native registration + health status, for the web layer / diagnostics. */
+export async function getNativeGeofenceHealth(): Promise<NativeGeofenceHealth> {
+  const plugin = getPlugin();
+  if (!plugin) return UNAVAILABLE_HEALTH;
+  try {
+    return await plugin.getHealth();
+  } catch (e) {
+    return { ...UNAVAILABLE_HEALTH, supported: true, lastError: e instanceof Error ? e.message : "health check failed" };
   }
 }
 

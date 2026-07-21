@@ -79,6 +79,22 @@ public class JobsiteGeofencePlugin: CAPPlugin, CLLocationManagerDelegate {
         call.resolve(["regions": regions])
     }
 
+    // Health/registration status surfaced to the web layer + diagnostics.
+    @objc func getHealth(_ call: CAPPluginCall) {
+        let defaults = UserDefaults.standard
+        let authorized = CLLocationManager.authorizationStatus() == .authorizedAlways
+        call.resolve([
+            "supported": true,
+            "authorized": authorized,
+            "registeredCount": manager.monitoredRegions.count,
+            "lastEventAt": defaults.string(forKey: "gw_last_event_at") as Any,
+            "lastEventTransition": defaults.string(forKey: "gw_last_event_transition") as Any,
+            "lastError": defaults.string(forKey: "gw_last_error") as Any,
+            // Depth of the native offline queue (events awaiting a network flush).
+            "pendingQueuedCount": defaults.integer(forKey: "gw_pending_queue_count")
+        ])
+    }
+
     // MARK: - CLLocationManagerDelegate
 
     public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {

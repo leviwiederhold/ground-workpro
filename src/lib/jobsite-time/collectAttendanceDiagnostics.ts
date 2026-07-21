@@ -16,6 +16,10 @@ import {
 } from "./attendanceDiagnostics.ts";
 import { checkLocationPermission } from "./locationPermission.ts";
 import { isNativeGeofenceAvailable } from "./geofence-client.ts";
+import {
+  getNativeGeofenceHealth,
+  getRegisteredGeofences,
+} from "../attendance/nativeGeofence.ts";
 
 async function fetchJson(url: string): Promise<any | null> {
   try {
@@ -103,6 +107,16 @@ export async function collectAttendanceDiagnostics(
   const foreground = (foregroundState as PermissionState) ?? "unknown";
   const nativeGeofenceSupported = isNativeGeofenceAvailable();
 
+  // Real native registration + last-event health (empty/null when no plugin).
+  const [registered, health] = await Promise.all([getRegisteredGeofences(), getNativeGeofenceHealth()]);
+  const registeredGeofences = registered.map((r) => ({
+    jobId: r.jobId,
+    zone: r.zone,
+    radiusMeters: r.radiusMeters,
+  }));
+  const lastEnterAt = health.lastEventTransition === "enter" ? health.lastEventAt : null;
+  const lastExitAt = health.lastEventTransition === "exit" ? health.lastEventAt : null;
+
   const input: AttendanceDiagnosticsInput = {
     employeeId: options.employeeId ?? null,
     assignedJob,
@@ -118,11 +132,11 @@ export async function collectAttendanceDiagnostics(
       locationServicesEnabled: foreground === "unavailable" ? false : null,
     },
     location,
-    // Native region-monitoring registry is not yet exposed to the web layer.
-    registeredGeofences: [],
-    lastGeofenceEntryAt: null,
-    lastGeofenceExitAt: null,
-    lastSuccessfulSyncAt: null,
+    // Real native region-monitoring registry + last transition, when exposed.
+    registeredGeofences,
+    lastGeofenceEntryAt: lastEnterAt,
+    lastGeofenceExitAt: lastExitAt,
+    lastSuccessfulSyncAt: health.lastEventAt,
     attendanceStatus: options.attendanceStatus ?? null,
     nativeGeofenceSupported,
   };

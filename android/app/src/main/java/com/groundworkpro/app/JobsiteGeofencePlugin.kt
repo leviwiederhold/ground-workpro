@@ -95,4 +95,19 @@ class JobsiteGeofencePlugin : Plugin() {
         // diagnostics view (which also relies on the last-known registration).
         call.resolve()
     }
+
+    // Health/registration status surfaced to the web layer + diagnostics.
+    @PluginMethod
+    fun getHealth(call: PluginCall) {
+        val prefs = androidx.preference.PreferenceManager.getDefaultSharedPreferences(context)
+        val result = com.getcapacitor.JSObject()
+        result.put("supported", true)
+        result.put("authorized", prefs.getBoolean("gw_background_authorized", false))
+        result.put("registeredCount", prefs.getInt("gw_registered_count", 0))
+        result.put("lastEventAt", prefs.getString("gw_last_event_at", null))
+        result.put("lastEventTransition", prefs.getString("gw_last_event_transition", null))
+        result.put("lastError", prefs.getString("gw_last_error", null))
+        result.put("pendingQueuedCount", prefs.getInt("gw_pending_queue_count", 0))
+        call.resolve(result)
+    }
 }

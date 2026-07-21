@@ -52,6 +52,10 @@ const round4 = (v: number | null | undefined) =>
 
 const normalizeId = (id: string | number) => (/^\d+$/.test(String(id)) ? Number(id) : id);
 
+// An event that reaches the server this long after it happened came out of the
+// offline queue, not off a live transition.
+const OFFLINE_SYNC_THRESHOLD_MS = 2 * 60 * 1000;
+
 // The earliest of two timestamps, tolerating nulls. Used so an out-of-order or
 // offline event can only ever move a departure EARLIER (to when it actually
 // happened), never later.
@@ -107,6 +111,22 @@ export async function POST(request: Request) {
       ? new Date(input.occurredAt).toISOString()
       : new Date().toISOString();
     const source = input.source ?? "jobsite_auto";
+    const receivedAt = new Date().toISOString();
+    // Provenance for the audit trail. The distinction that matters in a dispute
+    // is "did this come from the phone in the background, or from a page load?"
+    // — and whether it sat in the offline queue before arriving.
+    const delayedMs = Date.parse(receivedAt) - Date.parse(occurredAt);
+    const eventSource = source === "manual"
+      ? "employee_manual"
+      : viaToken
+        ? (delayedMs > OFFLINE_SYNC_THRESHOLD_MS ? "offline_sync" : "native_geofence")
+        : (delayedMs > OFFLINE_SYNC_THRESHOLD_MS ? "offline_sync" : "foreground_reconciliation");
+    // Every audit insert below carries the same provenance columns.
+    const provenance = {
+      event_source: eventSource,
+      device_reported_at: occurredAt,
+      server_received_at: receivedAt,
+    };
 
     // Background (token) path hardening: per-credential rate limit, timestamp
     // validation, and idempotency + audit. The audit row's unique idempotency
@@ -364,6 +384,9 @@ export async function POST(request: Request) {
           timecard_id: other.id,
           event_type: "exited_geofence",
           occurred_at: occurredAt,
+          ...provenance,
+          validation_result: "accepted",
+          validation_reason: "arrived_at_another_job",
           job_id: other.job_id,
           employee_id: employeeId,
           user_id: userId,
@@ -423,6 +446,8 @@ export async function POST(request: Request) {
               timecard_id: timecard.id,
               event_type: "departure_cancelled",
               occurred_at: occurredAt,
+              ...provenance,
+              validation_result: "accepted",
               job_id: jobId,
               employee_id: employeeId,
               user_id: userId,
@@ -454,6 +479,9 @@ export async function POST(request: Request) {
         timecard_id: timecard?.id ?? null,
         event_type: "entered_geofence",
         occurred_at: occurredAt,
+        ...provenance,
+        validation_result: "accepted",
+        validation_reason: evaluation.arrivalStatus ?? null,
         job_id: jobId,
         employee_id: employeeId,
         user_id: userId,
@@ -473,6 +501,9 @@ export async function POST(request: Request) {
           timecard_id: null,
           event_type: "clock_out_rejected",
           occurred_at: occurredAt,
+          ...provenance,
+          validation_result: "rejected",
+          validation_reason: "no_open_timecard",
           job_id: jobId,
           employee_id: employeeId,
           user_id: userId,
@@ -526,6 +557,8 @@ export async function POST(request: Request) {
             timecard_id: timecard.id,
             event_type: "departure_pending",
             occurred_at: departureAt,
+            ...provenance,
+            validation_result: "accepted",
             job_id: jobId,
             employee_id: employeeId,
             user_id: userId,
@@ -540,6 +573,9 @@ export async function POST(request: Request) {
         timecard_id: timecard?.id ?? null,
         event_type: "exited_geofence",
         occurred_at: occurredAt,
+        ...provenance,
+        validation_result: "accepted",
+        validation_reason: null,
         job_id: jobId,
         employee_id: employeeId,
         user_id: userId,

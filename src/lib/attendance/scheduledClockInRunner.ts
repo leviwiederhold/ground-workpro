@@ -103,13 +103,23 @@ async function logEvent(
   row: CandidateRow,
   eventType: string,
   occurredAt: string,
-  notes?: string
+  notes?: string,
+  now: string = new Date().toISOString()
 ): Promise<void> {
   await db.from("jobsite_timecard_events").insert({
     company_id: row.company_id,
     timecard_id: row.id,
     event_type: eventType,
     occurred_at: occurredAt,
+    // This pass runs on the server, with no device involved: there is no
+    // device-reported time to record, and the receipt time is now.
+    event_source: "scheduled_reconciliation",
+    device_reported_at: null,
+    server_received_at: now,
+    validation_result: eventType === "clock_in_rejected" ? "rejected"
+      : eventType === "duplicate_suppressed" ? "suppressed"
+      : "accepted",
+    validation_reason: notes ?? null,
     job_id: row.job_id,
     employee_id: row.employee_id,
     user_id: row.user_id,

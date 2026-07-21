@@ -9,11 +9,6 @@ import java.io.File
 
 // Durable storage for the offline attendance queue (Android).
 //
-// STATUS: REFERENCE IMPLEMENTATION — NOT YET WIRED INTO THE BUILD OR VERIFIED ON
-// A PHYSICAL DEVICE. See docs/attendance-offline-sync.md. Until the plugin is
-// registered and exercised on a real phone, the JS layer falls back to
-// localStorage and offline durability across a device restart is NOT proven.
-//
 // Why not localStorage: the app is a remote-URL Capacitor shell, so the queue
 // would live in WebView web storage — wiped by "clear cache" and evictable
 // under storage pressure.
@@ -27,12 +22,11 @@ import java.io.File
 @CapacitorPlugin(name = "AttendanceQueueStore")
 class AttendanceQueueStorePlugin : Plugin() {
     companion object {
-        const val FILE_NAME = "attendance-queue.json"
-
-        // Shared with GeofenceBroadcastReceiver, which appends to the same queue
-        // when a background transition cannot be POSTed immediately.
+        // Shared with GeofenceBroadcastReceiver via AttendanceNativeQueue, which
+        // appends to the SAME file when a background transition cannot be POSTed
+        // immediately. One queue, one reported depth.
         fun queueFile(context: android.content.Context): File =
-            File(context.filesDir, FILE_NAME)
+            AttendanceNativeQueue.queueFile(context)
     }
 
     @PluginMethod
@@ -63,7 +57,7 @@ class AttendanceQueueStorePlugin : Plugin() {
             // Write-then-rename so a kill mid-write cannot leave a truncated
             // queue behind.
             val target = queueFile(context)
-            val temp = File(context.filesDir, "$FILE_NAME.tmp")
+            val temp = File(context.filesDir, "${AttendanceNativeQueue.FILE_NAME}.tmp")
             temp.writeText(value)
             if (!temp.renameTo(target)) {
                 target.writeText(value)

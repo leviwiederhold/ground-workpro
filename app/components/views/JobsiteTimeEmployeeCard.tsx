@@ -206,6 +206,9 @@ export function JobsiteTimeEmployeeCard() {
           ? registered.some((r) => String(r.jobId) === String(monitoredJobId))
           : registered.length > 0
         : null,
+      // The REAL credential state, read from the native secure store rather
+      // than inferred from whether enrollment was attempted this session.
+      deviceCredentialActive: nativeSupported ? Boolean(health?.hasCredential) : prev.deviceCredentialActive,
       monitoringWindowActive: plan?.plan ? Boolean(plan.plan.active) : null,
       monitoringStartsAt: plan?.plan?.nextWindowStartsAt ?? null,
       todayCard,

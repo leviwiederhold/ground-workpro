@@ -47,6 +47,10 @@ export type NativeGeofenceHealth = {
   lastEventTransition: "enter" | "exit" | null;
   lastError: string | null;
   pendingQueuedCount: number; // native offline queue depth
+  // Whether a device credential is present in the Keychain/Keystore. Without
+  // one the native layer cannot authenticate a background submission, so
+  // monitoring is NOT actually working however healthy everything else looks.
+  hasCredential: boolean;
 };
 
 // The native plugin contract. A native implementation registers under this name.
@@ -121,6 +125,7 @@ const UNAVAILABLE_HEALTH: NativeGeofenceHealth = {
   lastEventTransition: null,
   lastError: null,
   pendingQueuedCount: 0,
+  hasCredential: false,
 };
 
 /** Native registration + health status, for the web layer / diagnostics. */
@@ -128,7 +133,11 @@ export async function getNativeGeofenceHealth(): Promise<NativeGeofenceHealth> {
   const plugin = getPlugin();
   if (!plugin) return UNAVAILABLE_HEALTH;
   try {
-    return await plugin.getHealth();
+    const health = await plugin.getHealth();
+    // Older native builds predate hasCredential. Default it to FALSE rather
+    // than true: an unknown credential must never let the UI claim monitoring
+    // is active.
+    return { ...UNAVAILABLE_HEALTH, ...health, supported: true, hasCredential: health.hasCredential === true };
   } catch (e) {
     return { ...UNAVAILABLE_HEALTH, supported: true, lastError: e instanceof Error ? e.message : "health check failed" };
   }

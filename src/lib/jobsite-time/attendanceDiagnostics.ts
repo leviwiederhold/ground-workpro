@@ -55,6 +55,20 @@ export type DiagnosticsPermissions = {
   locationServicesEnabled: boolean | null;
 };
 
+// Offline-queue health, surfaced so "attendance looks stuck" can be attributed
+// to un-synced events rather than guessed at.
+export type AttendanceQueueHealth = {
+  pendingCount: number;
+  quarantinedCount: number;
+  oldestOccurredAt: string | null;
+  lastSuccessfulSyncAt: string | null;
+  lastFailureAt: string | null;
+  lastFailureReason: string | null;
+  nextAttemptAt: string | null;
+  // Whether the durable native store is backing the queue, or localStorage is.
+  durableStore: boolean;
+};
+
 export type DiagnosticsRegisteredGeofence = {
   jobId: string;
   zone: string;
@@ -75,6 +89,9 @@ export type AttendanceDiagnosticsInput = {
   lastGeofenceEntryAt: string | null;
   lastGeofenceExitAt: string | null;
   lastSuccessfulSyncAt: string | null;
+  // Offline attendance queue health. Omitted/null when the queue has not been
+  // read (e.g. a caller that only wants the permission + geofence picture).
+  queue?: AttendanceQueueHealth | null;
   attendanceStatus: string | null;
   // Whether this runtime supports native background geofencing at all. When
   // false, background-permission / geofence-registration reasons don't apply.
@@ -105,6 +122,7 @@ export type AttendanceDiagnostics = {
   lastGeofenceEntryAt: string | null;
   lastGeofenceExitAt: string | null;
   lastSuccessfulSyncAt: string | null;
+  queue: AttendanceQueueHealth | null;
   attendanceStatus: string | null;
   nativeGeofenceSupported: boolean;
   automaticAttendanceActive: boolean;
@@ -290,7 +308,8 @@ export function buildAttendanceDiagnostics(
     assignedJobGeofenceRegistered,
     lastGeofenceEntryAt: input.lastGeofenceEntryAt,
     lastGeofenceExitAt: input.lastGeofenceExitAt,
-    lastSuccessfulSyncAt: input.lastSuccessfulSyncAt,
+    lastSuccessfulSyncAt: input.queue?.lastSuccessfulSyncAt ?? input.lastSuccessfulSyncAt,
+    queue: input.queue ?? null,
     attendanceStatus: input.attendanceStatus,
     nativeGeofenceSupported: input.nativeGeofenceSupported,
     automaticAttendanceActive: inactiveReason === null,

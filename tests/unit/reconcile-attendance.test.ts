@@ -71,10 +71,27 @@ test("onsite after shift start with no record requests a clock-in repair (never 
   assert.equal(r.shouldCreateClockIn, true);
 });
 
-test("onsite before shift start shows onsite_before_shift and does NOT clock in", () => {
+test("onsite before shift start shows onsite_before_shift and does NOT clock in (scheduled_start)", () => {
   // now 12:30, shift 14:00, lead 120m → window opened 12:00, so in-window but pre-shift.
   const r = reconcileAttendanceState(baseInput({ now: "2026-07-20T12:30:00.000Z" }));
   assert.equal(r.status, "onsite_before_shift");
+  assert.equal(r.shouldCreateClockIn, false);
+});
+
+test("earlyArrivalMode=clock_in_on_arrival clocks in on early arrival", () => {
+  const r = reconcileAttendanceState(
+    baseInput({ now: "2026-07-20T12:30:00.000Z", earlyArrivalMode: "clock_in_on_arrival" })
+  );
+  assert.equal(r.status, "clocked_in");
+  assert.equal(r.shouldCreateClockIn, true);
+});
+
+test("earlyArrivalMode does not override the monitoring window (still too early)", () => {
+  // now 11:00 is before the 12:00 window even under clock_in_on_arrival.
+  const r = reconcileAttendanceState(
+    baseInput({ now: "2026-07-20T11:00:00.000Z", earlyArrivalMode: "clock_in_on_arrival" })
+  );
+  assert.equal(r.status, "waiting_for_monitoring_window");
   assert.equal(r.shouldCreateClockIn, false);
 });
 

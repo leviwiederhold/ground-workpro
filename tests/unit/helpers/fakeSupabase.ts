@@ -11,6 +11,12 @@
 export type Row = Record<string, any>;
 type Filter = (row: Row) => boolean;
 
+/**
+ * Simulates the database refusing an operation — an RLS denial, a constraint,
+ * an outage. Return a message to fail the operation, or null to allow it.
+ */
+export type FailureRule = (op: { table: string; mode: "select" | "update" | "insert" }) => string | null;
+
 class Builder {
   private filters: Filter[] = [];
   private mode: "select" | "update" | "insert" = "select";
@@ -20,10 +26,12 @@ class Builder {
   private orderAsc = true;
   private tables: Record<string, Row[]>;
   private table: string;
+  private failure: FailureRule | null;
 
-  constructor(tables: Record<string, Row[]>, table: string) {
+  constructor(tables: Record<string, Row[]>, table: string, failure: FailureRule | null = null) {
     this.tables = tables;
     this.table = table;
+    this.failure = failure;
   }
 
   private rows(): Row[] {
@@ -89,7 +97,9 @@ class Builder {
     return out;
   }
 
-  private run(): { data: Row[]; error: null } {
+  private run(): { data: Row[]; error: { message: string } | null } {
+    const denied = this.failure?.({ table: this.table, mode: this.mode }) ?? null;
+    if (denied) return { data: [], error: { message: denied } };
     if (this.mode === "insert") {
       const inserted = { id: `row-${this.rows().length + 1}`, ...(this.payload as Row) };
       this.rows().push(inserted);
@@ -103,22 +113,30 @@ class Builder {
   }
 
   async maybeSingle() {
-    const { data } = this.run();
-    return { data: data[0] ?? null, error: null };
+    const { data, error } = this.run();
+    return { data: error ? null : (data[0] ?? null), error };
   }
 
-  then(resolve: (value: { data: Row[]; error: null }) => unknown) {
+  then(resolve: (value: { data: Row[]; error: { message: string } | null }) => unknown) {
     return Promise.resolve(this.run()).then(resolve);
   }
 }
 
-export function makeDb(tables: Record<string, Row[]>) {
+export function makeDb(tables: Record<string, Row[]>, failure?: FailureRule) {
   return {
     tables,
     from(table: string) {
-      return new Builder(tables, table);
+      return new Builder(tables, table, failure ?? null);
     },
   };
+}
+
+/** Deny every write to one table, the way a SELECT-only RLS policy would. */
+export function denyWritesTo(table: string): FailureRule {
+  return (op) =>
+    op.table === table && op.mode !== "select"
+      ? `new row violates row-level security policy for table "${table}"`
+      : null;
 }
 
 /** The audit event types written to jobsite_timecard_events, in insert order. */

@@ -14,6 +14,12 @@ import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ATTENDANCE_UNAVAILABLE_MESSAGE,
+  AttendanceWriteError,
+  assertWrite,
+  getAttendanceWriteDb,
+} from "@/lib/attendance/attendanceDb";
 import { canManageTimecards, computeTotalMinutes, mapTimecard } from "@/lib/jobsite-time/domain";
 import {
   canCorrectAttendance,
@@ -100,13 +106,18 @@ export async function GET(request: Request) {
 /** POST — record and apply a correction. Manager-only. */
 export async function POST(request: Request) {
   try {
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { companyId, userId } = await getCompanyId();
     const role = await getEffectiveRole();
     // Correcting payroll is a narrower privilege than reading a roster.
     if (!canCorrectAttendance(role)) {
       return NextResponse.json({ error: "Not permitted to correct attendance" }, { status: 403 });
     }
-    const db = getSupabaseAdmin() ?? supabase;
+    // A correction writes three tables. There is no session-client fallback:
+    // attendance tables are SELECT-only for authenticated users.
+    const db = getAttendanceWriteDb("POST /api/attendance/corrections");
+    if (!db) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
 
     const body = await request.json().catch(() => null);
     const parsed = validateCorrection(body);
@@ -194,7 +205,8 @@ export async function POST(request: Request) {
     if (updated.error) return NextResponse.json({ error: updated.error.message }, { status: 400 });
 
     // Append to the immutable trail, linked to the correction that caused it.
-    await db.from("jobsite_timecard_events").insert({
+    assertWrite(
+      await db.from("jobsite_timecard_events").insert({
       company_id: companyId,
       timecard_id: timecardId,
       event_type: plan.eventType,
@@ -208,9 +220,11 @@ export async function POST(request: Request) {
       event_source: "manager_correction",
       validation_result: "accepted",
       validation_reason: parsed.request.correctionType,
-      correction_id: correction.data?.id ?? null,
-      notes: parsed.request.reason,
-    });
+        correction_id: correction.data?.id ?? null,
+        notes: parsed.request.reason,
+      }),
+      "audit:correction"
+    );
 
     return NextResponse.json({
       item: mapTimecard(updated.data),
@@ -219,6 +233,9 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
     const message = error instanceof Error ? error.message : "Unexpected server error";
     return NextResponse.json({ error: message }, { status: 500 });

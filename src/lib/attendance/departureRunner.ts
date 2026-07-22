@@ -17,6 +17,7 @@ import {
   type AutomaticAttendanceSettings,
 } from "./attendanceSettings.ts";
 import { decideClockOut, type ClockOutAction, type DepartureCard } from "./departure.ts";
+import { assertWrite } from "./attendanceDb.ts";
 import { resolveCompanyWorkSchedule, type CompanyConfigRow } from "../company/companyConfig.ts";
 import { computeTotalMinutes, scheduledWindowForWorkDate } from "../jobsite-time/domain.ts";
 
@@ -100,7 +101,7 @@ async function logEvent(
   notes?: string,
   now: string = new Date().toISOString()
 ): Promise<void> {
-  await db.from("jobsite_timecard_events").insert({
+  const inserted = await db.from("jobsite_timecard_events").insert({
     company_id: row.company_id,
     timecard_id: row.id,
     event_type: eventType,
@@ -119,6 +120,7 @@ async function logEvent(
     source: "jobsite_auto",
     notes: notes ?? null,
   });
+  assertWrite(inserted, `audit:${eventType}`);
 }
 
 /**
@@ -147,6 +149,7 @@ export async function applyClockOutDecision(
       .not("pending_departure_at", "is", null)
       .select("id")
       .maybeSingle();
+    assertWrite(cleared, "clock_out:cancel_departure");
     if (!cleared.data) return "suppressed";
     await logEvent(
       db,
@@ -183,6 +186,7 @@ export async function applyClockOutDecision(
     .is("clock_out_at", null)
     .select("id")
     .maybeSingle();
+  assertWrite(applied, "clock_out");
 
   if (!applied.data) {
     await logEvent(db, row, "duplicate_suppressed", now, "Clock-out already applied by another writer");

@@ -18,6 +18,7 @@ import {
   type AutomaticAttendanceSettings,
 } from "./attendanceSettings.ts";
 import { decideArrivalClockIn, type ArrivalCard, type ClockInAction } from "./scheduledClockIn.ts";
+import { assertWrite } from "./attendanceDb.ts";
 import { resolveCompanyWorkSchedule, type CompanyConfigRow } from "../company/companyConfig.ts";
 import { scheduledWindowForWorkDate } from "../jobsite-time/domain.ts";
 
@@ -106,7 +107,7 @@ async function logEvent(
   notes?: string,
   now: string = new Date().toISOString()
 ): Promise<void> {
-  await db.from("jobsite_timecard_events").insert({
+  const inserted = await db.from("jobsite_timecard_events").insert({
     company_id: row.company_id,
     timecard_id: row.id,
     event_type: eventType,
@@ -126,6 +127,7 @@ async function logEvent(
     source: "jobsite_auto",
     notes: notes ?? null,
   });
+  assertWrite(inserted, `audit:${eventType}`);
 }
 
 /**
@@ -165,6 +167,7 @@ export async function applyClockInDecision(
         .not("pending_arrival_at", "is", null)
         .select("id")
         .maybeSingle();
+      assertWrite(cleared, "clock_in:clear_rejected_arrival");
       if (cleared.data) await logEvent(db, row, "clock_in_rejected", now, notes);
       return "rejected";
     }
@@ -186,6 +189,7 @@ export async function applyClockInDecision(
       .is("onsite_before_shift_at", null)
       .select("id")
       .maybeSingle();
+    assertWrite(stamped, "clock_in:onsite_before_shift");
     if (stamped.data) {
       await logEvent(
         db,
@@ -214,6 +218,7 @@ export async function applyClockInDecision(
     .is("clock_in_at", null)
     .select("id")
     .maybeSingle();
+  assertWrite(applied, "clock_in");
 
   if (!applied.data) {
     // Someone else clocked this timecard in between our read and our write.

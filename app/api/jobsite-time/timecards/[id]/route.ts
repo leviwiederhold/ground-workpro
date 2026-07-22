@@ -4,6 +4,12 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ATTENDANCE_UNAVAILABLE_MESSAGE,
+  AttendanceWriteError,
+  assertWrite,
+  getAttendanceWriteDb,
+} from "@/lib/attendance/attendanceDb";
 import { canManageTimecards, mapTimecard, mapTimecardEvent } from "@/lib/jobsite-time/domain";
 
 export const dynamic = "force-dynamic";
@@ -43,6 +49,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }
 }
@@ -73,12 +82,15 @@ const patchSchema = z.object({
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { companyId, userId } = await getCompanyId();
     const role = await getEffectiveRole();
     if (!canManageTimecards(role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const db = getSupabaseAdmin() ?? supabase;
+    const db = getAttendanceWriteDb("PATCH /api/jobsite-time/timecards/[id]");
+    if (!db) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
 
@@ -151,7 +163,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
 
     if (eventType) {
-      await db.from("jobsite_timecard_events").insert({
+      assertWrite(
+        await db.from("jobsite_timecard_events").insert({
         company_id: companyId,
         timecard_id: id,
         event_type: eventType,
@@ -168,13 +181,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         user_id: row.user_id,
         source: "manager_adjusted",
         notes: d.notes ?? null,
-      });
+        }),
+        `audit:${eventType}`
+      );
     }
 
     return NextResponse.json({ item: mapTimecard(result.data) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }

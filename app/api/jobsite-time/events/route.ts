@@ -9,7 +9,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ATTENDANCE_UNAVAILABLE_MESSAGE,
+  AttendanceWriteError,
+  getAttendanceWriteDb,
+} from "@/lib/attendance/attendanceDb";
 import {
   buildCompanyScheduleWindow,
   evaluateJobsiteEvent,
@@ -91,22 +95,27 @@ function toOtherOpenCard(row: any): OtherOpenCard {
 export async function POST(request: Request) {
   try {
     // ── Authenticate ────────────────────────────────────────────────────────
+    // Attendance tables are SELECT-only for authenticated users, so every write
+    // here needs the service-role client. There is no session-client fallback:
+    // without this the route would accept an arrival and record nothing.
+    const db = getAttendanceWriteDb("POST /api/jobsite-time/events");
+    if (!db) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
+
     // Identity resolves from EITHER a device attendance credential (native
     // background POST, no cookies) OR the WebView session cookie (foreground).
-    const admin = getSupabaseAdmin();
-    const tokenCtx = admin ? await verifyAttendanceCredential(admin, request) : null;
+    const tokenCtx = await verifyAttendanceCredential(db, request);
 
     let companyId: string;
     let userId: string;
-    let db: Awaited<ReturnType<typeof getCompanyId>>["supabase"];
     let viaToken = false;
     let credentialId: string | null = null;
     let deviceId: string | null = null;
 
-    if (tokenCtx && admin) {
+    if (tokenCtx) {
       companyId = tokenCtx.companyId;
       userId = tokenCtx.userId;
-      db = admin;
       viaToken = true;
       credentialId = tokenCtx.credentialId;
       deviceId = tokenCtx.deviceId;
@@ -119,7 +128,6 @@ export async function POST(request: Request) {
       const session = await getCompanyId();
       companyId = session.companyId;
       userId = session.userId;
-      db = getSupabaseAdmin() ?? session.supabase;
     }
 
     // ── Validate ────────────────────────────────────────────────────────────
@@ -406,8 +414,6 @@ export async function POST(request: Request) {
       decision,
       existing.data ?? null
     );
-    if (!applied.ok) return NextResponse.json({ error: applied.error }, { status: 400 });
-
     // ── Respond ─────────────────────────────────────────────────────────────
     if (decision.response.kind === "error") {
       return NextResponse.json(
@@ -422,6 +428,12 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    // A rejected write (RLS denial, constraint, outage) was already logged with
+    // its cause. The caller gets the stable message — the database's complaint
+    // is not something an employee can act on, and it describes our schema.
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
     const message = error instanceof Error ? error.message : "Unexpected server error";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -11,11 +11,12 @@
 // This pass is a FALLBACK, not the mechanism: with the app closed nothing calls
 // it, which is exactly why /api/attendance/reconcile exists.
 
-import { scheduledWindowForWorkDate, type CompanyWorkScheduleSettings } from "./domain";
-import { decideArrivalClockIn, type EarlyArrivalMode } from "../attendance/scheduledClockIn";
-import { applyClockInDecision, buildOpenElsewhere } from "../attendance/scheduledClockInRunner";
-import { decideClockOut } from "../attendance/departure";
-import { applyClockOutDecision } from "../attendance/departureRunner";
+import { scheduledWindowForWorkDate, type CompanyWorkScheduleSettings } from "./domain.ts";
+import { decideArrivalClockIn, type EarlyArrivalMode } from "../attendance/scheduledClockIn.ts";
+import { applyClockInDecision, buildOpenElsewhere } from "../attendance/scheduledClockInRunner.ts";
+import { decideClockOut } from "../attendance/departure.ts";
+import { applyClockOutDecision } from "../attendance/departureRunner.ts";
+import { assertWrite } from "../attendance/attendanceDb.ts";
 
 type TimecardRow = {
   id: string;
@@ -73,7 +74,11 @@ export async function finalizePendingAttendance({
     .is("clock_out_at", null)
     .gte("work_date", twoDaysAgo)
     .limit(300);
-  if (result.error || !result.data?.length) return;
+  // A failed load is not "nothing to finalize". Returning quietly here is how a
+  // denied read used to look identical to an empty result, leaving arrivals and
+  // departures permanently unmatured with no error anywhere.
+  assertWrite(result, "finalize:load_open_cards");
+  if (!result.data?.length) return;
 
   const rows = result.data as TimecardRow[];
   // Which employees already have an open clock-in at some other job — a second

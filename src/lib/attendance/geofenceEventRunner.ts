@@ -12,6 +12,7 @@
 // silent change if a write fails midway.
 
 import type { EventDraft, GeofenceDecision, PrimaryEffect } from "./geofenceEvent.ts";
+import { assertWrite } from "./attendanceDb.ts";
 
 export type GeofenceApplyContext = {
   companyId: string;
@@ -33,10 +34,6 @@ export type GeofenceApplyContext = {
   longitude: number | null;
   accuracyMeters: number | null;
 };
-
-export type GeofenceApplyResult =
-  | { ok: true; timecard: any | null }
-  | { ok: false; error: string };
 
 const round4 = (v: number | null | undefined) =>
   v === null || v === undefined ? null : Math.round(v * 10000) / 10000;
@@ -67,7 +64,9 @@ async function insertEvent(
     row.accuracy_meters = ctx.accuracyMeters ?? null;
   }
   if (draft.notes !== undefined) row.notes = draft.notes;
-  await db.from("jobsite_timecard_events").insert(row);
+  // A dropped audit row is not cosmetic: the trail is the record of what the
+  // device reported, and a silent gap in it is unrecoverable.
+  assertWrite(await db.from("jobsite_timecard_events").insert(row), `audit:${draft.eventType}`);
 }
 
 /**
@@ -77,17 +76,20 @@ async function insertEvent(
  * not the same thing: the guarded updates carry `.is("clock_out_at", null)`, so
  * a concurrent finalization can legitimately match nothing — in which case the
  * events gated on `requiresPrimaryApplied` are skipped rather than describing a
- * change that did not happen.
+ * change that did not happen. That is a no-op, not a failure.
+ *
+ * A rejected write (including an RLS denial) throws instead: it must never be
+ * mistaken for the race above and reported as success.
  */
 async function applyPrimary(
   db: any,
   ctx: GeofenceApplyContext,
   effect: PrimaryEffect,
   current: any | null
-): Promise<{ ok: true; timecard: any | null; applied: boolean } | { ok: false; error: string }> {
+): Promise<{ timecard: any | null; applied: boolean }> {
   switch (effect.kind) {
     case "none":
-      return { ok: true, timecard: current, applied: false };
+      return { timecard: current, applied: false };
 
     case "open_session": {
       const insert = await db
@@ -109,8 +111,8 @@ async function applyPrimary(
         })
         .select("*")
         .maybeSingle();
-      if (insert.error) return { ok: false, error: insert.error.message };
-      return { ok: true, timecard: insert.data, applied: Boolean(insert.data) };
+      assertWrite(insert, "open_session");
+      return { timecard: insert.data, applied: Boolean(insert.data) };
     }
 
     case "record_arrival": {
@@ -125,8 +127,8 @@ async function applyPrimary(
         .eq("company_id", ctx.companyId)
         .select("*")
         .maybeSingle();
-      if (upd.error) return { ok: false, error: upd.error.message };
-      return { ok: true, timecard: upd.data, applied: Boolean(upd.data) };
+      assertWrite(upd, "record_arrival");
+      return { timecard: upd.data, applied: Boolean(upd.data) };
     }
 
     case "cancel_departure": {
@@ -138,8 +140,8 @@ async function applyPrimary(
         .is("clock_out_at", null)
         .select("*")
         .maybeSingle();
-      if (upd.error) return { ok: false, error: upd.error.message };
-      return { ok: true, timecard: upd.data ?? current, applied: Boolean(upd.data) };
+      assertWrite(upd, "cancel_departure");
+      return { timecard: upd.data ?? current, applied: Boolean(upd.data) };
     }
 
     case "cancel_pending_arrival": {
@@ -150,8 +152,8 @@ async function applyPrimary(
         .eq("company_id", ctx.companyId)
         .select("*")
         .maybeSingle();
-      if (upd.error) return { ok: false, error: upd.error.message };
-      return { ok: true, timecard: upd.data, applied: Boolean(upd.data) };
+      assertWrite(upd, "cancel_pending_arrival");
+      return { timecard: upd.data, applied: Boolean(upd.data) };
     }
 
     case "begin_departure": {
@@ -168,8 +170,8 @@ async function applyPrimary(
         .is("clock_out_at", null)
         .select("*")
         .maybeSingle();
-      if (upd.error) return { ok: false, error: upd.error.message };
-      return { ok: true, timecard: upd.data ?? current, applied: Boolean(upd.data) };
+      assertWrite(upd, "begin_departure");
+      return { timecard: upd.data ?? current, applied: Boolean(upd.data) };
     }
   }
 }
@@ -185,25 +187,33 @@ export async function applyGeofenceDecision(
   ctx: GeofenceApplyContext,
   decision: GeofenceDecision,
   current: any | null
-): Promise<GeofenceApplyResult> {
+): Promise<{ timecard: any | null }> {
   // Transfers first — resolving job A before opening job B is what prevents an
   // employee from being open at two jobsites at once.
   for (const transfer of decision.transfers) {
     if (transfer.kind === "cancel_pending_arrival") {
-      await db
-        .from("jobsite_timecards")
-        .update({ pending_arrival_at: null })
-        .eq("id", transfer.timecardId)
-        .eq("company_id", ctx.companyId);
+      assertWrite(
+        await db
+          .from("jobsite_timecards")
+          .update({ pending_arrival_at: null })
+          .eq("id", transfer.timecardId)
+          .eq("company_id", ctx.companyId),
+        "transfer:cancel_pending_arrival"
+      );
     } else {
-      await db
-        .from("jobsite_timecards")
-        .update({
-          pending_departure_at: transfer.departureAt,
-          detected_departure_at: transfer.departureAt,
-        })
-        .eq("id", transfer.timecardId)
-        .eq("company_id", ctx.companyId);
+      // If this fails the employee would be left open at two jobs, so it must
+      // stop the request rather than let job B open on top of job A.
+      assertWrite(
+        await db
+          .from("jobsite_timecards")
+          .update({
+            pending_departure_at: transfer.departureAt,
+            detected_departure_at: transfer.departureAt,
+          })
+          .eq("id", transfer.timecardId)
+          .eq("company_id", ctx.companyId),
+        "transfer:begin_departure"
+      );
     }
     if (transfer.event) {
       await insertEvent(db, ctx, transfer.event, transfer.timecardId, transfer.jobId);
@@ -211,7 +221,6 @@ export async function applyGeofenceDecision(
   }
 
   const primary = await applyPrimary(db, ctx, decision.primary, current);
-  if (!primary.ok) return primary;
 
   for (const draft of decision.events) {
     if (draft.requiresPrimaryApplied && !primary.applied) continue;
@@ -225,5 +234,5 @@ export async function applyGeofenceDecision(
     }
   }
 
-  return { ok: true, timecard: primary.timecard };
+  return { timecard: primary.timecard };
 }

@@ -10,6 +10,9 @@ import {
 } from "@/lib/jobsite-time/domain";
 import { resolveCompanyWorkSchedule, type CompanyConfigRow } from "@/lib/company/companyConfig";
 import { finalizePendingAttendance } from "@/lib/jobsite-time/finalizeAttendance";
+import { enforceRateLimit } from "@/lib/http/rateLimit";
+import { buildIdempotencyKey, validateEventTimestamp } from "@/lib/attendance/deviceCredential";
+import { verifyAttendanceCredential } from "@/lib/attendance/deviceCredentialServer";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +44,36 @@ const normalizeId = (id: string | number) => (/^\d+$/.test(String(id)) ? Number(
 
 export async function POST(request: Request) {
   try {
-    const { supabase, companyId, userId } = await getCompanyId();
-    const db = getSupabaseAdmin() ?? supabase;
+    // Identity resolves from EITHER a device attendance credential (native
+    // background POST, no cookies) OR the WebView session cookie (foreground).
+    const admin = getSupabaseAdmin();
+    const tokenCtx = admin ? await verifyAttendanceCredential(admin, request) : null;
+
+    let companyId: string;
+    let userId: string;
+    let db: Awaited<ReturnType<typeof getCompanyId>>["supabase"];
+    let viaToken = false;
+    let credentialId: string | null = null;
+    let deviceId: string | null = null;
+
+    if (tokenCtx && admin) {
+      companyId = tokenCtx.companyId;
+      userId = tokenCtx.userId;
+      db = admin;
+      viaToken = true;
+      credentialId = tokenCtx.credentialId;
+      deviceId = tokenCtx.deviceId;
+    } else {
+      // Reject a malformed/expired bearer rather than silently trying cookies.
+      const hasBearer = /^Bearer\s+/i.test(request.headers.get("authorization") ?? "");
+      if (hasBearer) {
+        return NextResponse.json({ error: "Invalid or expired attendance credential" }, { status: 401 });
+      }
+      const session = await getCompanyId();
+      companyId = session.companyId;
+      userId = session.userId;
+      db = getSupabaseAdmin() ?? session.supabase;
+    }
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
@@ -54,6 +85,55 @@ export async function POST(request: Request) {
       ? new Date(input.occurredAt).toISOString()
       : new Date().toISOString();
     const source = input.source ?? "jobsite_auto";
+
+    // Background (token) path hardening: per-credential rate limit, timestamp
+    // validation, and idempotency + audit. The audit row's unique idempotency
+    // key dedupes duplicate native deliveries of the same transition.
+    if (viaToken && credentialId) {
+      const rl = enforceRateLimit(request, {
+        keyPrefix: `attendance-events:${credentialId}`,
+        limit: 60,
+        windowMs: 60_000,
+      });
+      if (rl) return rl;
+
+      const ts = validateEventTimestamp(occurredAt);
+      if (!ts.ok) {
+        return NextResponse.json({ error: "Invalid event timestamp", reason: ts.reason }, { status: 422 });
+      }
+
+      const idempotencyKey = buildIdempotencyKey({
+        credentialId,
+        jobId,
+        zone: input.zone,
+        transition: input.transition,
+        occurredAt,
+      });
+      const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+      const audit = await db
+        .from("attendance_event_audit")
+        .insert({
+          credential_id: credentialId,
+          company_id: companyId,
+          user_id: userId,
+          device_id: deviceId,
+          job_id: String(jobId),
+          zone: input.zone,
+          transition: input.transition,
+          occurred_at: occurredAt,
+          idempotency_key: idempotencyKey,
+          result: "accepted",
+          ip,
+        })
+        .select("id")
+        .maybeSingle();
+      if (audit.error) {
+        if (/duplicate key|unique/i.test(audit.error.message || "")) {
+          return NextResponse.json({ ok: true, ignored: true, reason: "duplicate" });
+        }
+        return NextResponse.json({ error: audit.error.message }, { status: 400 });
+      }
+    }
 
     // Company settings — auto events require the feature to be enabled.
     const settingsRow = await db.from("companies").select(SETTINGS_COLUMNS).eq("id", companyId).maybeSingle();

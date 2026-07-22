@@ -84,15 +84,34 @@ export function JobsiteTimeEmployeeCard() {
     if (verified.length === 0) return; // missing coords → surfaced by status derivation, not here
 
     const [settingsRes, cardsRes, fix] = await Promise.all([
-      fetch('/api/jobsite-time/settings', { cache: 'no-store' }).catch(() => null),
+      // Company automatic-attendance settings: radius, monitoring lead time,
+      // early-arrival behavior, and TODAY's schedule (already computed in the
+      // company timezone by the server).
+      fetch('/api/attendance/settings', { cache: 'no-store' }).catch(() => null),
       fetch('/api/jobsite-time/timecards', { cache: 'no-store' }).catch(() => null),
       getFreshLocationFix(),
     ]);
     if (!fix) return; // no usable fix → cannot prove onsite; leave state as-is
 
-    const settingsItem = settingsRes && settingsRes.ok ? (await settingsRes.json())?.item ?? null : null;
+    const settingsPayload = settingsRes && settingsRes.ok ? await settingsRes.json().catch(() => null) : null;
+    const settingsItem = settingsPayload?.item ?? null;
+    // Arrival radius is stored in meters; reconcile works in feet.
     const arrivalRadiusFeet =
-      settingsItem && typeof settingsItem.arrivalRadiusFeet === 'number' ? settingsItem.arrivalRadiusFeet : null;
+      settingsItem && typeof settingsItem.geofenceRadiusMeters === 'number'
+        ? settingsItem.geofenceRadiusMeters / 0.3048
+        : null;
+    const monitoringLeadMinutes =
+      settingsItem && typeof settingsItem.monitoringLeadMinutes === 'number' ? settingsItem.monitoringLeadMinutes : null;
+    const earlyArrivalMode =
+      settingsItem?.earlyArrivalMode === 'clock_in_on_arrival' ? 'clock_in_on_arrival' : 'scheduled_start';
+    const schedule =
+      settingsPayload?.schedule && (settingsPayload.schedule.startAt || settingsPayload.schedule.endAt)
+        ? { startAt: settingsPayload.schedule.startAt ?? null, endAt: settingsPayload.schedule.endAt ?? null }
+        : null;
+
+    // Respect the master switch: when automatic attendance is disabled for the
+    // company, do not auto-reconcile a clock-in.
+    if (settingsItem && settingsItem.automaticAttendanceEnabled === false) return;
 
     const nearest = pickNearestAssignedJob(
       verified.map((j) => ({ jobId: j.jobId, lat: j.lat, lng: j.lng, addressVerified: j.addressVerified })),
@@ -117,10 +136,12 @@ export function JobsiteTimeEmployeeCard() {
       },
       arrivalRadiusFeet,
       location: fix,
-      // Schedule/timezone come from company attendance settings (added
-      // separately); until then the server arbitrates the early-arrival window.
-      schedule: null,
-      monitoringLeadMinutes: null,
+      // Schedule (company timezone) + monitoring lead + early-arrival mode now
+      // come from the company attendance settings; the server still re-validates
+      // distance + schedule when the arrival event is ingested.
+      schedule,
+      monitoringLeadMinutes,
+      earlyArrivalMode,
       todayCard,
     });
 

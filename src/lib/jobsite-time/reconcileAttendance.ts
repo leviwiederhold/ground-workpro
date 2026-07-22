@@ -26,6 +26,10 @@ export type AttendanceStatus =
   | "departure_pending"
   | "clocked_out";
 
+// Early-arrival behavior from company attendance settings: clock in immediately
+// on a confirmed onsite arrival, or hold the clock-in until scheduled start.
+export type EarlyArrivalMode = "clock_in_on_arrival" | "scheduled_start";
+
 export type ReconcileAssignedJob = {
   jobId: string;
   lat: number | null;
@@ -40,6 +44,9 @@ export type ReconcileInput = {
   schedule: { startAt: string | null; endAt: string | null } | null;
   monitoringLeadMinutes: number | null;
   todayCard: { clockInAt: string | null; clockOutAt: string | null; status: string } | null;
+  // Company early-arrival behavior. Defaults to "scheduled_start" (hold the
+  // clock-in until shift start) when unspecified.
+  earlyArrivalMode?: EarlyArrivalMode;
   now?: string;
   maxAccuracyMeters?: number;
   maxLocationAgeMs?: number;
@@ -151,7 +158,11 @@ export function reconcileAttendanceState(input: ReconcileInput): ReconcileResult
       return { status: "waiting_for_monitoring_window", onsite, distanceMeters, shouldCreateClockIn: false, errorReason: null };
     }
     if (beforeShift) {
-      // Present early: acknowledged, but the clock-in waits for shift start.
+      // Early-arrival behavior is company-configurable: either clock in on the
+      // confirmed arrival, or hold the clock-in until scheduled start.
+      if ((input.earlyArrivalMode ?? "scheduled_start") === "clock_in_on_arrival") {
+        return { status: "clocked_in", onsite, distanceMeters, shouldCreateClockIn: true, errorReason: null };
+      }
       return { status: "onsite_before_shift", onsite, distanceMeters, shouldCreateClockIn: false, errorReason: null };
     }
     // Onsite, in-window, at/after shift start, but no record → repair it.

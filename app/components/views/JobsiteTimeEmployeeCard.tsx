@@ -2,11 +2,26 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchAssignedJobs, ingestJobsiteEvent, startForegroundGeofenceWatch } from '@/lib/jobsite-time/geofence-client';
+import { fetchAssignedJobs, startForegroundGeofenceWatch } from '@/lib/jobsite-time/geofence-client';
 import { checkLocationPermission } from '@/lib/jobsite-time/locationPermission';
-import { pickNearestAssignedJob } from '@/lib/jobsite-time/domain';
+import { feetToMeters, pickNearestAssignedJob } from '@/lib/jobsite-time/domain';
 import { reconcileAttendanceState } from '@/lib/jobsite-time/reconcileAttendance';
 import type { DiagnosticsLocationFix } from '@/lib/jobsite-time/attendanceDiagnostics';
+import {
+  buildJobsiteRegions,
+  isNativeGeofenceAvailable,
+  onGeofenceTransition,
+  registerGeofences,
+} from '@/lib/attendance/nativeGeofence';
+import {
+  enqueueAttendanceEvent,
+  flushAttendanceQueue,
+  startAttendanceQueueAutoFlush,
+} from '@/lib/attendance/offlineQueueClient';
+import { enrollDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
+
+// iOS monitors at most 20 regions; each job uses 2 (arrival + wake).
+const MAX_NATIVE_GEOFENCE_JOBS = 10;
 
 // One fresh, high-accuracy fix (never a cached/continuous stream). Resolves null
 // on any failure so reconciliation degrades gracefully rather than throwing.
@@ -69,6 +84,10 @@ export function JobsiteTimeEmployeeCard() {
   const syncPermission = useCallback(async () => {
     setPermission(await checkLocationPermission());
   }, []);
+
+  // Durable offline queue: flush on mount, on network recovery, and periodically
+  // so attendance events generated offline are eventually submitted exactly once.
+  useEffect(() => startAttendanceQueueAutoFlush(), []);
 
   // Foreground reconciliation (PR: basic correctness layer). On launch/resume,
   // take ONE fresh fix and reconcile the attendance state so opening the app
@@ -146,7 +165,9 @@ export function JobsiteTimeEmployeeCard() {
     });
 
     if (result.shouldCreateClockIn) {
-      await ingestJobsiteEvent({
+      // Queue (durable) then flush, so a reconcile clock-in made while offline
+      // is preserved and retried rather than lost.
+      enqueueAttendanceEvent({
         jobId: nearest.job.jobId,
         zone: 'arrival',
         transition: 'enter',
@@ -154,8 +175,8 @@ export function JobsiteTimeEmployeeCard() {
         latitude: fix.lat,
         longitude: fix.lng,
         accuracyMeters: fix.accuracyMeters,
-        source: 'jobsite_auto',
       });
+      await flushAttendanceQueue();
       await load();
     }
   }, [load]);
@@ -183,10 +204,14 @@ export function JobsiteTimeEmployeeCard() {
   // Run the foreground geofence watcher whenever we have at least one verified
   // assigned job and location permission is granted. Attendance is permanent —
   // it is never gated on an enable/disable flag.
+  //
+  // When the NATIVE geofence plugin is present it owns detection (including
+  // background), so the foreground watch stands down to avoid duplicate events.
   useEffect(() => {
     watchRef.current?.stop();
     watchRef.current = null;
     if (permission !== 'granted') return;
+    if (isNativeGeofenceAvailable()) return;
     const verifiedJobs = assignedJobs.filter((j) => j.addressVerified);
     if (verifiedJobs.length === 0) return;
     watchRef.current = startForegroundGeofenceWatch({
@@ -196,6 +221,59 @@ export function JobsiteTimeEmployeeCard() {
       onEvent: () => load(),
     });
     return () => watchRef.current?.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings?.wakeRadiusMeters, settings?.arrivalRadiusFeet, permission, assignedJobs.length]);
+
+  // Native background geofencing: register the assigned jobs' regions with the
+  // OS so arrival/departure are detected while the app is backgrounded or
+  // closed. The native layer POSTs background transitions to the events API
+  // itself; here we also forward any FOREGROUND transition it emits and refresh.
+  // No-op when the native plugin isn't present (web / not-yet-bundled build).
+  useEffect(() => {
+    if (permission !== 'granted' || !isNativeGeofenceAvailable()) return;
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+
+    (async () => {
+      const arrivalRadiusMeters = settings?.arrivalRadiusFeet
+        ? feetToMeters(settings.arrivalRadiusFeet)
+        : 76; // ~250 ft default
+      const wakeRadiusMeters = settings?.wakeRadiusMeters ?? 1609;
+      const verifiedJobs = assignedJobs
+        .filter((j) => j.addressVerified && j.lat !== null && j.lng !== null)
+        .slice(0, MAX_NATIVE_GEOFENCE_JOBS);
+      // Enroll a device attendance credential so the native layer can submit
+      // background events without WebView cookies. Best-effort: a no-op unless a
+      // native secure store is present (never mints a token it can't store).
+      await enrollDeviceCredential();
+
+      const regions = verifiedJobs.flatMap((j) =>
+        buildJobsiteRegions(j, arrivalRadiusMeters, wakeRadiusMeters)
+      );
+      await registerGeofences(regions);
+
+      unsubscribe = await onGeofenceTransition(async (event) => {
+        if (cancelled) return;
+        if (event.zone !== 'arrival') return; // wake only starts monitoring
+        // Durable-queue foreground-delivered transitions (dedup + offline-safe).
+        enqueueAttendanceEvent({
+          jobId: event.jobId,
+          zone: 'arrival',
+          transition: event.transition,
+          occurredAt: event.occurredAt,
+          latitude: event.latitude ?? null,
+          longitude: event.longitude ?? null,
+          accuracyMeters: event.accuracyMeters ?? null,
+        });
+        await flushAttendanceQueue();
+        await load();
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings?.wakeRadiusMeters, settings?.arrivalRadiusFeet, permission, assignedJobs.length]);
 

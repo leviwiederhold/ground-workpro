@@ -620,7 +620,20 @@ export function JobsiteTimeView({
             </div>
             <div className="mt-3 flex gap-2">
               <button type="button" disabled={savingId === detail.card.id} onClick={() => patch(detail.card.id, { action: 'approve' })} className="flex-1 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Approve</button>
-              <button type="button" disabled={savingId === detail.card.id} onClick={() => patch(detail.card.id, { action: 'reject' })} className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-50 dark:border-red-900/50 dark:text-red-300">Reject</button>
+              {/* Voiding a record changes what someone is paid, so it goes
+                  through the correction form (which requires a reason) rather
+                  than a one-click status flip. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCorrectionForm((f) => ({ ...f, correctionType: 'invalid_record', reason: '' }));
+                  setCorrectionError('');
+                  setCorrectionOpen(true);
+                }}
+                className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/50 dark:text-red-300"
+              >
+                Void…
+              </button>
             </div>
             {/* Corrections. The effective record above is what payroll uses;
                 this is how it got there. The original values are shown beside

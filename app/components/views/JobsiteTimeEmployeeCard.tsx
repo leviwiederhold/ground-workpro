@@ -534,19 +534,21 @@ export function JobsiteTimeEmployeeCard() {
             </ul>
           )}
 
-          {/* Manual clock in/out is SECONDARY and labeled as a fallback: the
-              automatic path is the product, and a prominent manual button
-              teaches employees to distrust it. It is promoted (not hidden)
-              only when the automatic path genuinely cannot record. */}
-          {lifecycle.manualFallbackAvailable && (
+          {/* Manual clock in/out is an EXCEPTION, not the workflow. During a
+              normal day the employee never sees a button here at all — the
+              whole product promise is that attendance happens without them.
+              The controls appear only when the automatic path genuinely cannot
+              record (permission missing, geofence unavailable, unsupported
+              runtime, unverified address, or a degraded setup), which is
+              exactly what manualFallbackRecommended means. The reason is
+              already named in the headline and the issue list above. */}
+          {lifecycle.manualFallbackAvailable && lifecycle.manualFallbackRecommended && (
             <div className="mt-3 border-t border-current/10 pt-2">
               <p className="text-[11px] font-medium uppercase tracking-wide opacity-60">
-                Manual fallback
+                Record attendance manually
               </p>
               <p className="mt-0.5 text-xs opacity-75">
-                {lifecycle.manualFallbackRecommended
-                  ? 'Automatic attendance cannot record right now — use this instead.'
-                  : 'Only needed if your arrival or departure was not recorded automatically.'}
+                Automatic attendance cannot record right now — use this instead.
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button

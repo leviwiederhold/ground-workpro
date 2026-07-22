@@ -152,6 +152,99 @@ the new build over it. The event must survive and flush.
 America/New_York and the device clock to 2026-03-08. Confirm the clock-in still
 lands at 7:00 **local**.
 
+## Decision-layer refactor — required device verification
+
+Gate for the PR that extracted attendance decisions out of
+`app/api/jobsite-time/events/route.ts` (see `docs/attendance-decision-layer.md`).
+Server behaviour is unit-covered; these five confirm it on real hardware, with
+real GPS, against a real backgrounded app. **None have been run.**
+
+Run each on iPhone and Android. Record the observed rows, not just a pass mark:
+after each scenario, capture `jobsite_timecards` (id, job_id, clock_in_at,
+clock_out_at, pending_arrival_at, pending_departure_at) and the
+`jobsite_timecard_events` trail for the work date.
+
+### 1. Happy path — automatic, invisible
+
+Setup: employee assigned to verified Job A, automatic attendance on, background
+location "Always"/"Allow all the time", app force-quit.
+
+| Check | Pass criteria | iPhone | Android |
+| --- | --- | --- | --- |
+| Arrive onsite, app still closed | `entered_geofence` logged, `pending_arrival_at` set | UNVERIFIED | UNVERIFIED |
+| Dwell past the confirmation period | `clock_in_at` set automatically, no interaction | UNVERIFIED | UNVERIFIED |
+| Open the app | Shows "Clocked in automatically" | UNVERIFIED | UNVERIFIED |
+| **Manual controls** | **Absent. No button anywhere on the card.** | UNVERIFIED | UNVERIFIED |
+| CEO opens Attendance | Employee listed as present at Job A, arrival time correct | UNVERIFIED | UNVERIFIED |
+
+The manual-controls row is the one this PR changed. A visible Clock In here is a
+failure even if attendance itself worked.
+
+### 2. Manual fallback — degraded
+
+Force **one** degraded condition and confirm the app is honest about it. Easiest
+to stage: iOS Settings → app → Location → "While Using the App" (drops background
+permission). Android: Location permission → "Allow only while using the app".
+
+| Check | Pass criteria | iPhone | Android |
+| --- | --- | --- | --- |
+| Reopen the app | Headline names the reason ("Background location needed") | UNVERIFIED | UNVERIFIED |
+| Manual controls | **Present**, under "Record attendance manually" | UNVERIFIED | UNVERIFIED |
+| Explanation | "Automatic attendance cannot record right now — use this instead." | UNVERIFIED | UNVERIFIED |
+| Automatic path | No geofence registration attempt; no `entered_geofence` rows | UNVERIFIED | UNVERIFIED |
+| Restore the permission | Manual controls disappear again without a reinstall | UNVERIFIED | UNVERIFIED |
+
+### 3. Transfer — Job A → Job B
+
+Both jobs assigned and address-verified. Clock in automatically at A, then travel
+to B. No interaction at any point.
+
+| Check | Pass criteria | iPhone | Android |
+| --- | --- | --- | --- |
+| Arrive at B | A gets `pending_departure_at`; `exited_geofence` with reason `arrived_at_another_job` | UNVERIFIED | UNVERIFIED |
+| A settles | A's `clock_out_at` = the time B was entered, not the processing time | UNVERIFIED | UNVERIFIED |
+| B opens | New record for B, `pending_arrival_at` set | UNVERIFIED | UNVERIFIED |
+| Duplicate sessions | Exactly one open record at any instant; A and B never both open | UNVERIFIED | UNVERIFIED |
+| Interaction required | None | UNVERIFIED | UNVERIFIED |
+
+### 4. Re-entry inside the departure grace period
+
+Leave the jobsite, stay out for **less** than the configured grace, return.
+
+| Check | Pass criteria | iPhone | Android |
+| --- | --- | --- | --- |
+| On exit | `departure_pending` logged once | UNVERIFIED | UNVERIFIED |
+| On return | `departure_cancelled` logged; `pending_departure_at` cleared | UNVERIFIED | UNVERIFIED |
+| Session | **One** record, unsplit; `clock_in_at` unchanged | UNVERIFIED | UNVERIFIED |
+| Clock-out | None written | UNVERIFIED | UNVERIFIED |
+| Total hours | Continuous across the gap — the excursion is not deducted | UNVERIFIED | UNVERIFIED |
+
+Repeat once with a gap **longer** than the grace to confirm the opposite: that
+departure does finalize, at the original exit time.
+
+### 5. Idempotency — duplicate ENTER delivery
+
+Both OSes redeliver geofence transitions. To force it deliberately: put the
+device in airplane mode at the boundary so the event queues, cross the boundary
+again, then restore connectivity so the queue flushes alongside a live event.
+
+| Check | Pass criteria | iPhone | Android |
+| --- | --- | --- | --- |
+| Sessions | Exactly one record for the job and work date | UNVERIFIED | UNVERIFIED |
+| Clock-in | Exactly one `clock_in_at`, at the FIRST arrival | UNVERIFIED | UNVERIFIED |
+| Audit trail | Duplicates rejected by idempotency key, or logged with no state change | UNVERIFIED | UNVERIFIED |
+| `pending_arrival_at` | Not pushed forward by the later delivery | UNVERIFIED | UNVERIFIED |
+
+### Sign-off for this PR
+
+| Scenario | iPhone | Android |
+| --- | --- | --- |
+| 1. Happy path | NOT RUN | NOT RUN |
+| 2. Manual fallback | NOT RUN | NOT RUN |
+| 3. Transfer | NOT RUN | NOT RUN |
+| 4. Re-entry | NOT RUN | NOT RUN |
+| 5. Idempotency | NOT RUN | NOT RUN |
+
 ## Battery and permission sanity
 
 Not a numbered scenario, but a release blocker in practice:

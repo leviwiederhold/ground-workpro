@@ -7,6 +7,16 @@
 // full background solution.
 //
 // Pure and side-effect free so the distance/onsite decisions are unit-tested.
+//
+// KNOWN DUPLICATION (deliberate, not yet resolved): the AttendanceStatus values
+// and the onsite / before-shift / early-arrival rules below are a second
+// evaluation of "should this person be clocked in", alongside
+// decideArrivalClockIn() in ../attendance/scheduledClockIn.ts. This module does
+// not write — it returns `shouldCreateClockIn` and the caller posts to
+// /api/jobsite-time/events, so every actual record still goes through the one
+// decision layer. The risk is drift between the two rule sets, not a second
+// write path. Merging them is tracked separately; do not add new rules here
+// without making the same change in decideArrivalClockIn().
 
 import { feetToMeters, haversineMeters } from "./domain.ts";
 import {

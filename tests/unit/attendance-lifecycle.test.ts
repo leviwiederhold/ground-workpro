@@ -245,3 +245,46 @@ test("manual fallback disappears when the company turns it off", () => {
   const result = deriveAttendanceLifecycle(healthy({ manualFallbackEnabled: false }));
   assert.equal(result.manualFallbackAvailable, false);
 });
+
+// The rule JobsiteTimeEmployeeCard renders on: manual controls exist only as an
+// exception. During a normal workday the employee is shown no buttons at all —
+// that is the whole product promise, and a visible Clock In teaches them to
+// distrust the automatic path.
+const manualControlsVisible = (l: { manualFallbackAvailable: boolean; manualFallbackRecommended: boolean }) =>
+  l.manualFallbackAvailable && l.manualFallbackRecommended;
+
+test("a healthy automatic day shows the employee no attendance controls", () => {
+  assert.equal(manualControlsVisible(deriveAttendanceLifecycle(healthy())), false);
+  // Including mid-shift: an employee who was clocked in automatically has
+  // nothing to press, and will be clocked out automatically too.
+  const working = deriveAttendanceLifecycle(
+    healthy({ todayCard: { clockInAt: "2026-07-21T11:00:00.000Z", clockOutAt: null, pendingDepartureAt: null, onsiteBeforeShiftAt: null } })
+  );
+  assert.equal(working.state, "clocked_in_automatically");
+  assert.equal(manualControlsVisible(working), false);
+});
+
+test("every condition that breaks automatic attendance surfaces the manual controls", () => {
+  const broken = {
+    "background permission missing": { backgroundPermission: "denied" as const },
+    "location permission missing": { foregroundPermission: "denied" as const },
+    "precise location off": { preciseLocation: false },
+    "geofence unavailable": { assignedJobGeofenceRegistered: false },
+    "unsupported runtime": { nativeGeofenceSupported: false },
+    "address not verified": { jobsiteHasVerifiedCoordinates: false },
+    "company switch off": { automaticAttendanceEnabled: false },
+  };
+  for (const [label, override] of Object.entries(broken)) {
+    const lifecycle = deriveAttendanceLifecycle(healthy(override));
+    assert.equal(manualControlsVisible(lifecycle), true, `${label} must offer manual attendance`);
+  }
+});
+
+test("a company that disabled manual leaves no controls even when automatic is broken", () => {
+  // Deliberate: the company has decided manual entry is not allowed at all.
+  const lifecycle = deriveAttendanceLifecycle(
+    healthy({ manualFallbackEnabled: false, foregroundPermission: "denied" })
+  );
+  assert.equal(lifecycle.manualFallbackRecommended, true);
+  assert.equal(manualControlsVisible(lifecycle), false);
+});

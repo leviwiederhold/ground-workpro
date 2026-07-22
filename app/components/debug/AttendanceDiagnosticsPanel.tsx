@@ -140,6 +140,17 @@ export function AttendanceDiagnosticsPanel({
           </div>
 
           <div>
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800">Offline queue</p>
+            <Row label="Pending events" value={fmt(d.queue?.pendingCount)} />
+            <Row label="Quarantined events" value={fmt(d.queue?.quarantinedCount)} />
+            <Row label="Oldest queued event" value={fmt(d.queue?.oldestOccurredAt)} />
+            <Row label="Next retry at" value={fmt(d.queue?.nextAttemptAt)} />
+            <Row label="Last sync failure" value={fmt(d.queue?.lastFailureAt)} />
+            <Row label="Last failure reason" value={fmt(d.queue?.lastFailureReason)} />
+            <Row label="Durable native store" value={fmt(d.queue?.durableStore)} />
+          </div>
+
+          <div>
             <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-amber-800">State</p>
             <Row label="Attendance status" value={fmt(d.attendanceStatus)} />
             <Row label="Snapshot captured at" value={fmt(d.capturedAt)} />

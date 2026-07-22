@@ -167,7 +167,7 @@ export function JobsiteTimeEmployeeCard() {
     if (result.shouldCreateClockIn) {
       // Queue (durable) then flush, so a reconcile clock-in made while offline
       // is preserved and retried rather than lost.
-      enqueueAttendanceEvent({
+      await enqueueAttendanceEvent({
         jobId: nearest.job.jobId,
         zone: 'arrival',
         transition: 'enter',
@@ -256,7 +256,7 @@ export function JobsiteTimeEmployeeCard() {
         if (cancelled) return;
         if (event.zone !== 'arrival') return; // wake only starts monitoring
         // Durable-queue foreground-delivered transitions (dedup + offline-safe).
-        enqueueAttendanceEvent({
+        await enqueueAttendanceEvent({
           jobId: event.jobId,
           zone: 'arrival',
           transition: event.transition,

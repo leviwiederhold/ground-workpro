@@ -15,6 +15,8 @@ import {
   type PermissionState,
 } from "./attendanceDiagnostics.ts";
 import { checkLocationPermission } from "./locationPermission.ts";
+import { readAttendanceQueueDiagnostics } from "../attendance/offlineQueueClient.ts";
+import { isNativeQueueStoreAvailable } from "../attendance/offlineQueueStorage.ts";
 import { isNativeGeofenceAvailable } from "./geofence-client.ts";
 import {
   getNativeGeofenceHealth,
@@ -108,7 +110,11 @@ export async function collectAttendanceDiagnostics(
   const nativeGeofenceSupported = isNativeGeofenceAvailable();
 
   // Real native registration + last-event health (empty/null when no plugin).
-  const [registered, health] = await Promise.all([getRegisteredGeofences(), getNativeGeofenceHealth()]);
+  const [registered, health, queueHealth] = await Promise.all([
+    getRegisteredGeofences(),
+    getNativeGeofenceHealth(),
+    readAttendanceQueueDiagnostics(),
+  ]);
   const registeredGeofences = registered.map((r) => ({
     jobId: r.jobId,
     zone: r.zone,
@@ -137,6 +143,12 @@ export async function collectAttendanceDiagnostics(
     lastGeofenceEntryAt: lastEnterAt,
     lastGeofenceExitAt: lastExitAt,
     lastSuccessfulSyncAt: health.lastEventAt,
+    // Real offline-queue depth and sync health, so "attendance looks stuck" can
+    // be attributed to un-synced events rather than guessed at.
+    queue: {
+      ...queueHealth,
+      durableStore: isNativeQueueStoreAvailable(),
+    },
     attendanceStatus: options.attendanceStatus ?? null,
     nativeGeofenceSupported,
   };

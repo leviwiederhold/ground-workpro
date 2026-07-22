@@ -94,27 +94,44 @@ order by sort_order, migration, requirement;
 -- After applying both, this must list all 18 types.
 -- ============================================================================
 
-select
-  count(*) filter (where t = any(array[
-    'entered_geofence','exited_geofence','auto_clock_in','auto_clock_out',
-    'break_suggested','manager_edited','approved','rejected',
-    'onsite_before_shift','scheduled_clock_in','clock_in_backfilled',
-    'clock_in_rejected','duplicate_suppressed',
-    'departure_pending','departure_cancelled','fallback_clock_out',
-    'clock_out_rejected','monitoring_stopped'
-  ])) as types_present,
-  18 as types_expected,
-  case
-    when count(*) filter (where t = any(array[
-      'departure_pending','departure_cancelled','fallback_clock_out',
-      'clock_out_rejected','monitoring_stopped'])) = 5
-    then '✅ departure types present — order was correct'
-    else '❌ RE-APPLY 20260721_02 — the departure event types are missing'
-  end as verdict
-from (
-  select unnest(regexp_matches(
-    pg_get_constraintdef(oid), '''([a-z_]+)''', 'g'
-  ))::text as t
+-- NOTE: an absent constraint and an out-of-order constraint BOTH leave the
+-- departure types missing. This distinguishes them. The earlier version of this
+-- query did not, and would say "re-apply _02" even when nothing was applied.
+
+with allowed as (
+  select unnest(regexp_matches(pg_get_constraintdef(oid), '''([a-z_]+)''', 'g'))::text as t
   from pg_constraint
   where conname = 'jobsite_timecard_events_event_type_check'
-) types;
+),
+tally as (
+  select
+    (select count(*) from allowed) as total,
+    (select count(*) from allowed where t in
+      ('onsite_before_shift','scheduled_clock_in','clock_in_backfilled',
+       'clock_in_rejected','duplicate_suppressed')) as arrival_types,
+    (select count(*) from allowed where t in
+      ('departure_pending','departure_cancelled','fallback_clock_out',
+       'clock_out_rejected','monitoring_stopped')) as departure_types,
+    exists (select 1 from pg_constraint
+            where conname = 'jobsite_timecard_events_event_type_check') as constraint_exists,
+    exists (select 1 from information_schema.columns
+            where table_schema='public' and table_name='jobsite_timecards'
+              and column_name='clock_out_method') as m02_columns_present
+)
+select
+  total as types_allowed,
+  18 as types_expected,
+  case
+    when not constraint_exists
+      then 'CONSTRAINT ABSENT - apply migrations from the start; do NOT run the repair'
+    when departure_types = 5 and arrival_types = 5
+      then 'OK - all 18 types present'
+    when departure_types = 0 and arrival_types = 0
+      then 'Neither 20260721_01 nor _02 applied - apply BOTH, in order'
+    when departure_types = 0 and m02_columns_present
+      then 'OUT OF ORDER - _02 ran, then _01 overwrote it. Run attendance-event-type-repair.sql PART 2'
+    when departure_types = 0 and not m02_columns_present
+      then '20260721_02 never applied - apply it IN FULL (it also adds columns the repair does not)'
+    else 'Unexpected state - run attendance-event-type-repair.sql PART 1'
+  end as verdict
+from tally;

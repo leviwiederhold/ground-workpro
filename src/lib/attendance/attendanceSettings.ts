@@ -162,6 +162,25 @@ export function mapRowToAttendanceSettings(row: Record<string, unknown> | null |
   };
 }
 
+/**
+ * The arrival dwell the pipeline actually enforces, in seconds.
+ *
+ * Two columns can express it: the newer `attendance_arrival_dwell_minutes`
+ * (this module) and the original `jobsite_arrival_confirmation_seconds` (the
+ * two-zone geofence settings). Taking the STRICTER of the two means neither
+ * knob can silently loosen arrival confirmation, and every caller — events
+ * route, foreground reconciliation, scheduled process — enforces the same
+ * number.
+ */
+export function resolveArrivalConfirmationSeconds(
+  attendance: Pick<AutomaticAttendanceSettings, "arrivalDwellMinutes">,
+  legacyArrivalConfirmationSeconds: number | null | undefined
+): number {
+  const dwellSeconds = Math.max(0, Math.round(attendance.arrivalDwellMinutes * 60));
+  const legacy = Number(legacyArrivalConfirmationSeconds);
+  return Number.isFinite(legacy) ? Math.max(dwellSeconds, legacy) : dwellSeconds;
+}
+
 /** Build a company-columns update object from a validated settings patch. */
 export function buildAttendanceSettingsUpdate(patch: Partial<AutomaticAttendanceSettings>): Record<string, unknown> {
   const update: Record<string, unknown> = {};

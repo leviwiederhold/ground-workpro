@@ -13,15 +13,23 @@ import { finalizePendingAttendance } from "@/lib/jobsite-time/finalizeAttendance
 import { enforceRateLimit } from "@/lib/http/rateLimit";
 import { buildIdempotencyKey, validateEventTimestamp } from "@/lib/attendance/deviceCredential";
 import { verifyAttendanceCredential } from "@/lib/attendance/deviceCredentialServer";
+import {
+  mapRowToAttendanceSettings,
+  resolveArrivalConfirmationSeconds,
+} from "@/lib/attendance/attendanceSettings";
 
 export const dynamic = "force-dynamic";
 
 // #51 two-zone/pending-attendance columns + #52 company work-schedule columns.
 // Both mappers below read from this single row: mapCompanyJobsiteSettings (the
 // geofence/pending engine) and resolveCompanyWorkSchedule (company work hours).
+// #59 automatic-attendance columns are read from the same row by
+// mapRowToAttendanceSettings (early-arrival mode + arrival dwell), which is what
+// decides whether an early arrival is held until the scheduled start.
 const SETTINGS_COLUMNS =
   "jobsite_time_enabled,jobsite_require_approval,jobsite_geofence_radius_feet,jobsite_wake_radius_meters,jobsite_departure_grace_minutes,jobsite_arrival_confirmation_seconds,jobsite_manual_fallback_enabled" +
-  ",timezone,default_work_days,default_work_start_time,default_work_end_time,attendance_early_arrival_window_minutes,attendance_late_grace_minutes";
+  ",timezone,default_work_days,default_work_start_time,default_work_end_time,attendance_early_arrival_window_minutes,attendance_late_grace_minutes" +
+  ",attendance_automatic_enabled,attendance_arrival_dwell_minutes,attendance_early_arrival_mode";
 
 const bodySchema = z.object({
   jobId: z.union([z.string(), z.number()]),
@@ -141,6 +149,16 @@ export async function POST(request: Request) {
     // Null until the company has valid, configured work hours + timezone. When
     // null we never derive a company scheduled window or an arrival status.
     const workSchedule = resolveCompanyWorkSchedule(settingsRow.data as unknown as CompanyConfigRow | null);
+    // Early-arrival behavior + the dwell the whole pipeline enforces. Resolved
+    // once here and passed down so the foreground pass and the scheduled process
+    // agree exactly.
+    const attendanceSettings = mapRowToAttendanceSettings(
+      settingsRow.data as unknown as Record<string, unknown> | null
+    );
+    const arrivalConfirmationSeconds = resolveArrivalConfirmationSeconds(
+      attendanceSettings,
+      settings.arrivalConfirmationSeconds
+    );
     // Attendance is permanent — auto events are never rejected on an
     // enable/disable gate.
 
@@ -208,8 +226,12 @@ export async function POST(request: Request) {
     await finalizePendingAttendance({
       db,
       companyId,
-      arrivalConfirmationSeconds: settings.arrivalConfirmationSeconds,
+      arrivalConfirmationSeconds,
       departureGraceMinutes: settings.departureGraceMinutes,
+      earlyArrivalMode: attendanceSettings.earlyArrivalMode,
+      workSchedule,
+      // Finalization is always evaluated against real time, never the event's
+      // occurredAt — a delayed/offline event must not stop a due clock-in.
     });
 
     // Prefer the company-local work date (from configured timezone) so a late

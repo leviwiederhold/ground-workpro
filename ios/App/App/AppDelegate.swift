@@ -34,12 +34,43 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     private var didLoadAppURL = false
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // MUST happen before anything else, and on EVERY launch — including the
+        // background relaunch iOS performs to deliver a region transition, where
+        // no WebView is created and no JS ever runs. The geofence handler reads
+        // this to know where to POST; without it, a background arrival would be
+        // queued with "No server URL configured" forever.
+        //
+        // Derived from the same resolved URL the WebView loads, so a preview
+        // build never posts attendance to production.
+        configureAttendanceBackgroundContext()
+
         clearWebViewAssetCache()
         window?.backgroundColor = appBackgroundColor
         DispatchQueue.main.async { [weak self] in
             self?.configureWebViewBackground()
         }
         return true
+    }
+
+    /// Publish the origin the attendance plugins should POST to, plus a stable
+    /// device id for queued events.
+    private func configureAttendanceBackgroundContext() {
+        let defaults = UserDefaults.standard
+
+        var components = URLComponents(url: appURL, resolvingAgainstBaseURL: false)
+        components?.path = ""
+        components?.query = nil
+        components?.fragment = nil
+        if let origin = components?.url?.absoluteString {
+            // Trim any trailing slash so "\(base)/api/..." never doubles it.
+            defaults.set(origin.hasSuffix("/") ? String(origin.dropLast()) : origin, forKey: "gw_server_base_url")
+        }
+
+        // Matches the JS layer's per-install id (attendance.deviceId.v1). Only
+        // used to attribute queued events; carries no secret.
+        if (defaults.string(forKey: "gw_device_id") ?? "").isEmpty {
+            defaults.set(UUID().uuidString, forKey: "gw_device_id")
+        }
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

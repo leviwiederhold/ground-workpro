@@ -13,4 +13,7 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+    // Attendance native dependencies.
+    playServicesLocationVersion = '21.3.0'
+    androidxPreferenceVersion = '1.2.1'
 }

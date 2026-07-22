@@ -8,10 +8,21 @@ device, an OS version, and a date.
 
 ## Before any of this can be run
 
-The native code is **not in the builds**. See
-[`attendance-completion-status.md`](./attendance-completion-status.md) for the
-evidence. Until the blockers there are cleared, this plan cannot be executed at
-all — there is no background detection on either platform to test.
+**PR 17 cleared the blocker.** The native plugins are now compiled into both
+builds and registered with Capacitor, so there is finally something on a device
+to test. Everything below is now executable — and still unexecuted.
+
+Install a build from the PR 17 branch (or later) on each device. On first
+launch, confirm the plugin lookup resolves before doing anything else:
+
+```js
+// In Safari Web Inspector / chrome://inspect, against the running app:
+Object.keys(window.Capacitor.Plugins)
+// must include: JobsiteGeofence, AttendanceQueueStore, SecureAttendanceStore
+```
+
+If any of those three is missing, stop — registration has regressed and no
+other result in this plan means anything.
 
 ## Automated coverage vs. device coverage
 

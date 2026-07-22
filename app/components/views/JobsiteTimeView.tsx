@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
 import { AttendanceDiagnosticsPanel } from '@/app/components/debug/AttendanceDiagnosticsPanel';
+import { AutoAttendanceSetupCard } from '@/app/components/views/AutoAttendanceSetupCard';
 
 type Timecard = {
   id: string;
@@ -292,6 +293,11 @@ export function JobsiteTimeView({
           <i className="fa-solid fa-sliders text-xs" /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </button>
       </div>
+
+      {/* #66: per-employee background-permission setup. #63: internal
+          diagnostics, gated behind ?debug=attendance. Independent surfaces —
+          the setup card is for managers, the panel is for debugging. */}
+      <AutoAttendanceSetupCard employees={employees} />
 
       <AttendanceDiagnosticsPanel enabled={showDiagnostics} />
 

@@ -135,6 +135,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         timecard_id: id,
         event_type: eventType,
         occurred_at: new Date().toISOString(),
+        // A manager edit has no device behind it, so device_reported_at is
+        // deliberately null rather than echoing the server time.
+        event_source: "manager_correction",
+        device_reported_at: null,
+        server_received_at: new Date().toISOString(),
+        validation_result: "accepted",
+        validation_reason: d.action ?? "edit",
         job_id: row.job_id,
         employee_id: row.employee_id,
         user_id: row.user_id,

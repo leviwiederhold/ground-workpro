@@ -483,10 +483,29 @@ export function mapTimecardEvent(row: any) {
     longitude: row.longitude ?? null,
     accuracyMeters: row.accuracy_meters ?? null,
     source: (row.source ?? "jobsite_auto") as TimecardSource,
+    // Precise provenance: which mechanism produced this event, when the DEVICE
+    // said it happened, and when the SERVER received it. The gap between the
+    // last two is the offline-queue delay, and it must stay visible.
+    eventSource: row.event_source ?? null,
+    deviceReportedAt: row.device_reported_at ?? null,
+    serverReceivedAt: row.server_received_at ?? row.created_at ?? null,
+    validationResult: row.validation_result ?? null,
+    validationReason: row.validation_reason ?? null,
+    correctionId: row.correction_id ?? null,
     notes: row.notes ?? "",
     createdAt: row.created_at ?? null,
   };
 }
+
+// Human-readable provenance for the audit trail.
+export const EVENT_SOURCE_LABEL: Record<string, string> = {
+  native_geofence: "Phone (background)",
+  foreground_reconciliation: "App open",
+  scheduled_reconciliation: "Scheduled check",
+  offline_sync: "Synced from offline",
+  employee_manual: "Employee (manual)",
+  manager_correction: "Manager correction",
+};
 
 export type JobsiteTimeSettings = {
   enabled: boolean;

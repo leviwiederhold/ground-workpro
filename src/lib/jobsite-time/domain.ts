@@ -36,6 +36,18 @@ export const TIMECARD_EVENT_TYPES = [
   "manager_edited",
   "approved",
   "rejected",
+  // Automatic arrival / scheduled clock-in audit trail.
+  "onsite_before_shift",
+  "scheduled_clock_in",
+  "clock_in_backfilled",
+  "clock_in_rejected",
+  "duplicate_suppressed",
+  // Automatic departure / clock-out audit trail.
+  "departure_pending",
+  "departure_cancelled",
+  "fallback_clock_out",
+  "clock_out_rejected",
+  "monitoring_stopped",
 ] as const;
 export type TimecardEventType = (typeof TIMECARD_EVENT_TYPES)[number];
 
@@ -272,6 +284,38 @@ export function buildCompanyScheduleWindow(
   return { workDate, scheduledStart, scheduledEnd, hasSchedule: true, isWorkDay };
 }
 
+/**
+ * Scheduled start/end for a specific company-local work date (YYYY-MM-DD).
+ *
+ * buildCompanyScheduleWindow() derives the work date from an event timestamp;
+ * the scheduled process works the other way round — it already knows the work
+ * date of a stored timecard and needs the shift boundaries for it. Resolving
+ * the local wall-clock time to UTC per date is what makes daylight-saving
+ * transitions correct: 07:00 local is a different UTC instant on either side of
+ * the change, and both are computed from the same configured "07:00".
+ */
+export function scheduledWindowForWorkDate(
+  workDate: string,
+  settings: CompanyWorkScheduleSettings
+): { scheduledStart: string | null; scheduledEnd: string | null; isWorkDay: boolean } {
+  const timezone = safeTimezone(settings.timezone);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(workDate ?? ""))) {
+    return { scheduledStart: null, scheduledEnd: null, isWorkDay: false };
+  }
+  const scheduledStart = zonedTimeToUtcIso(workDate, settings.workStartTime, timezone);
+  // Weekday is read back from the resolved instant so it reflects the company's
+  // timezone rather than the server's.
+  const weekday = localParts(new Date(scheduledStart), timezone).weekday;
+  if (!settings.workDays.includes(weekday)) {
+    return { scheduledStart: null, scheduledEnd: null, isWorkDay: false };
+  }
+  let scheduledEnd = zonedTimeToUtcIso(workDate, settings.workEndTime, timezone);
+  if (Date.parse(scheduledEnd) <= Date.parse(scheduledStart)) {
+    scheduledEnd = new Date(Date.parse(scheduledEnd) + 24 * 60 * 60000).toISOString();
+  }
+  return { scheduledStart, scheduledEnd, isWorkDay: true };
+}
+
 const CONF_RANK: Record<TimecardConfidence, number> = { low: 0, medium: 1, high: 2 };
 
 export function evaluateJobsiteEvent(params: {
@@ -439,10 +483,29 @@ export function mapTimecardEvent(row: any) {
     longitude: row.longitude ?? null,
     accuracyMeters: row.accuracy_meters ?? null,
     source: (row.source ?? "jobsite_auto") as TimecardSource,
+    // Precise provenance: which mechanism produced this event, when the DEVICE
+    // said it happened, and when the SERVER received it. The gap between the
+    // last two is the offline-queue delay, and it must stay visible.
+    eventSource: row.event_source ?? null,
+    deviceReportedAt: row.device_reported_at ?? null,
+    serverReceivedAt: row.server_received_at ?? row.created_at ?? null,
+    validationResult: row.validation_result ?? null,
+    validationReason: row.validation_reason ?? null,
+    correctionId: row.correction_id ?? null,
     notes: row.notes ?? "",
     createdAt: row.created_at ?? null,
   };
 }
+
+// Human-readable provenance for the audit trail.
+export const EVENT_SOURCE_LABEL: Record<string, string> = {
+  native_geofence: "Phone (background)",
+  foreground_reconciliation: "App open",
+  scheduled_reconciliation: "Scheduled check",
+  offline_sync: "Synced from offline",
+  employee_manual: "Employee (manual)",
+  manager_correction: "Manager correction",
+};
 
 export type JobsiteTimeSettings = {
   enabled: boolean;

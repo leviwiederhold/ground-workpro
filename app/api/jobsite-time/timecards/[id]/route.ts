@@ -4,7 +4,13 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { canManageTimecards, computeTotalMinutes, mapTimecard, mapTimecardEvent } from "@/lib/jobsite-time/domain";
+import {
+  ATTENDANCE_UNAVAILABLE_MESSAGE,
+  AttendanceWriteError,
+  assertWrite,
+  getAttendanceWriteDb,
+} from "@/lib/attendance/attendanceDb";
+import { canManageTimecards, mapTimecard, mapTimecardEvent } from "@/lib/jobsite-time/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -43,34 +49,80 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }
 }
 
-const isoOrNull = z.string().datetime().nullable().optional();
+// Fields that change what the record SAYS about hours worked. They are not
+// accepted here at all — see the note on PATCH below.
+const CORRECTABLE_FIELDS = ["clockInAt", "clockOutAt", "breakStartAt", "breakEndAt", "jobId"] as const;
+
 const patchSchema = z.object({
-  action: z.enum(["approve", "reject", "edit", "note"]).optional(),
-  clockInAt: isoOrNull,
-  clockOutAt: isoOrNull,
-  breakStartAt: isoOrNull,
-  breakEndAt: isoOrNull,
-  status: z.enum(["active", "pending_review", "approved", "rejected", "needs_review"]).optional(),
+  action: z.enum(["approve", "note"]).optional(),
+  status: z.enum(["active", "pending_review", "approved", "needs_review"]).optional(),
   notes: z.string().max(2000).optional(),
 });
 
-// PATCH: manager edit / approve / reject / note. Manager-only (server enforced),
-// even if the UI fails. Payroll is never finalized without approval here.
+// PATCH: approve / note / workflow status only. Manager-only (server enforced),
+// even if the UI fails.
+//
+// This route deliberately CANNOT change recorded hours or void a record. Both
+// are corrections, and a correction has to carry a reason, an original-values
+// snapshot, and an immutable row in attendance_corrections — guarantees that
+// only POST /api/attendance/corrections provides, and that this endpoint used to
+// let a manager walk straight past by PATCHing clock_in_at directly.
+//
+// The two privileges are also not the same: approving is open to
+// canManageTimecards() (foreman, executive, operations included), while
+// rewriting payroll is admin/pm only. Keeping the correcting powers out of here
+// is what keeps that distinction real.
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { companyId, userId } = await getCompanyId();
     const role = await getEffectiveRole();
     if (!canManageTimecards(role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const db = getSupabaseAdmin() ?? supabase;
+    const db = getAttendanceWriteDb("PATCH /api/jobsite-time/timecards/[id]");
+    if (!db) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
 
-    const parsed = patchSchema.safeParse(await request.json().catch(() => null));
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+
+    // Refuse rather than silently ignore: a caller that thinks it just changed
+    // someone's hours and got a 200 back is the worst possible outcome.
+    const attempted = CORRECTABLE_FIELDS.filter((f) => body?.[f] !== undefined);
+    if (attempted.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Recorded hours can only be changed through a correction",
+          code: "use_corrections_endpoint",
+          fields: attempted,
+          endpoint: "/api/attendance/corrections",
+        },
+        { status: 422 }
+      );
+    }
+    if (body?.action === "reject" || body?.status === "rejected") {
+      // Voiding a record is a correction too — it changes what the employee is
+      // paid, so it needs a reason on the permanent trail.
+      return NextResponse.json(
+        {
+          error: "Voiding a record requires a correction with a reason",
+          code: "use_corrections_endpoint",
+          correctionTypes: ["duplicate_record", "invalid_record"],
+          endpoint: "/api/attendance/corrections",
+        },
+        { status: 422 }
+      );
+    }
+
+    const parsed = patchSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json({ error: "Validation error", details: parsed.error.flatten() }, { status: 422 });
     }
@@ -84,34 +136,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const update: Record<string, unknown> = {};
     let eventType: string | null = null;
 
-    const editedTimes =
-      d.clockInAt !== undefined || d.clockOutAt !== undefined || d.breakStartAt !== undefined || d.breakEndAt !== undefined;
-    if (editedTimes) {
-      if (d.clockInAt !== undefined) update.clock_in_at = d.clockInAt;
-      if (d.clockOutAt !== undefined) update.clock_out_at = d.clockOutAt;
-      if (d.breakStartAt !== undefined) update.break_start_at = d.breakStartAt;
-      if (d.breakEndAt !== undefined) update.break_end_at = d.breakEndAt;
-      update.source = "manager_adjusted";
-      update.total_minutes = computeTotalMinutes({
-        clock_in_at: (update.clock_in_at as string) ?? row.clock_in_at,
-        clock_out_at: (update.clock_out_at as string) ?? row.clock_out_at,
-        break_start_at: (update.break_start_at as string) ?? row.break_start_at,
-        break_end_at: (update.break_end_at as string) ?? row.break_end_at,
-      });
-      eventType = "manager_edited";
-    }
     if (d.notes !== undefined) {
       update.notes = d.notes;
-      if (!eventType) eventType = "manager_edited";
+      eventType = "manager_edited";
     }
     if (d.action === "approve" || d.status === "approved") {
       update.status = "approved";
       update.approved_by = userId;
       update.approved_at = new Date().toISOString();
       eventType = "approved";
-    } else if (d.action === "reject" || d.status === "rejected") {
-      update.status = "rejected";
-      eventType = "rejected";
     } else if (d.status) {
       update.status = d.status;
     }
@@ -130,23 +163,36 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
 
     if (eventType) {
-      await db.from("jobsite_timecard_events").insert({
+      assertWrite(
+        await db.from("jobsite_timecard_events").insert({
         company_id: companyId,
         timecard_id: id,
         event_type: eventType,
         occurred_at: new Date().toISOString(),
+        // A manager edit has no device behind it, so device_reported_at is
+        // deliberately null rather than echoing the server time.
+        event_source: "manager_correction",
+        device_reported_at: null,
+        server_received_at: new Date().toISOString(),
+        validation_result: "accepted",
+        validation_reason: d.action ?? "edit",
         job_id: row.job_id,
         employee_id: row.employee_id,
         user_id: row.user_id,
         source: "manager_adjusted",
         notes: d.notes ?? null,
-      });
+        }),
+        `audit:${eventType}`
+      );
     }
 
     return NextResponse.json({ item: mapTimecard(result.data) });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }

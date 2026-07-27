@@ -3,6 +3,24 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
+import { AttendanceDiagnosticsPanel } from '@/app/components/debug/AttendanceDiagnosticsPanel';
+import { AutoAttendanceSetupCard } from '@/app/components/views/AutoAttendanceSetupCard';
+import {
+  SETUP_PROBLEM_FIX,
+  SETUP_PROBLEM_LABEL,
+  type EmployeeSetupHealth,
+  type SetupProblem,
+} from '@/lib/attendance/setupHealth';
+import {
+  CORRECTION_TYPES,
+  CORRECTION_TYPE_LABEL,
+  describeCorrection,
+  MIN_REASON_LENGTH,
+  reconstructOriginal,
+  type CorrectionRecord,
+  type CorrectionType,
+} from '@/lib/attendance/corrections';
+import { EVENT_SOURCE_LABEL } from '@/lib/jobsite-time/domain';
 
 type Timecard = {
   id: string;
@@ -85,8 +103,28 @@ export function JobsiteTimeView({
   const [error, setError] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
   const [detail, setDetail] = useState<{ card: Timecard; events: any[] } | null>(null);
+  // Correction history for the open timecard, and the correction form.
+  const [corrections, setCorrections] = useState<CorrectionRecord[]>([]);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionSaving, setCorrectionSaving] = useState(false);
+  const [correctionError, setCorrectionError] = useState('');
+  const [correctionForm, setCorrectionForm] = useState<{
+    correctionType: CorrectionType;
+    reason: string;
+    clockInAt: string;
+    clockOutAt: string;
+    jobId: string;
+  }>({ correctionType: 'incorrect_timestamp', reason: '', clockInAt: '', clockOutAt: '', jobId: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ from: '', to: '', employee: 'all', job: 'all', status: 'all', needsReview: false });
+  // Opt-in internal diagnostics: this view is already admin/pm-gated by route
+  // guards; the ?debug=attendance flag keeps the panel out of the way otherwise.
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const flag = new URLSearchParams(window.location.search).get('debug');
+    setShowDiagnostics(flag === 'attendance' || process.env.NODE_ENV !== 'production');
+  }, []);
 
   const nameByUser = useMemo(() => {
     const m = new Map<string, string>();
@@ -136,6 +174,22 @@ export function JobsiteTimeView({
   }, [filters]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Automatic-attendance setup health. Derived server-side from assignment,
+  // jobsite verification, and device enrollment — so a manager finds out that
+  // an employee's attendance will not record BEFORE payroll day, and without
+  // that employee needing to have the app open.
+  const [setupHealth, setSetupHealth] = useState<{ items: EmployeeSetupHealth[]; brokenCount: number; healthyCount: number } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch('/api/attendance/setup-health', { cache: 'no-store' }).catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const json = await res.json().catch(() => null);
+      if (json) setSetupHealth(json);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Employee attendance roster — always computed when there are employees, even
   // before any timecards exist. Statuses/hours are derived from real timecards;
@@ -246,9 +300,53 @@ export function JobsiteTimeView({
 
   const openDetail = async (card: Timecard) => {
     setDetail({ card, events: [] });
-    const res = await fetch(`/api/jobsite-time/timecards/${card.id}`, { cache: 'no-store' });
+    setCorrections([]);
+    setCorrectionOpen(false);
+    setCorrectionError('');
+    const [res, corrRes] = await Promise.all([
+      fetch(`/api/jobsite-time/timecards/${card.id}`, { cache: 'no-store' }),
+      fetch(`/api/attendance/corrections?timecardId=${encodeURIComponent(card.id)}`, { cache: 'no-store' }).catch(() => null),
+    ]);
     const json = await res.json().catch(() => null);
     if (res.ok) setDetail({ card: json.item, events: json.events || [] });
+    if (corrRes?.ok) setCorrections(((await corrRes.json().catch(() => null))?.items ?? []) as CorrectionRecord[]);
+  };
+
+  const submitCorrection = async () => {
+    if (!detail) return;
+    setCorrectionSaving(true);
+    setCorrectionError('');
+    try {
+      const values: Record<string, unknown> = {};
+      if (correctionForm.clockInAt) values.clockInAt = new Date(correctionForm.clockInAt).toISOString();
+      if (correctionForm.clockOutAt) values.clockOutAt = new Date(correctionForm.clockOutAt).toISOString();
+      if (correctionForm.jobId) values.jobId = correctionForm.jobId;
+
+      const res = await fetch('/api/attendance/corrections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timecardId: detail.card.id,
+          correctionType: correctionForm.correctionType,
+          reason: correctionForm.reason,
+          values,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const details = json?.details ? Object.values(json.details).join(' ') : '';
+        setCorrectionError(details || json?.error || 'Could not record the correction');
+        return;
+      }
+      setItems((prev) => prev.map((t) => (t.id === detail.card.id ? { ...t, ...json.item } : t)));
+      setDetail((d) => (d ? { ...d, card: { ...d.card, ...json.item } } : d));
+      setCorrections((prev) => [...prev, json.correction]);
+      setCorrectionOpen(false);
+      setCorrectionForm({ correctionType: 'incorrect_timestamp', reason: '', clockInAt: '', clockOutAt: '', jobId: '' });
+      await load();
+    } finally {
+      setCorrectionSaving(false);
+    }
   };
 
   const cards = [
@@ -283,6 +381,55 @@ export function JobsiteTimeView({
           <i className="fa-solid fa-sliders text-xs" /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
         </button>
       </div>
+
+      {/* Two complementary setup surfaces, deliberately both kept.
+          #66's card reports DEVICE-side background-location permission, which
+          only the phone can answer. The panel below reports SERVER-visible
+          setup (assignment, jobsite verification, device enrollment), which
+          does not need the employee to have the app open. Neither can see what
+          the other sees. */}
+      <AutoAttendanceSetupCard employees={employees} />
+
+      {/* Broken automatic-attendance setup. Shown above the roster because an
+          employee whose phone cannot report is invisible in every panel below
+          — they look like they simply haven't arrived. */}
+      {setupHealth && setupHealth.brokenCount > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-amber-200 px-4 py-3 dark:border-amber-900/40">
+            <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+              <i className="fa-solid fa-triangle-exclamation mr-1.5" />
+              Automatic attendance needs setup ({setupHealth.brokenCount})
+            </h3>
+            <p className="text-xs text-amber-800 dark:text-amber-300">
+              {setupHealth.healthyCount} {setupHealth.healthyCount === 1 ? 'employee is' : 'employees are'} set up correctly
+            </p>
+          </div>
+          <div className="divide-y divide-amber-200 dark:divide-amber-900/40">
+            {setupHealth.items.map((item) => (
+              <div key={item.employeeId} className="px-4 py-2.5">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-medium text-amber-950 dark:text-amber-100">{item.name}</p>
+                  {item.jobName && <p className="text-xs text-amber-800 dark:text-amber-300">{item.jobName}</p>}
+                </div>
+                <ul className="mt-1 space-y-0.5">
+                  {item.problems.map((problem: SetupProblem) => (
+                    <li key={problem} className="text-xs text-amber-900 dark:text-amber-200">
+                      <span className="font-medium">{SETUP_PROBLEM_LABEL[problem]}</span>
+                      {' — '}
+                      <span className="opacity-80">{SETUP_PROBLEM_FIX[problem]}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <p className="border-t border-amber-200 px-4 py-2 text-[11px] text-amber-700 dark:border-amber-900/40 dark:text-amber-400">
+            Setup status only — this shows whether attendance can be recorded, never where anyone is.
+          </p>
+        </div>
+      )}
+
+      <AttendanceDiagnosticsPanel enabled={showDiagnostics} />
 
       {showFilters && (
         <div className={`${cardCls} flex flex-wrap items-center gap-2 p-3`}>
@@ -473,20 +620,188 @@ export function JobsiteTimeView({
             </div>
             <div className="mt-3 flex gap-2">
               <button type="button" disabled={savingId === detail.card.id} onClick={() => patch(detail.card.id, { action: 'approve' })} className="flex-1 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">Approve</button>
-              <button type="button" disabled={savingId === detail.card.id} onClick={() => patch(detail.card.id, { action: 'reject' })} className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-700 disabled:opacity-50 dark:border-red-900/50 dark:text-red-300">Reject</button>
+              {/* Voiding a record changes what someone is paid, so it goes
+                  through the correction form (which requires a reason) rather
+                  than a one-click status flip. */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCorrectionForm((f) => ({ ...f, correctionType: 'invalid_record', reason: '' }));
+                  setCorrectionError('');
+                  setCorrectionOpen(true);
+                }}
+                className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-700 dark:border-red-900/50 dark:text-red-300"
+              >
+                Void…
+              </button>
             </div>
+            {/* Corrections. The effective record above is what payroll uses;
+                this is how it got there. The original values are shown beside
+                the corrected ones — a correction never replaces the history. */}
             <div className="mt-5">
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Timeline</p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Corrections{corrections.length > 0 ? ` (${corrections.length})` : ''}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCorrectionOpen((v) => !v)}
+                  className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 dark:border-zinc-700 dark:text-zinc-200"
+                >
+                  {correctionOpen ? 'Cancel' : 'Correct record'}
+                </button>
+              </div>
+
+              {corrections.length > 0 && (
+                <div className="mb-3 space-y-2">
+                  {corrections.map((c) => (
+                    <div key={c.id} className="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-zinc-800">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-gray-900 dark:text-zinc-100">
+                          {CORRECTION_TYPE_LABEL[c.correctionType] ?? c.correctionType}
+                        </span>
+                        <span className="tabular-nums text-gray-500 dark:text-zinc-400">
+                          {c.correctedAt ? new Date(c.correctedAt).toLocaleString() : '—'}
+                        </span>
+                      </div>
+                      {describeCorrection(c).map((diff) => (
+                        <p key={diff.field} className="mt-0.5 text-gray-600 dark:text-zinc-400">
+                          {diff.field}: <span className="line-through">{String(diff.from ?? '—')}</span>{' → '}
+                          <span className="font-medium text-gray-900 dark:text-zinc-100">{String(diff.to ?? '—')}</span>
+                        </p>
+                      ))}
+                      <p className="mt-1 text-gray-700 dark:text-zinc-300">{c.reason}</p>
+                    </div>
+                  ))}
+                  {/* The system's own answer, before any manager touched it. */}
+                  {(() => {
+                    const original = reconstructOriginal(
+                      {
+                        id: detail.card.id,
+                        jobId: detail.card.jobId,
+                        workDate: detail.card.workDate,
+                        clockInAt: detail.card.clockInAt,
+                        clockOutAt: detail.card.clockOutAt,
+                        breakStartAt: detail.card.breakStartAt,
+                        breakEndAt: detail.card.breakEndAt,
+                        status: detail.card.status,
+                      },
+                      corrections
+                    );
+                    return (
+                      <p className="text-xs text-gray-500 dark:text-zinc-400">
+                        Originally recorded: {fmtTime(original.clockInAt)} – {fmtTime(original.clockOutAt)}
+                      </p>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {correctionOpen && (
+                <div className="mb-3 space-y-2 rounded-lg border border-gray-300 p-3 dark:border-zinc-700">
+                  <select
+                    value={correctionForm.correctionType}
+                    onChange={(e) => setCorrectionForm((f) => ({ ...f, correctionType: e.target.value as CorrectionType }))}
+                    className={`${sel} w-full`}
+                    aria-label="Correction type"
+                  >
+                    {CORRECTION_TYPES.map((t) => (
+                      <option key={t} value={t}>{CORRECTION_TYPE_LABEL[t]}</option>
+                    ))}
+                  </select>
+
+                  {correctionForm.correctionType !== 'duplicate_record' &&
+                    correctionForm.correctionType !== 'invalid_record' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="text-xs text-gray-600 dark:text-zinc-400">
+                        Clock in
+                        <input
+                          type="datetime-local"
+                          value={correctionForm.clockInAt}
+                          onChange={(e) => setCorrectionForm((f) => ({ ...f, clockInAt: e.target.value }))}
+                          className={`${sel} mt-0.5 w-full`}
+                        />
+                      </label>
+                      <label className="text-xs text-gray-600 dark:text-zinc-400">
+                        Clock out
+                        <input
+                          type="datetime-local"
+                          value={correctionForm.clockOutAt}
+                          onChange={(e) => setCorrectionForm((f) => ({ ...f, clockOutAt: e.target.value }))}
+                          className={`${sel} mt-0.5 w-full`}
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {correctionForm.correctionType === 'incorrect_job' && (
+                    <select
+                      value={correctionForm.jobId}
+                      onChange={(e) => setCorrectionForm((f) => ({ ...f, jobId: e.target.value }))}
+                      className={`${sel} w-full`}
+                      aria-label="Correct job"
+                    >
+                      <option value="">Select the correct job…</option>
+                      {jobs.map((j) => <option key={j.id} value={String(j.id)}>{j.name || 'Job'}</option>)}
+                    </select>
+                  )}
+
+                  {/* Required. A correction with no explanation is
+                      indistinguishable from tampering when read back later. */}
+                  <textarea
+                    value={correctionForm.reason}
+                    onChange={(e) => setCorrectionForm((f) => ({ ...f, reason: e.target.value }))}
+                    placeholder={`Why is this being corrected? (required, at least ${MIN_REASON_LENGTH} characters)`}
+                    className="h-16 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
+                  />
+                  {correctionError && <p className="text-xs text-red-600 dark:text-red-300">{correctionError}</p>}
+                  <button
+                    type="button"
+                    disabled={correctionSaving || correctionForm.reason.trim().length < MIN_REASON_LENGTH}
+                    onClick={submitCorrection}
+                    className="w-full rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  >
+                    {correctionSaving ? 'Recording…' : 'Record correction'}
+                  </button>
+                  <p className="text-[11px] text-gray-500 dark:text-zinc-500">
+                    The original values are kept. Corrections are permanent and cannot be edited or deleted.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+                Original event trail
+              </p>
               <div className="space-y-2">
                 {detail.events.length === 0 ? (
                   <p className="text-sm text-gray-500 dark:text-zinc-400">No events recorded.</p>
                 ) : detail.events.map((ev) => (
-                  <div key={ev.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-zinc-800">
-                    <span className="text-gray-800 dark:text-zinc-200">{String(ev.eventType || '').replace(/_/g, ' ')}</span>
-                    <span className="tabular-nums text-gray-500 dark:text-zinc-400">{ev.occurredAt ? new Date(ev.occurredAt).toLocaleString() : '—'}</span>
+                  <div key={ev.id} className="rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-zinc-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-800 dark:text-zinc-200">{String(ev.eventType || '').replace(/_/g, ' ')}</span>
+                      <span className="shrink-0 tabular-nums text-gray-500 dark:text-zinc-400">{ev.occurredAt ? new Date(ev.occurredAt).toLocaleString() : '—'}</span>
+                    </div>
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-gray-500 dark:text-zinc-400">
+                      {ev.eventSource && <span>{EVENT_SOURCE_LABEL[ev.eventSource] ?? ev.eventSource}</span>}
+                      {ev.validationResult && ev.validationResult !== 'accepted' && (
+                        <span className="text-orange-600 dark:text-orange-400">{ev.validationResult}</span>
+                      )}
+                      {/* The gap between device and server time IS the offline
+                          delay — showing it is the point of storing both. */}
+                      {ev.deviceReportedAt && ev.serverReceivedAt &&
+                        Date.parse(ev.serverReceivedAt) - Date.parse(ev.deviceReportedAt) > 120000 && (
+                        <span>synced {new Date(ev.serverReceivedAt).toLocaleTimeString()}</span>
+                      )}
+                    </div>
+                    {ev.notes && <p className="mt-0.5 text-xs text-gray-600 dark:text-zinc-400">{ev.notes}</p>}
                   </div>
                 ))}
               </div>
+              <p className="mt-2 text-[11px] text-gray-500 dark:text-zinc-500">
+                Append-only. These are the events the system observed and are never modified by a correction.
+              </p>
             </div>
           </div>
         </div>

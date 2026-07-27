@@ -43,6 +43,18 @@
 	<string>Groundwork Pro needs camera access so you can take a profile photo.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Groundwork Pro uses your location to automatically detect your arrival and departure at your assigned jobsite for attendance.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Groundwork Pro records your arrival and departure at your assigned jobsite so your hours are logged automatically, even when the app is closed. Your location is only checked at the jobsite boundary during your assigned shift window — your travel is never tracked or stored.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>Groundwork Pro records your arrival and departure at your assigned jobsite so your hours are logged automatically, even when the app is closed. Your location is only checked at the jobsite boundary during your assigned shift window — your travel is never tracked or stored.</string>
+	<!-- Region monitoring relaunches the app on its own and would work without
+	     this, but the wake-region to arrival-region handoff briefly requests
+	     location updates. CLLocationManager.allowsBackgroundLocationUpdates
+	     raises at runtime unless `location` is declared here. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Groundwork Pro needs photo library access so you can choose a profile photo.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -24,6 +24,26 @@
 
         </activity>
 
+        <!-- Delivers jobsite enter/exit transitions even when the app is not
+             running. exported=false: only the platform geofencing service
+             targets it, via an explicit PendingIntent. -->
+        <receiver
+            android:name=".GeofenceBroadcastReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <!-- Android clears geofences on reboot. Without this, an employee who
+             restarts their phone overnight has no monitoring the next morning. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -38,9 +58,16 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Foreground-only for now: used to automatically detect jobsite attendance
-         arrival/departure while the app is open. Background location (needed for
-         true always-on geofencing) is not requested yet — see PR notes. -->
+    <!-- Automatic jobsite attendance: arrival/departure detection.
+         FINE is required by the geofencing API; COARSE alone cannot tell one
+         jobsite from a neighbouring one. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Required from API 29 for geofences to fire while the app is closed.
+         This is the permission that makes background attendance possible at
+         all; without it the platform silently drops transitions. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Re-register geofences after a reboot: the platform clears them, so
+         nothing would be monitored until the app was next opened. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 </manifest>

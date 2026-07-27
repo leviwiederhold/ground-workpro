@@ -22,6 +22,162 @@ export function resolveLocationGateStatus(
   return permission === "granted" ? "granted" : "blocked";
 }
 
+/** Default ceiling for the startup permission check. */
+export const LOCATION_CHECK_TIMEOUT_MS = 4000;
+
+/**
+ * Bounded gate-status resolution for the startup gate.
+ *
+ * The gate renders NOTHING while it is `checking`, so a check that never settles
+ * leaves the entire app blank. This was the physical-iPhone white screen: on
+ * native the check awaits a dynamic import of the Capacitor Geolocation plugin
+ * and then a bridge call (and, for participants, native health), and any of
+ * those can stall and never resolve — leaving the wrapper stuck on `checking`.
+ *
+ * Racing the resolver against a timeout guarantees the gate always leaves the
+ * `checking` state. A timed-out OR rejected resolve both fall back to `blocked`,
+ * which shows the location setup UI instead of a blank screen — always
+ * recoverable (the user can grant, and the wrapper's focus/visibility re-check
+ * lets a genuinely-ready user straight in) unlike a blank that never clears.
+ */
+export async function resolveGateStatusWithTimeout(
+  resolve: () => Promise<LocationGateStatus>,
+  timeoutMs: number = LOCATION_CHECK_TIMEOUT_MS,
+): Promise<LocationGateStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<LocationGateStatus>((res) => {
+    timer = setTimeout(() => res("blocked"), timeoutMs);
+  });
+  const resolved: Promise<LocationGateStatus> = Promise.resolve()
+    .then(resolve)
+    .catch((): LocationGateStatus => "blocked");
+  try {
+    return await Promise.race([resolved, timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ── Who is subject to the attendance location gate ───────────────────────────
+
+/**
+ * Whether a user participates in automatic attendance (and so must pass the
+ * location gate).
+ *
+ * The signal is ASSIGNMENT, not role: a user participates exactly when they are
+ * assigned to at least one job (job_employees — the authoritative model). This
+ * deliberately avoids a role allowlist. An assigned PM/operations user IS a
+ * participant and is gated; a CEO/executive/admin-only user with no assignments
+ * is not. When assignments can't be determined (fetch failure), the caller
+ * treats it as zero — never gating without positive evidence of participation.
+ */
+export function isAttendanceParticipant(params: { assignedJobCount: number }): boolean {
+  return params.assignedJobCount > 0;
+}
+
+export type GatePlatform = "native" | "web";
+
+/**
+ * Whether attendance location setup is COMPLETE for a participant.
+ *
+ *   web    → location permission granted is sufficient. A web session has no
+ *            secure store, so requiring a native device credential there would
+ *            lock web users out permanently.
+ *   native → permission granted AND a device credential is enrolled. Background
+ *            arrival/departure events cannot be submitted without the credential,
+ *            so permission alone is not "set up" on a device.
+ */
+export function isAttendanceSetupComplete(params: {
+  platform: GatePlatform;
+  permission: LocationPermissionState | "checking";
+  hasDeviceCredential: boolean;
+}): boolean {
+  if (params.permission !== "granted") return false;
+  return params.platform === "native" ? params.hasDeviceCredential === true : true;
+}
+
+// ── The tap-to-enable state machine (the fix for stuck "Requesting…") ─────────
+
+// The permission step may legitimately wait on the OS dialog while the user
+// decides, so it gets a long ceiling. The device-setup step has no user
+// interaction, so it gets a short one. BOTH are bounded, so no step can leave
+// the gate pinned on "Requesting…" forever.
+export const LOCATION_SETUP_PERMISSION_TIMEOUT_MS = 60_000;
+export const LOCATION_SETUP_STEP_TIMEOUT_MS = 15_000;
+
+/** Terminal outcome of one enable attempt. Every path resolves to one of these
+ *  — there is no "still pending forever". */
+export type LocationSetupResult =
+  | { status: "granted" }
+  | { status: "denied" }
+  | { status: "unavailable" }
+  | { status: "timeout" }
+  | { status: "enrollment_failed" };
+
+const STEP_TIMEOUT = Symbol("location-setup-step-timeout");
+
+/** Race one async step against a timeout. A rejection is folded into the timeout
+ *  sentinel so a throwing step is as recoverable as a slow one. */
+async function withStepTimeout<T>(op: Promise<T>, timeoutMs: number): Promise<T | typeof STEP_TIMEOUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof STEP_TIMEOUT>((resolve) => {
+    timer = setTimeout(() => resolve(STEP_TIMEOUT), timeoutMs);
+  });
+  const guarded: Promise<T | typeof STEP_TIMEOUT> = op.catch(() => STEP_TIMEOUT);
+  try {
+    return await Promise.race([guarded, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Orchestrate the two enable steps with a per-step ceiling. This is the fix for
+ * the stuck "Requesting…" bug: the native permission request can never resolve
+ * (iOS does not fire the authorization callback when the status is already
+ * decided) and the credential-enrollment fetch had no timeout, so either could
+ * hang the button forever. Bounding EACH step means every attempt terminates,
+ * and the caller renders a concise, recoverable error instead of a dead button.
+ *
+ * Pure and dependency-injected so success / denial / timeout / credential
+ * failure / retry are all unit-testable without a device.
+ */
+export async function runLocationSetup(deps: {
+  requestPermission: () => Promise<LocationPermissionResult>;
+  completeSetup: () => Promise<boolean>;
+  permissionTimeoutMs?: number;
+  setupTimeoutMs?: number;
+}): Promise<LocationSetupResult> {
+  const permissionTimeoutMs = deps.permissionTimeoutMs ?? LOCATION_SETUP_PERMISSION_TIMEOUT_MS;
+  const setupTimeoutMs = deps.setupTimeoutMs ?? LOCATION_SETUP_STEP_TIMEOUT_MS;
+
+  const permission = await withStepTimeout(deps.requestPermission(), permissionTimeoutMs);
+  if (permission === STEP_TIMEOUT) return { status: "timeout" };
+  if (permission === "denied") return { status: "denied" };
+  if (permission === "unavailable") return { status: "unavailable" };
+
+  // permission === "granted": finish device setup (native credential enrollment).
+  const ready = await withStepTimeout(deps.completeSetup(), setupTimeoutMs);
+  if (ready === STEP_TIMEOUT) return { status: "timeout" };
+  return ready === true ? { status: "granted" } : { status: "enrollment_failed" };
+}
+
+/** Map a setup result to its error kind (or null when it succeeded). */
+export function locationSetupErrorKind(result: LocationSetupResult): LocationSetupErrorKind | null {
+  switch (result.status) {
+    case "granted":
+      return null;
+    case "denied":
+      return "denied";
+    case "unavailable":
+      return "unavailable";
+    case "timeout":
+      return "timeout";
+    case "enrollment_failed":
+      return "enrollment";
+  }
+}
+
 export type GateAction =
   /** The platform can still surface the OS/browser dialog. */
   | "request"
@@ -60,16 +216,27 @@ export function resolveGateAction(params: {
 }
 
 export const LOCATION_GATE_COPY = {
-  title: "Enable location",
-  /** Shown before any denial. States the requirement plainly, without
-   *  referencing attendance, jobsites, or tracking. */
-  body: "Please enable location to continue using Groundwork Pro.",
-  /** Shown once the user has denied. */
-  deniedBody: "Location is required to continue using Groundwork Pro.",
-  request: "Enable location",
+  title: "Enable Location",
+  /** Intentionally generic — no mention of attendance, clocking in/out, jobsite
+   *  arrival/departure, or tracking. */
+  body: "Groundwork Pro uses location for accuracy.",
+  /** Shown once permission is denied — still generic. */
+  deniedBody: "Location is required to continue. Please enable it in Settings.",
+  request: "Enable Location",
   retry: "Try Again",
   settings: "Open Settings",
 } as const;
+
+/** The concrete way a setup attempt failed, for a concise recoverable message. */
+export type LocationSetupErrorKind = "denied" | "unavailable" | "timeout" | "enrollment";
+
+/** Concise error copy per failure — generic, no attendance/tracking wording. */
+export const LOCATION_GATE_ERROR_COPY: Record<LocationSetupErrorKind, string> = {
+  denied: "Location access was denied. Enable it in Settings to continue.",
+  unavailable: "Location isn't available on this device.",
+  timeout: "That took too long. Please try again.",
+  enrollment: "We couldn't finish setup on this device. Please try again.",
+};
 
 /** The body copy for the current state. */
 export function resolveGateBody(lastResult: LocationPermissionResult | null): string {

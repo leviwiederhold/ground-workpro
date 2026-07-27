@@ -1,18 +1,39 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
-import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ATTENDANCE_UNAVAILABLE_MESSAGE,
+  AttendanceWriteError,
+  getAttendanceWriteDb,
+} from "@/lib/attendance/attendanceDb";
 import { canManageTimecards, mapCompanyJobsiteSettings, mapTimecard } from "@/lib/jobsite-time/domain";
 import { finalizePendingAttendance } from "@/lib/jobsite-time/finalizeAttendance";
 
 export const dynamic = "force-dynamic";
 
+// This GET is not a pure read: it finalizes pending arrivals and departures
+// before returning the list.
+//
+// It therefore REFUSES TO RETURN DATA when finalization cannot run, rather than
+// serving whatever is currently in the table. That is deliberate. The unfinalized
+// rows are wrong in a specific and dangerous way — an employee who left hours ago
+// still reads as clocked in, and the hours shown are the hours a manager would
+// approve. A 503 tells the caller attendance is unavailable; a 200 with stale rows
+// tells them nothing is wrong. Between an outage and silently incorrect payroll,
+// this endpoint chooses the outage.
 export async function GET(request: Request) {
   try {
-    const { supabase, companyId, userId } = await getCompanyId();
+    const { companyId, userId } = await getCompanyId();
     const role = await getEffectiveRole();
     const isManager = canManageTimecards(role);
-    const db = getSupabaseAdmin() ?? supabase;
+    // This GET writes: it finalizes pending arrivals/departures before reading.
+    // Serving the list without that pass would show stale state — someone still
+    // "clocked in" who should have been clocked out — so a write-capable client
+    // is required even though the caller only asked to read.
+    const db = getAttendanceWriteDb("GET /api/jobsite-time/timecards");
+    if (!db) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+    }
 
     const settingsRow = await db
       .from("companies")
@@ -83,6 +104,11 @@ export async function GET(request: Request) {
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    // Finalization failed, so the list would show state that is known to be
+    // stale. Refusing beats serving hours that are wrong but look authoritative.
+    if (error instanceof AttendanceWriteError) {
+      return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
     }
     return NextResponse.json({ error: "Unexpected server error" }, { status: 500 });
   }

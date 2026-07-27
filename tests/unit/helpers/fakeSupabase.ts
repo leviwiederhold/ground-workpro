@@ -1,0 +1,145 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// A minimal in-memory stand-in for the Supabase query builder.
+//
+// It supports exactly the surface the attendance runners use
+// (select/update/insert + eq/is/not/gte/in/order/limit/maybeSingle), which is
+// enough to exercise the REAL write and audit paths — in particular the guarded
+// `.is("clock_out_at", null)` updates that are what actually prevent duplicate
+// attendance records. Rows are mutated in place, so a test can assert against
+// the object it handed in.
+
+export type Row = Record<string, any>;
+type Filter = (row: Row) => boolean;
+
+/**
+ * Simulates the database refusing an operation — an RLS denial, a constraint,
+ * an outage. Return a message to fail the operation, or null to allow it.
+ */
+export type FailureRule = (op: { table: string; mode: "select" | "update" | "insert" }) => string | null;
+
+class Builder {
+  private filters: Filter[] = [];
+  private mode: "select" | "update" | "insert" = "select";
+  private payload: Row | null = null;
+  private limitN: number | null = null;
+  private orderCol: string | null = null;
+  private orderAsc = true;
+  private tables: Record<string, Row[]>;
+  private table: string;
+  private failure: FailureRule | null;
+
+  constructor(tables: Record<string, Row[]>, table: string, failure: FailureRule | null = null) {
+    this.tables = tables;
+    this.table = table;
+    this.failure = failure;
+  }
+
+  private rows(): Row[] {
+    return (this.tables[this.table] ??= []);
+  }
+
+  select() {
+    return this;
+  }
+  update(payload: Row) {
+    this.mode = "update";
+    this.payload = payload;
+    return this;
+  }
+  insert(payload: Row) {
+    this.mode = "insert";
+    this.payload = payload;
+    return this;
+  }
+  eq(col: string, value: unknown) {
+    this.filters.push((r) => String(r[col] ?? "") === String(value ?? ""));
+    return this;
+  }
+  is(col: string, value: null) {
+    this.filters.push((r) => (r[col] ?? null) === value);
+    return this;
+  }
+  // Only ever called as .not(col, "is", null); the operator args are ignored.
+  not(col: string) {
+    this.filters.push((r) => (r[col] ?? null) !== null);
+    return this;
+  }
+  gte(col: string, value: string) {
+    this.filters.push((r) => String(r[col] ?? "") >= value);
+    return this;
+  }
+  in(col: string, values: unknown[]) {
+    const set = new Set(values.map(String));
+    this.filters.push((r) => set.has(String(r[col])));
+    return this;
+  }
+  order(col: string, opts?: { ascending?: boolean }) {
+    this.orderCol = col;
+    this.orderAsc = opts?.ascending !== false;
+    return this;
+  }
+  limit(n: number) {
+    this.limitN = n;
+    return this;
+  }
+
+  private matched(): Row[] {
+    let out = this.rows().filter((r) => this.filters.every((f) => f(r)));
+    if (this.orderCol) {
+      const col = this.orderCol;
+      out = out.slice().sort((a, b) => {
+        const av = String(a[col] ?? "");
+        const bv = String(b[col] ?? "");
+        return this.orderAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    }
+    if (this.limitN !== null) out = out.slice(0, this.limitN);
+    return out;
+  }
+
+  private run(): { data: Row[]; error: { message: string } | null } {
+    const denied = this.failure?.({ table: this.table, mode: this.mode }) ?? null;
+    if (denied) return { data: [], error: { message: denied } };
+    if (this.mode === "insert") {
+      const inserted = { id: `row-${this.rows().length + 1}`, ...(this.payload as Row) };
+      this.rows().push(inserted);
+      return { data: [inserted], error: null };
+    }
+    const matched = this.matched();
+    if (this.mode === "update") {
+      for (const row of matched) Object.assign(row, this.payload);
+    }
+    return { data: matched, error: null };
+  }
+
+  async maybeSingle() {
+    const { data, error } = this.run();
+    return { data: error ? null : (data[0] ?? null), error };
+  }
+
+  then(resolve: (value: { data: Row[]; error: { message: string } | null }) => unknown) {
+    return Promise.resolve(this.run()).then(resolve);
+  }
+}
+
+export function makeDb(tables: Record<string, Row[]>, failure?: FailureRule) {
+  return {
+    tables,
+    from(table: string) {
+      return new Builder(tables, table, failure ?? null);
+    },
+  };
+}
+
+/** Deny every write to one table, the way a SELECT-only RLS policy would. */
+export function denyWritesTo(table: string): FailureRule {
+  return (op) =>
+    op.table === table && op.mode !== "select"
+      ? `new row violates row-level security policy for table "${table}"`
+      : null;
+}
+
+/** The audit event types written to jobsite_timecard_events, in insert order. */
+export function eventTypes(db: ReturnType<typeof makeDb>): string[] {
+  return (db.tables.jobsite_timecard_events ?? []).map((e) => String(e.event_type));
+}

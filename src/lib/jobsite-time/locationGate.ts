@@ -22,6 +22,87 @@ export function resolveLocationGateStatus(
   return permission === "granted" ? "granted" : "blocked";
 }
 
+/** Default ceiling for the startup permission check. */
+export const LOCATION_CHECK_TIMEOUT_MS = 4000;
+
+/**
+ * Bounded gate-status resolution for the startup gate.
+ *
+ * The gate renders NOTHING while it is `checking`, so a check that never settles
+ * leaves the entire app blank. This was the physical-iPhone white screen: on
+ * native the check awaits a dynamic import of the Capacitor Geolocation plugin
+ * and then a bridge call (and, for participants, native health), and any of
+ * those can stall and never resolve — leaving the wrapper stuck on `checking`.
+ *
+ * Racing the resolver against a timeout guarantees the gate always leaves the
+ * `checking` state. A timed-out OR rejected resolve both fall back to `blocked`,
+ * which shows the location setup UI instead of a blank screen — always
+ * recoverable (the user can grant, and the wrapper's focus/visibility re-check
+ * lets a genuinely-ready user straight in) unlike a blank that never clears.
+ */
+export async function resolveGateStatusWithTimeout(
+  resolve: () => Promise<LocationGateStatus>,
+  timeoutMs: number = LOCATION_CHECK_TIMEOUT_MS,
+): Promise<LocationGateStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<LocationGateStatus>((res) => {
+    timer = setTimeout(() => res("blocked"), timeoutMs);
+  });
+  const resolved: Promise<LocationGateStatus> = Promise.resolve()
+    .then(resolve)
+    .catch((): LocationGateStatus => "blocked");
+  try {
+    return await Promise.race([resolved, timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+// ── Who is subject to the attendance location gate ───────────────────────────
+
+/**
+ * Roles that do NOT participate in automatic jobsite attendance and therefore
+ * must never be gated on location merely for being authenticated. Both role
+ * vocabularies are covered: the UI roles (`executive`, `operations`) and their
+ * server equivalents (`admin`, `pm`). Everyone else — foreman, operator,
+ * mechanic, field staff — is a field participant whose attendance is recorded by
+ * geofence and so needs location set up.
+ */
+const NON_PARTICIPANT_ROLES = new Set(["executive", "admin", "operations", "pm"]);
+
+/**
+ * Whether a user participates in automatic attendance (and so must pass the
+ * location gate). Management/office roles do not. An unknown/empty role returns
+ * false: we never demand location without positive evidence the user is a field
+ * participant, so a not-yet-hydrated role never gates a CEO/admin.
+ */
+export function participatesInAutomaticAttendance(role: string | null | undefined): boolean {
+  const normalized = String(role ?? "").trim().toLowerCase();
+  if (normalized === "") return false;
+  return !NON_PARTICIPANT_ROLES.has(normalized);
+}
+
+export type GatePlatform = "native" | "web";
+
+/**
+ * Whether attendance location setup is COMPLETE for a participant.
+ *
+ *   web    → location permission granted is sufficient. A web session has no
+ *            secure store, so requiring a native device credential there would
+ *            lock web users out permanently.
+ *   native → permission granted AND a device credential is enrolled. Background
+ *            arrival/departure events cannot be submitted without the credential,
+ *            so permission alone is not "set up" on a device.
+ */
+export function isAttendanceSetupComplete(params: {
+  platform: GatePlatform;
+  permission: LocationPermissionState | "checking";
+  hasDeviceCredential: boolean;
+}): boolean {
+  if (params.permission !== "granted") return false;
+  return params.platform === "native" ? params.hasDeviceCredential === true : true;
+}
+
 export type GateAction =
   /** The platform can still surface the OS/browser dialog. */
   | "request"
@@ -60,12 +141,15 @@ export function resolveGateAction(params: {
 }
 
 export const LOCATION_GATE_COPY = {
-  title: "Enable location",
-  /** Shown before any denial. States the requirement plainly, without
-   *  referencing attendance, jobsites, or tracking. */
-  body: "Please enable location to continue using Groundwork Pro.",
-  /** Shown once the user has denied. */
-  deniedBody: "Location is required to continue using Groundwork Pro.",
+  title: "Enable location for attendance",
+  /** Shown before any denial. Explains exactly what location is for: automatic
+   *  jobsite attendance (arrival/departure detection), and explicitly that it is
+   *  NOT continuous tracking. */
+  body:
+    "Groundwork Pro uses your location for automatic jobsite attendance — detecting when you arrive at and leave a jobsite so you're clocked in and out without doing it by hand. It checks your location only to detect jobsite arrival and departure. It does not continuously track your location.",
+  /** Shown once the user has denied — same explanation, framed as required. */
+  deniedBody:
+    "Location is required for automatic jobsite attendance — detecting when you arrive at and leave a jobsite. Groundwork Pro checks your location only for jobsite arrival and departure and does not continuously track your location. Please enable it to continue.",
   request: "Enable location",
   retry: "Try Again",
   settings: "Open Settings",

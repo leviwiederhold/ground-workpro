@@ -14061,7 +14061,7 @@ const MobileAppShell = ({
       // users can finish account setup; the gate meets them the moment setup
       // redirects them here.
       return (
-        <RequireLocationAccess>
+        <RequireLocationAccess role={loadCachedNavState().role}>
           <App currentUser={currentUser} onLogout={handleLogout} />
         </RequireLocationAccess>
       );

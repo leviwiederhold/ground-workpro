@@ -26,24 +26,18 @@ import {
   resolveGateButtonLabel,
 } from '@/lib/jobsite-time/locationGate';
 import { locationSettingsInstructions, openAppLocationSettings } from '@/lib/runtime/openAppSettings';
-
-function isNativeRuntime(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return (
-      (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() ===
-      true
-    );
-  } catch {
-    return false;
-  }
-}
+import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
+import { getNativeGeofenceHealth } from '@/lib/attendance/nativeGeofence';
+import { enrollDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
 
 export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   const [permission, setPermission] = useState<LocationPermissionState | 'checking'>('checking');
   const [lastResult, setLastResult] = useState<LocationPermissionResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+  // Set when location is granted but native device-credential enrollment failed
+  // — the one case where "Allow" succeeded yet setup is not complete.
+  const [setupError, setSetupError] = useState(false);
 
   // Read the current state so the button can offer "Try Again" vs "Open
   // Settings" correctly on first paint. This is the NON-prompting check — the
@@ -68,7 +62,19 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   }, []);
 
   const action = resolveGateAction({ permission, lastResult });
-  const native = isNativeRuntime();
+  const native = isCapacitorNativePlatform();
+
+  // Setup is complete when location is granted AND, on native only, a device
+  // credential is enrolled (background attendance events need it). Web has no
+  // secure store, so it requires only permission — never a credential, which
+  // would lock web users out permanently. Idempotent: an existing credential is
+  // reused rather than re-minted on every tap/return.
+  const completeSetup = useCallback(async (): Promise<boolean> => {
+    if (!native) return true;
+    const health = await getNativeGeofenceHealth().catch(() => null);
+    if (health?.hasCredential) return true;
+    return await enrollDeviceCredential();
+  }, [native]);
 
   const handlePrimary = useCallback(async () => {
     if (action === 'settings') {
@@ -79,17 +85,28 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       // Re-read on return: the user may have granted it in Settings.
       const next = await checkLocationPermission();
       setPermission(next);
-      if (next === 'granted') onGranted();
+      if (next === 'granted') {
+        const ready = await completeSetup();
+        if (ready) onGranted();
+        else setSetupError(true);
+      }
       return;
     }
 
     setBusy(true);
+    setSetupError(false);
     try {
       const result = await requestLocationPermissionInteractive();
       setLastResult(result);
       if (result === 'granted') {
-        // Dismiss and render the application — no reload, no navigation.
-        onGranted();
+        // Finish device setup (native credential enrollment) before entering.
+        // Dismiss only when complete — no reload, no navigation.
+        const ready = await completeSetup();
+        if (ready) {
+          onGranted();
+          return;
+        }
+        setSetupError(true);
         return;
       }
       // Re-read so the next tap offers the right action.
@@ -97,7 +114,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [action, onGranted]);
+  }, [action, completeSetup, onGranted]);
 
   // Re-check when the app returns to the foreground: the user may have enabled
   // location in Settings and come back.
@@ -105,7 +122,10 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     const onFocus = async () => {
       const next = await checkLocationPermission();
       setPermission(next);
-      if (next === 'granted') onGranted();
+      if (next === 'granted') {
+        const ready = await completeSetup();
+        if (ready) onGranted();
+      }
     };
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onFocus);
@@ -113,7 +133,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [onGranted]);
+  }, [onGranted, completeSetup]);
 
   const label = resolveGateButtonLabel({ action, lastResult });
   const body = resolveGateBody(lastResult);
@@ -144,6 +164,15 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             data-testid="location-gate-instructions"
           >
             {locationSettingsInstructions(native)}
+          </p>
+        ) : null}
+
+        {setupError ? (
+          <p
+            className="mt-4 rounded-xl bg-amber-50 p-3 text-left text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+            data-testid="location-gate-setup-error"
+          >
+            Location is on, but we couldn&apos;t finish setting up attendance on this device. Please try again.
           </p>
         ) : null}
 

@@ -4,11 +4,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  isAttendanceSetupComplete,
+  LOCATION_CHECK_TIMEOUT_MS,
   LOCATION_GATE_COPY,
+  participatesInAutomaticAttendance,
   resolveGateAction,
   resolveGateBody,
   resolveGateButtonLabel,
+  resolveGateStatusWithTimeout,
   resolveLocationGateStatus,
+  type LocationGateStatus,
 } from "../../src/lib/jobsite-time/locationGate.ts";
 import { locationSettingsInstructions } from "../../src/lib/runtime/openAppSettings.ts";
 
@@ -42,6 +47,128 @@ test("status resolves so the dashboard never renders before permission", () => {
   }
 });
 
+// ── A permission check can never blank the app forever (Stage 1) ─────────────
+test("a gate resolution that never settles cannot leave the app blank", async () => {
+  // This is the physical-iPhone white screen: on native the Capacitor plugin
+  // import / bridge call can hang, so the evaluation never resolves.
+  const hang = () => new Promise<LocationGateStatus>(() => {});
+  const status = await resolveGateStatusWithTimeout(hang, 20);
+  assert.equal(status, "blocked", "a stalled check must fall back to the setup gate, not null");
+});
+
+test("a resolution that answers in time wins over the timeout", async () => {
+  assert.equal(
+    await resolveGateStatusWithTimeout(async () => "granted", LOCATION_CHECK_TIMEOUT_MS),
+    "granted",
+    "a complete setup must let the user in",
+  );
+  assert.equal(
+    await resolveGateStatusWithTimeout(async () => "blocked", LOCATION_CHECK_TIMEOUT_MS),
+    "blocked",
+    "an incomplete setup must show the gate",
+  );
+});
+
+test("a rejected or throwing resolution shows the gate rather than hanging", async () => {
+  assert.equal(
+    await resolveGateStatusWithTimeout(async () => {
+      throw new Error("bridge failed");
+    }, LOCATION_CHECK_TIMEOUT_MS),
+    "blocked",
+    "a rejected check must fall back to the setup gate",
+  );
+  assert.equal(
+    await resolveGateStatusWithTimeout(() => {
+      throw new Error("synchronous failure");
+    }, LOCATION_CHECK_TIMEOUT_MS),
+    "blocked",
+    "a synchronously-throwing check must fall back to the setup gate",
+  );
+});
+
+test("the startup gate bounds its evaluation so it cannot render null forever", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
+  // The evaluation must go through the bounded helper, not a bare await that can
+  // stall on native and strand the app on 'checking' → null.
+  assert.match(
+    source,
+    /resolveGateStatusWithTimeout\(evaluate/,
+    "the evaluation must be time-bounded",
+  );
+  // Stage 1/2 constraint: the fix must not redirect or reload.
+  for (const forbidden of ["location.reload", "location.assign", "location.href", "router.push", "router.replace", "router.refresh"]) {
+    assert.ok(!source.includes(forbidden), `the wrapper must not ${forbidden}`);
+  }
+});
+
+// ── Only attendance participants are gated (Stage 2) ─────────────────────────
+test("attendance participants are gated; management/office roles are not", () => {
+  // Field crew participate in automatic attendance and must set up location.
+  for (const role of ["foreman", "mechanic", "field", "fieldstaff", "operator"]) {
+    assert.equal(participatesInAutomaticAttendance(role), true, `${role} participates`);
+  }
+  // CEO/admin and PM/operations manage — being authenticated is not a reason to
+  // demand location. Both role vocabularies are covered.
+  for (const role of ["executive", "admin", "operations", "pm", "EXECUTIVE", " Admin "]) {
+    assert.equal(participatesInAutomaticAttendance(role), false, `${role} must not be gated`);
+  }
+  // Unknown/empty role → never gate (so a not-yet-hydrated CEO is not blocked).
+  for (const role of ["", null, undefined]) {
+    assert.equal(participatesInAutomaticAttendance(role), false, "unknown role must not be gated");
+  }
+});
+
+test("the wrapper gates by participation, using already-hydrated role state", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
+  assert.match(source, /participatesInAutomaticAttendance/, "must gate by attendance participation");
+  // Role comes from a prop or the cached nav role — not a new blocking fetch.
+  assert.match(source, /readCachedUiRole/, "must read the already-hydrated cached role");
+  assert.ok(!/fetch\(/.test(source), "the wrapper must not add a blocking bootstrap fetch");
+});
+
+// ── Native requires a device credential; web does not (Stage 2) ──────────────
+test("native setup requires location AND a device credential", () => {
+  assert.equal(
+    isAttendanceSetupComplete({ platform: "native", permission: "granted", hasDeviceCredential: true }),
+    true,
+    "native: granted + credential is complete",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({ platform: "native", permission: "granted", hasDeviceCredential: false }),
+    false,
+    "native: granted without a credential is NOT complete",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({ platform: "native", permission: "denied", hasDeviceCredential: true }),
+    false,
+    "native: no permission is never complete",
+  );
+});
+
+test("web setup requires only location — never a native credential", () => {
+  assert.equal(
+    isAttendanceSetupComplete({ platform: "web", permission: "granted", hasDeviceCredential: false }),
+    true,
+    "web: granted is complete even with no credential (web has no secure store)",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({ platform: "web", permission: "prompt", hasDeviceCredential: false }),
+    false,
+    "web: without permission it is not complete",
+  );
+});
+
+test("the gate enrolls a device credential on native, and exempts web", () => {
+  const source = code(gate());
+  assert.match(source, /enrollDeviceCredential/, "native completion must enroll a device credential");
+  assert.match(source, /getNativeGeofenceHealth/, "must reuse existing native credential health");
+  // completeSetup short-circuits on web (no secure store) so web is never locked out.
+  assert.match(source, /if \(!native\) return true;/, "web requires no credential");
+  // Reuses the strict Capacitor native check (a web session can't spoof native
+  // and get locked out).
+  assert.match(source, /isCapacitorNativePlatform/, "must use the strict native-platform check");
+});
+
 test("the wrapper renders nothing while checking, the gate when blocked, the route when granted", () => {
   const source = code(read("app/components/location/RequireLocationAccess.tsx"));
 
@@ -69,9 +196,9 @@ test("revoking permission raises the gate on focus or visibility change", () => 
   const source = code(read("app/components/location/RequireLocationAccess.tsx"));
   assert.match(source, /addEventListener\('focus'/, "must re-check on focus");
   assert.match(source, /visibilitychange/, "must re-check on visibility change");
-  // sync() sets status from the fresh read in BOTH directions, so a revoke
-  // downgrades a granted session rather than being ignored.
-  assert.match(source, /setStatus\(resolveLocationGateStatus\(await checkLocationPermission\(\)\)\)/);
+  // sync() re-evaluates in BOTH directions, so a revoke downgrades a granted
+  // session rather than being ignored.
+  assert.match(source, /setStatus\(await evaluate\(\)\)/);
 });
 
 // ── Which routes are gated, and which are deliberately not ───────────────────
@@ -176,14 +303,30 @@ test("the geofence watcher still starts automatically once granted", () => {
   assert.match(source, /checkLocationPermission/, "permission is read non-interactively");
 });
 
-// ── Copy ─────────────────────────────────────────────────────────────────────
+// ── Copy (Stage 2: attendance-specific) ──────────────────────────────────────
 test("the gate uses the exact required copy", () => {
-  assert.equal(LOCATION_GATE_COPY.title, "Enable location");
-  assert.equal(LOCATION_GATE_COPY.body, "Please enable location to continue using Groundwork Pro.");
+  assert.equal(LOCATION_GATE_COPY.title, "Enable location for attendance");
   assert.equal(LOCATION_GATE_COPY.request, "Enable location");
-  assert.equal(LOCATION_GATE_COPY.deniedBody, "Location is required to continue using Groundwork Pro.");
   assert.equal(LOCATION_GATE_COPY.retry, "Try Again");
   assert.equal(LOCATION_GATE_COPY.settings, "Open Settings");
+});
+
+test("the copy explains automatic jobsite attendance and disclaims continuous tracking", () => {
+  for (const body of [LOCATION_GATE_COPY.body, LOCATION_GATE_COPY.deniedBody]) {
+    assert.match(body, /jobsite attendance/i, "must name automatic jobsite attendance");
+    assert.match(body, /arrive/i, "must mention arrival detection");
+    assert.match(body, /leave/i, "must mention departure detection");
+    assert.match(
+      body,
+      /does not continuously track/i,
+      "must explicitly disclaim continuous tracking",
+    );
+  }
+  // The generic pre-attendance copy is gone.
+  assert.ok(
+    !LOCATION_GATE_COPY.body.includes("continue using Groundwork Pro"),
+    "the old generic copy must be replaced",
+  );
 });
 
 test("the body switches to the required message after a denial", () => {
@@ -247,7 +390,12 @@ test("granting dismisses the gate without navigating or reloading", () => {
   for (const forbidden of ["location.reload", "location.assign", "location.href =", "router.refresh", "router.push"]) {
     assert.ok(!source.includes(forbidden), `the gate must not ${forbidden}`);
   }
-  assert.match(source, /if \(result === 'granted'\)[\s\S]{0,120}onGranted\(\)/);
+  // Granting → finish setup (native credential) → dismiss via onGranted(). The
+  // credential step sits between, so the two are not adjacent, but dismissal is
+  // still a plain onGranted() with no navigation or reload.
+  assert.match(source, /if \(result === 'granted'\)/, "handles a granted result");
+  assert.match(source, /const ready = await completeSetup\(\);/, "finishes setup before dismissing");
+  assert.match(source, /if \(ready\) \{\s*onGranted\(\);/, "dismisses only when setup is complete");
 });
 
 test("the gate locks scrolling of anything behind it", () => {
@@ -273,5 +421,25 @@ test("returning from Settings re-checks permission and lets the user in", () => 
   const source = code(gate());
   assert.match(source, /addEventListener\('focus'/, "re-check on foreground");
   assert.match(source, /visibilitychange/, "re-check on visibility change");
-  assert.match(source, /if \(next === 'granted'\) onGranted\(\)/);
+  // On return, a granted permission finishes setup and then dismisses.
+  assert.match(source, /if \(next === 'granted'\)/, "acts on a granted result on return");
+  assert.match(source, /if \(ready\) onGranted\(\)/, "dismisses once setup is complete");
+});
+
+// ── No header location prompt anywhere (Stage 2) ─────────────────────────────
+test("there is no header/ribbon location prompt outside the single gate", () => {
+  // The one and only permission experience is LocationRequiredGate. No header,
+  // ribbon, or banner elsewhere may ask for or prompt location.
+  for (const rel of [
+    "app/page.tsx",
+    "app/components/views/JobsiteTimeEmployeeCard.tsx",
+  ]) {
+    const source = code(read(rel));
+    assert.ok(!source.includes("Allow location"), `${rel} must not show a location ribbon`);
+    assert.ok(!source.includes("Enable location"), `${rel} must not show a location prompt (only the gate does)`);
+    assert.ok(
+      !source.includes("requestLocationPermissionInteractive"),
+      `${rel} must not request permission`,
+    );
+  }
 });

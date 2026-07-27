@@ -61,25 +61,18 @@ export async function resolveGateStatusWithTimeout(
 // ── Who is subject to the attendance location gate ───────────────────────────
 
 /**
- * Roles that do NOT participate in automatic jobsite attendance and therefore
- * must never be gated on location merely for being authenticated. Both role
- * vocabularies are covered: the UI roles (`executive`, `operations`) and their
- * server equivalents (`admin`, `pm`). Everyone else — foreman, operator,
- * mechanic, field staff — is a field participant whose attendance is recorded by
- * geofence and so needs location set up.
- */
-const NON_PARTICIPANT_ROLES = new Set(["executive", "admin", "operations", "pm"]);
-
-/**
  * Whether a user participates in automatic attendance (and so must pass the
- * location gate). Management/office roles do not. An unknown/empty role returns
- * false: we never demand location without positive evidence the user is a field
- * participant, so a not-yet-hydrated role never gates a CEO/admin.
+ * location gate).
+ *
+ * The signal is ASSIGNMENT, not role: a user participates exactly when they are
+ * assigned to at least one job (job_employees — the authoritative model). This
+ * deliberately avoids a role allowlist. An assigned PM/operations user IS a
+ * participant and is gated; a CEO/executive/admin-only user with no assignments
+ * is not. When assignments can't be determined (fetch failure), the caller
+ * treats it as zero — never gating without positive evidence of participation.
  */
-export function participatesInAutomaticAttendance(role: string | null | undefined): boolean {
-  const normalized = String(role ?? "").trim().toLowerCase();
-  if (normalized === "") return false;
-  return !NON_PARTICIPANT_ROLES.has(normalized);
+export function isAttendanceParticipant(params: { assignedJobCount: number }): boolean {
+  return params.assignedJobCount > 0;
 }
 
 export type GatePlatform = "native" | "web";

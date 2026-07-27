@@ -4,10 +4,10 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  isAttendanceParticipant,
   isAttendanceSetupComplete,
   LOCATION_CHECK_TIMEOUT_MS,
   LOCATION_GATE_COPY,
-  participatesInAutomaticAttendance,
   resolveGateAction,
   resolveGateBody,
   resolveGateButtonLabel,
@@ -101,29 +101,25 @@ test("the startup gate bounds its evaluation so it cannot render null forever", 
   }
 });
 
-// ── Only attendance participants are gated (Stage 2) ─────────────────────────
-test("attendance participants are gated; management/office roles are not", () => {
-  // Field crew participate in automatic attendance and must set up location.
-  for (const role of ["foreman", "mechanic", "field", "fieldstaff", "operator"]) {
-    assert.equal(participatesInAutomaticAttendance(role), true, `${role} participates`);
-  }
-  // CEO/admin and PM/operations manage — being authenticated is not a reason to
-  // demand location. Both role vocabularies are covered.
-  for (const role of ["executive", "admin", "operations", "pm", "EXECUTIVE", " Admin "]) {
-    assert.equal(participatesInAutomaticAttendance(role), false, `${role} must not be gated`);
-  }
-  // Unknown/empty role → never gate (so a not-yet-hydrated CEO is not blocked).
-  for (const role of ["", null, undefined]) {
-    assert.equal(participatesInAutomaticAttendance(role), false, "unknown role must not be gated");
-  }
+// ── Only attendance participants are gated (Stage 2, assignment-based) ────────
+test("participation is by job assignment, not a role allowlist", () => {
+  // Assigned to at least one job → participant (regardless of role: an assigned
+  // PM/operations user participates and is gated).
+  assert.equal(isAttendanceParticipant({ assignedJobCount: 1 }), true, "one assignment participates");
+  assert.equal(isAttendanceParticipant({ assignedJobCount: 5 }), true, "many assignments participate");
+  // No assignment → not a participant (a CEO/executive/admin-only user with no
+  // jobs is never gated just for being authenticated).
+  assert.equal(isAttendanceParticipant({ assignedJobCount: 0 }), false, "no assignment does not participate");
 });
 
-test("the wrapper gates by participation, using already-hydrated role state", () => {
+test("the wrapper gates by assignment, not by role", () => {
   const source = code(read("app/components/location/RequireLocationAccess.tsx"));
-  assert.match(source, /participatesInAutomaticAttendance/, "must gate by attendance participation");
-  // Role comes from a prop or the cached nav role — not a new blocking fetch.
-  assert.match(source, /readCachedUiRole/, "must read the already-hydrated cached role");
-  assert.ok(!/fetch\(/.test(source), "the wrapper must not add a blocking bootstrap fetch");
+  // Participation is derived from the authoritative assignment source.
+  assert.match(source, /isAttendanceParticipant/, "must gate by attendance participation");
+  assert.match(source, /fetchAssignedJobs\(\)/, "participation comes from assigned jobs (job_employees)");
+  // No role allowlist anywhere in the gating decision.
+  assert.ok(!/participatesInAutomaticAttendance/.test(source), "must not use a role allowlist");
+  assert.ok(!/readCachedUiRole/.test(source), "must not decide participation from cached role");
 });
 
 // ── Native requires a device credential; web does not (Stage 2) ──────────────

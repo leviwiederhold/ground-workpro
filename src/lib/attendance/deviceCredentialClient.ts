@@ -9,6 +9,11 @@
 
 const DEVICE_ID_KEY = "attendance.deviceId.v1";
 
+// The enrollment POST is over the network on a remote-URL native app, so it must
+// be bounded — an un-timed fetch that stalls was one cause of the gate hanging
+// on "Requesting…".
+const ENROLL_FETCH_TIMEOUT_MS = 15_000;
+
 interface SecureAttendanceStorePlugin {
   setToken(opts: { token: string; expiresAt: string }): Promise<void>;
   clear(): Promise<void>;
@@ -46,11 +51,16 @@ export async function enrollDeviceCredential(platform?: string): Promise<boolean
   if (!store) return false;
 
   const deviceId = getStableDeviceId();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ENROLL_FETCH_TIMEOUT_MS);
   const res = await fetch("/api/attendance/device-credential", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ deviceId, platform }),
-  }).catch(() => null);
+    signal: controller.signal,
+  })
+    .catch(() => null)
+    .finally(() => clearTimeout(timer));
   if (!res || !res.ok) return false;
 
   const payload = await res.json().catch(() => null);

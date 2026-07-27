@@ -91,12 +91,23 @@ export async function requestLocationPermissionInteractive(): Promise<LocationPe
   const geo = await loadCapacitorGeolocation();
   if (geo) {
     try {
-      // Already granted → don't re-prompt.
+      // Read the current status FIRST. On iOS, requestPermissions() only surfaces
+      // a dialog — and only resolves — when the status is undetermined ("prompt").
+      // Calling it on an already-decided status (granted OR denied) is a no-op
+      // whose authorization-change callback never fires, so the promise hangs
+      // forever (this was the stuck "Requesting…" bug). Branch on the current
+      // status instead of blindly requesting.
+      let current: LocationPermissionState = "prompt";
       try {
-        if (mapCapacitorPermission(await geo.checkPermissions()) === "granted") return "granted";
+        current = mapCapacitorPermission(await geo.checkPermissions());
       } catch {
-        // checkPermissions unsupported/failed — go straight to requesting.
+        // checkPermissions unsupported/failed — assume undetermined and let the
+        // request below try (a real prompt still resolves).
       }
+      if (current === "granted") return "granted";
+      if (current === "denied") return "denied";
+
+      // current === "prompt" → safe to raise the OS dialog; it will resolve.
       const state = mapCapacitorPermission(await geo.requestPermissions());
       console.info("[attendance/location] native requestPermissions →", state);
       if (state === "granted") return "granted";

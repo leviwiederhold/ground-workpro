@@ -96,6 +96,88 @@ export function isAttendanceSetupComplete(params: {
   return params.platform === "native" ? params.hasDeviceCredential === true : true;
 }
 
+// ── The tap-to-enable state machine (the fix for stuck "Requesting…") ─────────
+
+// The permission step may legitimately wait on the OS dialog while the user
+// decides, so it gets a long ceiling. The device-setup step has no user
+// interaction, so it gets a short one. BOTH are bounded, so no step can leave
+// the gate pinned on "Requesting…" forever.
+export const LOCATION_SETUP_PERMISSION_TIMEOUT_MS = 60_000;
+export const LOCATION_SETUP_STEP_TIMEOUT_MS = 15_000;
+
+/** Terminal outcome of one enable attempt. Every path resolves to one of these
+ *  — there is no "still pending forever". */
+export type LocationSetupResult =
+  | { status: "granted" }
+  | { status: "denied" }
+  | { status: "unavailable" }
+  | { status: "timeout" }
+  | { status: "enrollment_failed" };
+
+const STEP_TIMEOUT = Symbol("location-setup-step-timeout");
+
+/** Race one async step against a timeout. A rejection is folded into the timeout
+ *  sentinel so a throwing step is as recoverable as a slow one. */
+async function withStepTimeout<T>(op: Promise<T>, timeoutMs: number): Promise<T | typeof STEP_TIMEOUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof STEP_TIMEOUT>((resolve) => {
+    timer = setTimeout(() => resolve(STEP_TIMEOUT), timeoutMs);
+  });
+  const guarded: Promise<T | typeof STEP_TIMEOUT> = op.catch(() => STEP_TIMEOUT);
+  try {
+    return await Promise.race([guarded, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Orchestrate the two enable steps with a per-step ceiling. This is the fix for
+ * the stuck "Requesting…" bug: the native permission request can never resolve
+ * (iOS does not fire the authorization callback when the status is already
+ * decided) and the credential-enrollment fetch had no timeout, so either could
+ * hang the button forever. Bounding EACH step means every attempt terminates,
+ * and the caller renders a concise, recoverable error instead of a dead button.
+ *
+ * Pure and dependency-injected so success / denial / timeout / credential
+ * failure / retry are all unit-testable without a device.
+ */
+export async function runLocationSetup(deps: {
+  requestPermission: () => Promise<LocationPermissionResult>;
+  completeSetup: () => Promise<boolean>;
+  permissionTimeoutMs?: number;
+  setupTimeoutMs?: number;
+}): Promise<LocationSetupResult> {
+  const permissionTimeoutMs = deps.permissionTimeoutMs ?? LOCATION_SETUP_PERMISSION_TIMEOUT_MS;
+  const setupTimeoutMs = deps.setupTimeoutMs ?? LOCATION_SETUP_STEP_TIMEOUT_MS;
+
+  const permission = await withStepTimeout(deps.requestPermission(), permissionTimeoutMs);
+  if (permission === STEP_TIMEOUT) return { status: "timeout" };
+  if (permission === "denied") return { status: "denied" };
+  if (permission === "unavailable") return { status: "unavailable" };
+
+  // permission === "granted": finish device setup (native credential enrollment).
+  const ready = await withStepTimeout(deps.completeSetup(), setupTimeoutMs);
+  if (ready === STEP_TIMEOUT) return { status: "timeout" };
+  return ready === true ? { status: "granted" } : { status: "enrollment_failed" };
+}
+
+/** Map a setup result to its error kind (or null when it succeeded). */
+export function locationSetupErrorKind(result: LocationSetupResult): LocationSetupErrorKind | null {
+  switch (result.status) {
+    case "granted":
+      return null;
+    case "denied":
+      return "denied";
+    case "unavailable":
+      return "unavailable";
+    case "timeout":
+      return "timeout";
+    case "enrollment_failed":
+      return "enrollment";
+  }
+}
+
 export type GateAction =
   /** The platform can still surface the OS/browser dialog. */
   | "request"
@@ -134,19 +216,27 @@ export function resolveGateAction(params: {
 }
 
 export const LOCATION_GATE_COPY = {
-  title: "Enable location for attendance",
-  /** Shown before any denial. Explains exactly what location is for: automatic
-   *  jobsite attendance (arrival/departure detection), and explicitly that it is
-   *  NOT continuous tracking. */
-  body:
-    "Groundwork Pro uses your location for automatic jobsite attendance — detecting when you arrive at and leave a jobsite so you're clocked in and out without doing it by hand. It checks your location only to detect jobsite arrival and departure. It does not continuously track your location.",
-  /** Shown once the user has denied — same explanation, framed as required. */
-  deniedBody:
-    "Location is required for automatic jobsite attendance — detecting when you arrive at and leave a jobsite. Groundwork Pro checks your location only for jobsite arrival and departure and does not continuously track your location. Please enable it to continue.",
-  request: "Enable location",
+  title: "Enable Location",
+  /** Intentionally generic — no mention of attendance, clocking in/out, jobsite
+   *  arrival/departure, or tracking. */
+  body: "Groundwork Pro uses location for accuracy.",
+  /** Shown once permission is denied — still generic. */
+  deniedBody: "Location is required to continue. Please enable it in Settings.",
+  request: "Enable Location",
   retry: "Try Again",
   settings: "Open Settings",
 } as const;
+
+/** The concrete way a setup attempt failed, for a concise recoverable message. */
+export type LocationSetupErrorKind = "denied" | "unavailable" | "timeout" | "enrollment";
+
+/** Concise error copy per failure — generic, no attendance/tracking wording. */
+export const LOCATION_GATE_ERROR_COPY: Record<LocationSetupErrorKind, string> = {
+  denied: "Location access was denied. Enable it in Settings to continue.",
+  unavailable: "Location isn't available on this device.",
+  timeout: "That took too long. Please try again.",
+  enrollment: "We couldn't finish setup on this device. Please try again.",
+};
 
 /** The body copy for the current state. */
 export function resolveGateBody(lastResult: LocationPermissionResult | null): string {

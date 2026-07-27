@@ -8,11 +8,14 @@ import {
   isAttendanceSetupComplete,
   LOCATION_CHECK_TIMEOUT_MS,
   LOCATION_GATE_COPY,
+  LOCATION_GATE_ERROR_COPY,
+  locationSetupErrorKind,
   resolveGateAction,
   resolveGateBody,
   resolveGateButtonLabel,
   resolveGateStatusWithTimeout,
   resolveLocationGateStatus,
+  runLocationSetup,
   type LocationGateStatus,
 } from "../../src/lib/jobsite-time/locationGate.ts";
 import { locationSettingsInstructions } from "../../src/lib/runtime/openAppSettings.ts";
@@ -300,29 +303,124 @@ test("the geofence watcher still starts automatically once granted", () => {
 });
 
 // ── Copy (Stage 2: attendance-specific) ──────────────────────────────────────
+// ── The enable state machine can never get stuck on "Requesting…" ────────────
+const grant = async () => "granted" as const;
+const deny = async () => "denied" as const;
+const never = () => new Promise<never>(() => {}); // simulates a hung native call
+
+test("success: permission granted + setup complete → granted", async () => {
+  const result = await runLocationSetup({ requestPermission: grant, completeSetup: async () => true });
+  assert.deepEqual(result, { status: "granted" });
+});
+
+test("denial: iOS denies permission → denied (recoverable, not stuck)", async () => {
+  const result = await runLocationSetup({ requestPermission: deny, completeSetup: async () => true });
+  assert.deepEqual(result, { status: "denied" });
+  assert.equal(locationSetupErrorKind(result), "denied");
+});
+
+test("timeout: a permission request that never resolves cannot hang the button", async () => {
+  // This is the stuck "Requesting…" bug — a native call that never settles.
+  const result = await runLocationSetup({
+    requestPermission: never,
+    completeSetup: async () => true,
+    permissionTimeoutMs: 20,
+    setupTimeoutMs: 20,
+  });
+  assert.deepEqual(result, { status: "timeout" }, "must terminate, not pend forever");
+});
+
+test("timeout: an enrollment step that never resolves cannot hang the button", async () => {
+  const result = await runLocationSetup({
+    requestPermission: grant,
+    completeSetup: never,
+    permissionTimeoutMs: 20,
+    setupTimeoutMs: 20,
+  });
+  assert.deepEqual(result, { status: "timeout" });
+});
+
+test("credential failure: granted but enrollment returns false → enrollment_failed", async () => {
+  const result = await runLocationSetup({ requestPermission: grant, completeSetup: async () => false });
+  assert.deepEqual(result, { status: "enrollment_failed" });
+  assert.equal(locationSetupErrorKind(result), "enrollment");
+});
+
+test("a throwing step is recoverable, not a hang", async () => {
+  const result = await runLocationSetup({
+    requestPermission: grant,
+    completeSetup: async () => {
+      throw new Error("enrollment blew up");
+    },
+    setupTimeoutMs: 50,
+  });
+  // A throw is folded into a terminal, retryable outcome (never left pending).
+  assert.ok(result.status === "timeout" || result.status === "enrollment_failed");
+});
+
+test("retry: a failed attempt can succeed on a second call", async () => {
+  let attempt = 0;
+  const completeSetup = async () => {
+    attempt += 1;
+    return attempt > 1; // fails once, then succeeds
+  };
+  const first = await runLocationSetup({ requestPermission: grant, completeSetup });
+  assert.deepEqual(first, { status: "enrollment_failed" });
+  const second = await runLocationSetup({ requestPermission: grant, completeSetup });
+  assert.deepEqual(second, { status: "granted" });
+});
+
+test("every error kind has concise, generic copy", () => {
+  for (const kind of ["denied", "unavailable", "timeout", "enrollment"] as const) {
+    assert.ok(LOCATION_GATE_ERROR_COPY[kind].length > 0, `${kind} needs a message`);
+  }
+});
+
+test("the gate renders a location icon from the existing icon library", () => {
+  const source = gate();
+  // Font Awesome (already loaded globally) — a location pin. No image asset.
+  assert.match(source, /fa-location-dot/, "must use a Font Awesome location icon");
+  assert.ok(!/\.(png|jpg|jpeg|svg)['"]/.test(source), "must not add an image asset");
+});
+
+test("the native permission request never fires on an already-decided status", () => {
+  // The iOS hang: requestPermissions() on an already-granted/denied status never
+  // resolves. The helper must branch on the current status and only request when
+  // it is 'prompt'.
+  const source = code(read("src/lib/jobsite-time/locationPermission.ts"));
+  assert.match(source, /if \(current === "granted"\) return "granted";/);
+  assert.match(source, /if \(current === "denied"\) return "denied";/);
+  const requestIdx = source.indexOf("requestPermissions()");
+  const denyGuardIdx = source.indexOf('if (current === "denied")');
+  assert.ok(denyGuardIdx > -1 && denyGuardIdx < requestIdx, "must guard denied BEFORE requesting");
+});
+
+test("device-credential enrollment is time-bounded (no un-timed fetch)", () => {
+  const source = read("src/lib/attendance/deviceCredentialClient.ts");
+  assert.match(source, /AbortController/, "enrollment fetch must be abortable");
+  assert.match(source, /signal: controller\.signal/, "fetch must carry the abort signal");
+});
+
 test("the gate uses the exact required copy", () => {
-  assert.equal(LOCATION_GATE_COPY.title, "Enable location for attendance");
-  assert.equal(LOCATION_GATE_COPY.request, "Enable location");
+  assert.equal(LOCATION_GATE_COPY.title, "Enable Location");
+  assert.equal(LOCATION_GATE_COPY.body, "Groundwork Pro uses location for accuracy.");
+  assert.equal(LOCATION_GATE_COPY.request, "Enable Location");
   assert.equal(LOCATION_GATE_COPY.retry, "Try Again");
   assert.equal(LOCATION_GATE_COPY.settings, "Open Settings");
 });
 
-test("the copy explains automatic jobsite attendance and disclaims continuous tracking", () => {
-  for (const body of [LOCATION_GATE_COPY.body, LOCATION_GATE_COPY.deniedBody]) {
-    assert.match(body, /jobsite attendance/i, "must name automatic jobsite attendance");
-    assert.match(body, /arrive/i, "must mention arrival detection");
-    assert.match(body, /leave/i, "must mention departure detection");
-    assert.match(
-      body,
-      /does not continuously track/i,
-      "must explicitly disclaim continuous tracking",
-    );
+test("the copy is generic — no attendance, clock-in/out, jobsite, or tracking wording", () => {
+  const strings = [
+    LOCATION_GATE_COPY.title,
+    LOCATION_GATE_COPY.body,
+    LOCATION_GATE_COPY.deniedBody,
+    ...Object.values(LOCATION_GATE_ERROR_COPY),
+  ];
+  for (const s of strings) {
+    for (const forbidden of [/attendance/i, /clock/i, /jobsite/i, /arriv/i, /depart/i, /\btrack/i]) {
+      assert.ok(!forbidden.test(s), `copy must not mention ${forbidden} — got: ${s}`);
+    }
   }
-  // The generic pre-attendance copy is gone.
-  assert.ok(
-    !LOCATION_GATE_COPY.body.includes("continue using Groundwork Pro"),
-    "the old generic copy must be replaced",
-  );
 });
 
 test("the body switches to the required message after a denial", () => {
@@ -350,7 +448,7 @@ test("a permanently denied platform offers Settings instead of a dead retry", ()
 test("button labels follow the state machine", () => {
   assert.equal(
     resolveGateButtonLabel({ action: "request", lastResult: null }),
-    "Enable location",
+    "Enable Location",
     "first ask",
   );
   assert.equal(
@@ -386,12 +484,21 @@ test("granting dismisses the gate without navigating or reloading", () => {
   for (const forbidden of ["location.reload", "location.assign", "location.href =", "router.refresh", "router.push"]) {
     assert.ok(!source.includes(forbidden), `the gate must not ${forbidden}`);
   }
-  // Granting → finish setup (native credential) → dismiss via onGranted(). The
-  // credential step sits between, so the two are not adjacent, but dismissal is
-  // still a plain onGranted() with no navigation or reload.
-  assert.match(source, /if \(result === 'granted'\)/, "handles a granted result");
-  assert.match(source, /const ready = await completeSetup\(\);/, "finishes setup before dismissing");
-  assert.match(source, /if \(ready\) \{\s*onGranted\(\);/, "dismisses only when setup is complete");
+  // The enable flow runs through the bounded runLocationSetup state machine, and
+  // a granted result dismisses via a plain onGranted() — no navigation/reload.
+  assert.match(source, /runLocationSetup\(\{/, "uses the bounded setup state machine");
+  assert.match(source, /result\.status === 'granted'/, "acts on a granted result");
+  assert.match(source, /onGranted\(\)/, "dismisses via onGranted");
+});
+
+test("the button can never be stranded on Requesting — busy always clears", () => {
+  const source = code(gate());
+  // busy drives the "Requesting…" label; it must be cleared in a finally so no
+  // failure path leaves the button disabled forever.
+  assert.match(source, /\} finally \{\s*setBusy\(false\);/, "busy is reset in finally");
+  assert.match(source, /busy \? 'Requesting…' : label/, "label reverts once busy clears");
+  // Failures surface a concise, recoverable error rather than a dead button.
+  assert.match(source, /setErrorKind\(locationSetupErrorKind\(result\)\)/, "shows a concise error on failure");
 });
 
 test("the gate locks scrolling of anything behind it", () => {
@@ -417,9 +524,9 @@ test("returning from Settings re-checks permission and lets the user in", () => 
   const source = code(gate());
   assert.match(source, /addEventListener\('focus'/, "re-check on foreground");
   assert.match(source, /visibilitychange/, "re-check on visibility change");
-  // On return, a granted permission finishes setup and then dismisses.
+  // On return, a granted permission finishes (bounded) setup and then dismisses.
   assert.match(source, /if \(next === 'granted'\)/, "acts on a granted result on return");
-  assert.match(source, /if \(ready\) onGranted\(\)/, "dismisses once setup is complete");
+  assert.match(source, /if \(result\.status === 'granted'\) onGranted\(\)/, "dismisses once setup is complete");
 });
 
 // ── No header location prompt anywhere (Stage 2) ─────────────────────────────

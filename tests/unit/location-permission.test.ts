@@ -30,15 +30,19 @@ type NavShape = {
   permissions?: { query?: (d: any) => Promise<{ state: string }> };
 };
 
-test("the required gate bundles Geolocation instead of loading it during the tap", () => {
+test("the required gate uses the bridge-injected Geolocation proxy", () => {
   const source = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/lib/jobsite-time/locationPermission.ts"),
     "utf8",
   );
-  assert.match(source, /import \{ Geolocation \} from "@capacitor\/geolocation";/);
+  assert.match(source, /getCapacitor\(\)\?\.Plugins\?\.Geolocation/);
   assert.ok(
     !source.includes('import("@capacitor/geolocation")'),
     "a physical iPhone must not wait on a dynamic Geolocation chunk before checkPermissions",
+  );
+  assert.ok(
+    !source.includes('from "@capacitor/geolocation"'),
+    "the gate must not create a competing npm-module proxy",
   );
 });
 

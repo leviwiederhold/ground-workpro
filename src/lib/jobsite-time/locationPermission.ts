@@ -1,5 +1,4 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Geolocation } from "@capacitor/geolocation";
 
 // Attendance location permission (clock-in/out only). Self-contained — no
 // relative imports — so the four required outcomes can be unit-tested directly.
@@ -12,7 +11,10 @@ import { Geolocation } from "@capacitor/geolocation";
 export type LocationPermissionResult = "granted" | "denied" | "unavailable";
 export type LocationPermissionState = LocationPermissionResult | "prompt";
 
-type CapacitorLike = { isNativePlatform?: () => boolean };
+type CapacitorLike = {
+  isNativePlatform?: () => boolean;
+  Plugins?: { Geolocation?: NativeGeolocationPlugin };
+};
 
 export interface NativeGeolocationPlugin {
   checkPermissions(): Promise<{ location?: string; coarseLocation?: string }>;
@@ -55,14 +57,20 @@ export function mapGeolocationError(err: { code?: number } | null | undefined): 
   return err?.code === 1 ? "denied" : "unavailable";
 }
 
-// Return the statically bundled proxy. The prior dynamic import could remain
-// pending in a remote-URL WKWebView before any native bridge method was called;
-// physical-device logs showed "checking_location_permission" followed by its
-// timeout with no "To Native -> Geolocation checkPermissions" line. The
-// Capacitor proxy is SSR-safe, and bundling it removes that runtime chunk-load
-// boundary from the required gate.
+// Use the proxy injected by the native iOS bridge at document start. Two
+// physical-device traces reached "checking_location_permission" but never
+// emitted Capacitor's "To Native -> Geolocation checkPermissions" line when
+// using the npm module proxy (first dynamically, then statically). Calling the
+// bridge-owned proxy removes that competing JS registration boundary. If the
+// binary did not register Geolocation, return null and let the named stage fail
+// visibly instead of falling through to WKWebView geolocation.
 export async function loadCapacitorGeolocation(): Promise<NativeGeolocationPlugin | null> {
-  return (Geolocation as NativeGeolocationPlugin | undefined) ?? null;
+  const plugin = getCapacitor()?.Plugins?.Geolocation ?? null;
+  console.info(
+    "[location/setup] native Geolocation bridge proxy",
+    plugin ? "available" : "unavailable",
+  );
+  return plugin;
 }
 
 /** Strict native check used by the diagnostic setup pipeline. */

@@ -114,16 +114,21 @@ export type LocationSetupResult =
   | { status: "timeout" }
   | { status: "enrollment_failed" };
 
-const STEP_TIMEOUT = Symbol("location-setup-step-timeout");
+type StepResult<T> =
+  | { kind: "value"; value: T }
+  | { kind: "timeout" }
+  | { kind: "failure" };
 
-/** Race one async step against a timeout. A rejection is folded into the timeout
- *  sentinel so a throwing step is as recoverable as a slow one. */
-async function withStepTimeout<T>(op: Promise<T>, timeoutMs: number): Promise<T | typeof STEP_TIMEOUT> {
+/** Race one async step against a timeout while preserving failure vs stall. */
+async function withStepTimeout<T>(op: Promise<T>, timeoutMs: number): Promise<StepResult<T>> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<typeof STEP_TIMEOUT>((resolve) => {
-    timer = setTimeout(() => resolve(STEP_TIMEOUT), timeoutMs);
+  const timeout = new Promise<StepResult<T>>((resolve) => {
+    timer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
   });
-  const guarded: Promise<T | typeof STEP_TIMEOUT> = op.catch(() => STEP_TIMEOUT);
+  const guarded: Promise<StepResult<T>> = op.then(
+    (value) => ({ kind: "value", value }),
+    () => ({ kind: "failure" }),
+  );
   try {
     return await Promise.race([guarded, timeout]);
   } finally {
@@ -147,19 +152,30 @@ export async function runLocationSetup(deps: {
   completeSetup: () => Promise<boolean>;
   permissionTimeoutMs?: number;
   setupTimeoutMs?: number;
+  onTransition?: (step: "permission" | "enrollment") => void;
 }): Promise<LocationSetupResult> {
   const permissionTimeoutMs = deps.permissionTimeoutMs ?? LOCATION_SETUP_PERMISSION_TIMEOUT_MS;
   const setupTimeoutMs = deps.setupTimeoutMs ?? LOCATION_SETUP_STEP_TIMEOUT_MS;
 
-  const permission = await withStepTimeout(deps.requestPermission(), permissionTimeoutMs);
-  if (permission === STEP_TIMEOUT) return { status: "timeout" };
-  if (permission === "denied") return { status: "denied" };
-  if (permission === "unavailable") return { status: "unavailable" };
+  deps.onTransition?.("permission");
+  const permission = await withStepTimeout(
+    Promise.resolve().then(deps.requestPermission),
+    permissionTimeoutMs,
+  );
+  if (permission.kind === "timeout") return { status: "timeout" };
+  if (permission.kind === "failure") return { status: "unavailable" };
+  if (permission.value === "denied") return { status: "denied" };
+  if (permission.value === "unavailable") return { status: "unavailable" };
 
   // permission === "granted": finish device setup (native credential enrollment).
-  const ready = await withStepTimeout(deps.completeSetup(), setupTimeoutMs);
-  if (ready === STEP_TIMEOUT) return { status: "timeout" };
-  return ready === true ? { status: "granted" } : { status: "enrollment_failed" };
+  deps.onTransition?.("enrollment");
+  const ready = await withStepTimeout(
+    Promise.resolve().then(deps.completeSetup),
+    setupTimeoutMs,
+  );
+  if (ready.kind === "timeout") return { status: "timeout" };
+  if (ready.kind === "failure") return { status: "enrollment_failed" };
+  return ready.value === true ? { status: "granted" } : { status: "enrollment_failed" };
 }
 
 /** Map a setup result to its error kind (or null when it succeeded). */
@@ -233,7 +249,7 @@ export type LocationSetupErrorKind = "denied" | "unavailable" | "timeout" | "enr
 /** Concise error copy per failure — generic, no attendance/tracking wording. */
 export const LOCATION_GATE_ERROR_COPY: Record<LocationSetupErrorKind, string> = {
   denied: "Location access was denied. Enable it in Settings to continue.",
-  unavailable: "Location isn't available on this device.",
+  unavailable: "We couldn't start Location on this device. Please try again or enable Location in iOS Settings.",
   timeout: "That took too long. Please try again.",
   enrollment: "We couldn't finish setup on this device. Please try again.",
 };

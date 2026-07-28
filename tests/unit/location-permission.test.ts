@@ -6,7 +6,9 @@ import {
   mapGeolocationError,
   resolveLocationGateView,
   checkLocationPermission,
+  requestNativeLocationPermission,
   requestLocationPermissionInteractive,
+  type NativeGeolocationPlugin,
 } from "../../src/lib/jobsite-time/locationPermission.ts";
 
 // Bug fixed here: tapping "Enable/Allow location" did nothing because the old
@@ -69,6 +71,76 @@ test("resolveLocationGateView maps each state to a UI", () => {
   assert.equal(resolveLocationGateView("prompt"), "pre-permission");
   assert.equal(resolveLocationGateView("denied"), "blocked");
   assert.equal(resolveLocationGateView("unavailable"), "unavailable");
+});
+
+function nativePlugin(overrides: Partial<NativeGeolocationPlugin> = {}): NativeGeolocationPlugin {
+  return {
+    checkPermissions: async () => ({ location: "prompt", coarseLocation: "prompt" }),
+    requestPermissions: async () => ({ location: "granted", coarseLocation: "granted" }),
+    getCurrentPosition: async () => ({ coords: { latitude: 39.3, longitude: -84.3 } }),
+    ...overrides,
+  };
+}
+
+// --- real Capacitor/iOS bridge behavior ------------------------------------
+test("first-time iOS permission request checks once, prompts once, and grants", async () => {
+  let checks = 0;
+  let requests = 0;
+  const plugin = nativePlugin({
+    checkPermissions: async () => {
+      checks += 1;
+      return { location: "prompt", coarseLocation: "prompt" };
+    },
+    requestPermissions: async () => {
+      requests += 1;
+      return { location: "granted", coarseLocation: "granted" };
+    },
+  });
+
+  assert.equal(await requestNativeLocationPermission(plugin), "granted");
+  assert.equal(checks, 1);
+  assert.equal(requests, 1);
+});
+
+test("already-granted iOS permission skips the system request", async () => {
+  let requests = 0;
+  const plugin = nativePlugin({
+    checkPermissions: async () => ({ location: "granted", coarseLocation: "granted" }),
+    requestPermissions: async () => {
+      requests += 1;
+      return { location: "granted", coarseLocation: "granted" };
+    },
+  });
+
+  assert.equal(await requestNativeLocationPermission(plugin), "granted");
+  assert.equal(requests, 0, "must not ask iOS again after permission is decided");
+});
+
+test("denied iOS permission returns denied without calling requestPermissions", async () => {
+  let requests = 0;
+  const plugin = nativePlugin({
+    checkPermissions: async () => ({ location: "denied", coarseLocation: "denied" }),
+    requestPermissions: async () => {
+      requests += 1;
+      return { location: "denied", coarseLocation: "denied" };
+    },
+  });
+
+  assert.equal(await requestNativeLocationPermission(plugin), "denied");
+  assert.equal(requests, 0, "a denied iOS status must go to Settings, not another prompt");
+});
+
+test("native permission call failure is terminal and retryable", async () => {
+  const plugin = nativePlugin({
+    requestPermissions: async () => {
+      throw new Error("bridge rejected");
+    },
+  });
+  assert.equal(await requestNativeLocationPermission(plugin), "unavailable");
+});
+
+test("native bridge/plugin unavailable is terminal and never uses browser geolocation", async () => {
+  assert.equal(await requestNativeLocationPermission(null), "unavailable");
 });
 
 // --- case 1: already granted → skips the permission screen -----------------

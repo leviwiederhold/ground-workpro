@@ -13,7 +13,7 @@
 // the button — it falls back to a concise, recoverable error and the button
 // returns to "Enable Location".
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   checkLocationPermission,
   requestLocationPermissionInteractive,
@@ -23,6 +23,7 @@ import {
 import {
   LOCATION_GATE_COPY,
   LOCATION_GATE_ERROR_COPY,
+  LOCATION_CHECK_TIMEOUT_MS,
   locationSetupErrorKind,
   resolveGateAction,
   resolveGateBody,
@@ -43,6 +44,10 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   // Non-denial failure (timeout / enrollment / unavailable) → a concise message.
   // Denial is communicated by the body + "Open Settings", so it stays null there.
   const [errorKind, setErrorKind] = useState<LocationSetupErrorKind | null>(null);
+  // React state updates are asynchronous. This ref is the synchronous lock that
+  // prevents a second tap from starting another native permission/enrollment
+  // attempt before the disabled button has rendered.
+  const setupInFlight = useRef(false);
 
   // Read the current state so the button can offer "Try Again" vs "Open
   // Settings" correctly on first paint. This is the NON-prompting check — the
@@ -84,37 +89,22 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     return enrollDeviceCredential();
   }, [native]);
 
-  // Bounded "finish setup because permission is already granted" — reused by the
-  // Settings-return and focus paths so the credential step is time-bounded there
-  // too.
-  const finishGrantedSetup = useCallback(
-    () => runLocationSetup({ requestPermission: async () => 'granted', completeSetup }),
-    [completeSetup],
-  );
-
   const handlePrimary = useCallback(async () => {
     if (action === 'settings') {
-      const outcome = openAppLocationSettings();
-      // Browsers cannot open site settings programmatically — show the manual
-      // steps rather than a button that appears to do nothing.
-      if (outcome === 'unsupported') setShowInstructions(true);
-      // Re-read on return: the user may have granted it in Settings.
-      const next = await checkLocationPermission().catch(() => 'unavailable' as LocationPermissionState);
-      setPermission(next);
-      if (next === 'granted') {
-        setBusy(true);
-        setErrorKind(null);
-        try {
-          const result = await finishGrantedSetup();
-          if (result.status === 'granted') onGranted();
-          else setErrorKind(locationSetupErrorKind(result));
-        } finally {
-          setBusy(false);
-        }
-      }
+      // Always show the manual path as well. `window.open` can be accepted by
+      // the WebView without proving that iOS displayed Settings.
+      setShowInstructions(true);
+      openAppLocationSettings();
+      // Do not immediately re-check: the app is only beginning to background
+      // and the user has not had a chance to change the setting yet. The
+      // bounded foreground listener below finishes setup on return.
       return;
     }
 
+    if (setupInFlight.current) return;
+    setupInFlight.current = true;
+    // This update happens before any awaited operation, so the first render
+    // after a valid tap says "Requesting…".
     setBusy(true);
     setErrorKind(null);
     try {
@@ -131,27 +121,44 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       if (result.status === 'denied') {
         // Communicated by the body switching + the "Open Settings" action.
         setLastResult('denied');
-        setPermission(await checkLocationPermission().catch(() => 'denied' as LocationPermissionState));
+        // The native request result is authoritative. Do not make another
+        // unbounded bridge call here: that was a remaining path that could pin
+        // the button on "Requesting…" after a denial.
+        setPermission('denied');
         return;
       }
       // timeout | unavailable | enrollment_failed → concise recoverable message,
       // button returns to "Enable Location".
       setErrorKind(locationSetupErrorKind(result));
     } finally {
+      setupInFlight.current = false;
       setBusy(false);
     }
-  }, [action, completeSetup, finishGrantedSetup, onGranted]);
+  }, [action, completeSetup, onGranted]);
 
   // Re-check when the app returns to the foreground: the user may have enabled
   // location in Settings and come back. Bounded, and silent on failure (this is
   // a background re-check, not a tap).
   useEffect(() => {
     const onFocus = async () => {
-      const next = await checkLocationPermission().catch(() => 'unavailable' as LocationPermissionState);
-      setPermission(next);
-      if (next === 'granted') {
-        const result = await finishGrantedSetup();
+      // The OS permission sheet itself emits focus/visibility transitions.
+      // Never let those launch enrollment alongside the tap-owned attempt.
+      if (setupInFlight.current) return;
+      setupInFlight.current = true;
+      try {
+        const result = await runLocationSetup({
+          requestPermission: async () => {
+            const next = await checkLocationPermission();
+            setPermission(next);
+            if (next === 'granted' || next === 'denied' || next === 'unavailable') return next;
+            return 'unavailable';
+          },
+          completeSetup,
+          permissionTimeoutMs: LOCATION_CHECK_TIMEOUT_MS,
+        });
         if (result.status === 'granted') onGranted();
+      } finally {
+        setupInFlight.current = false;
       }
     };
     window.addEventListener('focus', onFocus);
@@ -160,7 +167,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [onGranted, finishGrantedSetup]);
+  }, [onGranted, completeSetup]);
 
   const label = resolveGateButtonLabel({ action, lastResult });
   const body = resolveGateBody(lastResult);
@@ -174,10 +181,23 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       data-testid="location-required-gate"
     >
       <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-[#0b0b0b]">
-        {/* Proper location icon from Font Awesome (loaded globally via
-            globals.css) — a map pin above the title. No image asset added. */}
+        {/* Inline SVG ships inside the remote page's JS/HTML. It cannot disappear
+            when the TestFlight WebView misses a global icon-font stylesheet. */}
         <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-600 dark:bg-brand-950/40 dark:text-brand-400">
-          <i className="fa-solid fa-location-dot text-2xl" aria-hidden="true" data-testid="location-gate-icon" />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-7 w-7"
+            aria-hidden="true"
+            data-testid="location-gate-icon"
+          >
+            <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+            <circle cx="12" cy="10" r="2.5" />
+          </svg>
         </div>
 
         <h1 id="location-gate-title" className="text-xl font-semibold text-gray-900 dark:text-zinc-100">

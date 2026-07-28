@@ -144,6 +144,28 @@ export async function getNativeGeofenceHealth(): Promise<NativeGeofenceHealth> {
 }
 
 /**
+ * Diagnostic/required variant used by native setup. Unlike the dashboard-safe
+ * helper above, this throws when the app-target plugin was not registered or
+ * when the bridge call rejects. That distinction is essential on TestFlight:
+ * returning an "unavailable" health-shaped value hid a broken native shell and
+ * made the gate report only a generic enrollment failure.
+ */
+export async function requireNativeGeofenceHealth(): Promise<NativeGeofenceHealth> {
+  const plugin = getPlugin();
+  if (!plugin) throw new Error("JobsiteGeofence native bridge unavailable");
+  const health = await plugin.getHealth();
+  if (health?.supported !== true) {
+    throw new Error(health?.lastError || "native geofence service is not supported");
+  }
+  return {
+    ...UNAVAILABLE_HEALTH,
+    ...health,
+    supported: true,
+    hasCredential: health.hasCredential === true,
+  };
+}
+
+/**
  * Subscribe to native transition events for the time the app is in the
  * foreground (background transitions are POSTed by the native layer directly).
  * Returns an unsubscribe function; no-op when the plugin is absent.

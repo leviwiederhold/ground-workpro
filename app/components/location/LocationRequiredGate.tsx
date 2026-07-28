@@ -15,7 +15,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  checkNativeLocationPermission,
   checkLocationPermission,
+  loadCapacitorGeolocation,
+  requestNativeLocationPermissionFromPrompt,
   requestLocationPermissionInteractive,
   type LocationPermissionResult,
   type LocationPermissionState,
@@ -23,18 +26,23 @@ import {
 import {
   LOCATION_GATE_COPY,
   LOCATION_GATE_ERROR_COPY,
-  LOCATION_CHECK_TIMEOUT_MS,
   locationSetupErrorKind,
   resolveGateAction,
   resolveGateBody,
   resolveGateButtonLabel,
   runLocationSetup,
   type LocationSetupErrorKind,
+  type LocationSetupStage,
+  type LocationSetupTransition,
 } from '@/lib/jobsite-time/locationGate';
 import { locationSettingsInstructions, openAppLocationSettings } from '@/lib/runtime/openAppSettings';
 import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
-import { getNativeGeofenceHealth } from '@/lib/attendance/nativeGeofence';
-import { enrollDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
+import { requireNativeGeofenceHealth } from '@/lib/attendance/nativeGeofence';
+import {
+  requestDeviceCredential,
+  writeDeviceCredentialToSecureStore,
+  type DeviceCredentialPayload,
+} from '@/lib/attendance/deviceCredentialClient';
 
 export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   const [permission, setPermission] = useState<LocationPermissionState | 'checking'>('checking');
@@ -44,6 +52,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   // Non-denial failure (timeout / enrollment / unavailable) → a concise message.
   // Denial is communicated by the body + "Open Settings", so it stays null there.
   const [errorKind, setErrorKind] = useState<LocationSetupErrorKind | null>(null);
+  const [activeStage, setActiveStage] = useState<LocationSetupStage | null>(null);
   // React state updates are asynchronous. This ref is the synchronous lock that
   // prevents a second tap from starting another native permission/enrollment
   // attempt before the disabled button has rendered.
@@ -78,16 +87,44 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   const action = resolveGateAction({ permission, lastResult });
   const native = isCapacitorNativePlatform();
 
-  // Setup is complete when location is granted AND, on native only, a device
-  // credential is enrolled. Web has no secure store, so it requires only
-  // permission — never a credential, which would lock web users out. Idempotent:
-  // an existing credential is reused rather than re-minted on every tap/return.
-  const completeSetup = useCallback(async (): Promise<boolean> => {
-    if (!native) return true;
-    const health = await getNativeGeofenceHealth().catch(() => null);
-    if (health?.hasCredential) return true;
-    return enrollDeviceCredential();
-  }, [native]);
+  const reportTransition = useCallback((transition: LocationSetupTransition) => {
+    console.info('[location/setup]', transition.state, transition.stage);
+    if (transition.state === 'started') setActiveStage(transition.stage);
+  }, []);
+
+  /**
+   * One dependency-injected pipeline for tap and foreground return. Native
+   * permission check/request, geofence bridge, network enrollment, Keychain
+   * write and final verification remain separately timed and reported.
+   */
+  const performSetup = useCallback(
+    (interactive: boolean) =>
+      runLocationSetup<DeviceCredentialPayload>({
+        native,
+        checkPermission: async () => {
+          if (!native) return checkLocationPermission();
+          return checkNativeLocationPermission(await loadCapacitorGeolocation());
+        },
+        requestPermission: async () => {
+          if (!interactive) return 'unavailable';
+          if (!native) return requestLocationPermissionInteractive();
+          return requestNativeLocationPermissionFromPrompt(await loadCapacitorGeolocation());
+        },
+        checkNativeGeofenceHealth: requireNativeGeofenceHealth,
+        enrollSecureCredential: (signal) => requestDeviceCredential('ios', signal),
+        writeSecureCredential: writeDeviceCredentialToSecureStore,
+        verifyCompletion: async () => {
+          const finalPermission = native
+            ? await checkNativeLocationPermission(await loadCapacitorGeolocation())
+            : await checkLocationPermission();
+          if (finalPermission !== 'granted') return false;
+          if (!native) return true;
+          return (await requireNativeGeofenceHealth()).hasCredential;
+        },
+        onTransition: reportTransition,
+      }),
+    [native, reportTransition],
+  );
 
   const handlePrimary = useCallback(async () => {
     if (action === 'settings') {
@@ -107,13 +144,9 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     // after a valid tap says "Requesting…".
     setBusy(true);
     setErrorKind(null);
+    setActiveStage(null);
     try {
-      // Both steps are bounded inside runLocationSetup, so this always settles —
-      // the button can never be stranded on "Requesting…".
-      const result = await runLocationSetup({
-        requestPermission: requestLocationPermissionInteractive,
-        completeSetup,
-      });
+      const result = await performSetup(true);
       if (result.status === 'granted') {
         onGranted();
         return;
@@ -127,14 +160,14 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
         setPermission('denied');
         return;
       }
-      // timeout | unavailable | enrollment_failed → concise recoverable message,
-      // button returns to "Enable Location".
+      console.error('[location/setup] failed', result.code, result.stage, result.detail ?? '');
       setErrorKind(locationSetupErrorKind(result));
     } finally {
       setupInFlight.current = false;
       setBusy(false);
+      setActiveStage(null);
     }
-  }, [action, completeSetup, onGranted]);
+  }, [action, onGranted, performSetup]);
 
   // Re-check when the app returns to the foreground: the user may have enabled
   // location in Settings and come back. Bounded, and silent on failure (this is
@@ -146,16 +179,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       if (setupInFlight.current) return;
       setupInFlight.current = true;
       try {
-        const result = await runLocationSetup({
-          requestPermission: async () => {
-            const next = await checkLocationPermission();
-            setPermission(next);
-            if (next === 'granted' || next === 'denied' || next === 'unavailable') return next;
-            return 'unavailable';
-          },
-          completeSetup,
-          permissionTimeoutMs: LOCATION_CHECK_TIMEOUT_MS,
-        });
+        const result = await performSetup(false);
         if (result.status === 'granted') onGranted();
       } finally {
         setupInFlight.current = false;
@@ -167,7 +191,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('visibilitychange', onFocus);
     };
-  }, [onGranted, completeSetup]);
+  }, [onGranted, performSetup]);
 
   const label = resolveGateButtonLabel({ action, lastResult });
   const body = resolveGateBody(lastResult);
@@ -222,6 +246,15 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             data-testid="location-gate-error"
           >
             {LOCATION_GATE_ERROR_COPY[errorKind]}
+            <span className="mt-2 block font-mono text-[10px]" data-testid="location-gate-error-code">
+              {errorKind}
+            </span>
+          </p>
+        ) : null}
+
+        {busy && activeStage ? (
+          <p className="mt-4 text-xs text-gray-500 dark:text-zinc-500" data-testid="location-gate-active-stage">
+            {activeStage.replaceAll('_', ' ')}
           </p>
         ) : null}
 

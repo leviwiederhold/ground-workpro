@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
 // Attendance location permission (clock-in/out only). Self-contained — no
 // relative imports — so the four required outcomes can be unit-tested directly.
 //
@@ -10,7 +11,10 @@
 export type LocationPermissionResult = "granted" | "denied" | "unavailable";
 export type LocationPermissionState = LocationPermissionResult | "prompt";
 
-type CapacitorLike = { isNativePlatform?: () => boolean };
+type CapacitorLike = {
+  isNativePlatform?: () => boolean;
+  Plugins?: { Geolocation?: NativeGeolocationPlugin };
+};
 
 export interface NativeGeolocationPlugin {
   checkPermissions(): Promise<{ location?: string; coarseLocation?: string }>;
@@ -53,16 +57,50 @@ export function mapGeolocationError(err: { code?: number } | null | undefined): 
   return err?.code === 1 ? "denied" : "unavailable";
 }
 
-// Loads the native Capacitor Geolocation plugin, but ONLY inside the native app
-// wrapper. On web this returns null so we use the standard browser prompt.
-// Imported dynamically so the plugin never runs during SSR.
-async function loadCapacitorGeolocation(): Promise<NativeGeolocationPlugin | null> {
-  try {
-    const mod: any = await import("@capacitor/geolocation");
-    return (mod?.Geolocation as NativeGeolocationPlugin | undefined) ?? null;
-  } catch {
-    return null;
-  }
+// Use the proxy injected by the native iOS bridge at document start. Two
+// physical-device traces reached "checking_location_permission" but never
+// emitted Capacitor's "To Native -> Geolocation checkPermissions" line when
+// using the npm module proxy (first dynamically, then statically). Calling the
+// bridge-owned proxy removes that competing JS registration boundary. If the
+// binary did not register Geolocation, return null and let the named stage fail
+// visibly instead of falling through to WKWebView geolocation.
+export async function loadCapacitorGeolocation(): Promise<NativeGeolocationPlugin | null> {
+  const plugin = getCapacitor()?.Plugins?.Geolocation ?? null;
+  console.info(
+    "[location/setup] native Geolocation bridge proxy",
+    plugin ? "available" : "unavailable",
+  );
+  return plugin;
+}
+
+/** Strict native check used by the diagnostic setup pipeline. */
+export async function checkNativeLocationPermission(
+  geo: NativeGeolocationPlugin | null,
+): Promise<LocationPermissionState> {
+  if (!geo) throw new Error("Capacitor Geolocation native bridge unavailable");
+  return mapCapacitorPermission(await geo.checkPermissions());
+}
+
+/**
+ * Request from an already-confirmed prompt state. This deliberately performs no
+ * check of its own: the gate times and reports the check and request as separate
+ * native transitions.
+ */
+export async function requestNativeLocationPermissionFromPrompt(
+  geo: NativeGeolocationPlugin | null,
+): Promise<LocationPermissionResult> {
+  if (!geo) throw new Error("Capacitor Geolocation native bridge unavailable");
+  const state = mapCapacitorPermission(await geo.requestPermissions());
+  console.info("[location/setup] native requestPermissions →", state);
+  if (state === "granted") return "granted";
+  if (state === "denied") return "denied";
+
+  const position = await geo.getCurrentPosition({ enableHighAccuracy: false, timeout: 10_000 });
+  console.info("[location/setup] native getCurrentPosition → granted", {
+    lat: position?.coords?.latitude,
+    lng: position?.coords?.longitude,
+  });
+  return "granted";
 }
 
 // Non-prompting check of the current permission state (never shows a dialog).
@@ -75,7 +113,7 @@ export async function checkLocationPermission(): Promise<LocationPermissionState
       return "unavailable";
     }
     try {
-      return mapCapacitorPermission(await geo.checkPermissions());
+      return await checkNativeLocationPermission(geo);
     } catch (error) {
       console.warn("[location/setup] native checkPermissions failed", error);
       return "unavailable";
@@ -111,29 +149,12 @@ export async function requestNativeLocationPermission(
     // Read the current status first. Besides avoiding an unnecessary system
     // call, this is what turns an existing denial into Settings instructions
     // instead of waiting for a prompt that iOS will never show again.
-    const current = mapCapacitorPermission(await geo.checkPermissions());
+    const current = await checkNativeLocationPermission(geo);
     console.info("[location/setup] native checkPermissions →", current);
     if (current === "granted") return "granted";
     if (current === "denied") return "denied";
 
-    const state = mapCapacitorPermission(await geo.requestPermissions());
-    console.info("[location/setup] native requestPermissions →", state);
-    if (state === "granted") return "granted";
-    if (state === "denied") return "denied";
-
-    // A platform that still reports prompt gets one bounded position read to
-    // establish the terminal state.
-    try {
-      const pos = await geo.getCurrentPosition({ enableHighAccuracy: false, timeout: 10000 });
-      console.info("[location/setup] native getCurrentPosition → granted", {
-        lat: pos?.coords?.latitude,
-        lng: pos?.coords?.longitude,
-      });
-      return "granted";
-    } catch (error) {
-      console.warn("[location/setup] native getCurrentPosition failed", error);
-      return "unavailable";
-    }
+    return await requestNativeLocationPermissionFromPrompt(geo);
   } catch (error) {
     console.warn("[location/setup] native permission bridge call failed", error);
     return "unavailable";

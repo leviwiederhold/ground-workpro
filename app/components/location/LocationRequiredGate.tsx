@@ -27,17 +27,24 @@ import {
   LOCATION_GATE_COPY,
   LOCATION_GATE_ERROR_COPY,
   locationSetupErrorKind,
+  isAttendanceSetupComplete,
   resolveGateAction,
   resolveGateBody,
   resolveGateButtonLabel,
   runLocationSetup,
   type LocationSetupErrorKind,
-  type LocationSetupStage,
   type LocationSetupTransition,
 } from '@/lib/jobsite-time/locationGate';
 import { locationSettingsInstructions, openAppLocationSettings } from '@/lib/runtime/openAppSettings';
 import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
-import { requireNativeGeofenceHealth } from '@/lib/attendance/nativeGeofence';
+import {
+  buildJobsiteRegions,
+  getRegisteredGeofences,
+  requestNativeAlwaysAuthorization,
+  requireNativeGeofenceHealth,
+  requireRegisteredGeofences,
+} from '@/lib/attendance/nativeGeofence';
+import { fetchAssignedJobsRequired } from '@/lib/jobsite-time/geofence-client';
 import {
   requestDeviceCredential,
   writeDeviceCredentialToSecureStore,
@@ -49,10 +56,10 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   const [lastResult, setLastResult] = useState<LocationPermissionResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [settingsRequired, setSettingsRequired] = useState(false);
   // Non-denial failure (timeout / enrollment / unavailable) → a concise message.
   // Denial is communicated by the body + "Open Settings", so it stays null there.
   const [errorKind, setErrorKind] = useState<LocationSetupErrorKind | null>(null);
-  const [activeStage, setActiveStage] = useState<LocationSetupStage | null>(null);
   // React state updates are asynchronous. This ref is the synchronous lock that
   // prevents a second tap from starting another native permission/enrollment
   // attempt before the disabled button has rendered.
@@ -84,12 +91,36 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     };
   }, []);
 
-  const action = resolveGateAction({ permission, lastResult });
+  const action = settingsRequired
+    ? 'settings'
+    : resolveGateAction({ permission, lastResult });
   const native = isCapacitorNativePlatform();
 
   const reportTransition = useCallback((transition: LocationSetupTransition) => {
     console.info('[location/setup]', transition.state, transition.stage);
-    if (transition.state === 'started') setActiveStage(transition.stage);
+  }, []);
+
+  const loadRequiredRegions = useCallback(async () => {
+    const [jobs, settingsRes] = await Promise.all([
+      fetchAssignedJobsRequired(),
+      fetch('/api/jobsite-time/settings', { cache: 'no-store' }),
+    ]);
+    if (!settingsRes.ok) throw new Error('Could not load location settings');
+    const settings = (await settingsRes.json().catch(() => null))?.item ?? null;
+    const arrivalRadiusMeters = settings?.arrivalRadiusFeet
+      ? Number(settings.arrivalRadiusFeet) * 0.3048
+      : 76;
+    const wakeRadiusMeters = Number(settings?.wakeRadiusMeters ?? 1609);
+    const regions = jobs
+      .filter((job) => job.addressVerified && job.lat !== null && job.lng !== null)
+      .slice(0, 10)
+      .flatMap((job) =>
+        buildJobsiteRegions(job, arrivalRadiusMeters, wakeRadiusMeters),
+      );
+    if (regions.length === 0) {
+      throw new Error('No assigned location is ready');
+    }
+    return regions;
   }, []);
 
   /**
@@ -111,19 +142,36 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
           return requestNativeLocationPermissionFromPrompt(await loadCapacitorGeolocation());
         },
         checkNativeGeofenceHealth: requireNativeGeofenceHealth,
+        requestBackgroundAuthorization: interactive
+          ? requestNativeAlwaysAuthorization
+          : async () => {},
         enrollSecureCredential: (signal) => requestDeviceCredential('ios', signal),
         writeSecureCredential: writeDeviceCredentialToSecureStore,
+        registerAssignedLocations: async () =>
+          requireRegisteredGeofences(await loadRequiredRegions()),
         verifyCompletion: async () => {
           const finalPermission = native
             ? await checkNativeLocationPermission(await loadCapacitorGeolocation())
             : await checkLocationPermission();
           if (finalPermission !== 'granted') return false;
           if (!native) return true;
-          return (await requireNativeGeofenceHealth()).hasCredential;
+          const [health, requiredRegions, registered] = await Promise.all([
+            requireNativeGeofenceHealth(),
+            loadRequiredRegions(),
+            getRegisteredGeofences(),
+          ]);
+          return isAttendanceSetupComplete({
+            platform: 'native',
+            permission: finalPermission,
+            hasDeviceCredential: health.hasCredential,
+            nativeHealth: health,
+            requiredRegionIds: requiredRegions.map((region) => region.identifier),
+            registeredRegionIds: registered.map((region) => region.identifier),
+          });
         },
         onTransition: reportTransition,
       }),
-    [native, reportTransition],
+    [loadRequiredRegions, native, reportTransition],
   );
 
   const handlePrimary = useCallback(async () => {
@@ -144,7 +192,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     // after a valid tap says "Requesting…".
     setBusy(true);
     setErrorKind(null);
-    setActiveStage(null);
+    setSettingsRequired(false);
     try {
       const result = await performSetup(true);
       if (result.status === 'granted') {
@@ -158,6 +206,14 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
         // unbounded bridge call here: that was a remaining path that could pin
         // the button on "Requesting…" after a denial.
         setPermission('denied');
+        setSettingsRequired(true);
+        setShowInstructions(true);
+        return;
+      }
+      if (result.status === 'settings_required') {
+        setPermission('granted');
+        setSettingsRequired(true);
+        setShowInstructions(true);
         return;
       }
       console.error('[location/setup] failed', result.code, result.stage, result.detail ?? '');
@@ -165,7 +221,6 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
     } finally {
       setupInFlight.current = false;
       setBusy(false);
-      setActiveStage(null);
     }
   }, [action, onGranted, performSetup]);
 
@@ -181,6 +236,10 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       try {
         const result = await performSetup(false);
         if (result.status === 'granted') onGranted();
+        if (result.status === 'settings_required' || result.status === 'denied') {
+          setSettingsRequired(true);
+          setShowInstructions(true);
+        }
       } finally {
         setupInFlight.current = false;
       }
@@ -194,7 +253,9 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   }, [onGranted, performSetup]);
 
   const label = resolveGateButtonLabel({ action, lastResult });
-  const body = resolveGateBody(lastResult);
+  const body = settingsRequired
+    ? LOCATION_GATE_COPY.deniedBody
+    : resolveGateBody(lastResult);
 
   return (
     <main
@@ -246,15 +307,6 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             data-testid="location-gate-error"
           >
             {LOCATION_GATE_ERROR_COPY[errorKind]}
-            <span className="mt-2 block font-mono text-[10px]" data-testid="location-gate-error-code">
-              {errorKind}
-            </span>
-          </p>
-        ) : null}
-
-        {busy && activeStage ? (
-          <p className="mt-4 text-xs text-gray-500 dark:text-zinc-500" data-testid="location-gate-active-stage">
-            {activeStage.replaceAll('_', ' ')}
           </p>
         ) : null}
 

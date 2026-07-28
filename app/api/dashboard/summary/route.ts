@@ -397,8 +397,7 @@ export async function GET() {
     if (role === "pm") {
       kpis.push(
         { key: "active_jobs", label: "Active Jobs", value: stats.active_jobs?.value ?? activeJobsCount, href: stats.active_jobs?.href, visible: stats.active_jobs?.visible },
-        { key: "fleet_utilization", label: "Fleet Utilization", value: stats.fleet_utilization?.value ?? `${fleetUtilizationPct}%`, sublabel: `${activeEquipmentCount} of ${equipmentRows.length} active`, href: stats.fleet_utilization?.href, visible: stats.fleet_utilization?.visible },
-        { key: "crew_on_site", label: "Crew On-Site", value: stats.crew_on_site?.value ?? (employeesOnSiteCountResult.count ?? 0), href: stats.crew_on_site?.href, visible: stats.crew_on_site?.visible }
+        { key: "fleet_utilization", label: "Fleet Utilization", value: stats.fleet_utilization?.value ?? `${fleetUtilizationPct}%`, sublabel: `${activeEquipmentCount} of ${equipmentRows.length} active`, href: stats.fleet_utilization?.href, visible: stats.fleet_utilization?.visible }
       );
 
       sections.activeJobs = {
@@ -420,7 +419,6 @@ export async function GET() {
       sections.quickActions = {
         items: [
           { key: "add_event", label: "Add Event", href: "calendar-event" },
-          { key: "time_clock", label: "Time Clock", href: "time-clock" },
           { key: "check_in", label: "Check-In", href: "equipment-checkin" },
           { key: "daily_report", label: "Daily Report", href: "daily-report" },
           { key: "work_order", label: "Work Order", href: "work-order" },
@@ -470,7 +468,6 @@ export async function GET() {
       };
       sections.quickActions = {
         items: [
-          { key: "time_clock", label: "Time Clock", href: "time-clock" },
           { key: "check_in", label: "Check-In", href: "equipment-checkin" },
           { key: "daily_report", label: "Daily Report", href: "daily-report" },
           { key: "safety_sign_off", label: "Safety Sign-Off", href: "safety" },
@@ -502,7 +499,6 @@ export async function GET() {
       };
       sections.quickActions = {
         items: [
-          { key: "time_clock", label: "Time Clock", href: "time-clock" },
           { key: "work_order", label: "Work Order", href: "work-order" },
           { key: "check_in", label: "Equipment Check-In", href: "equipment-checkin" },
           { key: "parts_low", label: "Parts Inventory", href: "/inventory" },
@@ -551,7 +547,6 @@ export async function GET() {
       };
       sections.quickActions = {
         items: [
-          { key: "time_clock", label: "Time Clock", href: "time-clock" },
           { key: "daily_report", label: "Daily Report", href: "daily-report" },
           { key: "safety_sign_off", label: "Safety Sign-Off", href: "safety" },
         ],

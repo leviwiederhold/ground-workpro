@@ -109,6 +109,21 @@ test("iOS declares the location usage descriptions background monitoring needs",
   assert.ok(plist.includes("NSLocationAlwaysAndWhenInUseUsageDescription"));
   assert.ok(plist.includes("NSLocationWhenInUseUsageDescription"));
   assert.ok(plist.includes("UIBackgroundModes"));
+  assert.equal(
+    (plist.match(/Groundwork Pro uses location for accuracy\./g) ?? []).length,
+    3,
+    "all location permission prompts must use neutral approved wording",
+  );
+});
+
+test("iOS exposes the authorization details required for setup completion", () => {
+  const source = read("ios/App/App/JobsiteGeofencePlugin.swift");
+  assert.match(source, /CAPPluginMethod\(name: "requestAlwaysAuthorization"/);
+  assert.match(source, /manager\.requestAlwaysAuthorization\(\)/);
+  assert.match(source, /"authorized_when_in_use"/);
+  assert.match(source, /"authorized_always"/);
+  assert.match(source, /CLLocationManager\.locationServicesEnabled\(\)/);
+  assert.match(source, /manager\.accuracyAuthorization == \.fullAccuracy/);
 });
 
 test("iOS never uses a background URLSession for a data task", () => {

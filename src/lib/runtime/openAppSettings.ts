@@ -41,6 +41,6 @@ export function openAppLocationSettings(): OpenSettingsOutcome {
 /** Platform-appropriate instructions for re-enabling location by hand. */
 export function locationSettingsInstructions(native: boolean): string {
   return native
-    ? "Open Settings → Privacy & Security → Location Services → Groundwork Pro, then choose “While Using the App”."
+    ? "Location access needs one more step. Open Settings and set Location to Always. Make sure Precise Location is on."
     : "Open your browser’s site settings for this page (the icon in the address bar) → Location → Allow, then reload.";
 }

@@ -31,7 +31,8 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
         CAPPluginMethod(name: "register", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "removeAll", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getRegistered", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getHealth", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "getHealth", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "requestAlwaysAuthorization", returnType: CAPPluginReturnPromise)
     ]
 
     private let manager = CLLocationManager()
@@ -131,9 +132,27 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
         // Instance property, not the deprecated class method: the class method
         // returns a stale value on iOS 14+.
         let authorized = manager.authorizationStatus == .authorizedAlways
+        let authorizationStatus: String
+        switch manager.authorizationStatus {
+        case .notDetermined: authorizationStatus = "not_determined"
+        case .restricted: authorizationStatus = "restricted"
+        case .denied: authorizationStatus = "denied"
+        case .authorizedWhenInUse: authorizationStatus = "authorized_when_in_use"
+        case .authorizedAlways: authorizationStatus = "authorized_always"
+        @unknown default: authorizationStatus = "unknown"
+        }
+        let preciseLocation: Bool
+        if #available(iOS 14.0, *) {
+            preciseLocation = manager.accuracyAuthorization == .fullAccuracy
+        } else {
+            preciseLocation = true
+        }
         call.resolve([
             "supported": CLLocationManager.isMonitoringAvailable(for: CLCircularRegion.self),
             "authorized": authorized,
+            "authorizationStatus": authorizationStatus,
+            "locationServicesEnabled": CLLocationManager.locationServicesEnabled(),
+            "preciseLocation": preciseLocation,
             "registeredCount": manager.monitoredRegions.count,
             "lastEventAt": defaults.string(forKey: "gw_last_event_at") ?? "",
             "lastEventTransition": defaults.string(forKey: "gw_last_event_transition") ?? "",
@@ -145,6 +164,16 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
             // without it.
             "hasCredential": SecureAttendanceStorePlugin.hasCredential()
         ])
+    }
+
+    @objc func requestAlwaysAuthorization(_ call: CAPPluginCall) {
+        if manager.authorizationStatus != .authorizedAlways {
+            manager.requestAlwaysAuthorization()
+        }
+        // The OS owns the prompt and may complete it after this bridge call.
+        // JavaScript keeps the full-screen gate mounted and rechecks health on
+        // foreground return before it can dismiss.
+        call.resolve()
     }
 
     // MARK: - CLLocationManagerDelegate

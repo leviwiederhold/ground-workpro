@@ -42,6 +42,15 @@ export type GeofenceTransitionEvent = {
 export type NativeGeofenceHealth = {
   supported: boolean;
   authorized: boolean; // background location authorized natively
+  authorizationStatus:
+    | "not_determined"
+    | "restricted"
+    | "denied"
+    | "authorized_when_in_use"
+    | "authorized_always"
+    | "unknown";
+  locationServicesEnabled: boolean | null;
+  preciseLocation: boolean | null;
   registeredCount: number;
   lastEventAt: string | null;
   lastEventTransition: "enter" | "exit" | null;
@@ -59,6 +68,7 @@ export interface JobsiteGeofencePlugin {
   removeAll(): Promise<void>;
   getRegistered(): Promise<{ regions: GeofenceRegion[] }>;
   getHealth(): Promise<NativeGeofenceHealth>;
+  requestAlwaysAuthorization(): Promise<void>;
   addListener(
     eventName: "geofenceTransition",
     listener: (event: GeofenceTransitionEvent) => void
@@ -120,6 +130,9 @@ export async function getRegisteredGeofences(): Promise<GeofenceRegion[]> {
 const UNAVAILABLE_HEALTH: NativeGeofenceHealth = {
   supported: false,
   authorized: false,
+  authorizationStatus: "unknown",
+  locationServicesEnabled: null,
+  preciseLocation: null,
   registeredCount: 0,
   lastEventAt: null,
   lastEventTransition: null,
@@ -163,6 +176,39 @@ export async function requireNativeGeofenceHealth(): Promise<NativeGeofenceHealt
     supported: true,
     hasCredential: health.hasCredential === true,
   };
+}
+
+/** Ask iOS to elevate an existing foreground grant to Always authorization. */
+export async function requestNativeAlwaysAuthorization(): Promise<void> {
+  const plugin = getPlugin();
+  if (!plugin?.requestAlwaysAuthorization) {
+    throw new Error("native location authorization bridge unavailable");
+  }
+  await plugin.requestAlwaysAuthorization();
+}
+
+/**
+ * Register and read back the exact required region set. A successful bridge
+ * call is not enough: setup only completes when Core Location reports every
+ * assigned identifier as monitored.
+ */
+export async function requireRegisteredGeofences(
+  regions: GeofenceRegion[],
+): Promise<{ requiredRegionIds: string[]; registeredRegionIds: string[] }> {
+  const plugin = getPlugin();
+  if (!plugin) throw new Error("native location service unavailable");
+  if (regions.length === 0) throw new Error("no assigned location regions are available");
+
+  await plugin.removeAll();
+  await plugin.register({ regions });
+  const registered = (await plugin.getRegistered()).regions ?? [];
+  const requiredRegionIds = regions.map((region) => region.identifier).sort();
+  const registeredRegionIds = registered.map((region) => region.identifier).sort();
+  const registeredSet = new Set(registeredRegionIds);
+  if (!requiredRegionIds.every((identifier) => registeredSet.has(identifier))) {
+    throw new Error("assigned location regions were not registered");
+  }
+  return { requiredRegionIds, registeredRegionIds };
 }
 
 /**

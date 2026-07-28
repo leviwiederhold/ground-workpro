@@ -24,7 +24,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (rel: string) => readFileSync(join(repoRoot, rel), "utf8");
 
 const gate = () => read("app/components/location/LocationRequiredGate.tsx");
-const card = () => read("app/components/views/JobsiteTimeEmployeeCard.tsx");
+const runtime = () => read("app/components/location/LocationBackgroundRuntime.tsx");
 const page = () => read("app/page.tsx");
 
 /** Strip comments so assertions test code, not prose about it. */
@@ -119,28 +119,75 @@ test("the wrapper gates by assignment, not by role", () => {
   const source = code(read("app/components/location/RequireLocationAccess.tsx"));
   // Participation is derived from the authoritative assignment source.
   assert.match(source, /isAttendanceParticipant/, "must gate by attendance participation");
-  assert.match(source, /fetchAssignedJobs\(\)/, "participation comes from assigned jobs (job_employees)");
+  assert.match(source, /fetchAssignedJobsRequired\(\)/, "participation comes from assigned jobs (job_employees)");
   // No role allowlist anywhere in the gating decision.
   assert.ok(!/participatesInAutomaticAttendance/.test(source), "must not use a role allowlist");
   assert.ok(!/readCachedUiRole/.test(source), "must not decide participation from cached role");
 });
 
 // ── Native requires a device credential; web does not (Stage 2) ──────────────
-test("native setup requires location AND a device credential", () => {
+const completeNativeHealth = {
+  supported: true,
+  authorized: true,
+  authorizationStatus: "authorized_always" as const,
+  locationServicesEnabled: true,
+  preciseLocation: true,
+  registeredCount: 2,
+  lastEventAt: null,
+  lastEventTransition: null,
+  lastError: null,
+  pendingQueuedCount: 0,
+  hasCredential: true,
+};
+
+test("native setup requires Always authorization, Precise Location, credential, and every assigned region", () => {
+  const complete = {
+    platform: "native" as const,
+    permission: "granted" as const,
+    hasDeviceCredential: true,
+    nativeHealth: completeNativeHealth,
+    requiredRegionIds: ["shop:arrival", "shop:wake"],
+    registeredRegionIds: ["shop:arrival", "shop:wake"],
+  };
   assert.equal(
-    isAttendanceSetupComplete({ platform: "native", permission: "granted", hasDeviceCredential: true }),
+    isAttendanceSetupComplete(complete),
     true,
-    "native: granted + credential is complete",
+    "all native requirements are complete",
   );
   assert.equal(
-    isAttendanceSetupComplete({ platform: "native", permission: "granted", hasDeviceCredential: false }),
+    isAttendanceSetupComplete({
+      ...complete,
+      nativeHealth: {
+        ...completeNativeHealth,
+        authorized: false,
+        authorizationStatus: "authorized_when_in_use",
+      },
+    }),
     false,
-    "native: granted without a credential is NOT complete",
+    "foreground-only authorization must not dismiss the gate",
   );
   assert.equal(
-    isAttendanceSetupComplete({ platform: "native", permission: "denied", hasDeviceCredential: true }),
+    isAttendanceSetupComplete({
+      ...complete,
+      nativeHealth: { ...completeNativeHealth, preciseLocation: false },
+    }),
     false,
-    "native: no permission is never complete",
+    "reduced-accuracy location must not dismiss the gate",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({ ...complete, hasDeviceCredential: false }),
+    false,
+    "a missing secure credential must not dismiss the gate",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({ ...complete, registeredRegionIds: ["shop:arrival"] }),
+    false,
+    "every assigned region must be registered",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({ ...complete, permission: "denied" }),
+    false,
+    "revoked permission must raise the gate",
   );
 });
 
@@ -254,26 +301,19 @@ test("all feature-level permission UI is gone", () => {
   assert.ok(!source.includes("ensureLocation"), "no action-level ensureLocation gating");
 });
 
-test("no location ribbon remains, and the dashboard never prompts", () => {
-  const source = code(card());
+test("the headless background runtime never renders or prompts", () => {
+  const source = code(runtime());
   assert.ok(!source.includes("Allow location"), "the ribbon must be removed");
-  // The card DOES render now — the attendance lifecycle state and a manual
-  // fallback (PR 14). What it must never do is ask for permission itself: the
-  // one permission experience is LocationRequiredGate. The non-prompting
-  // checkLocationPermission() read is what belongs here.
   assert.ok(
     !source.includes("requestLocationPermissionInteractive"),
-    "the dashboard must never raise the OS dialog",
+    "the background runtime must never raise the OS dialog",
   );
   assert.ok(
     source.includes("checkLocationPermission"),
-    "the card must read permission non-prompting",
+    "the runtime must read permission non-prompting",
   );
-  // No control on this card may be a permission request in disguise.
-  assert.ok(
-    !/onClick=\{[^}]*[Pp]ermission/.test(source),
-    "no control on the card may trigger a permission request",
-  );
+  assert.match(source, /return null;/, "the runtime must render no employee-facing UI");
+  assert.ok(!/<button\b/.test(source), "the runtime must render no controls");
 });
 
 test("exactly one component requests permission", () => {
@@ -284,7 +324,7 @@ test("exactly one component requests permission", () => {
   // Nothing else in the app may call it.
   const others = [
     "app/page.tsx",
-    "app/components/views/JobsiteTimeEmployeeCard.tsx",
+    "app/components/location/LocationBackgroundRuntime.tsx",
   ];
   for (const rel of others) {
     assert.ok(
@@ -296,7 +336,7 @@ test("exactly one component requests permission", () => {
 
 // ── Attendance preserved ─────────────────────────────────────────────────────
 test("the geofence watcher still starts automatically once granted", () => {
-  const source = card();
+  const source = runtime();
   assert.match(source, /startForegroundGeofenceWatch/, "the watcher must be preserved");
   assert.match(source, /permission !== 'granted'/, "still gated on granted permission");
   assert.match(source, /checkLocationPermission/, "permission is read non-interactively");
@@ -312,9 +352,14 @@ const setupDeps = (overrides: Record<string, unknown> = {}) => ({
   native: true,
   checkPermission: grant,
   requestPermission: grant,
-  checkNativeGeofenceHealth: async () => ({ supported: true, hasCredential: false }),
+  checkNativeGeofenceHealth: async () => ({ ...completeNativeHealth, hasCredential: false }),
+  requestBackgroundAuthorization: async () => {},
   enrollSecureCredential: async () => "credential",
   writeSecureCredential: async () => {},
+  registerAssignedLocations: async () => ({
+    requiredRegionIds: ["shop:arrival", "shop:wake"],
+    registeredRegionIds: ["shop:arrival", "shop:wake"],
+  }),
   verifyCompletion: async () => true,
   ...overrides,
 });
@@ -383,6 +428,18 @@ test("every native setup stage has its own timeout code", async () => {
       override: { checkNativeGeofenceHealth: never },
     },
     {
+      stage: "requesting_background_authorization",
+      code: "BACKGROUND_AUTHORIZATION_REQUEST_TIMEOUT",
+      override: {
+        checkNativeGeofenceHealth: async () => ({
+          ...completeNativeHealth,
+          authorized: false,
+          authorizationStatus: "authorized_when_in_use" as const,
+        }),
+        requestBackgroundAuthorization: never,
+      },
+    },
+    {
       stage: "secure_credential_enrollment",
       code: "SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT",
       override: { enrollSecureCredential: never },
@@ -393,10 +450,15 @@ test("every native setup stage has its own timeout code", async () => {
       override: { writeSecureCredential: never },
     },
     {
+      stage: "assigned_location_registration",
+      code: "ASSIGNED_LOCATION_REGISTRATION_TIMEOUT",
+      override: { registerAssignedLocations: never },
+    },
+    {
       stage: "completion",
       code: "LOCATION_SETUP_COMPLETION_TIMEOUT",
       override: {
-        checkNativeGeofenceHealth: async () => ({ supported: true, hasCredential: true }),
+        checkNativeGeofenceHealth: async () => completeNativeHealth,
         verifyCompletion: never,
       },
     },
@@ -430,6 +492,17 @@ test("bridge, enrollment and Keychain failures retain their exact stage codes", 
       override: { checkNativeGeofenceHealth: async () => { throw new Error("plugin unavailable"); } },
     },
     {
+      code: "BACKGROUND_AUTHORIZATION_REQUEST_FAILED",
+      override: {
+        checkNativeGeofenceHealth: async () => ({
+          ...completeNativeHealth,
+          authorized: false,
+          authorizationStatus: "authorized_when_in_use" as const,
+        }),
+        requestBackgroundAuthorization: async () => { throw new Error("bridge failed"); },
+      },
+    },
+    {
       code: "SECURE_CREDENTIAL_ENROLLMENT_FAILED",
       override: { enrollSecureCredential: async () => { throw new Error("HTTP 401"); } },
     },
@@ -438,9 +511,13 @@ test("bridge, enrollment and Keychain failures retain their exact stage codes", 
       override: { writeSecureCredential: async () => { throw new Error("Keychain failed"); } },
     },
     {
+      code: "ASSIGNED_LOCATION_REGISTRATION_FAILED",
+      override: { registerAssignedLocations: async () => { throw new Error("registration failed"); } },
+    },
+    {
       code: "LOCATION_SETUP_COMPLETION_FAILED",
       override: {
-        checkNativeGeofenceHealth: async () => ({ supported: true, hasCredential: true }),
+        checkNativeGeofenceHealth: async () => completeNativeHealth,
         verifyCompletion: async () => false,
       },
     },
@@ -453,7 +530,7 @@ test("bridge, enrollment and Keychain failures retain their exact stage codes", 
   }
 });
 
-test("setup diagnostics report all six named stages", async () => {
+test("setup diagnostics report every required native boundary", async () => {
   const transitions: Array<{ stage: string; state: string }> = [];
   const result = await runLocationSetup(
     setupDeps({
@@ -468,6 +545,7 @@ test("setup diagnostics report all six named stages", async () => {
       "native_geofence_health",
       "secure_credential_enrollment",
       "secure_store_write",
+      "assigned_location_registration",
       "completion",
     ],
   );
@@ -477,6 +555,73 @@ test("setup diagnostics report all six named stages", async () => {
         transition.stage === "requesting_location_permission" && transition.state === "skipped",
     ),
   );
+  assert.ok(
+    transitions.some(
+      (transition) =>
+        transition.stage === "requesting_background_authorization" &&
+        transition.state === "skipped",
+    ),
+  );
+});
+
+test("foreground-only iOS authorization stays in the neutral Settings flow", async () => {
+  let healthChecks = 0;
+  let enrollmentCalls = 0;
+  const result = await runLocationSetup(
+    setupDeps({
+      checkNativeGeofenceHealth: async () => {
+        healthChecks += 1;
+        return {
+          ...completeNativeHealth,
+          authorized: false,
+          authorizationStatus: "authorized_when_in_use" as const,
+          hasCredential: false,
+        };
+      },
+      enrollSecureCredential: async () => {
+        enrollmentCalls += 1;
+        return "credential";
+      },
+    }),
+  );
+  assert.deepEqual(result, {
+    status: "settings_required",
+    stage: "native_geofence_health",
+    code: "IOS_BACKGROUND_LOCATION_REQUIRED",
+  });
+  assert.equal(healthChecks, 2, "authorization must be re-read after requesting Always");
+  assert.equal(enrollmentCalls, 0, "incomplete authorization must not advance setup");
+});
+
+test("disabled Precise Location stays in the neutral Settings flow", async () => {
+  const result = await runLocationSetup(
+    setupDeps({
+      checkNativeGeofenceHealth: async () => ({
+        ...completeNativeHealth,
+        preciseLocation: false,
+      }),
+    }),
+  );
+  assert.deepEqual(result, {
+    status: "settings_required",
+    stage: "native_geofence_health",
+    code: "IOS_PRECISE_LOCATION_REQUIRED",
+  });
+});
+
+test("setup cannot complete until every assigned region is registered", async () => {
+  const result = await runLocationSetup(
+    setupDeps({
+      registerAssignedLocations: async () => ({
+        requiredRegionIds: ["shop:arrival", "shop:wake"],
+        registeredRegionIds: ["shop:arrival"],
+      }),
+    }),
+  );
+  assert.equal(result.status, "failed");
+  if (result.status === "failed") {
+    assert.equal(result.code, "ASSIGNED_LOCATION_REGISTRATION_FAILED");
+  }
 });
 
 test("every failure code has exact visible copy", () => {
@@ -489,11 +634,11 @@ test("every failure code has exact visible copy", () => {
   );
   assert.equal(
     LOCATION_GATE_ERROR_COPY.NATIVE_GEOFENCE_HEALTH_TIMEOUT,
-    "Timed out verifying native geofence service.",
+    "Timed out verifying location services.",
   );
   assert.equal(
     LOCATION_GATE_ERROR_COPY.SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT,
-    "Timed out enrolling secure attendance credential.",
+    "Timed out completing secure location setup.",
   );
 });
 
@@ -674,7 +819,8 @@ test("settings can only be opened natively; the web falls back to instructions",
   assert.match(helper, /return "unsupported"/, "web must report that it cannot open settings");
 
   // Both platforms get usable manual steps.
-  assert.match(locationSettingsInstructions(true), /Privacy & Security/);
+  assert.match(locationSettingsInstructions(true), /set Location to Always/);
+  assert.match(locationSettingsInstructions(true), /Precise Location is on/);
   assert.match(locationSettingsInstructions(false), /site settings/);
 
   // The gate always shows instructions as a reliable fallback, even when the
@@ -706,7 +852,7 @@ test("there is no header/ribbon location prompt outside the single gate", () => 
   // ribbon, or banner elsewhere may ask for or prompt location.
   for (const rel of [
     "app/page.tsx",
-    "app/components/views/JobsiteTimeEmployeeCard.tsx",
+    "app/components/location/LocationBackgroundRuntime.tsx",
   ]) {
     const source = code(read(rel));
     assert.ok(!source.includes("Allow location"), `${rel} must not show a location ribbon`);

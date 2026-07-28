@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { Geolocation } from "@capacitor/geolocation";
+
 // Attendance location permission (clock-in/out only). Self-contained — no
 // relative imports — so the four required outcomes can be unit-tested directly.
 //
@@ -53,16 +55,14 @@ export function mapGeolocationError(err: { code?: number } | null | undefined): 
   return err?.code === 1 ? "denied" : "unavailable";
 }
 
-// Loads the native Capacitor Geolocation plugin, but ONLY inside the native app
-// wrapper. On web this returns null so we use the standard browser prompt.
-// Imported dynamically so the plugin never runs during SSR.
+// Return the statically bundled proxy. The prior dynamic import could remain
+// pending in a remote-URL WKWebView before any native bridge method was called;
+// physical-device logs showed "checking_location_permission" followed by its
+// timeout with no "To Native -> Geolocation checkPermissions" line. The
+// Capacitor proxy is SSR-safe, and bundling it removes that runtime chunk-load
+// boundary from the required gate.
 export async function loadCapacitorGeolocation(): Promise<NativeGeolocationPlugin | null> {
-  try {
-    const mod: any = await import("@capacitor/geolocation");
-    return (mod?.Geolocation as NativeGeolocationPlugin | undefined) ?? null;
-  } catch {
-    return null;
-  }
+  return (Geolocation as NativeGeolocationPlugin | undefined) ?? null;
 }
 
 /** Strict native check used by the diagnostic setup pipeline. */

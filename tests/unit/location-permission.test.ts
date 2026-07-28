@@ -10,6 +10,9 @@ import {
   requestLocationPermissionInteractive,
   type NativeGeolocationPlugin,
 } from "../../src/lib/jobsite-time/locationPermission.ts";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Bug fixed here: tapping "Enable/Allow location" did nothing because the old
 // helper only *queried* the Permissions API (never surfaced a dialog). These
@@ -26,6 +29,18 @@ type NavShape = {
   };
   permissions?: { query?: (d: any) => Promise<{ state: string }> };
 };
+
+test("the required gate bundles Geolocation instead of loading it during the tap", () => {
+  const source = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src/lib/jobsite-time/locationPermission.ts"),
+    "utf8",
+  );
+  assert.match(source, /import \{ Geolocation \} from "@capacitor\/geolocation";/);
+  assert.ok(
+    !source.includes('import("@capacitor/geolocation")'),
+    "a physical iPhone must not wait on a dynamic Geolocation chunk before checkPermissions",
+  );
+});
 
 // Node 22 exposes a built-in read-only `navigator` getter, so assignment throws.
 // Override it via a configurable property descriptor and restore afterward.

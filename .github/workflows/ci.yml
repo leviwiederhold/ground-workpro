@@ -21,6 +21,8 @@ jobs:
 
       - run: pnpm install
       - run: pnpm lint
+      - run: pnpm test:unit
+      - run: pnpm auth:contract
       - run: pnpm build
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}

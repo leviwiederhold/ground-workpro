@@ -29,7 +29,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm exec next typegen && tsc --noEmit --incremental false",
-    "apple:secret": "node scripts/generate-apple-secret.js"
+    "apple:secret": "node scripts/generate-apple-secret.js",
+    "auth:contract": "node scripts/check-production-auth-contract.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",

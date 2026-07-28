@@ -203,6 +203,13 @@ test("the web login route does not use the native detector at all", () => {
   );
 });
 
+test("legacy native shells never hide social login without an update explanation", () => {
+  const webPage = read("app/login/page.tsx");
+  assert.match(webPage, /data-testid="native-auth-update-required"/);
+  assert.match(webPage, /Update required for Apple or Google Sign-In/);
+  assert.match(webPage, /latest Groundwork Pro version from TestFlight or the App Store/);
+});
+
 test("AppDelegate targets the native route, keeping the marker only as a fallback", () => {
   const appDelegate = read("ios/App/App/AppDelegate.swift");
 

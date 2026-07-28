@@ -1,0 +1,10 @@
+{
+  "productionSiteOrigin": "https://groundwork-pro.com",
+  "supabaseProjectRef": "ucyalowqzvkybnfgucem",
+  "supabaseAuthCallback": "https://ucyalowqzvkybnfgucem.supabase.co/auth/v1/callback",
+  "apple": {
+    "webServicesId": "com.groundwork-pro.web",
+    "nativeBundleId": "com.leviwiederhold.groundworkpro",
+    "supabaseClientIdsInOrder": ["com.groundwork-pro.web", "com.leviwiederhold.groundworkpro"]
+  }
+}

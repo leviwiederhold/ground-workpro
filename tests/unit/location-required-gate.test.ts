@@ -354,8 +354,29 @@ test("a throwing step is recoverable, not a hang", async () => {
     },
     setupTimeoutMs: 50,
   });
-  // A throw is folded into a terminal, retryable outcome (never left pending).
-  assert.ok(result.status === "timeout" || result.status === "enrollment_failed");
+  assert.deepEqual(result, { status: "enrollment_failed" });
+});
+
+test("a throwing native permission call is reported as unavailable, not mislabeled as a timeout", async () => {
+  const result = await runLocationSetup({
+    requestPermission: async () => {
+      throw new Error("native bridge rejected");
+    },
+    completeSetup: async () => true,
+    permissionTimeoutMs: 50,
+  });
+  assert.deepEqual(result, { status: "unavailable" });
+});
+
+test("setup diagnostics identify permission then credential enrollment", async () => {
+  const steps: string[] = [];
+  const result = await runLocationSetup({
+    requestPermission: grant,
+    completeSetup: async () => true,
+    onTransition: (step) => steps.push(step),
+  });
+  assert.deepEqual(result, { status: "granted" });
+  assert.deepEqual(steps, ["permission", "enrollment"]);
 });
 
 test("retry: a failed attempt can succeed on a second call", async () => {
@@ -376,21 +397,26 @@ test("every error kind has concise, generic copy", () => {
   }
 });
 
-test("the gate renders a location icon from the existing icon library", () => {
-  const source = gate();
-  // Font Awesome (already loaded globally) — a location pin. No image asset.
-  assert.match(source, /fa-location-dot/, "must use a Font Awesome location icon");
-  assert.ok(!/\.(png|jpg|jpeg|svg)['"]/.test(source), "must not add an image asset");
+test("the gate bundles a visible SVG location icon without global icon CSS", () => {
+  const source = code(gate());
+  assert.match(source, /<svg[\s\S]*data-testid="location-gate-icon"/, "must render the bundled icon component");
+  assert.match(source, /<path d="M20 10c0 5-8 11-8 11S4 15 4 10/, "must contain the map-pin shape");
+  assert.ok(!source.includes("fa-location"), "must not depend on Font Awesome location CSS");
+  assert.ok(!source.includes("@fortawesome"), "must not import a global icon stylesheet");
 });
 
 test("the native permission request never fires on an already-decided status", () => {
   // The iOS hang: requestPermissions() on an already-granted/denied status never
   // resolves. The helper must branch on the current status and only request when
   // it is 'prompt'.
-  const source = code(read("src/lib/jobsite-time/locationPermission.ts"));
+  const allSource = code(read("src/lib/jobsite-time/locationPermission.ts"));
+  const source = allSource.slice(
+    allSource.indexOf("export async function requestNativeLocationPermission"),
+    allSource.indexOf("export async function requestLocationPermissionInteractive"),
+  );
   assert.match(source, /if \(current === "granted"\) return "granted";/);
   assert.match(source, /if \(current === "denied"\) return "denied";/);
-  const requestIdx = source.indexOf("requestPermissions()");
+  const requestIdx = source.indexOf("geo.requestPermissions()");
   const denyGuardIdx = source.indexOf('if (current === "denied")');
   assert.ok(denyGuardIdx > -1 && denyGuardIdx < requestIdx, "must guard denied BEFORE requesting");
 });
@@ -495,10 +521,33 @@ test("the button can never be stranded on Requesting — busy always clears", ()
   const source = code(gate());
   // busy drives the "Requesting…" label; it must be cleared in a finally so no
   // failure path leaves the button disabled forever.
-  assert.match(source, /\} finally \{\s*setBusy\(false\);/, "busy is reset in finally");
+  assert.match(
+    source,
+    /\} finally \{\s*setupInFlight\.current = false;\s*setBusy\(false\);/,
+    "the lock and busy state are reset together in finally",
+  );
   assert.match(source, /busy \? 'Requesting…' : label/, "label reverts once busy clears");
   // Failures surface a concise, recoverable error rather than a dead button.
   assert.match(source, /setErrorKind\(locationSetupErrorKind\(result\)\)/, "shows a concise error on failure");
+});
+
+test("a tap starts exactly one setup attempt and enters Requesting immediately", () => {
+  const source = code(gate());
+  assert.match(source, /onClick=\{handlePrimary\}/, "the primary tap must invoke the setup handler");
+  assert.match(source, /if \(setupInFlight\.current\) return;/, "a synchronous lock must reject repeated taps");
+  const lock = source.indexOf("setupInFlight.current = true");
+  const busy = source.indexOf("setBusy(true)", lock);
+  const setup = source.indexOf("runLocationSetup({", busy);
+  assert.ok(lock > -1 && busy > lock && setup > busy, "lock and Requesting state must be set before setup starts");
+  assert.match(source, /setupInFlight\.current = false;\s*setBusy\(false\);/, "failure must restore a usable retry button");
+});
+
+test("a denied result cannot start a second bridge call that strands Requesting", () => {
+  const source = code(gate());
+  const deniedStart = source.indexOf("if (result.status === 'denied')");
+  const denied = source.slice(deniedStart, source.indexOf("setErrorKind(locationSetupErrorKind(result))", deniedStart));
+  assert.match(denied, /setPermission\('denied'\)/, "the native denial result is authoritative");
+  assert.ok(!denied.includes("checkLocationPermission"), "must not perform an unbounded post-denial bridge check");
 });
 
 test("the gate locks scrolling of anything behind it", () => {
@@ -516,8 +565,9 @@ test("settings can only be opened natively; the web falls back to instructions",
   assert.match(locationSettingsInstructions(true), /Privacy & Security/);
   assert.match(locationSettingsInstructions(false), /site settings/);
 
-  // The gate shows instructions when opening is unsupported.
-  assert.match(code(gate()), /if \(outcome === 'unsupported'\) setShowInstructions\(true\)/);
+  // The gate always shows instructions as a reliable fallback, even when the
+  // WebView accepted the app-settings URL.
+  assert.match(code(gate()), /setShowInstructions\(true\);\s*openAppLocationSettings\(\)/);
 });
 
 test("returning from Settings re-checks permission and lets the user in", () => {
@@ -525,8 +575,17 @@ test("returning from Settings re-checks permission and lets the user in", () => 
   assert.match(source, /addEventListener\('focus'/, "re-check on foreground");
   assert.match(source, /visibilitychange/, "re-check on visibility change");
   // On return, a granted permission finishes (bounded) setup and then dismisses.
-  assert.match(source, /if \(next === 'granted'\)/, "acts on a granted result on return");
+  assert.match(source, /permissionTimeoutMs: LOCATION_CHECK_TIMEOUT_MS/, "the return check must be bounded");
   assert.match(source, /if \(result\.status === 'granted'\) onGranted\(\)/, "dismisses once setup is complete");
+});
+
+test("focus events cannot race the tap-owned native setup", () => {
+  const source = code(gate());
+  const focusStart = source.indexOf("const onFocus = async () =>");
+  const focus = source.slice(focusStart, source.indexOf("window.addEventListener('focus'", focusStart));
+  assert.match(focus, /if \(setupInFlight\.current\) return;/);
+  assert.match(focus, /setupInFlight\.current = true;/);
+  assert.match(focus, /setupInFlight\.current = false;/);
 });
 
 // ── No header location prompt anywhere (Stage 2) ─────────────────────────────

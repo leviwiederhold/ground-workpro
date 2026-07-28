@@ -36,6 +36,7 @@ const code = (rel: string) =>
 
 const IOS_PLUGIN_SOURCES = [
   "AttendanceNativeQueue.swift",
+  "GroundworkBridgeViewController.swift",
   "JobsiteGeofencePlugin.swift",
   "AttendanceQueueStorePlugin.swift",
   "SecureAttendanceStorePlugin.swift",
@@ -79,6 +80,26 @@ test("iOS plugins declare Capacitor registration", () => {
     assert.ok(source.includes(`jsName = "${jsName}"`), `${path} does not expose jsName "${jsName}"`);
     assert.ok(source.includes("pluginMethods"), `${path} declares no pluginMethods`);
   }
+});
+
+test("the iOS bridge explicitly registers every app-target attendance plugin", () => {
+  const bridge = read("ios/App/App/GroundworkBridgeViewController.swift");
+  for (const plugin of [
+    "JobsiteGeofencePlugin",
+    "AttendanceQueueStorePlugin",
+    "SecureAttendanceStorePlugin",
+  ]) {
+    assert.ok(
+      bridge.includes(`registerPluginInstance(${plugin}())`),
+      `${plugin} is compiled but never registered with the Capacitor bridge`,
+    );
+  }
+
+  const storyboard = read("ios/App/App/Base.lproj/Main.storyboard");
+  assert.ok(
+    storyboard.includes('customClass="GroundworkBridgeViewController"'),
+    "the registered bridge controller is not the app's startup controller",
+  );
 });
 
 test("iOS declares the location usage descriptions background monitoring needs", () => {

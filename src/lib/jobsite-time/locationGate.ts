@@ -98,100 +98,282 @@ export function isAttendanceSetupComplete(params: {
 
 // ── The tap-to-enable state machine (the fix for stuck "Requesting…") ─────────
 
-// The permission step may legitimately wait on the OS dialog while the user
-// decides, so it gets a long ceiling. The device-setup step has no user
-// interaction, so it gets a short one. BOTH are bounded, so no step can leave
-// the gate pinned on "Requesting…" forever.
-export const LOCATION_SETUP_PERMISSION_TIMEOUT_MS = 60_000;
-export const LOCATION_SETUP_STEP_TIMEOUT_MS = 15_000;
+export type LocationSetupStage =
+  | "checking_location_permission"
+  | "requesting_location_permission"
+  | "native_geofence_health"
+  | "secure_credential_enrollment"
+  | "secure_store_write"
+  | "completion";
 
-/** Terminal outcome of one enable attempt. Every path resolves to one of these
- *  — there is no "still pending forever". */
+export type LocationSetupFailureCode =
+  | "LOCATION_PERMISSION_CHECK_TIMEOUT"
+  | "LOCATION_PERMISSION_CHECK_FAILED"
+  | "LOCATION_PERMISSION_REQUEST_TIMEOUT"
+  | "LOCATION_PERMISSION_REQUEST_FAILED"
+  | "NATIVE_GEOFENCE_HEALTH_TIMEOUT"
+  | "NATIVE_GEOFENCE_HEALTH_FAILED"
+  | "SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT"
+  | "SECURE_CREDENTIAL_ENROLLMENT_FAILED"
+  | "SECURE_STORE_WRITE_TIMEOUT"
+  | "SECURE_STORE_WRITE_FAILED"
+  | "LOCATION_SETUP_COMPLETION_TIMEOUT"
+  | "LOCATION_SETUP_COMPLETION_FAILED";
+
+export const LOCATION_SETUP_STAGE_TIMEOUT_MS: Record<LocationSetupStage, number> = {
+  checking_location_permission: 10_000,
+  // The only user-controlled wait: iOS may leave the permission sheet visible
+  // while the user reads it.
+  requesting_location_permission: 60_000,
+  native_geofence_health: 10_000,
+  secure_credential_enrollment: 15_000,
+  secure_store_write: 10_000,
+  completion: 10_000,
+};
+
+type LocationSetupFailure = {
+  status: "failed";
+  stage: LocationSetupStage;
+  code: LocationSetupFailureCode;
+  kind: "timeout" | "failure";
+  detail?: string;
+};
+
+/** Terminal outcome of one enable attempt. */
 export type LocationSetupResult =
   | { status: "granted" }
-  | { status: "denied" }
-  | { status: "unavailable" }
-  | { status: "timeout" }
-  | { status: "enrollment_failed" };
+  | {
+      status: "denied";
+      stage: "checking_location_permission" | "requesting_location_permission";
+      code: "IOS_LOCATION_PERMISSION_DENIED";
+    }
+  | LocationSetupFailure;
 
-type StepResult<T> =
+type StageResult<T> =
   | { kind: "value"; value: T }
   | { kind: "timeout" }
-  | { kind: "failure" };
+  | { kind: "failure"; error: unknown };
 
-/** Race one async step against a timeout while preserving failure vs stall. */
-async function withStepTimeout<T>(op: Promise<T>, timeoutMs: number): Promise<StepResult<T>> {
+export type LocationSetupTransition = {
+  stage: LocationSetupStage;
+  state: "started" | "succeeded" | "skipped";
+};
+
+const STAGE_CODES: Record<
+  LocationSetupStage,
+  { timeout: LocationSetupFailureCode; failure: LocationSetupFailureCode }
+> = {
+  checking_location_permission: {
+    timeout: "LOCATION_PERMISSION_CHECK_TIMEOUT",
+    failure: "LOCATION_PERMISSION_CHECK_FAILED",
+  },
+  requesting_location_permission: {
+    timeout: "LOCATION_PERMISSION_REQUEST_TIMEOUT",
+    failure: "LOCATION_PERMISSION_REQUEST_FAILED",
+  },
+  native_geofence_health: {
+    timeout: "NATIVE_GEOFENCE_HEALTH_TIMEOUT",
+    failure: "NATIVE_GEOFENCE_HEALTH_FAILED",
+  },
+  secure_credential_enrollment: {
+    timeout: "SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT",
+    failure: "SECURE_CREDENTIAL_ENROLLMENT_FAILED",
+  },
+  secure_store_write: {
+    timeout: "SECURE_STORE_WRITE_TIMEOUT",
+    failure: "SECURE_STORE_WRITE_FAILED",
+  },
+  completion: {
+    timeout: "LOCATION_SETUP_COMPLETION_TIMEOUT",
+    failure: "LOCATION_SETUP_COMPLETION_FAILED",
+  },
+};
+
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error ?? "unknown error");
+}
+
+/** Race exactly one named transition against its own ceiling. */
+async function runStage<T>(
+  stage: LocationSetupStage,
+  operation: (signal: AbortSignal) => Promise<T>,
+  onTransition?: (transition: LocationSetupTransition) => void,
+  timeoutMs: number = LOCATION_SETUP_STAGE_TIMEOUT_MS[stage],
+): Promise<T | LocationSetupFailure> {
+  onTransition?.({ stage, state: "started" });
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<StepResult<T>>((resolve) => {
-    timer = setTimeout(() => resolve({ kind: "timeout" }), timeoutMs);
+  const timeout = new Promise<StageResult<T>>((resolve) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      resolve({ kind: "timeout" });
+    }, timeoutMs);
   });
-  const guarded: Promise<StepResult<T>> = op.then(
-    (value) => ({ kind: "value", value }),
-    () => ({ kind: "failure" }),
-  );
+  const guarded: Promise<StageResult<T>> = Promise.resolve()
+    .then(() => operation(controller.signal))
+    .then(
+      (value) => ({ kind: "value", value }),
+      (error) => ({ kind: "failure", error }),
+    );
   try {
-    return await Promise.race([guarded, timeout]);
+    const result = await Promise.race([guarded, timeout]);
+    if (result.kind === "timeout") {
+      return { status: "failed", stage, code: STAGE_CODES[stage].timeout, kind: "timeout" };
+    }
+    if (result.kind === "failure") {
+      return {
+        status: "failed",
+        stage,
+        code: STAGE_CODES[stage].failure,
+        kind: "failure",
+        detail: errorDetail(result.error),
+      };
+    }
+    onTransition?.({ stage, state: "succeeded" });
+    return result.value;
   } finally {
     if (timer) clearTimeout(timer);
   }
 }
 
-/**
- * Orchestrate the two enable steps with a per-step ceiling. This is the fix for
- * the stuck "Requesting…" bug: the native permission request can never resolve
- * (iOS does not fire the authorization callback when the status is already
- * decided) and the credential-enrollment fetch had no timeout, so either could
- * hang the button forever. Bounding EACH step means every attempt terminates,
- * and the caller renders a concise, recoverable error instead of a dead button.
- *
- * Pure and dependency-injected so success / denial / timeout / credential
- * failure / retry are all unit-testable without a device.
- */
-export async function runLocationSetup(deps: {
-  requestPermission: () => Promise<LocationPermissionResult>;
-  completeSetup: () => Promise<boolean>;
-  permissionTimeoutMs?: number;
-  setupTimeoutMs?: number;
-  onTransition?: (step: "permission" | "enrollment") => void;
-}): Promise<LocationSetupResult> {
-  const permissionTimeoutMs = deps.permissionTimeoutMs ?? LOCATION_SETUP_PERMISSION_TIMEOUT_MS;
-  const setupTimeoutMs = deps.setupTimeoutMs ?? LOCATION_SETUP_STEP_TIMEOUT_MS;
-
-  deps.onTransition?.("permission");
-  const permission = await withStepTimeout(
-    Promise.resolve().then(deps.requestPermission),
-    permissionTimeoutMs,
-  );
-  if (permission.kind === "timeout") return { status: "timeout" };
-  if (permission.kind === "failure") return { status: "unavailable" };
-  if (permission.value === "denied") return { status: "denied" };
-  if (permission.value === "unavailable") return { status: "unavailable" };
-
-  // permission === "granted": finish device setup (native credential enrollment).
-  deps.onTransition?.("enrollment");
-  const ready = await withStepTimeout(
-    Promise.resolve().then(deps.completeSetup),
-    setupTimeoutMs,
-  );
-  if (ready.kind === "timeout") return { status: "timeout" };
-  if (ready.kind === "failure") return { status: "enrollment_failed" };
-  return ready.value === true ? { status: "granted" } : { status: "enrollment_failed" };
+function isFailure<T>(value: T | LocationSetupFailure): value is LocationSetupFailure {
+  return typeof value === "object" && value !== null && "status" in value && value.status === "failed";
 }
 
-/** Map a setup result to its error kind (or null when it succeeded). */
-export function locationSetupErrorKind(result: LocationSetupResult): LocationSetupErrorKind | null {
-  switch (result.status) {
-    case "granted":
-      return null;
-    case "denied":
-      return "denied";
-    case "unavailable":
-      return "unavailable";
-    case "timeout":
-      return "timeout";
-    case "enrollment_failed":
-      return "enrollment";
+export type LocationSetupDependencies<Credential = unknown> = {
+  native: boolean;
+  checkPermission: () => Promise<LocationPermissionState>;
+  requestPermission: () => Promise<LocationPermissionResult>;
+  checkNativeGeofenceHealth: () => Promise<{ supported: boolean; hasCredential: boolean }>;
+  enrollSecureCredential: (signal: AbortSignal) => Promise<Credential>;
+  writeSecureCredential: (credential: Credential) => Promise<void>;
+  verifyCompletion: () => Promise<boolean>;
+  onTransition?: (transition: LocationSetupTransition) => void;
+  stageTimeoutMs?: Partial<Record<LocationSetupStage, number>>;
+};
+
+/**
+ * Six explicit transitions replace the old two coarse timers. A physical iOS
+ * stall now identifies the exact bridge/network/Keychain boundary and code.
+ * There is no global wrapper timeout and no automatic retry.
+ */
+export async function runLocationSetup<Credential>(
+  deps: LocationSetupDependencies<Credential>,
+): Promise<LocationSetupResult> {
+  const run = <T>(stage: LocationSetupStage, op: (signal: AbortSignal) => Promise<T>) =>
+    runStage(stage, op, deps.onTransition, deps.stageTimeoutMs?.[stage]);
+  const skip = (stage: LocationSetupStage) => deps.onTransition?.({ stage, state: "skipped" });
+
+  let permission = await run("checking_location_permission", () => deps.checkPermission());
+  if (isFailure(permission)) return permission;
+  if (permission === "denied") {
+    return {
+      status: "denied",
+      stage: "checking_location_permission",
+      code: "IOS_LOCATION_PERMISSION_DENIED",
+    };
   }
+  if (permission === "unavailable") {
+    return {
+      status: "failed",
+      stage: "checking_location_permission",
+      code: "LOCATION_PERMISSION_CHECK_FAILED",
+      kind: "failure",
+      detail: "location permission is unavailable",
+    };
+  }
+
+  if (permission === "prompt") {
+    const requested = await run("requesting_location_permission", () => deps.requestPermission());
+    if (isFailure(requested)) return requested;
+    if (requested === "denied") {
+      return {
+        status: "denied",
+        stage: "requesting_location_permission",
+        code: "IOS_LOCATION_PERMISSION_DENIED",
+      };
+    }
+    if (requested === "unavailable") {
+      return {
+        status: "failed",
+        stage: "requesting_location_permission",
+        code: "LOCATION_PERMISSION_REQUEST_FAILED",
+        kind: "failure",
+        detail: "location permission request is unavailable",
+      };
+    }
+
+    // Do not trust only the request callback; verify the OS state independently.
+    permission = await run("checking_location_permission", () => deps.checkPermission());
+    if (isFailure(permission)) return permission;
+    if (permission !== "granted") {
+      return permission === "denied"
+        ? {
+            status: "denied",
+            stage: "checking_location_permission",
+            code: "IOS_LOCATION_PERMISSION_DENIED",
+          }
+        : {
+            status: "failed",
+            stage: "checking_location_permission",
+            code: "LOCATION_PERMISSION_CHECK_FAILED",
+            kind: "failure",
+            detail: `post-request permission state was ${permission}`,
+          };
+    }
+  } else {
+    skip("requesting_location_permission");
+  }
+
+  if (!deps.native) {
+    skip("native_geofence_health");
+    skip("secure_credential_enrollment");
+    skip("secure_store_write");
+  } else {
+    const health = await run("native_geofence_health", () => deps.checkNativeGeofenceHealth());
+    if (isFailure(health)) return health;
+    if (!health.supported) {
+      return {
+        status: "failed",
+        stage: "native_geofence_health",
+        code: "NATIVE_GEOFENCE_HEALTH_FAILED",
+        kind: "failure",
+        detail: "native geofence service is unsupported",
+      };
+    }
+
+    if (health.hasCredential) {
+      skip("secure_credential_enrollment");
+      skip("secure_store_write");
+    } else {
+      const credential = await run(
+        "secure_credential_enrollment",
+        (signal) => deps.enrollSecureCredential(signal),
+      );
+      if (isFailure(credential)) return credential;
+      const write = await run("secure_store_write", () => deps.writeSecureCredential(credential));
+      if (isFailure(write)) return write;
+    }
+  }
+
+  const complete = await run("completion", () => deps.verifyCompletion());
+  if (isFailure(complete)) return complete;
+  if (!complete) {
+    return {
+      status: "failed",
+      stage: "completion",
+      code: "LOCATION_SETUP_COMPLETION_FAILED",
+      kind: "failure",
+      detail: "completion verification returned false",
+    };
+  }
+  return { status: "granted" };
+}
+
+/** Map a setup result to the visible error code (or null on success/denial). */
+export function locationSetupErrorKind(result: LocationSetupResult): LocationSetupErrorKind | null {
+  if (result.status === "granted" || result.status === "denied") return null;
+  return result.code;
 }
 
 export type GateAction =
@@ -243,15 +425,22 @@ export const LOCATION_GATE_COPY = {
   settings: "Open Settings",
 } as const;
 
-/** The concrete way a setup attempt failed, for a concise recoverable message. */
-export type LocationSetupErrorKind = "denied" | "unavailable" | "timeout" | "enrollment";
+/** The exact recoverable failure code shown by the gate. */
+export type LocationSetupErrorKind = LocationSetupFailureCode;
 
-/** Concise error copy per failure — generic, no attendance/tracking wording. */
 export const LOCATION_GATE_ERROR_COPY: Record<LocationSetupErrorKind, string> = {
-  denied: "Location access was denied. Enable it in Settings to continue.",
-  unavailable: "We couldn't start Location on this device. Please try again or enable Location in iOS Settings.",
-  timeout: "That took too long. Please try again.",
-  enrollment: "We couldn't finish setup on this device. Please try again.",
+  LOCATION_PERMISSION_CHECK_TIMEOUT: "Timed out checking iOS location permission.",
+  LOCATION_PERMISSION_CHECK_FAILED: "Could not check iOS location permission.",
+  LOCATION_PERMISSION_REQUEST_TIMEOUT: "Timed out requesting iOS location permission.",
+  LOCATION_PERMISSION_REQUEST_FAILED: "Could not request iOS location permission.",
+  NATIVE_GEOFENCE_HEALTH_TIMEOUT: "Timed out verifying native geofence service.",
+  NATIVE_GEOFENCE_HEALTH_FAILED: "Could not verify native geofence service.",
+  SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT: "Timed out enrolling secure attendance credential.",
+  SECURE_CREDENTIAL_ENROLLMENT_FAILED: "Could not enroll secure attendance credential.",
+  SECURE_STORE_WRITE_TIMEOUT: "Timed out writing secure attendance credential.",
+  SECURE_STORE_WRITE_FAILED: "Could not write secure attendance credential.",
+  LOCATION_SETUP_COMPLETION_TIMEOUT: "Timed out completing location setup.",
+  LOCATION_SETUP_COMPLETION_FAILED: "Could not complete location setup.",
 };
 
 /** The body copy for the current state. */

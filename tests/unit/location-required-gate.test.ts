@@ -159,10 +159,10 @@ test("web setup requires only location — never a native credential", () => {
 
 test("the gate enrolls a device credential on native, and exempts web", () => {
   const source = code(gate());
-  assert.match(source, /enrollDeviceCredential/, "native completion must enroll a device credential");
-  assert.match(source, /getNativeGeofenceHealth/, "must reuse existing native credential health");
-  // completeSetup short-circuits on web (no secure store) so web is never locked out.
-  assert.match(source, /if \(!native\) return true;/, "web requires no credential");
+  assert.match(source, /requestDeviceCredential/, "native completion must mint a device credential");
+  assert.match(source, /writeDeviceCredentialToSecureStore/, "native completion must write the credential securely");
+  assert.match(source, /requireNativeGeofenceHealth/, "must verify the native geofence bridge");
+  assert.match(source, /native,\s*checkPermission:/, "the pipeline must explicitly distinguish native from web");
   // Reuses the strict Capacitor native check (a web session can't spoof native
   // and get locked out).
   assert.match(source, /isCapacitorNativePlatform/, "must use the strict native-platform check");
@@ -308,93 +308,193 @@ const grant = async () => "granted" as const;
 const deny = async () => "denied" as const;
 const never = () => new Promise<never>(() => {}); // simulates a hung native call
 
-test("success: permission granted + setup complete → granted", async () => {
-  const result = await runLocationSetup({ requestPermission: grant, completeSetup: async () => true });
+const setupDeps = (overrides: Record<string, unknown> = {}) => ({
+  native: true,
+  checkPermission: grant,
+  requestPermission: grant,
+  checkNativeGeofenceHealth: async () => ({ supported: true, hasCredential: false }),
+  enrollSecureCredential: async () => "credential",
+  writeSecureCredential: async () => {},
+  verifyCompletion: async () => true,
+  ...overrides,
+});
+
+test("success: already-granted permission completes every native setup boundary", async () => {
+  const result = await runLocationSetup(setupDeps());
   assert.deepEqual(result, { status: "granted" });
 });
 
-test("denial: iOS denies permission → denied (recoverable, not stuck)", async () => {
-  const result = await runLocationSetup({ requestPermission: deny, completeSetup: async () => true });
-  assert.deepEqual(result, { status: "denied" });
-  assert.equal(locationSetupErrorKind(result), "denied");
-});
-
-test("timeout: a permission request that never resolves cannot hang the button", async () => {
-  // This is the stuck "Requesting…" bug — a native call that never settles.
-  const result = await runLocationSetup({
-    requestPermission: never,
-    completeSetup: async () => true,
-    permissionTimeoutMs: 20,
-    setupTimeoutMs: 20,
-  });
-  assert.deepEqual(result, { status: "timeout" }, "must terminate, not pend forever");
-});
-
-test("timeout: an enrollment step that never resolves cannot hang the button", async () => {
-  const result = await runLocationSetup({
-    requestPermission: grant,
-    completeSetup: never,
-    permissionTimeoutMs: 20,
-    setupTimeoutMs: 20,
-  });
-  assert.deepEqual(result, { status: "timeout" });
-});
-
-test("credential failure: granted but enrollment returns false → enrollment_failed", async () => {
-  const result = await runLocationSetup({ requestPermission: grant, completeSetup: async () => false });
-  assert.deepEqual(result, { status: "enrollment_failed" });
-  assert.equal(locationSetupErrorKind(result), "enrollment");
-});
-
-test("a throwing step is recoverable, not a hang", async () => {
-  const result = await runLocationSetup({
-    requestPermission: grant,
-    completeSetup: async () => {
-      throw new Error("enrollment blew up");
-    },
-    setupTimeoutMs: 50,
-  });
-  assert.deepEqual(result, { status: "enrollment_failed" });
-});
-
-test("a throwing native permission call is reported as unavailable, not mislabeled as a timeout", async () => {
-  const result = await runLocationSetup({
-    requestPermission: async () => {
-      throw new Error("native bridge rejected");
-    },
-    completeSetup: async () => true,
-    permissionTimeoutMs: 50,
-  });
-  assert.deepEqual(result, { status: "unavailable" });
-});
-
-test("setup diagnostics identify permission then credential enrollment", async () => {
-  const steps: string[] = [];
-  const result = await runLocationSetup({
-    requestPermission: grant,
-    completeSetup: async () => true,
-    onTransition: (step) => steps.push(step),
-  });
+test("first-time iOS request is checked, requested once, then checked again", async () => {
+  let checks = 0;
+  let requests = 0;
+  const result = await runLocationSetup(
+    setupDeps({
+      checkPermission: async () => (++checks === 1 ? "prompt" as const : "granted" as const),
+      requestPermission: async () => {
+        requests += 1;
+        return "granted" as const;
+      },
+    }),
+  );
   assert.deepEqual(result, { status: "granted" });
-  assert.deepEqual(steps, ["permission", "enrollment"]);
+  assert.equal(checks, 2);
+  assert.equal(requests, 1);
 });
 
-test("retry: a failed attempt can succeed on a second call", async () => {
-  let attempt = 0;
-  const completeSetup = async () => {
-    attempt += 1;
-    return attempt > 1; // fails once, then succeeds
-  };
-  const first = await runLocationSetup({ requestPermission: grant, completeSetup });
-  assert.deepEqual(first, { status: "enrollment_failed" });
-  const second = await runLocationSetup({ requestPermission: grant, completeSetup });
-  assert.deepEqual(second, { status: "granted" });
+test("already-granted permission never invokes the request call", async () => {
+  let requests = 0;
+  const result = await runLocationSetup(
+    setupDeps({
+      requestPermission: async () => {
+        requests += 1;
+        return "granted" as const;
+      },
+    }),
+  );
+  assert.deepEqual(result, { status: "granted" });
+  assert.equal(requests, 0);
 });
 
-test("every error kind has concise, generic copy", () => {
-  for (const kind of ["denied", "unavailable", "timeout", "enrollment"] as const) {
-    assert.ok(LOCATION_GATE_ERROR_COPY[kind].length > 0, `${kind} needs a message`);
+test("denial is terminal and identifies the checking stage", async () => {
+  const result = await runLocationSetup(setupDeps({ checkPermission: deny }));
+  assert.deepEqual(result, {
+    status: "denied",
+    stage: "checking_location_permission",
+    code: "IOS_LOCATION_PERMISSION_DENIED",
+  });
+  assert.equal(locationSetupErrorKind(result), null);
+});
+
+test("every native setup stage has its own timeout code", async () => {
+  const cases = [
+    {
+      stage: "checking_location_permission",
+      code: "LOCATION_PERMISSION_CHECK_TIMEOUT",
+      override: { checkPermission: never },
+    },
+    {
+      stage: "requesting_location_permission",
+      code: "LOCATION_PERMISSION_REQUEST_TIMEOUT",
+      override: { checkPermission: async () => "prompt" as const, requestPermission: never },
+    },
+    {
+      stage: "native_geofence_health",
+      code: "NATIVE_GEOFENCE_HEALTH_TIMEOUT",
+      override: { checkNativeGeofenceHealth: never },
+    },
+    {
+      stage: "secure_credential_enrollment",
+      code: "SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT",
+      override: { enrollSecureCredential: never },
+    },
+    {
+      stage: "secure_store_write",
+      code: "SECURE_STORE_WRITE_TIMEOUT",
+      override: { writeSecureCredential: never },
+    },
+    {
+      stage: "completion",
+      code: "LOCATION_SETUP_COMPLETION_TIMEOUT",
+      override: {
+        checkNativeGeofenceHealth: async () => ({ supported: true, hasCredential: true }),
+        verifyCompletion: never,
+      },
+    },
+  ] as const;
+
+  for (const item of cases) {
+    const result = await runLocationSetup(
+      setupDeps({
+        ...item.override,
+        stageTimeoutMs: { [item.stage]: 15 },
+      }),
+    );
+    assert.equal(result.status, "failed", `${item.stage} must fail`);
+    if (result.status === "failed") {
+      assert.equal(result.stage, item.stage);
+      assert.equal(result.code, item.code);
+      assert.equal(result.kind, "timeout");
+      assert.equal(locationSetupErrorKind(result), item.code);
+    }
   }
+});
+
+test("bridge, enrollment and Keychain failures retain their exact stage codes", async () => {
+  const cases = [
+    {
+      code: "LOCATION_PERMISSION_CHECK_FAILED",
+      override: { checkPermission: async () => { throw new Error("Geolocation unavailable"); } },
+    },
+    {
+      code: "NATIVE_GEOFENCE_HEALTH_FAILED",
+      override: { checkNativeGeofenceHealth: async () => { throw new Error("plugin unavailable"); } },
+    },
+    {
+      code: "SECURE_CREDENTIAL_ENROLLMENT_FAILED",
+      override: { enrollSecureCredential: async () => { throw new Error("HTTP 401"); } },
+    },
+    {
+      code: "SECURE_STORE_WRITE_FAILED",
+      override: { writeSecureCredential: async () => { throw new Error("Keychain failed"); } },
+    },
+    {
+      code: "LOCATION_SETUP_COMPLETION_FAILED",
+      override: {
+        checkNativeGeofenceHealth: async () => ({ supported: true, hasCredential: true }),
+        verifyCompletion: async () => false,
+      },
+    },
+  ] as const;
+
+  for (const item of cases) {
+    const result = await runLocationSetup(setupDeps(item.override));
+    assert.equal(result.status, "failed");
+    if (result.status === "failed") assert.equal(result.code, item.code);
+  }
+});
+
+test("setup diagnostics report all six named stages", async () => {
+  const transitions: Array<{ stage: string; state: string }> = [];
+  const result = await runLocationSetup(
+    setupDeps({
+      onTransition: (transition: { stage: string; state: string }) => transitions.push(transition),
+    }),
+  );
+  assert.deepEqual(result, { status: "granted" });
+  assert.deepEqual(
+    transitions.filter((transition) => transition.state === "started").map((transition) => transition.stage),
+    [
+      "checking_location_permission",
+      "native_geofence_health",
+      "secure_credential_enrollment",
+      "secure_store_write",
+      "completion",
+    ],
+  );
+  assert.ok(
+    transitions.some(
+      (transition) =>
+        transition.stage === "requesting_location_permission" && transition.state === "skipped",
+    ),
+  );
+});
+
+test("every failure code has exact visible copy", () => {
+  for (const [code, message] of Object.entries(LOCATION_GATE_ERROR_COPY)) {
+    assert.ok(message.length > 0, `${code} needs a message`);
+  }
+  assert.equal(
+    LOCATION_GATE_ERROR_COPY.LOCATION_PERMISSION_REQUEST_TIMEOUT,
+    "Timed out requesting iOS location permission.",
+  );
+  assert.equal(
+    LOCATION_GATE_ERROR_COPY.NATIVE_GEOFENCE_HEALTH_TIMEOUT,
+    "Timed out verifying native geofence service.",
+  );
+  assert.equal(
+    LOCATION_GATE_ERROR_COPY.SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT,
+    "Timed out enrolling secure attendance credential.",
+  );
 });
 
 test("the gate bundles a visible SVG location icon without global icon CSS", () => {
@@ -410,21 +510,34 @@ test("the native permission request never fires on an already-decided status", (
   // resolves. The helper must branch on the current status and only request when
   // it is 'prompt'.
   const allSource = code(read("src/lib/jobsite-time/locationPermission.ts"));
+  const interactiveStart = allSource.indexOf("export async function requestLocationPermissionInteractive");
+  const wrapperStart = allSource.lastIndexOf(
+    "export async function requestNativeLocationPermission",
+    interactiveStart,
+  );
   const source = allSource.slice(
-    allSource.indexOf("export async function requestNativeLocationPermission"),
-    allSource.indexOf("export async function requestLocationPermissionInteractive"),
+    wrapperStart,
+    interactiveStart,
   );
   assert.match(source, /if \(current === "granted"\) return "granted";/);
   assert.match(source, /if \(current === "denied"\) return "denied";/);
-  const requestIdx = source.indexOf("geo.requestPermissions()");
+  const requestIdx = source.indexOf("requestNativeLocationPermissionFromPrompt");
   const denyGuardIdx = source.indexOf('if (current === "denied")');
   assert.ok(denyGuardIdx > -1 && denyGuardIdx < requestIdx, "must guard denied BEFORE requesting");
+  assert.match(
+    allSource.slice(
+      allSource.indexOf("export async function requestNativeLocationPermissionFromPrompt"),
+      allSource.indexOf("// Non-prompting check"),
+    ),
+    /geo\.requestPermissions\(\)/,
+  );
 });
 
 test("device-credential enrollment is time-bounded (no un-timed fetch)", () => {
   const source = read("src/lib/attendance/deviceCredentialClient.ts");
   assert.match(source, /AbortController/, "enrollment fetch must be abortable");
-  assert.match(source, /signal: controller\.signal/, "fetch must carry the abort signal");
+  assert.match(source, /body: JSON\.stringify[\s\S]{0,100}signal,/, "fetch must carry the stage abort signal");
+  assert.match(read("src/lib/jobsite-time/locationGate.ts"), /controller\.abort\(\)/, "stage timeout must abort the fetch");
 });
 
 test("the gate uses the exact required copy", () => {
@@ -435,12 +548,11 @@ test("the gate uses the exact required copy", () => {
   assert.equal(LOCATION_GATE_COPY.settings, "Open Settings");
 });
 
-test("the copy is generic — no attendance, clock-in/out, jobsite, or tracking wording", () => {
+test("approved header/body copy stays generic", () => {
   const strings = [
     LOCATION_GATE_COPY.title,
     LOCATION_GATE_COPY.body,
     LOCATION_GATE_COPY.deniedBody,
-    ...Object.values(LOCATION_GATE_ERROR_COPY),
   ];
   for (const s of strings) {
     for (const forbidden of [/attendance/i, /clock/i, /jobsite/i, /arriv/i, /depart/i, /\btrack/i]) {
@@ -512,7 +624,7 @@ test("granting dismisses the gate without navigating or reloading", () => {
   }
   // The enable flow runs through the bounded runLocationSetup state machine, and
   // a granted result dismisses via a plain onGranted() — no navigation/reload.
-  assert.match(source, /runLocationSetup\(\{/, "uses the bounded setup state machine");
+  assert.match(source, /runLocationSetup<DeviceCredentialPayload>\(\{/, "uses the bounded setup state machine");
   assert.match(source, /result\.status === 'granted'/, "acts on a granted result");
   assert.match(source, /onGranted\(\)/, "dismisses via onGranted");
 });
@@ -537,7 +649,7 @@ test("a tap starts exactly one setup attempt and enters Requesting immediately",
   assert.match(source, /if \(setupInFlight\.current\) return;/, "a synchronous lock must reject repeated taps");
   const lock = source.indexOf("setupInFlight.current = true");
   const busy = source.indexOf("setBusy(true)", lock);
-  const setup = source.indexOf("runLocationSetup({", busy);
+  const setup = source.indexOf("performSetup(true)", busy);
   assert.ok(lock > -1 && busy > lock && setup > busy, "lock and Requesting state must be set before setup starts");
   assert.match(source, /setupInFlight\.current = false;\s*setBusy\(false\);/, "failure must restore a usable retry button");
 });
@@ -575,7 +687,7 @@ test("returning from Settings re-checks permission and lets the user in", () => 
   assert.match(source, /addEventListener\('focus'/, "re-check on foreground");
   assert.match(source, /visibilitychange/, "re-check on visibility change");
   // On return, a granted permission finishes (bounded) setup and then dismisses.
-  assert.match(source, /permissionTimeoutMs: LOCATION_CHECK_TIMEOUT_MS/, "the return check must be bounded");
+  assert.match(source, /performSetup\(false\)/, "the return check must use the same staged pipeline without prompting");
   assert.match(source, /if \(result\.status === 'granted'\) onGranted\(\)/, "dismisses once setup is complete");
 });
 

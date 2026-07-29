@@ -126,3 +126,25 @@ test("authorized management UI remains available", () => {
     /return r === "admin" \|\| r === "executive" \|\| r === "ceo" \|\| r === "owner";/,
   );
 });
+
+test("break settings and exception copy stay in CEO-only management surfaces", () => {
+  const settings = withoutComments(page());
+  const management = read("app/components/views/JobsiteTimeView.tsx");
+  const employeeRuntime = withoutComments(runtime());
+  const employeeGate = withoutComments(
+    read("app/components/location/LocationRequiredGate.tsx"),
+  );
+
+  assert.match(settings, /Use a scheduled lunch break/);
+  assert.match(settings, /Lunch start/);
+  assert.match(settings, /Lunch end/);
+  assert.match(settings, /isAdmin && \(/);
+  assert.match(management, /Not returned from break/);
+  assert.match(management, /Returned late from break/);
+
+  for (const employeeSource of [employeeRuntime, employeeGate]) {
+    assert.ok(!/\blunch\b/i.test(employeeSource));
+    assert.ok(!/\bbreak exceptions?\b/i.test(employeeSource));
+    assert.ok(!/not returned from break/i.test(employeeSource));
+  }
+});

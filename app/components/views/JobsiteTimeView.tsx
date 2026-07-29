@@ -2,7 +2,17 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
+import {
+  ATTENDANCE_STATUS_LABEL,
+  deriveAttendanceStatus,
+  formatAssignedJobSubtitle,
+  getCompanyLocalDateKey,
+  type AttendanceDisplayStatus,
+} from '@/lib/jobsite-time/domain';
+import {
+  deriveCompanyBreakState,
+  type CompanyBreakSchedule,
+} from '@/lib/attendance/companyBreakSchedule';
 import { AttendanceDiagnosticsPanel } from '@/app/components/debug/AttendanceDiagnosticsPanel';
 import { AutoAttendanceSetupCard } from '@/app/components/views/AutoAttendanceSetupCard';
 import {
@@ -62,7 +72,6 @@ const statusLabel = (s: string) => STATUS_LABELS[s] || s.replace(/_/g, ' ');
 const fmtTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '—';
 const fmtHours = (min: number) => (min > 0 ? `${(min / 60).toFixed(1)} h` : '—');
-const todayStr = () => new Date().toISOString().slice(0, 10);
 const minutesSince = (iso: string | null) => (iso ? Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000)) : 0);
 
 function StatusBadge({ status }: { status: string }) {
@@ -117,6 +126,8 @@ export function JobsiteTimeView({
   }>({ correctionType: 'incorrect_timestamp', reason: '', clockInAt: '', clockOutAt: '', jobId: '' });
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ from: '', to: '', employee: 'all', job: 'all', status: 'all', needsReview: false });
+  const [breakSchedule, setBreakSchedule] = useState<CompanyBreakSchedule | null>(null);
+  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
   // Opt-in internal diagnostics: this view is already admin/pm-gated by route
   // guards; the ?debug=attendance flag keeps the panel out of the way otherwise.
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -124,6 +135,28 @@ export function JobsiteTimeView({
     if (typeof window === 'undefined') return;
     const flag = new URLSearchParams(window.location.search).get('debug');
     setShowDiagnostics(flag === 'attendance' || process.env.NODE_ENV !== 'production');
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowIso(new Date().toISOString()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch('/api/company/settings', { cache: 'no-store' }).catch(() => null);
+      if (cancelled || !res?.ok) return;
+      const item = (await res.json().catch(() => null))?.item;
+      if (!item) return;
+      setBreakSchedule({
+        startTime: item.attendance_break_start_time ?? null,
+        endTime: item.attendance_break_end_time ?? null,
+        returnGraceMinutes: Number(item.attendance_break_return_grace_minutes ?? 0),
+        timezone: String(item.timezone || 'America/New_York'),
+      });
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   const nameByUser = useMemo(() => {
@@ -200,14 +233,17 @@ export function JobsiteTimeView({
   );
 
   const roster = useMemo(() => {
-    const today = todayStr();
+    const today = getCompanyLocalDateKey(nowIso, breakSchedule?.timezone || 'America/New_York');
     const weekStart = (() => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); })();
     const cardsFor = (e: { id: string; user_id?: string | null }) =>
       items.filter((t) => String(t.userId || '') === String(e.user_id || ' ') || String(t.employeeId || '') === String(e.id));
 
     return activeEmployees.map((e) => {
       const cards = cardsFor(e);
-      const todayCard = cards.find((c) => c.workDate === today) || null;
+      const todayCards = cards
+        .filter((c) => c.workDate === today)
+        .sort((a, b) => Date.parse(b.clockInAt || b.clockOutAt || '0') - Date.parse(a.clockInAt || a.clockOutAt || '0'));
+      const todayCard = todayCards[0] || null;
       const weekMinutes = cards.filter((c) => c.workDate && c.workDate >= weekStart).reduce((sum, c) => sum + (c.totalMinutes || 0), 0);
       const lastCard = cards.slice().sort((a, b) =>
         Date.parse(b.clockOutAt || b.clockInAt || '0') - Date.parse(a.clockOutAt || a.clockInAt || '0'))[0] || null;
@@ -225,21 +261,50 @@ export function JobsiteTimeView({
         hasStaleOpenCard,
       });
 
-      const hoursSoFarMin = todayCard?.clockInAt && !todayCard.clockOutAt
-        ? minutesSince(todayCard.clockInAt)
-        : (todayCard?.totalMinutes ?? 0);
+      const hoursSoFarMin = todayCards.reduce(
+        (sum, card) => sum + (
+          card.clockInAt && !card.clockOutAt
+            ? minutesSince(card.clockInAt)
+            : (card.totalMinutes || 0)
+        ),
+        0
+      );
+      const breakState = breakSchedule
+        ? deriveCompanyBreakState({
+            now: nowIso,
+            workDate: today,
+            schedule: breakSchedule,
+            sessions: todayCards,
+          })
+        : { status: 'none' as const, departureAt: null, returnAt: null, returnDueAt: null };
 
       // Roster subtitle: "{roleLabel} - {jobName}" (e.g. "PM - Smith Excavation").
       const rosterSubtitle = formatAssignedJobSubtitle({ role: e.role, jobName: assignedJobName, jobId: e.jobId });
       const lastActivity = lastCard ? (lastCard.clockOutAt || lastCard.clockInAt) : null;
-      return { e, cards, todayCard, lastCard, weekMinutes, status, rosterSubtitle, lastActivity, hoursSoFarMin };
+      return {
+        e,
+        cards,
+        todayCards,
+        todayCard,
+        lastCard,
+        weekMinutes,
+        status,
+        breakState,
+        rosterSubtitle,
+        lastActivity,
+        hoursSoFarMin,
+      };
     });
-  }, [activeEmployees, items, jobById]);
+  }, [activeEmployees, items, jobById, breakSchedule, nowIso]);
 
   const onSite = useMemo(() => roster.filter((r) => r.status === 'checked_in'), [roster]);
   const notArrived = useMemo(() => roster.filter((r) => r.status === 'waiting' || r.status === 'address_needs_verification'), [roster]);
   const recentlyLeft = useMemo(
     () => roster.filter((r) => r.status === 'checked_out').sort((a, b) => Date.parse(b.lastActivity || '0') - Date.parse(a.lastActivity || '0')),
+    [roster]
+  );
+  const breakExceptions = useMemo(
+    () => roster.filter((r) => r.breakState.status === 'not_returned' || r.breakState.status === 'returned_late'),
     [roster]
   );
 
@@ -263,7 +328,10 @@ export function JobsiteTimeView({
       const job = (t.jobId && jobById.get(String(t.jobId))?.name) || 'Unassigned';
       if (t.clockInAt) events.push({ key: `${t.id}-in`, t, label: `${name} arrived at ${job}`, icon: 'fa-arrow-right-to-bracket', tone: 'text-green-500', at: t.clockInAt });
       if (t.clockOutAt) events.push({ key: `${t.id}-out`, t, label: `${name} left ${job}`, icon: 'fa-arrow-right-from-bracket', tone: 'text-amber-500', at: t.clockOutAt });
-      if (t.status === 'needs_review' && t.workDate === todayStr()) {
+      if (
+        t.status === 'needs_review' &&
+        t.workDate === getCompanyLocalDateKey(nowIso, breakSchedule?.timezone || 'America/New_York')
+      ) {
         events.push({
           key: `${t.id}-review`,
           t,
@@ -276,7 +344,7 @@ export function JobsiteTimeView({
     }
     events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
     return events.slice(0, 10);
-  }, [items, nameByUser, jobById]);
+  }, [items, nameByUser, jobById, nowIso, breakSchedule?.timezone]);
 
   const needsReview = useMemo(() => items.filter((t) => t.status === 'needs_review' || t.status === 'pending_review'), [items]);
 
@@ -472,6 +540,33 @@ export function JobsiteTimeView({
 
       {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
 
+      {breakExceptions.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/20">
+          <div className="border-b border-amber-200 px-4 py-3 dark:border-amber-900/40">
+            <h3 className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+              Break exceptions ({breakExceptions.length})
+            </h3>
+          </div>
+          <div className="divide-y divide-amber-200 dark:divide-amber-900/40">
+            {breakExceptions.map((r) => (
+              <div key={r.e.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                <div>
+                  <p className="text-sm font-medium text-amber-950 dark:text-amber-100">
+                    {r.e.name || 'Team member'}
+                  </p>
+                  <p className="text-xs text-amber-800 dark:text-amber-300">{r.rosterSubtitle}</p>
+                </div>
+                <p className="text-xs font-medium text-amber-900 dark:text-amber-200">
+                  {r.breakState.status === 'not_returned'
+                    ? `Not returned from break · due ${fmtTime(r.breakState.returnDueAt)}`
+                    : `Returned late from break · ${fmtTime(r.breakState.returnAt)}`}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className={`${cardCls} px-4 py-10 text-center text-sm text-gray-500 dark:text-zinc-400`}>Loading…</div>
       ) : activeEmployees.length === 0 && items.length === 0 ? (
@@ -538,7 +633,9 @@ export function JobsiteTimeView({
                 >
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-gray-900 dark:text-zinc-100">{r.e.name || 'Team member'}</p>
-                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">{r.rosterSubtitle} · Left {fmtTime(r.todayCard?.clockOutAt ?? null)}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-zinc-400">
+                      {r.rosterSubtitle} · {r.breakState.status === 'expected_break' ? 'Scheduled break since' : 'Left'} {fmtTime(r.todayCard?.clockOutAt ?? null)}
+                    </p>
                   </div>
                   <span className="shrink-0 text-xs tabular-nums text-gray-600 dark:text-zinc-300">{fmtHours(r.todayCard?.totalMinutes ?? 0)}</span>
                 </button>

@@ -10307,6 +10307,9 @@ const MobileAppShell = ({
         attendance_early_arrival_window_minutes: 120,
         attendance_late_grace_minutes: 10,
         jobsite_geofence_radius_feet: 5280,
+        attendance_break_start_time: null,
+        attendance_break_end_time: null,
+        attendance_break_return_grace_minutes: 0,
       };
       const EMPTY_PRICING = {
         operator_labor_rate: 0, labor_burden_percent: 0, hauling_rate_per_hour: 0,
@@ -10374,6 +10377,9 @@ const MobileAppShell = ({
                 attendance_early_arrival_window_minutes: Number(c.attendance_early_arrival_window_minutes ?? 120),
                 attendance_late_grace_minutes: Number(c.attendance_late_grace_minutes ?? 10),
                 jobsite_geofence_radius_feet: Number(c.jobsite_geofence_radius_feet ?? 5280),
+                attendance_break_start_time: c.attendance_break_start_time ? String(c.attendance_break_start_time) : null,
+                attendance_break_end_time: c.attendance_break_end_time ? String(c.attendance_break_end_time) : null,
+                attendance_break_return_grace_minutes: Number(c.attendance_break_return_grace_minutes ?? 0),
               };
               setCompany(nextCompany);
               setInitialCompany(nextCompany);
@@ -10483,6 +10489,9 @@ const MobileAppShell = ({
                 attendance_early_arrival_window_minutes: company.attendance_early_arrival_window_minutes,
                 attendance_late_grace_minutes: company.attendance_late_grace_minutes,
                 jobsite_geofence_radius_feet: company.jobsite_geofence_radius_feet,
+                attendance_break_start_time: company.attendance_break_start_time,
+                attendance_break_end_time: company.attendance_break_end_time,
+                attendance_break_return_grace_minutes: company.attendance_break_return_grace_minutes,
               };
               // Omit empty times (a legacy company that hasn't set them yet) — the
               // setup-parity validator only accepts a valid HH:MM, never "".
@@ -10672,6 +10681,63 @@ const MobileAppShell = ({
                         <option key={v} value={v}>{lbl}</option>
                       ))}
                     </select>
+                  </div>
+                  <div className="md:col-span-2 rounded-lg border border-gray-200 p-3">
+                    <label className="inline-flex items-center gap-2 text-sm font-medium text-gray-800">
+                      <input
+                        type="checkbox"
+                        className="accent-brand-500"
+                        checked={Boolean(company.attendance_break_start_time && company.attendance_break_end_time)}
+                        onChange={(e) => setCompany((c) => ({
+                          ...c,
+                          attendance_break_start_time: e.target.checked ? (c.attendance_break_start_time || '12:00') : null,
+                          attendance_break_end_time: e.target.checked ? (c.attendance_break_end_time || '13:00') : null,
+                          attendance_break_return_grace_minutes: e.target.checked
+                            ? c.attendance_break_return_grace_minutes
+                            : 0,
+                        }))}
+                      />
+                      Use a scheduled lunch break
+                    </label>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Optional. Employees who leave are clocked out normally, and monitoring stays active for their return.
+                    </p>
+                    {company.attendance_break_start_time && company.attendance_break_end_time && (
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div>
+                          <label className={label}>Lunch start</label>
+                          <input
+                            type="time"
+                            className={field}
+                            value={company.attendance_break_start_time}
+                            onChange={(e) => setCompany((c) => ({ ...c, attendance_break_start_time: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className={label}>Lunch end</label>
+                          <input
+                            type="time"
+                            className={field}
+                            value={company.attendance_break_end_time}
+                            onChange={(e) => setCompany((c) => ({ ...c, attendance_break_end_time: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className={label}>Return grace (minutes)</label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={240}
+                            className={field}
+                            value={company.attendance_break_return_grace_minutes}
+                            onChange={(e) => setCompany((c) => ({
+                              ...c,
+                              attendance_break_return_grace_minutes: Number(e.target.value),
+                            }))}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

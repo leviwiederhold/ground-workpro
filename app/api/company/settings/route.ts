@@ -25,26 +25,55 @@ import {
 // validation are provably identical in both flows. They are `.optional()` here
 // only so a partial "Save Changes" doesn't force every field on every write —
 // but any value that IS present is validated by the identical rule.
-const companySettingsSchema = z.object({
-  company_name: z.string().trim().min(1, "Company name is required.").max(160),
-  timezone: timezoneField.optional().or(z.literal("")),
-  default_work_days: workDaysField.optional(),
-  default_work_start_time: workTimeField.optional(),
-  default_work_end_time: workTimeField.optional(),
-  attendance_early_arrival_window_minutes: earlyArrivalWindowField.optional(),
-  attendance_late_grace_minutes: lateGraceField.optional(),
-  jobsite_geofence_radius_feet: geofenceRadiusField.optional(),
-  phone: z.string().trim().max(60).optional(),
-  email: z.string().trim().email().max(160).optional().or(z.literal("")),
-  address: z.string().trim().max(500).optional(),
-  website: z.string().trim().max(240).optional(),
-  industry: z.string().trim().max(120).optional(),
-  employee_count: z.coerce.number().int().min(0).max(100000).nullable().optional(),
-  default_work_hours: z.string().trim().max(120).optional(),
-  currency: z.string().trim().min(3).max(8).optional(),
-  date_format: z.string().trim().min(4).max(40).optional(),
-  company_logo: z.string().trim().max(2_000_000).optional(),
-});
+const optionalBreakTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM format.").nullable().optional();
+
+const companySettingsSchema = z
+  .object({
+    company_name: z.string().trim().min(1, "Company name is required.").max(160),
+    timezone: timezoneField.optional().or(z.literal("")),
+    default_work_days: workDaysField.optional(),
+    default_work_start_time: workTimeField.optional(),
+    default_work_end_time: workTimeField.optional(),
+    attendance_early_arrival_window_minutes: earlyArrivalWindowField.optional(),
+    attendance_late_grace_minutes: lateGraceField.optional(),
+    jobsite_geofence_radius_feet: geofenceRadiusField.optional(),
+    attendance_break_start_time: optionalBreakTime,
+    attendance_break_end_time: optionalBreakTime,
+    attendance_break_return_grace_minutes: z.coerce.number().int().min(0).max(240).optional(),
+    phone: z.string().trim().max(60).optional(),
+    email: z.string().trim().email().max(160).optional().or(z.literal("")),
+    address: z.string().trim().max(500).optional(),
+    website: z.string().trim().max(240).optional(),
+    industry: z.string().trim().max(120).optional(),
+    employee_count: z.coerce.number().int().min(0).max(100000).nullable().optional(),
+    default_work_hours: z.string().trim().max(120).optional(),
+    currency: z.string().trim().min(3).max(8).optional(),
+    date_format: z.string().trim().min(4).max(40).optional(),
+    company_logo: z.string().trim().max(2_000_000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const startProvided = Object.prototype.hasOwnProperty.call(value, "attendance_break_start_time");
+    const endProvided = Object.prototype.hasOwnProperty.call(value, "attendance_break_end_time");
+    if (startProvided !== endProvided) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attendance_break_start_time"],
+        message: "Break start and end must be saved together.",
+      });
+      return;
+    }
+    if (
+      value.attendance_break_start_time &&
+      value.attendance_break_end_time &&
+      value.attendance_break_start_time >= value.attendance_break_end_time
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["attendance_break_end_time"],
+        message: "Break end must be after break start.",
+      });
+    }
+  });
 
 type CompanySettingsRow = {
   id: string;
@@ -56,6 +85,9 @@ type CompanySettingsRow = {
   attendance_early_arrival_window_minutes?: number | null;
   attendance_late_grace_minutes?: number | null;
   jobsite_geofence_radius_feet?: number | null;
+  attendance_break_start_time?: string | null;
+  attendance_break_end_time?: string | null;
+  attendance_break_return_grace_minutes?: number | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
@@ -86,6 +118,9 @@ function normalizeCompanySettings(row: CompanySettingsRow | null | undefined) {
       row?.attendance_late_grace_minutes ?? DEFAULT_LATE_GRACE_MINUTES
     ),
     jobsite_geofence_radius_feet: resolveGeofenceRadiusFeet(row?.jobsite_geofence_radius_feet),
+    attendance_break_start_time: parseWorkTime(row?.attendance_break_start_time) ?? null,
+    attendance_break_end_time: parseWorkTime(row?.attendance_break_end_time) ?? null,
+    attendance_break_return_grace_minutes: Number(row?.attendance_break_return_grace_minutes ?? 0),
     phone: String(row?.phone ?? "").trim(),
     email: String(row?.email ?? "").trim(),
     address: String(row?.address ?? "").trim(),
@@ -108,7 +143,8 @@ const isMissingColumnError = (message: string | undefined) =>
 
 const SELECT_COLUMNS =
   "id,name,timezone,phone,email,address,website,industry,employee_count,default_work_hours,currency,date_format,company_logo" +
-  ",default_work_days,default_work_start_time,default_work_end_time,attendance_early_arrival_window_minutes,attendance_late_grace_minutes,jobsite_geofence_radius_feet";
+  ",default_work_days,default_work_start_time,default_work_end_time,attendance_early_arrival_window_minutes,attendance_late_grace_minutes,jobsite_geofence_radius_feet" +
+  ",attendance_break_start_time,attendance_break_end_time,attendance_break_return_grace_minutes";
 
 async function selectCompanyRow(supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"], companyId: string) {
   let result = await supabase
@@ -221,6 +257,15 @@ export async function PATCH(request: Request) {
     }
     if (payload.jobsite_geofence_radius_feet !== undefined) {
       updatePayload.jobsite_geofence_radius_feet = payload.jobsite_geofence_radius_feet;
+    }
+    if (payload.attendance_break_start_time !== undefined) {
+      updatePayload.attendance_break_start_time = payload.attendance_break_start_time;
+    }
+    if (payload.attendance_break_end_time !== undefined) {
+      updatePayload.attendance_break_end_time = payload.attendance_break_end_time;
+    }
+    if (payload.attendance_break_return_grace_minutes !== undefined) {
+      updatePayload.attendance_break_return_grace_minutes = payload.attendance_break_return_grace_minutes;
     }
 
     let result: {

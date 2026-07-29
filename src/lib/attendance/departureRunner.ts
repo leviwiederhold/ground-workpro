@@ -171,9 +171,11 @@ export async function applyClockOutDecision(
     pending_departure_at: null,
     total_minutes: totalMinutes,
     clock_out_method: decision.method,
-    // Monitoring stops for this assignment the moment the day is resolved.
-    monitoring_stopped_at: now,
   };
+  // A departure-grace clock-out ends one session, not the workday. Only the
+  // fallback path runs after scheduled end + configured cutoff, which is the
+  // point monitoring may truthfully be marked stopped.
+  if (fallback) update.monitoring_stopped_at = now;
   // A shift closed without a real exit event is a guess at the boundary, not an
   // observation — it must never look like a verified departure.
   if (fallback) update.status = "needs_review";
@@ -204,7 +206,15 @@ export async function applyClockOutDecision(
   } else {
     await logEvent(db, row, "auto_clock_out", decision.effectiveAt, "Departure grace period elapsed");
   }
-  await logEvent(db, row, "monitoring_stopped", now, "Workday resolved; monitoring stopped for this assignment");
+  if (fallback) {
+    await logEvent(
+      db,
+      row,
+      "monitoring_stopped",
+      now,
+      "Scheduled end-of-workday cutoff reached; monitoring stopped for this assignment"
+    );
+  }
   return fallback ? "fallback_clocked_out" : "clocked_out";
 }
 
@@ -293,7 +303,6 @@ export async function runScheduledAttendanceClockOut({
     const outcome = await applyClockOutDecision(db, row, decision, now);
     if (outcome === "clocked_out") {
       summary.clockedOut += 1;
-      summary.monitoringStopped += 1;
     } else if (outcome === "fallback_clocked_out") {
       summary.clockedOut += 1;
       summary.fallbackClockedOut += 1;

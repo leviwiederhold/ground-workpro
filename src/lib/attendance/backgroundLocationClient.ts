@@ -14,6 +14,7 @@ import type {
   PermissionLevel,
   StoredLocationPermission,
 } from "./backgroundLocation.ts";
+import type { NativeGeofenceHealth } from "./nativeGeofence.ts";
 
 const LOCAL_KEY = "attendance.locationPermission.v1";
 
@@ -127,11 +128,14 @@ function cacheLocally(stored: StoredLocationPermission) {
 /** Persist the snapshot locally (avoid re-prompting) and on the server. */
 export async function persistLocationPermission(
   snapshot: LocationPermissionSnapshot,
-  opts: { onboardingCompleted?: boolean } = {}
+  opts: { onboardingCompleted?: boolean; setupComplete?: boolean } = {}
 ): Promise<void> {
   const prior = loadStoredLocationPermission();
-  const onboardingCompletedAt = opts.onboardingCompleted
+  const completed = opts.setupComplete ?? opts.onboardingCompleted;
+  const onboardingCompletedAt = completed === true
     ? new Date().toISOString()
+    : completed === false
+      ? null
     : prior?.onboardingCompletedAt ?? null;
   cacheLocally({ onboardingCompletedAt, snapshot });
 
@@ -146,9 +150,65 @@ export async function persistLocationPermission(
         precise: snapshot.precise,
         platform: snapshot.platform,
         onboardingCompleted: Boolean(opts.onboardingCompleted),
+        setupComplete: opts.setupComplete,
       }),
     });
   } catch {
     // Offline is fine — the local cache still prevents re-prompting.
   }
+}
+
+/** Convert the same native health read used by the gate into its server report. */
+export function nativeHealthToPermissionSnapshot(
+  health: Pick<
+    NativeGeofenceHealth,
+    "authorizationStatus" | "locationServicesEnabled" | "preciseLocation"
+  >,
+  capturedAt: string = new Date().toISOString(),
+): LocationPermissionSnapshot {
+  const foreground =
+    health.authorizationStatus === "authorized_always" ||
+    health.authorizationStatus === "authorized_when_in_use"
+      ? "granted"
+      : health.authorizationStatus === "not_determined"
+        ? "prompt"
+        : health.authorizationStatus === "denied" ||
+            health.authorizationStatus === "restricted"
+          ? "denied"
+          : "unknown";
+  const background =
+    health.authorizationStatus === "authorized_always"
+      ? "granted"
+      : health.authorizationStatus === "not_determined" ||
+          health.authorizationStatus === "authorized_when_in_use"
+        ? "prompt"
+        : health.authorizationStatus === "denied" ||
+            health.authorizationStatus === "restricted"
+          ? "denied"
+          : "unknown";
+  return {
+    locationServicesEnabled: health.locationServicesEnabled,
+    foreground,
+    background,
+    precise: health.preciseLocation,
+    platform: "ios",
+    capturedAt,
+  };
+}
+
+/**
+ * Best-effort server synchronization after a definitive live native check.
+ * Transient bridge failures never call this, so they cannot flip a configured
+ * employee to "Not set up".
+ */
+export async function persistNativeAttendanceReadiness(
+  health: Pick<
+    NativeGeofenceHealth,
+    "authorizationStatus" | "locationServicesEnabled" | "preciseLocation"
+  >,
+  setupComplete: boolean,
+): Promise<void> {
+  await persistLocationPermission(nativeHealthToPermissionSnapshot(health), {
+    setupComplete,
+  });
 }

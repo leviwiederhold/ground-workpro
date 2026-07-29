@@ -3,7 +3,10 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
-import { isBackgroundReady, type LocationPermissionSnapshot } from "@/lib/attendance/backgroundLocation";
+import {
+  isReportedAttendanceSetupComplete,
+  type LocationPermissionSnapshot,
+} from "@/lib/attendance/backgroundLocation";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +19,7 @@ const putSchema = z.object({
   precise: z.boolean().nullable().optional(),
   platform: z.enum(["ios", "android", "web", "unknown"]).optional(),
   onboardingCompleted: z.boolean().optional(),
+  setupComplete: z.boolean().optional(),
 });
 
 function rowToSnapshot(row: Record<string, unknown>): LocationPermissionSnapshot {
@@ -50,15 +54,40 @@ export async function GET(request: Request) {
       if (result.error) {
         return NextResponse.json({ error: result.error.message }, { status: 400 });
       }
+      const userIds = (result.data ?? [])
+        .map((row: Record<string, unknown>) => String(row.user_id ?? ""))
+        .filter(Boolean);
+      const credentialResult =
+        userIds.length > 0
+          ? await db
+              .from("device_attendance_credentials")
+              .select("user_id")
+              .eq("company_id", companyId)
+              .in("user_id", userIds)
+              .is("revoked_at", null)
+              .gt("expires_at", new Date().toISOString())
+          : { data: [] as Array<{ user_id: string }> };
+      if ("error" in credentialResult && credentialResult.error) {
+        return NextResponse.json(
+          { error: credentialResult.error.message },
+          { status: 400 },
+        );
+      }
+      const activeCredentialUsers = new Set(
+        (credentialResult.data ?? []).map((row: { user_id: string }) => String(row.user_id)),
+      );
       const items = (result.data ?? []).map((row: Record<string, unknown>) => {
         const snapshot = rowToSnapshot(row);
+        const onboardingCompletedAt = (row.onboarding_completed_at as string | null) ?? null;
         return {
           userId: row.user_id,
-          onboardingCompletedAt: row.onboarding_completed_at ?? null,
+          onboardingCompletedAt,
           snapshot,
-          // The admin cares about one thing: is automatic attendance actually
-          // configured (background-ready) for this person?
-          automaticAttendanceConfigured: isBackgroundReady(snapshot),
+          automaticAttendanceConfigured: isReportedAttendanceSetupComplete({
+            snapshot,
+            onboardingCompletedAt,
+            hasActiveCredential: activeCredentialUsers.has(String(row.user_id)),
+          }),
         };
       });
       return NextResponse.json({ items });
@@ -77,11 +106,29 @@ export async function GET(request: Request) {
       return NextResponse.json({ item: { onboardingCompletedAt: null, snapshot: null } });
     }
     const snapshot = rowToSnapshot(result.data as Record<string, unknown>);
+    const credential = await db
+      .from("device_attendance_credentials")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("user_id", userId)
+      .is("revoked_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (credential.error) {
+      return NextResponse.json({ error: credential.error.message }, { status: 400 });
+    }
+    const onboardingCompletedAt =
+      (result.data as Record<string, unknown>).onboarding_completed_at as string | null;
     return NextResponse.json({
       item: {
-        onboardingCompletedAt: (result.data as Record<string, unknown>).onboarding_completed_at ?? null,
+        onboardingCompletedAt: onboardingCompletedAt ?? null,
         snapshot,
-        automaticAttendanceConfigured: isBackgroundReady(snapshot),
+        automaticAttendanceConfigured: isReportedAttendanceSetupComplete({
+          snapshot,
+          onboardingCompletedAt: onboardingCompletedAt ?? null,
+          hasActiveCredential: Boolean(credential.data),
+        }),
       },
     });
   } catch (error) {
@@ -112,7 +159,11 @@ export async function PUT(request: Request) {
     if (d.background !== undefined) payload.background = d.background;
     if (d.precise !== undefined) payload.precise = d.precise;
     if (d.platform !== undefined) payload.platform = d.platform;
-    if (d.onboardingCompleted) payload.onboarding_completed_at = new Date().toISOString();
+    if (d.setupComplete === true || d.onboardingCompleted) {
+      payload.onboarding_completed_at = new Date().toISOString();
+    } else if (d.setupComplete === false) {
+      payload.onboarding_completed_at = null;
+    }
 
     const db = getSupabaseAdmin() ?? supabase;
     const result = await db
@@ -124,11 +175,29 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: result.error.message }, { status: 400 });
     }
     const snapshot = rowToSnapshot(result.data as Record<string, unknown>);
+    const credential = await db
+      .from("device_attendance_credentials")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("user_id", userId)
+      .is("revoked_at", null)
+      .gt("expires_at", new Date().toISOString())
+      .limit(1)
+      .maybeSingle();
+    if (credential.error) {
+      return NextResponse.json({ error: credential.error.message }, { status: 400 });
+    }
+    const onboardingCompletedAt =
+      (result.data as Record<string, unknown>).onboarding_completed_at as string | null;
     return NextResponse.json({
       item: {
-        onboardingCompletedAt: (result.data as Record<string, unknown>).onboarding_completed_at ?? null,
+        onboardingCompletedAt: onboardingCompletedAt ?? null,
         snapshot,
-        automaticAttendanceConfigured: isBackgroundReady(snapshot),
+        automaticAttendanceConfigured: isReportedAttendanceSetupComplete({
+          snapshot,
+          onboardingCompletedAt: onboardingCompletedAt ?? null,
+          hasActiveCredential: Boolean(credential.data),
+        }),
       },
     });
   } catch (error) {

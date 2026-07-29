@@ -4,6 +4,7 @@ import {
   automaticAttendanceClaimable,
   detectRegressions,
   isBackgroundReady,
+  isReportedAttendanceSetupComplete,
   resolveOnboardingStatus,
   shouldPromptOnboarding,
   type LocationPermissionSnapshot,
@@ -39,6 +40,41 @@ test("automatic attendance is never claimable without background permission", ()
   assert.equal(automaticAttendanceClaimable(snap()), true);
   assert.equal(automaticAttendanceClaimable(snap({ background: "denied" })), false);
   assert.equal(automaticAttendanceClaimable(snap({ background: "unknown" })), false);
+});
+
+test("CEO configured state requires the complete native report and an active credential", () => {
+  const complete = {
+    snapshot: snap(),
+    onboardingCompletedAt: NOW,
+    hasActiveCredential: true,
+  };
+  assert.equal(isReportedAttendanceSetupComplete(complete), true);
+  assert.equal(
+    isReportedAttendanceSetupComplete({ ...complete, onboardingCompletedAt: null }),
+    false,
+    "missing native health/region completion report is not configured",
+  );
+  assert.equal(
+    isReportedAttendanceSetupComplete({ ...complete, hasActiveCredential: false }),
+    false,
+    "a missing or revoked secure credential is not configured",
+  );
+  assert.equal(
+    isReportedAttendanceSetupComplete({
+      ...complete,
+      snapshot: snap({ background: "prompt" }),
+    }),
+    false,
+    "foreground-only permission is not configured",
+  );
+  assert.equal(
+    isReportedAttendanceSetupComplete({
+      ...complete,
+      snapshot: snap({ platform: "web" }),
+    }),
+    false,
+    "the web runtime cannot report native background setup",
+  );
 });
 
 test("do not re-prompt once background is ready; prompt when never completed or regressed", () => {

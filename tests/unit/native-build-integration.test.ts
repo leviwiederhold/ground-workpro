@@ -136,6 +136,31 @@ test("iOS never uses a background URLSession for a data task", () => {
   );
 });
 
+test("iOS owns region callbacks before the WebView for terminated-app arrival and departure", () => {
+  const appDelegate = read("ios/App/App/AppDelegate.swift");
+  const geofence = read("ios/App/App/JobsiteGeofencePlugin.swift");
+  assert.match(
+    appDelegate,
+    /AttendanceGeofenceCoordinator\.shared\.start\(\)/,
+    "AppDelegate must install the Core Location delegate on a headless location relaunch",
+  );
+  assert.match(geofence, /final class AttendanceGeofenceCoordinator/);
+  assert.match(geofence, /didEnterRegion[\s\S]{0,160}transition: "enter"/);
+  assert.match(geofence, /didExitRegion[\s\S]{0,160}transition: "exit"/);
+  assert.match(geofence, /didDetermineState[\s\S]{0,260}state == \.inside/);
+  assert.match(geofence, /didStartMonitoringFor[\s\S]{0,420}requestState/);
+  assert.match(geofence, /JobsiteGeofencePlugin\.submitOrQueue/);
+});
+
+test("iOS registration reconciles in place instead of dropping every live region", () => {
+  const geofence = read("ios/App/App/JobsiteGeofencePlugin.swift");
+  assert.match(geofence, /func reconcile\(_ regions:/);
+  assert.match(geofence, /Unchanged regions[\s\S]{0,520}continue/);
+  const js = code("src/lib/attendance/nativeGeofence.ts");
+  const registerBody = js.slice(js.indexOf("export async function registerGeofences"), js.indexOf("export async function getRegisteredGeofences"));
+  assert.ok(!registerBody.includes("removeAll"), "JS must not create an empty-region window before registration");
+});
+
 // ── Android ──────────────────────────────────────────────────────────────────
 
 const ANDROID_SOURCES = [

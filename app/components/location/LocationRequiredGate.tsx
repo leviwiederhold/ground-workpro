@@ -38,13 +38,14 @@ import {
 import { locationSettingsInstructions, openAppLocationSettings } from '@/lib/runtime/openAppSettings';
 import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
 import {
-  buildJobsiteRegions,
   getRegisteredGeofences,
   requestNativeAlwaysAuthorization,
   requireNativeGeofenceHealth,
   requireRegisteredGeofences,
 } from '@/lib/attendance/nativeGeofence';
 import { fetchAssignedJobsRequired } from '@/lib/jobsite-time/geofence-client';
+import { loadAssignedAttendanceRegions } from '@/lib/attendance/assignedRegionsClient';
+import { persistNativeAttendanceReadiness } from '@/lib/attendance/backgroundLocationClient';
 import {
   requestDeviceCredential,
   writeDeviceCredentialToSecureStore,
@@ -101,26 +102,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   }, []);
 
   const loadRequiredRegions = useCallback(async () => {
-    const [jobs, settingsRes] = await Promise.all([
-      fetchAssignedJobsRequired(),
-      fetch('/api/jobsite-time/settings', { cache: 'no-store' }),
-    ]);
-    if (!settingsRes.ok) throw new Error('Could not load location settings');
-    const settings = (await settingsRes.json().catch(() => null))?.item ?? null;
-    const arrivalRadiusMeters = settings?.arrivalRadiusFeet
-      ? Number(settings.arrivalRadiusFeet) * 0.3048
-      : 76;
-    const wakeRadiusMeters = Number(settings?.wakeRadiusMeters ?? 1609);
-    const regions = jobs
-      .filter((job) => job.addressVerified && job.lat !== null && job.lng !== null)
-      .slice(0, 10)
-      .flatMap((job) =>
-        buildJobsiteRegions(job, arrivalRadiusMeters, wakeRadiusMeters),
-      );
-    if (regions.length === 0) {
-      throw new Error('No assigned location is ready');
-    }
-    return regions;
+    return loadAssignedAttendanceRegions(await fetchAssignedJobsRequired());
   }, []);
 
   /**
@@ -160,7 +142,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             loadRequiredRegions(),
             getRegisteredGeofences(),
           ]);
-          return isAttendanceSetupComplete({
+          const complete = isAttendanceSetupComplete({
             platform: 'native',
             permission: finalPermission,
             hasDeviceCredential: health.hasCredential,
@@ -168,6 +150,8 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             requiredRegionIds: requiredRegions.map((region) => region.identifier),
             registeredRegionIds: registered.map((region) => region.identifier),
           });
+          await persistNativeAttendanceReadiness(health, complete);
+          return complete;
         },
         onTransition: reportTransition,
       }),

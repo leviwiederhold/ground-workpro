@@ -27,92 +27,107 @@
 // white screen, where the Capacitor plugin import / bridge call can hang) can
 // never leave the app rendering null forever — it falls back to the setup gate.
 
-import { useCallback, useEffect, useState } from 'react';
-import { checkLocationPermission } from '@/lib/jobsite-time/locationPermission';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  checkLocationPermission,
+  checkNativeLocationPermission,
+  loadCapacitorGeolocation,
+} from '@/lib/jobsite-time/locationPermission';
 import {
   isAttendanceParticipant,
   isAttendanceSetupComplete,
   LOCATION_CHECK_TIMEOUT_MS,
   resolveGateStatusWithTimeout,
+  retryTransientNativeRead,
   type GatePlatform,
   type LocationGateStatus,
 } from '@/lib/jobsite-time/locationGate';
 import { fetchAssignedJobsRequired } from '@/lib/jobsite-time/geofence-client';
 import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
 import {
-  buildJobsiteRegions,
-  getNativeGeofenceHealth,
-  getRegisteredGeofences,
+  requireNativeGeofenceHealth,
+  requireRegisteredGeofencesRead,
 } from '@/lib/attendance/nativeGeofence';
+import { loadAssignedAttendanceRegions } from '@/lib/attendance/assignedRegionsClient';
+import { persistNativeAttendanceReadiness } from '@/lib/attendance/backgroundLocationClient';
 import { LocationRequiredGate } from './LocationRequiredGate';
 
 export function RequireLocationAccess({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<LocationGateStatus>('checking');
+  const evaluationVersion = useRef(0);
 
   // Non-prompting evaluation of the gate status:
   //   1. Participation — assigned to at least one job? A fetch failure blocks
   //      safely instead of incorrectly treating the user as unassigned.
   //   2. If a participant, is attendance setup complete? Web needs permission;
   //      native needs the complete live native contract described above.
-  const evaluate = useCallback(async (): Promise<LocationGateStatus> => {
+  const evaluate = useCallback(async (version: number): Promise<LocationGateStatus> => {
     const jobs = await fetchAssignedJobsRequired();
     if (!isAttendanceParticipant({ assignedJobCount: jobs.length })) return 'granted';
 
-    const permission = await checkLocationPermission();
     const platform: GatePlatform = isCapacitorNativePlatform() ? 'native' : 'web';
     let hasDeviceCredential = true;
     if (platform === 'native') {
-      const health = await getNativeGeofenceHealth().catch(() => null);
-      hasDeviceCredential = Boolean(health?.hasCredential);
-      const requiredRegionIds = jobs
-        .filter((job) => job.addressVerified && job.lat !== null && job.lng !== null)
-        .slice(0, 10)
-        .flatMap((job) => buildJobsiteRegions(job, 1, 1))
-        .map((region) => region.identifier);
-      const registeredRegionIds = (await getRegisteredGeofences()).map(
-        (region) => region.identifier,
+      // Capacitor can expose the WebView before every native proxy is ready.
+      // An unavailable proxy is indeterminate, not proof that setup regressed;
+      // retry the strict bridge reads during that short cold-launch window.
+      const permission = await retryTransientNativeRead(async () =>
+        checkNativeLocationPermission(await loadCapacitorGeolocation()),
       );
-      return isAttendanceSetupComplete({
+      const [health, requiredRegions, registered] = await Promise.all([
+        retryTransientNativeRead(requireNativeGeofenceHealth),
+        loadAssignedAttendanceRegions(jobs),
+        retryTransientNativeRead(requireRegisteredGeofencesRead),
+      ]);
+      hasDeviceCredential = Boolean(health?.hasCredential);
+      const complete = isAttendanceSetupComplete({
         platform,
         permission,
         hasDeviceCredential,
         nativeHealth: health,
-        requiredRegionIds,
-        registeredRegionIds,
-      })
-        ? 'granted'
-        : 'blocked';
+        requiredRegionIds: requiredRegions.map((region) => region.identifier),
+        registeredRegionIds: registered.map((region) => region.identifier),
+      });
+      // This is a definitive live read. Synchronize the same answer used by the
+      // CEO setup summary; transient bridge failures throw before reaching here
+      // and therefore never flip a configured employee to false.
+      if (version === evaluationVersion.current) {
+        void persistNativeAttendanceReadiness(health, complete);
+      }
+      return complete ? 'granted' : 'blocked';
     }
+    const permission = await checkLocationPermission();
     return isAttendanceSetupComplete({ platform, permission, hasDeviceCredential }) ? 'granted' : 'blocked';
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    // Bound the evaluation so it can never leave the app rendering null forever.
-    // A stall or failure resolves to 'blocked' (show the setup gate) rather than
-    // a blank screen. No redirect or reload — the gate is recoverable in place.
-    resolveGateStatusWithTimeout(evaluate, LOCATION_CHECK_TIMEOUT_MS).then((next) => {
-      if (active) setStatus(next);
-    });
-    return () => {
-      active = false;
-    };
+  const sync = useCallback(async () => {
+    const version = ++evaluationVersion.current;
+    const next = await resolveGateStatusWithTimeout(
+      () => evaluate(version),
+      LOCATION_CHECK_TIMEOUT_MS,
+    );
+    // Focus + visibility can fire together. A slower earlier read must never
+    // overwrite a later successful validation with a stale blocked result.
+    if (version === evaluationVersion.current) setStatus(next);
   }, [evaluate]);
+
+  useEffect(() => {
+    void sync();
+  }, [sync]);
 
   // Re-check on focus/visibility. Covers BOTH directions: completing setup in
   // Settings and coming back lets the user in, and revoking there raises the
   // gate on an already-signed-in session.
-  const sync = useCallback(async () => {
-    setStatus(await evaluate());
-  }, [evaluate]);
-
   useEffect(() => {
     const onFocus = () => void sync();
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden') void sync();
+    };
     window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [sync]);
 

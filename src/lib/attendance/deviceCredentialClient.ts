@@ -16,6 +16,7 @@ const ENROLL_FETCH_TIMEOUT_MS = 15_000;
 
 interface SecureAttendanceStorePlugin {
   setToken(opts: { token: string; expiresAt: string }): Promise<void>;
+  getToken(): Promise<{ hasToken?: boolean; expiresAt?: string }>;
   clear(): Promise<void>;
 }
 
@@ -104,6 +105,47 @@ export async function enrollDeviceCredential(platform?: string): Promise<boolean
     return false;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+let ensureCredentialInFlight: Promise<boolean> | null = null;
+
+/**
+ * Keep the existing Keychain credential when it is still usable.
+ *
+ * The headless runtime previously minted on every render/focus cycle. One
+ * physical-test day produced 65 server credential rows, with each mint revoking
+ * the previous token. Concurrent mints could therefore write an already-revoked
+ * token to the Keychain last. This single-flight check rotates only when the
+ * secure store is empty or the token is close to expiry.
+ */
+export async function ensureDeviceCredential(
+  platform?: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  if (ensureCredentialInFlight) return ensureCredentialInFlight;
+
+  ensureCredentialInFlight = (async () => {
+    const store = secureStore();
+    if (!store) return false;
+    try {
+      const current = await store.getToken();
+      const expiresAt = Date.parse(String(current?.expiresAt ?? ""));
+      const usableForAtLeastOneDay =
+        current?.hasToken === true &&
+        Number.isFinite(expiresAt) &&
+        expiresAt - now > 24 * 60 * 60 * 1000;
+      if (usableForAtLeastOneDay) return true;
+    } catch {
+      // A failed read is recoverable by one enrollment attempt below.
+    }
+    return enrollDeviceCredential(platform);
+  })();
+
+  try {
+    return await ensureCredentialInFlight;
+  } finally {
+    ensureCredentialInFlight = null;
   }
 }
 

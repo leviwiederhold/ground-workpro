@@ -216,14 +216,21 @@ test("monitoring is active inside the window, starting 120 minutes early", () =>
   assert.equal(beforeWindow.nextWindowStartsAt, "2026-07-21T09:00:00.000Z");
 });
 
-test("monitoring ends for the workday once it is clocked out", () => {
+test("monitoring remains active after an ordinary mid-day clock-out", () => {
   const plan = computeMonitoringPlan(planInput({ days: [day({ resolved: true }), TOMORROW] }));
-  assert.equal(plan.active, false);
-  assert.equal(plan.inactiveReason, "day_resolved");
+  assert.equal(plan.active, true);
+  assert.equal(plan.nextWorkDate, "2026-07-21");
 });
 
-test("the next scheduled workday is still prepared after a clock-out", () => {
-  const plan = computeMonitoringPlan(planInput({ days: [day({ resolved: true }), TOMORROW] }));
+test("monitoring ends only after scheduled end plus cutoff and prepares the next day", () => {
+  const plan = computeMonitoringPlan(
+    planInput({
+      now: "2026-07-21T23:01:00.000Z",
+      days: [day({ resolved: true }), TOMORROW],
+    }),
+  );
+  assert.equal(plan.active, false);
+  assert.equal(plan.inactiveReason, "before_window");
   assert.equal(plan.nextWorkDate, "2026-07-22");
   // Tomorrow's window opens 120 minutes before its 11:00Z start.
   assert.equal(plan.nextWindowStartsAt, "2026-07-22T09:00:00.000Z");

@@ -37,7 +37,7 @@ test("the employee runtime preserves background behavior but renders no UI or co
   const source = withoutComments(runtime());
   assert.match(source, /startAttendanceQueueAutoFlush/);
   assert.match(source, /startForegroundGeofenceWatch/);
-  assert.match(source, /enrollDeviceCredential/);
+  assert.match(source, /ensureDeviceCredential/);
   assert.match(source, /registerGeofences/);
   assert.match(source, /onGeofenceTransition/);
   assert.match(source, /return null;/);

@@ -6,19 +6,18 @@
 // the employee UI, and diagnostics all read the same answer instead of each
 // inventing one.
 //
-// The two rules that matter after a clock-out:
-//   - monitoring STOPS for a workday once it is resolved (clocked out). Leaving
-//     regions registered would re-trigger arrivals for a finished shift.
-//   - the NEXT scheduled workday is still prepared, so tomorrow activates
-//     normally without the app ever being opened.
+// A completed session is not a completed workday. Employees commonly leave and
+// return for lunch, materials, or equipment, so monitoring remains active until
+// the scheduled end plus the configured end-of-day cutoff.
 
 export type MonitoringDay = {
   // Company-local work date (YYYY-MM-DD).
   workDate: string;
   scheduledStart: string | null;
   scheduledEnd: string | null;
-  // True once the day has a completed (clocked-out) timecard for the assignment.
-  resolved: boolean;
+  // Retained for backward-compatible callers. A closed timecard must never set
+  // this; the time window, assignment, and company switch own monitoring.
+  resolved?: boolean;
 };
 
 export type MonitoringPlanInput = {
@@ -43,7 +42,6 @@ export type MonitoringPlan = {
     | "no_job"
     | "no_schedule"
     | "before_window"
-    | "day_resolved"
     | "after_window"
     | null;
   // The next window to prepare for, so the device knows when to wake.
@@ -75,10 +73,9 @@ function windowFor(
 }
 
 /**
- * Resolve the monitoring plan. A resolved (clocked-out) day is skipped entirely
- * — that is what "stop monitoring for the completed assignment" means — while
- * the next unresolved scheduled day still reports its start time so the next
- * workday can activate normally.
+ * Resolve the monitoring plan. Clocked-out sessions do not affect it: the
+ * current workday remains active through its end-of-day cutoff so a later
+ * re-entry can open a new session.
  */
 export function computeMonitoringPlan(input: MonitoringPlanInput): MonitoringPlan {
   const none: MonitoringPlan = {
@@ -100,8 +97,9 @@ export function computeMonitoringPlan(input: MonitoringPlanInput): MonitoringPla
 
   if (windows.length === 0) return { ...none, inactiveReason: "no_schedule" };
 
-  // The next window that has not finished AND has not already been resolved.
-  const upcoming = windows.filter((w) => !w.day.resolved && nowMs <= w.endMs);
+  // The next window that has not finished. A prior clock-out is intentionally
+  // irrelevant: it ended one session, not the employee's ability to return.
+  const upcoming = windows.filter((w) => nowMs <= w.endMs);
   const next = upcoming[0] ?? null;
 
   const current = upcoming.find((w) => nowMs >= w.startMs && nowMs <= w.endMs) ?? null;
@@ -116,14 +114,7 @@ export function computeMonitoringPlan(input: MonitoringPlanInput): MonitoringPla
     };
   }
 
-  // Nothing active. Distinguish "today is finished" from "not started yet" so
-  // the UI can say something true rather than "waiting for arrival".
-  const todayResolved = windows.some((w) => w.day.resolved && nowMs >= w.startMs && nowMs <= w.endMs);
-  const reason: MonitoringPlan["inactiveReason"] = todayResolved
-    ? "day_resolved"
-    : next
-      ? "before_window"
-      : "after_window";
+  const reason: MonitoringPlan["inactiveReason"] = next ? "before_window" : "after_window";
 
   return {
     active: false,

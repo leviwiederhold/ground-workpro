@@ -43,6 +43,28 @@ export function isBackgroundReady(snapshot: LocationPermissionSnapshot | null): 
 }
 
 /**
+ * The server-visible equivalent of the native gate's live completion decision.
+ *
+ * `onboardingCompletedAt` is written only after the device has verified native
+ * health, its secure credential, and every assigned region. The permission
+ * dimensions and active server credential are checked separately so this
+ * cannot degrade into a single stale boolean.
+ */
+export function isReportedAttendanceSetupComplete(params: {
+  snapshot: LocationPermissionSnapshot | null;
+  onboardingCompletedAt: string | null;
+  hasActiveCredential: boolean;
+}): boolean {
+  const platform = params.snapshot?.platform;
+  return (
+    (platform === "ios" || platform === "android") &&
+    isBackgroundReady(params.snapshot) &&
+    Boolean(params.onboardingCompletedAt) &&
+    params.hasActiveCredential
+  );
+}
+
+/**
  * The app must NEVER show automatic attendance as active without background
  * permission. This is the single guard other surfaces should consult.
  */

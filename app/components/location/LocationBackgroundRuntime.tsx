@@ -4,11 +4,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchAssignedJobs, startForegroundGeofenceWatch } from '@/lib/jobsite-time/geofence-client';
 import { checkLocationPermission } from '@/lib/jobsite-time/locationPermission';
-import { feetToMeters, pickNearestAssignedJob } from '@/lib/jobsite-time/domain';
+import { pickNearestAssignedJob } from '@/lib/jobsite-time/domain';
 import { reconcileAttendanceState } from '@/lib/jobsite-time/reconcileAttendance';
 import type { DiagnosticsLocationFix } from '@/lib/jobsite-time/attendanceDiagnostics';
 import {
-  buildJobsiteRegions,
   isNativeGeofenceAvailable,
   onGeofenceTransition,
   registerGeofences,
@@ -18,7 +17,8 @@ import {
   flushAttendanceQueue,
   startAttendanceQueueAutoFlush,
 } from '@/lib/attendance/offlineQueueClient';
-import { enrollDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
+import { ensureDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
+import { loadAssignedAttendanceRegions } from '@/lib/attendance/assignedRegionsClient';
 
 const MAX_NATIVE_GEOFENCE_JOBS = 10;
 
@@ -235,20 +235,17 @@ export function LocationBackgroundRuntime() {
     let cancelled = false;
 
     void (async () => {
-      const arrivalRadiusMeters = settings?.arrivalRadiusFeet
-        ? feetToMeters(settings.arrivalRadiusFeet)
-        : 76;
-      const wakeRadiusMeters = settings?.wakeRadiusMeters ?? 1609;
       const verifiedJobs = assignedJobs
         .filter(
           (job) => job.addressVerified && job.lat !== null && job.lng !== null,
         )
         .slice(0, MAX_NATIVE_GEOFENCE_JOBS);
 
-      await enrollDeviceCredential();
-      const regions = verifiedJobs.flatMap((job) =>
-        buildJobsiteRegions(job, arrivalRadiusMeters, wakeRadiusMeters),
-      );
+      // The gate already enrolled a credential. This verifies the Keychain
+      // state and rotates only near expiry; it must not mint on every focus or
+      // render.
+      await ensureDeviceCredential('ios');
+      const regions = await loadAssignedAttendanceRegions(verifiedJobs);
       await registerGeofences(regions);
 
       unsubscribe = await onGeofenceTransition(async (event) => {

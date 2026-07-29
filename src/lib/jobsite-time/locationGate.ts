@@ -59,6 +59,27 @@ export async function resolveGateStatusWithTimeout(
   }
 }
 
+/** Retry only transient native bridge failures during a cold-launch warmup. */
+export async function retryTransientNativeRead<T>(
+  read: () => Promise<T>,
+  options: { attempts?: number; delayMs?: number } = {},
+): Promise<T> {
+  const attempts = Math.max(1, options.attempts ?? 8);
+  const delayMs = Math.max(0, options.delayMs ?? 150);
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await read();
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 < attempts && delayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("native readiness check failed");
+}
+
 // ── Who is subject to the attendance location gate ───────────────────────────
 
 /**

@@ -43,6 +43,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Derived from the same resolved URL the WebView loads, so a preview
         // build never posts attendance to production.
         configureAttendanceBackgroundContext()
+        // Install the Core Location delegate even when iOS relaunched the app
+        // only to deliver a region transition and no Capacitor WebView/plugin
+        // instance will be created.
+        AttendanceGeofenceCoordinator.shared.start()
 
         clearWebViewAssetCache()
         window?.backgroundColor = appBackgroundColor

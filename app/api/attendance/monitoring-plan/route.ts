@@ -1,15 +1,8 @@
 // What this employee's device should be monitoring, and when.
 //
 // Geofence registration happens on the client, but WHETHER to monitor is a
-// server decision — it depends on the assignment, the schedule, and whether the
-// workday has already been resolved by a clock-out. Serving it from one place
-// means the native layer, the employee UI, and diagnostics cannot disagree.
-//
-// Two rules this exists to enforce, both from the departure lifecycle:
-//   - monitoring STOPS for a workday once it is clocked out (otherwise the
-//     regions stay registered and re-trigger arrivals for a finished shift);
-//   - the NEXT scheduled workday is still prepared, so tomorrow activates
-//     normally without the app ever being opened.
+// server decision based on assignment and the company schedule. A clock-out
+// closes one session; it does not end monitoring for the workday.
 
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
@@ -99,23 +92,6 @@ export async function GET() {
       }
     }
 
-    // Which of those days are already resolved (clocked out) for this job.
-    const resolvedDates = new Set<string>();
-    if (assignedJob) {
-      const cards = await db
-        .from("jobsite_timecards")
-        .select("work_date, clock_out_at")
-        .eq("company_id", companyId)
-        .eq("user_id", userId)
-        .eq("job_id", assignedJob.jobId)
-        .in("work_date", horizon)
-        .not("clock_out_at", "is", null)
-        .limit(20);
-      for (const card of (cards.data ?? []) as Array<{ work_date: string | null }>) {
-        if (card.work_date) resolvedDates.add(card.work_date);
-      }
-    }
-
     const days: MonitoringDay[] = horizon.map((workDate) => {
       const window = workSchedule
         ? scheduledWindowForWorkDate(workDate, workSchedule)
@@ -124,7 +100,6 @@ export async function GET() {
         workDate,
         scheduledStart: window.scheduledStart,
         scheduledEnd: window.scheduledEnd,
-        resolved: resolvedDates.has(workDate),
       };
     });
 
@@ -142,9 +117,9 @@ export async function GET() {
       hasMonitorableJob: Boolean(hasMonitorableJob),
     });
 
-    // Regions are only returned while the plan is active. An inactive plan
-    // returns an EMPTY set, which is the instruction to deregister — that is
-    // how monitoring stops for a resolved workday.
+    // Regions are returned through the entire scheduled window, including
+    // after an ordinary departure. After the end-of-day cutoff the empty set is
+    // the instruction to deregister.
     const arrivalRadiusFeet = Number(
       (settingsRow.data as Record<string, unknown> | null)?.jobsite_geofence_radius_feet ??
         DEFAULT_ARRIVAL_RADIUS_FEET

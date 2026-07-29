@@ -15,6 +15,7 @@ import {
   resolveGateButtonLabel,
   resolveGateStatusWithTimeout,
   resolveLocationGateStatus,
+  retryTransientNativeRead,
   runLocationSetup,
   type LocationGateStatus,
 } from "../../src/lib/jobsite-time/locationGate.ts";
@@ -95,13 +96,37 @@ test("the startup gate bounds its evaluation so it cannot render null forever", 
   // stall on native and strand the app on 'checking' → null.
   assert.match(
     source,
-    /resolveGateStatusWithTimeout\(evaluate/,
+    /resolveGateStatusWithTimeout\(\s*\(\) => evaluate\(version\)/,
     "the evaluation must be time-bounded",
   );
   // Stage 1/2 constraint: the fix must not redirect or reload.
   for (const forbidden of ["location.reload", "location.assign", "location.href", "router.push", "router.replace", "router.refresh"]) {
     assert.ok(!source.includes(forbidden), `the wrapper must not ${forbidden}`);
   }
+});
+
+test("completed native setup survives transient cold-launch bridge gaps", async () => {
+  let reads = 0;
+  const result = await retryTransientNativeRead(
+    async () => {
+      reads += 1;
+      if (reads < 4) throw new Error("Capacitor bridge warming up");
+      return "complete";
+    },
+    { attempts: 5, delayMs: 0 },
+  );
+  assert.equal(result, "complete");
+  assert.equal(reads, 4);
+});
+
+test("a stale launch/focus evaluation cannot overwrite the current readiness report", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
+  assert.match(source, /version === evaluationVersion\.current/);
+  assert.match(
+    source,
+    /version === evaluationVersion\.current[\s\S]{0,160}persistNativeAttendanceReadiness/,
+    "only the current definitive native read may update the CEO setup report",
+  );
 });
 
 // ── Only attendance participants are gated (Stage 2, assignment-based) ────────
@@ -244,7 +269,9 @@ test("revoking permission raises the gate on focus or visibility change", () => 
   assert.match(source, /visibilitychange/, "must re-check on visibility change");
   // sync() re-evaluates in BOTH directions, so a revoke downgrades a granted
   // session rather than being ignored.
-  assert.match(source, /setStatus\(await evaluate\(\)\)/);
+  assert.match(source, /resolveGateStatusWithTimeout\(\s*\(\) => evaluate\(version\)/);
+  assert.match(source, /setStatus\(next\)/);
+  assert.match(source, /evaluationVersion/, "stale concurrent reads must not overwrite a newer result");
 });
 
 // ── Which routes are gated, and which are deliberately not ───────────────────

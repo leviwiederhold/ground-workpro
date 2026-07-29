@@ -85,6 +85,32 @@ test("returning to the same job after a closed session starts a new one", () => 
   assert.equal(d.primary.kind, "open_session");
 });
 
+test("multiple same-day leave and return cycles each start a new session", () => {
+  const closedSessions = [
+    card({
+      id: "tc-1",
+      clockInAt: "2026-07-21T11:00:00.000Z",
+      clockOutAt: "2026-07-21T14:00:00.000Z",
+    }),
+    card({
+      id: "tc-2",
+      clockInAt: "2026-07-21T15:00:00.000Z",
+      clockOutAt: "2026-07-21T17:00:00.000Z",
+    }),
+  ];
+
+  for (const [index, closed] of closedSessions.entries()) {
+    const decision = decideGeofenceEvent(
+      input({
+        occurredAt: `2026-07-21T${18 + index}:00:00.000Z`,
+        card: closed,
+      }),
+    );
+    assert.equal(decision.primary.kind, "open_session");
+    assert.deepEqual(eventTypes(decision), ["entered_geofence"]);
+  }
+});
+
 test("an arrival at a job already awaiting confirmation keeps the ORIGINAL time", () => {
   // The dwell period runs from when they first got here. A duplicate delivery
   // of the same transition must not restart the clock.

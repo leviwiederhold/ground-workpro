@@ -25,7 +25,7 @@ closed nothing in the WebView runs. The server-side pass is the mechanism.
 | 2:00 PM | Geofence exit | `pending_departure_at = 2:00`, `departure_pending` audit event |
 | 2:00–2:10 | Cron passes; decision is `hold` | Unchanged — a brief exit is not a departure |
 | 2:04 (alt) | Employee returns | `pending_departure_at` cleared, `departure_cancelled` audit event. **Shift continues** |
-| 2:11 | Grace elapsed | `clock_out_at = 2:00` (**not** 2:11), `clock_out_method = departure_grace`, `auto_clock_out` + `monitoring_stopped` audit events |
+| 2:11 | Grace elapsed | `clock_out_at = 2:00` (**not** 2:11), `clock_out_method = departure_grace`, `auto_clock_out` audit event. Monitoring stays active for a same-day return |
 
 The clock-out is recorded at the **original validated departure time**, so a
 delayed, offline, or duplicated confirmation produces the identical timecard.
@@ -72,14 +72,16 @@ should do.
 have registered right now, plus why not and what is next when it should have
 none.
 
-- Monitoring **stops** for a workday once it is clocked out (`resolved`). The
-  plan returns an empty region set, which is the instruction to deregister.
-  Otherwise the regions stay live and re-trigger arrivals for a finished shift.
+- A departure-grace clock-out ends one attendance session, not the workday.
+  Monitoring remains active through the scheduled end plus the configured
+  end-of-day cutoff, so a same-day return can open a new session.
+- After that cutoff, the plan returns an empty region set, which is the
+  instruction to deregister until the next scheduled window.
 - The **next** scheduled workday still reports its window start, so tomorrow
   activates normally without the app being opened.
 - `inactiveReason` distinguishes `no_job`, `no_schedule`, `before_window`,
-  `day_resolved`, and `after_window`, so the UI (PR 14) can say something true
-  instead of "waiting for arrival".
+  and `after_window`, so the UI can say something true instead of "waiting for
+  arrival".
 
 ## Audit events
 
@@ -91,7 +93,7 @@ none.
 | `auto_clock_out` | Departure confirmed; clock-out at the original exit time |
 | `fallback_clock_out` | No exit ever arrived; closed at the scheduled end |
 | `clock_out_rejected` | Exit event with no open timecard to close |
-| `monitoring_stopped` | Workday resolved; monitoring ended for the assignment |
+| `monitoring_stopped` | The scheduled end-of-day cutoff was reached and monitoring ended for the assignment |
 
 ## Route rename
 

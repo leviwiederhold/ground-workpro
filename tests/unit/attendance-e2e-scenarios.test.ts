@@ -138,13 +138,12 @@ test("REGRESSION: onsite before 7:00, app never opened → auto clock-in at 7:00
   await tick(db, "2026-07-21T18:11:00.000Z");
   assert.equal(c.clock_out_at, "2026-07-21T18:00:00.000Z");
   assert.equal(c.total_minutes, 420, "7 hours — the processing delay is not paid");
-  assert.equal(c.monitoring_stopped_at, "2026-07-21T18:11:00.000Z");
+  assert.equal(c.monitoring_stopped_at, null, "midday departure ends one session, not monitoring");
 
   assert.deepEqual(eventTypes(db), [
     "onsite_before_shift",
     "scheduled_clock_in",
     "auto_clock_out",
-    "monitoring_stopped",
   ]);
 });
 
@@ -528,7 +527,6 @@ test("30. Full arrival-to-clock-out lifecycle with the app never opened", async 
     "onsite_before_shift",
     "scheduled_clock_in",
     "auto_clock_out",
-    "monitoring_stopped",
   ]);
 });
 
@@ -536,7 +534,7 @@ test("30. Full arrival-to-clock-out lifecycle with the app never opened", async 
 // Monitoring lifecycle across days
 // ═══════════════════════════════════════════════════════════════════════════
 
-test("after clock-out, monitoring ends for the day and the next day is prepared", () => {
+test("after a mid-day clock-out, monitoring continues for same-day re-entry", () => {
   const tomorrow = {
     workDate: "2026-07-22",
     scheduledStart: "2026-07-22T11:00:00.000Z",
@@ -550,18 +548,18 @@ test("after clock-out, monitoring ends for the day and the next day is prepared"
     endOfDayCutoffMinutes: 180,
     hasMonitorableJob: true,
   });
-  assert.equal(afterClockOut.active, false);
-  assert.equal(afterClockOut.inactiveReason, "day_resolved");
-  assert.equal(afterClockOut.nextWindowStartsAt, "2026-07-22T09:00:00.000Z");
+  assert.equal(afterClockOut.active, true);
+  assert.equal(afterClockOut.nextWorkDate, WORK_DATE);
 
-  const nextMorning = computeMonitoringPlan({
-    now: "2026-07-22T09:30:00.000Z",
+  const afterCutoff = computeMonitoringPlan({
+    now: "2026-07-21T23:01:00.000Z",
     days: [{ workDate: WORK_DATE, scheduledStart: SHIFT_START, scheduledEnd: SHIFT_END, resolved: true }, tomorrow],
     monitoringLeadMinutes: 120,
     endOfDayCutoffMinutes: 180,
     hasMonitorableJob: true,
   });
-  assert.equal(nextMorning.active, true, "the next workday must activate normally");
+  assert.equal(afterCutoff.active, false);
+  assert.equal(afterCutoff.nextWindowStartsAt, "2026-07-22T09:00:00.000Z");
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -37,7 +37,7 @@ export async function GET() {
 
     const employeesResult = await admin
       .from("employees")
-      .select("id, name, user_id, status")
+      .select("id, full_name, user_id, status")
       .eq("company_id", companyId)
       .limit(500);
     const employees = (employeesResult.data ?? []).filter(
@@ -115,7 +115,7 @@ export async function GET() {
       const userId = employee.user_id ? String(employee.user_id) : null;
       return {
         employeeId,
-        name: String(employee.name ?? "Team member"),
+        name: String(employee.full_name ?? "Team member"),
         hasAssignmentToday: Boolean(jobId),
         jobsiteVerified: Boolean(job?.address_verified) && job?.lat != null && job?.lng != null,
         jobName: job?.name ? String(job.name) : null,

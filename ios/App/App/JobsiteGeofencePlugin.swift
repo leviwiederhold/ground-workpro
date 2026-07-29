@@ -18,8 +18,193 @@ import Capacitor
 // no signal is not lost — it syncs later with its ORIGINAL timestamp, and the
 // server's idempotency guards collapse any overlap into one record.
 
+/// Process-wide owner of Core Location attendance regions.
+///
+/// AppDelegate starts this before any WebView exists, including a location
+/// relaunch after iOS terminated the app. The previous delegate lived only on
+/// the Capacitor plugin instance, so a terminated-app entry had nobody to
+/// receive it while a later background exit (with the process still alive)
+/// worked normally.
+final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
+    static let shared = AttendanceGeofenceCoordinator()
+
+    let manager = CLLocationManager()
+    var eventSink: ((JSObject) -> Void)?
+    private var started = false
+    private var initialStateRequests = Set<String>()
+
+    func start() {
+        if !started {
+            manager.delegate = self
+            manager.pausesLocationUpdatesAutomatically = false
+            started = true
+        }
+        if manager.authorizationStatus == .authorizedAlways {
+            manager.allowsBackgroundLocationUpdates = true
+        }
+    }
+
+    private func matches(_ existing: CLCircularRegion, _ desired: JSObject) -> Bool {
+        guard
+            let latitude = desired["latitude"] as? Double,
+            let longitude = desired["longitude"] as? Double,
+            let radius = desired["radiusMeters"] as? Double
+        else { return false }
+        let clampedRadius = min(radius, manager.maximumRegionMonitoringDistance)
+        return abs(existing.center.latitude - latitude) < 0.000001 &&
+            abs(existing.center.longitude - longitude) < 0.000001 &&
+            abs(existing.radius - clampedRadius) < 0.5
+    }
+
+    /// Reconcile desired state without an empty-region gap.
+    func reconcile(_ regions: [JSObject]) -> Int {
+        start()
+        let desiredById = Dictionary(
+            uniqueKeysWithValues: regions.compactMap { region -> (String, JSObject)? in
+                guard let identifier = region["identifier"] as? String else { return nil }
+                return (identifier, region)
+            }
+        )
+        let existingById = Dictionary(
+            uniqueKeysWithValues: manager.monitoredRegions.compactMap { region -> (String, CLCircularRegion)? in
+                guard let circular = region as? CLCircularRegion else { return nil }
+                return (circular.identifier, circular)
+            }
+        )
+
+        // Remove only stale or materially changed regions. Unchanged regions
+        // remain continuously monitored across launches and focus events.
+        for (identifier, existing) in existingById {
+            guard let desired = desiredById[identifier], matches(existing, desired) else {
+                manager.stopMonitoring(for: existing)
+                continue
+            }
+        }
+
+        for (identifier, region) in desiredById {
+            if let existing = existingById[identifier], matches(existing, region) {
+                continue
+            }
+            guard
+                let latitude = region["latitude"] as? Double,
+                let longitude = region["longitude"] as? Double,
+                let radius = region["radiusMeters"] as? Double
+            else { continue }
+            let circular = CLCircularRegion(
+                center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
+                radius: min(radius, manager.maximumRegionMonitoringDistance),
+                identifier: identifier
+            )
+            circular.notifyOnEntry = true
+            circular.notifyOnExit = true
+            initialStateRequests.insert(identifier)
+            manager.startMonitoring(for: circular)
+        }
+
+        UserDefaults.standard.set(desiredById.count, forKey: "gw_registered_count")
+        return desiredById.count
+    }
+
+    func removeAll() {
+        start()
+        initialStateRequests.removeAll()
+        for region in manager.monitoredRegions {
+            manager.stopMonitoring(for: region)
+        }
+        UserDefaults.standard.set(0, forKey: "gw_registered_count")
+    }
+
+    func registeredRegions() -> [JSObject] {
+        start()
+        return manager.monitoredRegions.compactMap { region in
+            guard let circular = region as? CLCircularRegion else { return nil }
+            let parts = circular.identifier.split(separator: ":")
+            var obj = JSObject()
+            obj["identifier"] = circular.identifier
+            obj["jobId"] = parts.count == 2 ? String(parts[0]) : ""
+            obj["zone"] = parts.count == 2 ? String(parts[1]) : ""
+            obj["latitude"] = circular.center.latitude
+            obj["longitude"] = circular.center.longitude
+            obj["radiusMeters"] = circular.radius
+            return obj
+        }
+    }
+
+    func requestAlwaysAuthorization() {
+        start()
+        if manager.authorizationStatus != .authorizedAlways {
+            manager.requestAlwaysAuthorization()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didStartMonitoringFor region: CLRegion) {
+        // Core Location does not guarantee an enter callback when monitoring is
+        // first installed while the device is already inside. Determine the
+        // initial state only for a newly-added region; unchanged registrations
+        // are never re-fired on an ordinary app launch.
+        if initialStateRequests.contains(region.identifier) {
+            manager.requestState(for: region)
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didDetermineState state: CLRegionState, for region: CLRegion) {
+        guard initialStateRequests.remove(region.identifier) != nil else { return }
+        if state == .inside {
+            handleTransition(region: region, transition: "enter")
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
+        handleTransition(region: region, transition: "enter")
+    }
+
+    func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
+        handleTransition(region: region, transition: "exit")
+    }
+
+    func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
+        if let identifier = region?.identifier {
+            initialStateRequests.remove(identifier)
+        }
+        UserDefaults.standard.set(error.localizedDescription, forKey: "gw_last_error")
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if manager.authorizationStatus == .authorizedAlways {
+            manager.allowsBackgroundLocationUpdates = true
+        }
+    }
+
+    private func handleTransition(region: CLRegion, transition: String) {
+        let parts = region.identifier.split(separator: ":")
+        guard parts.count == 2 else { return }
+        let jobId = String(parts[0])
+        let zone = String(parts[1])
+        let occurredAt = ISO8601DateFormatter.attendance.string(from: Date())
+        let defaults = UserDefaults.standard
+        defaults.set(occurredAt, forKey: "gw_last_event_at")
+        defaults.set(transition, forKey: "gw_last_event_transition")
+
+        var event = JSObject()
+        event["identifier"] = region.identifier
+        event["jobId"] = jobId
+        event["zone"] = zone
+        event["transition"] = transition
+        event["occurredAt"] = occurredAt
+        eventSink?(event)
+
+        JobsiteGeofencePlugin.submitOrQueue(
+            jobId: jobId,
+            zone: zone,
+            transition: transition,
+            occurredAt: occurredAt,
+            baseUrl: defaults.string(forKey: "gw_server_base_url") ?? ""
+        )
+    }
+}
+
 @objc(JobsiteGeofencePlugin)
-public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManagerDelegate {
+public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin {
     // Capacitor 6+ registers Swift plugins through CAPBridgedPlugin. Without
     // these three members the class compiles, ships, and is never registered —
     // `Capacitor.Plugins.JobsiteGeofence` stays undefined and every native path
@@ -35,24 +220,12 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
         CAPPluginMethod(name: "requestAlwaysAuthorization", returnType: CAPPluginReturnPromise)
     ]
 
-    private let manager = CLLocationManager()
-
-    /// Where background events are POSTed. Written by AppDelegate at launch from
-    /// the same resolved URL the WebView loads, so a preview build never posts
-    /// to production.
-    private var serverBaseUrl: String {
-        UserDefaults.standard.string(forKey: "gw_server_base_url") ?? ""
-    }
+    private let coordinator = AttendanceGeofenceCoordinator.shared
 
     override public func load() {
-        manager.delegate = self
-        manager.pausesLocationUpdatesAutomatically = false
-        // Legal only because UIBackgroundModes includes `location` (see
-        // Info.plist). Region monitoring alone would not require it, but the
-        // wake-region → arrival-region handoff briefly requests updates, and
-        // setting this without the background mode raises at runtime.
-        if manager.authorizationStatus == .authorizedAlways {
-            manager.allowsBackgroundLocationUpdates = true
+        coordinator.start()
+        coordinator.eventSink = { [weak self] event in
+            self?.notifyListeners("geofenceTransition", data: event)
         }
     }
 
@@ -69,42 +242,12 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
             return
         }
 
-        // Replace the whole set: the caller owns the desired state, and leaving
-        // a stale region registered would re-trigger arrivals for a finished
-        // assignment.
-        for existing in manager.monitoredRegions {
-            manager.stopMonitoring(for: existing)
-        }
-
-        var registered = 0
-        for region in regions {
-            guard
-                let identifier = region["identifier"] as? String,
-                let latitude = region["latitude"] as? Double,
-                let longitude = region["longitude"] as? Double,
-                let radius = region["radiusMeters"] as? Double
-            else { continue }
-            let clampedRadius = min(radius, manager.maximumRegionMonitoringDistance)
-            let clRegion = CLCircularRegion(
-                center: CLLocationCoordinate2D(latitude: latitude, longitude: longitude),
-                radius: clampedRadius,
-                identifier: identifier
-            )
-            clRegion.notifyOnEntry = true
-            clRegion.notifyOnExit = true
-            manager.startMonitoring(for: clRegion)
-            registered += 1
-        }
-
-        UserDefaults.standard.set(registered, forKey: "gw_registered_count")
+        let registered = coordinator.reconcile(regions)
         call.resolve(["registered": registered])
     }
 
     @objc func removeAll(_ call: CAPPluginCall) {
-        for region in manager.monitoredRegions {
-            manager.stopMonitoring(for: region)
-        }
-        UserDefaults.standard.set(0, forKey: "gw_registered_count")
+        coordinator.removeAll()
         call.resolve()
     }
 
@@ -112,22 +255,12 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
         // Read back from the OS, not from a mirror — this is what makes
         // "assigned job geofence registered" in diagnostics a real answer
         // rather than an echo of what we last asked for.
-        let regions: [JSObject] = manager.monitoredRegions.compactMap { region in
-            guard let circular = region as? CLCircularRegion else { return nil }
-            let parts = circular.identifier.split(separator: ":")
-            var obj = JSObject()
-            obj["identifier"] = circular.identifier
-            obj["jobId"] = parts.count == 2 ? String(parts[0]) : ""
-            obj["zone"] = parts.count == 2 ? String(parts[1]) : ""
-            obj["latitude"] = circular.center.latitude
-            obj["longitude"] = circular.center.longitude
-            obj["radiusMeters"] = circular.radius
-            return obj
-        }
-        call.resolve(["regions": regions])
+        call.resolve(["regions": coordinator.registeredRegions()])
     }
 
     @objc func getHealth(_ call: CAPPluginCall) {
+        coordinator.start()
+        let manager = coordinator.manager
         let defaults = UserDefaults.standard
         // Instance property, not the deprecated class method: the class method
         // returns a stale value on iOS 14+.
@@ -167,68 +300,11 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin, CLLocationManag
     }
 
     @objc func requestAlwaysAuthorization(_ call: CAPPluginCall) {
-        if manager.authorizationStatus != .authorizedAlways {
-            manager.requestAlwaysAuthorization()
-        }
+        coordinator.requestAlwaysAuthorization()
         // The OS owns the prompt and may complete it after this bridge call.
         // JavaScript keeps the full-screen gate mounted and rechecks health on
         // foreground return before it can dismiss.
         call.resolve()
-    }
-
-    // MARK: - CLLocationManagerDelegate
-
-    public func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
-        handleTransition(region: region, transition: "enter")
-    }
-
-    public func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
-        handleTransition(region: region, transition: "exit")
-    }
-
-    public func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
-        UserDefaults.standard.set(error.localizedDescription, forKey: "gw_last_error")
-    }
-
-    public func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedAlways {
-            manager.allowsBackgroundLocationUpdates = true
-        }
-        notifyListeners("geofenceAuthorizationChanged", data: [
-            "authorized": manager.authorizationStatus == .authorizedAlways
-        ])
-    }
-
-    private func handleTransition(region: CLRegion, transition: String) {
-        // identifier is `${jobId}:${zone}`.
-        let parts = region.identifier.split(separator: ":")
-        guard parts.count == 2 else { return }
-        let jobId = String(parts[0])
-        let zone = String(parts[1])
-        let occurredAt = ISO8601DateFormatter.attendance.string(from: Date())
-
-        let defaults = UserDefaults.standard
-        defaults.set(occurredAt, forKey: "gw_last_event_at")
-        defaults.set(transition, forKey: "gw_last_event_transition")
-
-        // Notify the foreground JS listener when the app happens to be alive.
-        // This is a nice-to-have; the POST below is the critical path and does
-        // not depend on any JS running.
-        notifyListeners("geofenceTransition", data: [
-            "identifier": region.identifier,
-            "jobId": jobId,
-            "zone": zone,
-            "transition": transition,
-            "occurredAt": occurredAt
-        ])
-
-        JobsiteGeofencePlugin.submitOrQueue(
-            jobId: jobId,
-            zone: zone,
-            transition: transition,
-            occurredAt: occurredAt,
-            baseUrl: serverBaseUrl
-        )
     }
 
     // MARK: - Delivery

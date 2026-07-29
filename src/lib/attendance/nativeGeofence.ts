@@ -98,8 +98,23 @@ export function buildJobsiteRegions(
 ): GeofenceRegion[] {
   if (!job.addressVerified || job.lat === null || job.lng === null) return [];
   const base = { jobId: String(job.jobId), latitude: job.lat, longitude: job.lng };
+  const arrival: GeofenceRegion = {
+    identifier: `${job.jobId}:arrival`,
+    zone: "arrival",
+    radiusMeters: arrivalRadiusMeters,
+    ...base,
+  };
+
+  // The wake region is only useful when it is genuinely wider than the
+  // attendance boundary. Production had a legacy 5,280 ft arrival radius and a
+  // 1,609 m wake radius — effectively two identical Core Location regions.
+  // iOS delivered the wake enter but not the arrival enter, then delivered both
+  // exits together. Collapsing that redundant pair preserves the configured
+  // arrival boundary and guarantees the one entry callback is actionable.
+  if (wakeRadiusMeters <= arrivalRadiusMeters + 1) return [arrival];
+
   return [
-    { identifier: `${job.jobId}:arrival`, zone: "arrival", radiusMeters: arrivalRadiusMeters, ...base },
+    arrival,
     { identifier: `${job.jobId}:wake`, zone: "wake", radiusMeters: wakeRadiusMeters, ...base },
   ];
 }
@@ -109,8 +124,11 @@ export async function registerGeofences(regions: GeofenceRegion[]): Promise<bool
   const plugin = getPlugin();
   if (!plugin) return false;
   try {
-    await plugin.removeAll();
-    if (regions.length > 0) await plugin.register({ regions });
+    // `register` owns reconciliation of the desired set. Removing everything
+    // first created a real zero-region window on every launch/focus refresh;
+    // the concurrent startup readiness check saw that gap and raised the
+    // location gate again for an otherwise-complete device.
+    await plugin.register({ regions });
     return true;
   } catch {
     return false;
@@ -125,6 +143,17 @@ export async function getRegisteredGeofences(): Promise<GeofenceRegion[]> {
   } catch {
     return [];
   }
+}
+
+/** Strict read used by startup readiness checks; bridge errors are not "zero regions". */
+export async function requireRegisteredGeofencesRead(): Promise<GeofenceRegion[]> {
+  const plugin = getPlugin();
+  if (!plugin) throw new Error("JobsiteGeofence native bridge unavailable");
+  const result = await plugin.getRegistered();
+  if (!Array.isArray(result?.regions)) {
+    throw new Error("native location service returned an invalid region list");
+  }
+  return result.regions;
 }
 
 const UNAVAILABLE_HEALTH: NativeGeofenceHealth = {
@@ -199,7 +228,9 @@ export async function requireRegisteredGeofences(
   if (!plugin) throw new Error("native location service unavailable");
   if (regions.length === 0) throw new Error("no assigned location regions are available");
 
-  await plugin.removeAll();
+  // Native registration is an idempotent desired-state reconciliation. Never
+  // introduce an empty monitoring gap merely to validate an already-correct
+  // setup.
   await plugin.register({ regions });
   const registered = (await plugin.getRegistered()).regions ?? [];
   const requiredRegionIds = regions.map((region) => region.identifier).sort();

@@ -66,7 +66,8 @@ test("a confirmed departure creates exactly one clock-out at the original exit t
   assert.equal(card.pending_departure_at, null);
   // 11:00Z → 18:00Z is 7 hours; the 11-minute processing delay is not counted.
   assert.equal(card.total_minutes, 420);
-  assert.deepEqual(eventTypes(db), ["auto_clock_out", "monitoring_stopped"]);
+  assert.deepEqual(eventTypes(db), ["auto_clock_out"]);
+  assert.equal(card.monitoring_stopped_at, null, "midday clock-out must keep monitoring active");
 });
 
 test("a repeat pass after the clock-out produces no duplicate", async () => {
@@ -78,7 +79,7 @@ test("a repeat pass after the clock-out produces no duplicate", async () => {
 
   assert.equal(again.candidates, 0);
   assert.equal(db.tables.jobsite_timecards.length, 1);
-  assert.deepEqual(eventTypes(db), ["auto_clock_out", "monitoring_stopped"]);
+  assert.deepEqual(eventTypes(db), ["auto_clock_out"]);
 });
 
 test("re-entry during the grace period cancels the pending departure", async () => {
@@ -100,15 +101,15 @@ test("re-entry during the grace period cancels the pending departure", async () 
   assert.ok(eventTypes(db).includes("departure_cancelled"));
 });
 
-test("monitoring ends for the resolved workday after clock-out", async () => {
+test("ordinary mid-day departure does not end monitoring for the workday", async () => {
   const card = openCard();
   const db = makeDb({ jobsite_timecards: [card], companies: [COMPANY], jobsite_timecard_events: [] });
 
   const summary = await runScheduledAttendanceClockOut({ db, now: "2026-07-21T18:11:00.000Z" });
 
-  assert.equal(summary.monitoringStopped, 1);
-  assert.equal(card.monitoring_stopped_at, "2026-07-21T18:11:00.000Z");
-  assert.ok(eventTypes(db).includes("monitoring_stopped"));
+  assert.equal(summary.monitoringStopped, 0);
+  assert.equal(card.monitoring_stopped_at, null);
+  assert.ok(!eventTypes(db).includes("monitoring_stopped"));
 });
 
 test("the longer of the two configured grace periods is enforced", async () => {
@@ -132,12 +133,14 @@ test("a missed exit event is closed at the scheduled end and flagged for review"
 
   const summary = await runScheduledAttendanceClockOut({ db, now: "2026-07-21T23:30:00.000Z" });
   assert.equal(summary.fallbackClockedOut, 1);
+  assert.equal(summary.monitoringStopped, 1);
   assert.equal(card.clock_out_at, SHIFT_END);
   assert.equal(card.clock_out_method, "fallback_end_of_day");
   // A guessed boundary is never presented as a verified departure.
   assert.equal(card.status, "needs_review");
   assert.equal(card.detected_departure_at, null);
   assert.deepEqual(eventTypes(db), ["fallback_clock_out", "monitoring_stopped"]);
+  assert.equal(card.monitoring_stopped_at, "2026-07-21T23:30:00.000Z");
 });
 
 test("a card without a stored scheduled end falls back to the company work hours", async () => {

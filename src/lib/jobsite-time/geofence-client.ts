@@ -216,18 +216,25 @@ export function startForegroundGeofenceWatch(options: ForegroundGeofenceOptions)
 
 // Fetches the current user's assigned jobs (with verified coordinates when
 // available) for the foreground watcher / status card.
+export async function fetchAssignedJobsRequired(): Promise<
+  Array<AssignedJobLocation & { name?: string }>
+> {
+  const res = await fetch("/api/jobsite-time/assigned-jobs", { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load assigned locations");
+  const json = await res.json().catch(() => null);
+  if (!Array.isArray(json?.items)) throw new Error("Assigned locations response was invalid");
+  return json.items.map((j: any) => ({
+    jobId: String(j.jobId),
+    lat: j.lat ?? null,
+    lng: j.lng ?? null,
+    addressVerified: Boolean(j.addressVerified),
+    name: j.name ?? "Job",
+  }));
+}
+
 export async function fetchAssignedJobs(): Promise<Array<AssignedJobLocation & { name?: string }>> {
   try {
-    const res = await fetch("/api/jobsite-time/assigned-jobs", { cache: "no-store" });
-    if (!res.ok) return [];
-    const json = await res.json().catch(() => null);
-    return (json?.items ?? []).map((j: any) => ({
-      jobId: String(j.jobId),
-      lat: j.lat ?? null,
-      lng: j.lng ?? null,
-      addressVerified: Boolean(j.addressVerified),
-      name: j.name ?? "Job",
-    }));
+    return await fetchAssignedJobsRequired();
   } catch {
     return [];
   }

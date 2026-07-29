@@ -20,7 +20,8 @@
 //
 // "Setup complete" is derived from live signals every time — never a local
 // completion flag. On web that is location permission; on native it is
-// permission AND an enrolled device credential (background events need it).
+// the full live native contract: Always + Precise authorization, healthy
+// bridge, enrolled device credential, and assigned regions registered.
 //
 // The whole evaluation is time-bounded: a stalled check (the physical-iPhone
 // white screen, where the Capacitor plugin import / bridge call can hang) can
@@ -36,22 +37,25 @@ import {
   type GatePlatform,
   type LocationGateStatus,
 } from '@/lib/jobsite-time/locationGate';
-import { fetchAssignedJobs } from '@/lib/jobsite-time/geofence-client';
+import { fetchAssignedJobsRequired } from '@/lib/jobsite-time/geofence-client';
 import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
-import { getNativeGeofenceHealth } from '@/lib/attendance/nativeGeofence';
+import {
+  buildJobsiteRegions,
+  getNativeGeofenceHealth,
+  getRegisteredGeofences,
+} from '@/lib/attendance/nativeGeofence';
 import { LocationRequiredGate } from './LocationRequiredGate';
 
 export function RequireLocationAccess({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<LocationGateStatus>('checking');
 
   // Non-prompting evaluation of the gate status:
-  //   1. Participation — assigned to at least one job? (fetchAssignedJobs returns
-  //      [] on any failure, so a transient error means "not a participant" and
-  //      the app renders; the focus re-check will gate a participant on retry.)
+  //   1. Participation — assigned to at least one job? A fetch failure blocks
+  //      safely instead of incorrectly treating the user as unassigned.
   //   2. If a participant, is attendance setup complete? Web needs permission;
-  //      native needs permission AND an enrolled device credential.
+  //      native needs the complete live native contract described above.
   const evaluate = useCallback(async (): Promise<LocationGateStatus> => {
-    const jobs = await fetchAssignedJobs();
+    const jobs = await fetchAssignedJobsRequired();
     if (!isAttendanceParticipant({ assignedJobCount: jobs.length })) return 'granted';
 
     const permission = await checkLocationPermission();
@@ -60,6 +64,24 @@ export function RequireLocationAccess({ children }: { children: React.ReactNode 
     if (platform === 'native') {
       const health = await getNativeGeofenceHealth().catch(() => null);
       hasDeviceCredential = Boolean(health?.hasCredential);
+      const requiredRegionIds = jobs
+        .filter((job) => job.addressVerified && job.lat !== null && job.lng !== null)
+        .slice(0, 10)
+        .flatMap((job) => buildJobsiteRegions(job, 1, 1))
+        .map((region) => region.identifier);
+      const registeredRegionIds = (await getRegisteredGeofences()).map(
+        (region) => region.identifier,
+      );
+      return isAttendanceSetupComplete({
+        platform,
+        permission,
+        hasDeviceCredential,
+        nativeHealth: health,
+        requiredRegionIds,
+        registeredRegionIds,
+      })
+        ? 'granted'
+        : 'blocked';
     }
     return isAttendanceSetupComplete({ platform, permission, hasDeviceCredential }) ? 'granted' : 'blocked';
   }, []);

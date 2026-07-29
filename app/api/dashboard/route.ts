@@ -81,11 +81,19 @@ function toError(error: unknown) {
 const normalizeEmail = (email: string | null | undefined) => String(email ?? "").trim().toLowerCase();
 
 function getQuickActionsForRole(role: AppRole) {
-  const common = [{ key: "time_clock", label: "Clock In / Out", href: "time-clock" }];
-
-  if (role === "admin" || role === "pm") {
+  if (role === "admin") {
     return [
-      ...common,
+      { key: "time_clock", label: "Time Clock", href: "time-clock" },
+      { key: "add_event", label: "Add Event", href: "calendar-event" },
+      { key: "daily_report", label: "Daily Report", href: "daily-report" },
+      { key: "work_order", label: "Work Order", href: "work-order" },
+      { key: "create_bid", label: "Create Bid", href: "/bids" },
+      { key: "invite_employee", label: "Invite Employee", href: "/team" },
+    ];
+  }
+
+  if (role === "pm") {
+    return [
       { key: "add_event", label: "Add Event", href: "calendar-event" },
       { key: "daily_report", label: "Daily Report", href: "daily-report" },
       { key: "work_order", label: "Work Order", href: "work-order" },
@@ -96,7 +104,6 @@ function getQuickActionsForRole(role: AppRole) {
 
   if (role === "foreman") {
     return [
-      ...common,
       { key: "add_event", label: "Add Event", href: "calendar-event" },
       { key: "daily_report", label: "Daily Report", href: "daily-report" },
       { key: "work_order", label: "Work Order", href: "work-order" },
@@ -107,7 +114,6 @@ function getQuickActionsForRole(role: AppRole) {
 
   if (role === "mechanic") {
     return [
-      ...common,
       { key: "work_order", label: "Work Order", href: "work-order" },
       { key: "check_in", label: "Equipment Check-In", href: "equipment-checkin" },
       { key: "parts_low", label: "Parts Inventory", href: "/inventory" },
@@ -116,7 +122,6 @@ function getQuickActionsForRole(role: AppRole) {
   }
 
   return [
-    ...common,
     { key: "my_jobs", label: "My Schedule", href: "/schedule" },
     { key: "daily_report", label: "Daily Report", href: "daily-report" },
     { key: "safety_sign_off", label: "Safety Report", href: "safety" },
@@ -721,8 +726,7 @@ export async function GET(request: Request) {
 
       kpis.push(
         { key: "active_jobs", label: "Active Jobs", value: String(activeJobsCount), href: "/jobs" },
-        { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" },
-        { key: "crew_on_site", label: "Crew On-Site", value: String(employeesOnSite), href: "/team" }
+        { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" }
       );
       alerts.push({ type: "pm_alerts", message: `Maintenance Due Soon: ${maintenanceDueSoonCount}`, href: "/maintenance", severity: "warn" });
       alerts.push(...recentActivityAlerts);

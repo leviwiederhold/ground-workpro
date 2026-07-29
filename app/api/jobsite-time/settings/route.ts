@@ -21,8 +21,9 @@ const SETTINGS_COLUMNS =
 const isMissingColumn = (message: string | undefined) =>
   /column|Could not find the/i.test(String(message || "")) && /does not exist|not find/i.test(String(message || ""));
 
-// Any company member may READ settings (the employee UI needs to know whether
-// Attendance is on and the manual fallback is available).
+// Any company member may READ settings because the headless native setup and
+// background runtime need the configured radii. These values are not rendered
+// in the employee UI.
 export async function GET() {
   try {
     const { supabase, companyId } = await getCompanyId();

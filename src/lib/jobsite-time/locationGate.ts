@@ -6,6 +6,7 @@
 // be unit-tested without a DOM.
 
 import type { LocationPermissionResult, LocationPermissionState } from "./locationPermission";
+import type { NativeGeofenceHealth } from "../attendance/nativeGeofence";
 
 export type LocationGateStatus =
   /** Still resolving. Render NOTHING — never the dashboard, never the gate. */
@@ -83,17 +84,42 @@ export type GatePlatform = "native" | "web";
  *   web    → location permission granted is sufficient. A web session has no
  *            secure store, so requiring a native device credential there would
  *            lock web users out permanently.
- *   native → permission granted AND a device credential is enrolled. Background
- *            arrival/departure events cannot be submitted without the credential,
- *            so permission alone is not "set up" on a device.
+ *   native → foreground permission, Always authorization, Precise Location,
+ *            native service health, a device credential, and every required
+ *            assigned region confirmed by Core Location.
  */
 export function isAttendanceSetupComplete(params: {
   platform: GatePlatform;
   permission: LocationPermissionState | "checking";
   hasDeviceCredential: boolean;
+  nativeHealth?: Pick<
+    NativeGeofenceHealth,
+    | "supported"
+    | "authorized"
+    | "authorizationStatus"
+    | "locationServicesEnabled"
+    | "preciseLocation"
+  > | null;
+  requiredRegionIds?: string[];
+  registeredRegionIds?: string[];
 }): boolean {
   if (params.permission !== "granted") return false;
-  return params.platform === "native" ? params.hasDeviceCredential === true : true;
+  if (params.platform !== "native") return true;
+
+  const health = params.nativeHealth;
+  if (
+    !health?.supported ||
+    !health.authorized ||
+    health.locationServicesEnabled !== true ||
+    health.preciseLocation !== true ||
+    params.hasDeviceCredential !== true
+  ) {
+    return false;
+  }
+
+  const required = params.requiredRegionIds ?? [];
+  const registered = new Set(params.registeredRegionIds ?? []);
+  return required.length > 0 && required.every((identifier) => registered.has(identifier));
 }
 
 // ── The tap-to-enable state machine (the fix for stuck "Requesting…") ─────────
@@ -102,8 +128,10 @@ export type LocationSetupStage =
   | "checking_location_permission"
   | "requesting_location_permission"
   | "native_geofence_health"
+  | "requesting_background_authorization"
   | "secure_credential_enrollment"
   | "secure_store_write"
+  | "assigned_location_registration"
   | "completion";
 
 export type LocationSetupFailureCode =
@@ -113,10 +141,14 @@ export type LocationSetupFailureCode =
   | "LOCATION_PERMISSION_REQUEST_FAILED"
   | "NATIVE_GEOFENCE_HEALTH_TIMEOUT"
   | "NATIVE_GEOFENCE_HEALTH_FAILED"
+  | "BACKGROUND_AUTHORIZATION_REQUEST_TIMEOUT"
+  | "BACKGROUND_AUTHORIZATION_REQUEST_FAILED"
   | "SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT"
   | "SECURE_CREDENTIAL_ENROLLMENT_FAILED"
   | "SECURE_STORE_WRITE_TIMEOUT"
   | "SECURE_STORE_WRITE_FAILED"
+  | "ASSIGNED_LOCATION_REGISTRATION_TIMEOUT"
+  | "ASSIGNED_LOCATION_REGISTRATION_FAILED"
   | "LOCATION_SETUP_COMPLETION_TIMEOUT"
   | "LOCATION_SETUP_COMPLETION_FAILED";
 
@@ -126,8 +158,10 @@ export const LOCATION_SETUP_STAGE_TIMEOUT_MS: Record<LocationSetupStage, number>
   // while the user reads it.
   requesting_location_permission: 60_000,
   native_geofence_health: 10_000,
+  requesting_background_authorization: 60_000,
   secure_credential_enrollment: 15_000,
   secure_store_write: 10_000,
+  assigned_location_registration: 15_000,
   completion: 10_000,
 };
 
@@ -142,6 +176,14 @@ type LocationSetupFailure = {
 /** Terminal outcome of one enable attempt. */
 export type LocationSetupResult =
   | { status: "granted" }
+  | {
+      status: "settings_required";
+      stage: "native_geofence_health";
+      code:
+        | "IOS_LOCATION_SERVICES_REQUIRED"
+        | "IOS_BACKGROUND_LOCATION_REQUIRED"
+        | "IOS_PRECISE_LOCATION_REQUIRED";
+    }
   | {
       status: "denied";
       stage: "checking_location_permission" | "requesting_location_permission";
@@ -175,6 +217,10 @@ const STAGE_CODES: Record<
     timeout: "NATIVE_GEOFENCE_HEALTH_TIMEOUT",
     failure: "NATIVE_GEOFENCE_HEALTH_FAILED",
   },
+  requesting_background_authorization: {
+    timeout: "BACKGROUND_AUTHORIZATION_REQUEST_TIMEOUT",
+    failure: "BACKGROUND_AUTHORIZATION_REQUEST_FAILED",
+  },
   secure_credential_enrollment: {
     timeout: "SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT",
     failure: "SECURE_CREDENTIAL_ENROLLMENT_FAILED",
@@ -182,6 +228,10 @@ const STAGE_CODES: Record<
   secure_store_write: {
     timeout: "SECURE_STORE_WRITE_TIMEOUT",
     failure: "SECURE_STORE_WRITE_FAILED",
+  },
+  assigned_location_registration: {
+    timeout: "ASSIGNED_LOCATION_REGISTRATION_TIMEOUT",
+    failure: "ASSIGNED_LOCATION_REGISTRATION_FAILED",
   },
   completion: {
     timeout: "LOCATION_SETUP_COMPLETION_TIMEOUT",
@@ -244,16 +294,21 @@ export type LocationSetupDependencies<Credential = unknown> = {
   native: boolean;
   checkPermission: () => Promise<LocationPermissionState>;
   requestPermission: () => Promise<LocationPermissionResult>;
-  checkNativeGeofenceHealth: () => Promise<{ supported: boolean; hasCredential: boolean }>;
+  checkNativeGeofenceHealth: () => Promise<NativeGeofenceHealth>;
+  requestBackgroundAuthorization: () => Promise<void>;
   enrollSecureCredential: (signal: AbortSignal) => Promise<Credential>;
   writeSecureCredential: (credential: Credential) => Promise<void>;
+  registerAssignedLocations: () => Promise<{
+    requiredRegionIds: string[];
+    registeredRegionIds: string[];
+  }>;
   verifyCompletion: () => Promise<boolean>;
   onTransition?: (transition: LocationSetupTransition) => void;
   stageTimeoutMs?: Partial<Record<LocationSetupStage, number>>;
 };
 
 /**
- * Six explicit transitions replace the old two coarse timers. A physical iOS
+ * Explicit transitions replace the old two coarse timers. A physical iOS
  * stall now identifies the exact bridge/network/Keychain boundary and code.
  * There is no global wrapper timeout and no automatic retry.
  */
@@ -327,10 +382,12 @@ export async function runLocationSetup<Credential>(
 
   if (!deps.native) {
     skip("native_geofence_health");
+    skip("requesting_background_authorization");
     skip("secure_credential_enrollment");
     skip("secure_store_write");
+    skip("assigned_location_registration");
   } else {
-    const health = await run("native_geofence_health", () => deps.checkNativeGeofenceHealth());
+    let health = await run("native_geofence_health", () => deps.checkNativeGeofenceHealth());
     if (isFailure(health)) return health;
     if (!health.supported) {
       return {
@@ -340,6 +397,38 @@ export async function runLocationSetup<Credential>(
         kind: "failure",
         detail: "native geofence service is unsupported",
       };
+    }
+    if (health.locationServicesEnabled !== true) {
+      return {
+        status: "settings_required",
+        stage: "native_geofence_health",
+        code: "IOS_LOCATION_SERVICES_REQUIRED",
+      };
+    }
+    if (health.preciseLocation !== true) {
+      return {
+        status: "settings_required",
+        stage: "native_geofence_health",
+        code: "IOS_PRECISE_LOCATION_REQUIRED",
+      };
+    }
+    if (!health.authorized) {
+      const backgroundRequest = await run(
+        "requesting_background_authorization",
+        () => deps.requestBackgroundAuthorization(),
+      );
+      if (isFailure(backgroundRequest)) return backgroundRequest;
+      health = await run("native_geofence_health", () => deps.checkNativeGeofenceHealth());
+      if (isFailure(health)) return health;
+      if (!health.authorized) {
+        return {
+          status: "settings_required",
+          stage: "native_geofence_health",
+          code: "IOS_BACKGROUND_LOCATION_REQUIRED",
+        };
+      }
+    } else {
+      skip("requesting_background_authorization");
     }
 
     if (health.hasCredential) {
@@ -353,6 +442,26 @@ export async function runLocationSetup<Credential>(
       if (isFailure(credential)) return credential;
       const write = await run("secure_store_write", () => deps.writeSecureCredential(credential));
       if (isFailure(write)) return write;
+    }
+
+    const registration = await run(
+      "assigned_location_registration",
+      () => deps.registerAssignedLocations(),
+    );
+    if (isFailure(registration)) return registration;
+    if (
+      registration.requiredRegionIds.length === 0 ||
+      !registration.requiredRegionIds.every((identifier) =>
+        registration.registeredRegionIds.includes(identifier),
+      )
+    ) {
+      return {
+        status: "failed",
+        stage: "assigned_location_registration",
+        code: "ASSIGNED_LOCATION_REGISTRATION_FAILED",
+        kind: "failure",
+        detail: "assigned locations were not registered",
+      };
     }
   }
 
@@ -372,7 +481,13 @@ export async function runLocationSetup<Credential>(
 
 /** Map a setup result to the visible error code (or null on success/denial). */
 export function locationSetupErrorKind(result: LocationSetupResult): LocationSetupErrorKind | null {
-  if (result.status === "granted" || result.status === "denied") return null;
+  if (
+    result.status === "granted" ||
+    result.status === "denied" ||
+    result.status === "settings_required"
+  ) {
+    return null;
+  }
   return result.code;
 }
 
@@ -419,7 +534,7 @@ export const LOCATION_GATE_COPY = {
    *  arrival/departure, or tracking. */
   body: "Groundwork Pro uses location for accuracy.",
   /** Shown once permission is denied — still generic. */
-  deniedBody: "Location is required to continue. Please enable it in Settings.",
+  deniedBody: "Location access needs one more step.",
   request: "Enable Location",
   retry: "Try Again",
   settings: "Open Settings",
@@ -433,12 +548,16 @@ export const LOCATION_GATE_ERROR_COPY: Record<LocationSetupErrorKind, string> = 
   LOCATION_PERMISSION_CHECK_FAILED: "Could not check iOS location permission.",
   LOCATION_PERMISSION_REQUEST_TIMEOUT: "Timed out requesting iOS location permission.",
   LOCATION_PERMISSION_REQUEST_FAILED: "Could not request iOS location permission.",
-  NATIVE_GEOFENCE_HEALTH_TIMEOUT: "Timed out verifying native geofence service.",
-  NATIVE_GEOFENCE_HEALTH_FAILED: "Could not verify native geofence service.",
-  SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT: "Timed out enrolling secure attendance credential.",
-  SECURE_CREDENTIAL_ENROLLMENT_FAILED: "Could not enroll secure attendance credential.",
-  SECURE_STORE_WRITE_TIMEOUT: "Timed out writing secure attendance credential.",
-  SECURE_STORE_WRITE_FAILED: "Could not write secure attendance credential.",
+  NATIVE_GEOFENCE_HEALTH_TIMEOUT: "Timed out verifying location services.",
+  NATIVE_GEOFENCE_HEALTH_FAILED: "Could not verify location services.",
+  BACKGROUND_AUTHORIZATION_REQUEST_TIMEOUT: "Timed out requesting complete location access.",
+  BACKGROUND_AUTHORIZATION_REQUEST_FAILED: "Could not request complete location access.",
+  SECURE_CREDENTIAL_ENROLLMENT_TIMEOUT: "Timed out completing secure location setup.",
+  SECURE_CREDENTIAL_ENROLLMENT_FAILED: "Could not complete secure location setup.",
+  SECURE_STORE_WRITE_TIMEOUT: "Timed out saving secure location setup.",
+  SECURE_STORE_WRITE_FAILED: "Could not save secure location setup.",
+  ASSIGNED_LOCATION_REGISTRATION_TIMEOUT: "Timed out finishing location setup.",
+  ASSIGNED_LOCATION_REGISTRATION_FAILED: "Could not finish location setup.",
   LOCATION_SETUP_COMPLETION_TIMEOUT: "Timed out completing location setup.",
   LOCATION_SETUP_COMPLETION_FAILED: "Could not complete location setup.",
 };

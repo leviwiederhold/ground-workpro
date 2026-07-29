@@ -61,7 +61,7 @@ export type GeofenceZone = (typeof GEOFENCE_ZONES)[number];
 // to their own records (or blocked).
 export function canManageTimecards(role: string | null | undefined): boolean {
   const r = String(role ?? "").toLowerCase();
-  return r === "admin" || r === "pm" || r === "executive" || r === "ceo" || r === "operations" || r === "manager";
+  return r === "admin" || r === "executive" || r === "ceo" || r === "owner";
 }
 
 export function feetToMeters(feet: number): number {

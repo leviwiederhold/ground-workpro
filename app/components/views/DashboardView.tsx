@@ -103,6 +103,8 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const [onboardingError, setOnboardingError] = useState('');
 
   const effectiveRole = dashboardSummary?.role ?? currentRole;
+  const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
+  const canUseTimeClock = ['admin', 'ceo', 'executive', 'owner'].includes(normalizedEffectiveRole);
 
   const completedCount = useMemo(
     () => onboardingItems.filter((item) => item.completed).length,
@@ -273,6 +275,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   const goToChecklistItem = (item) => {
     const href = String(item?.href || '').trim();
+    if (href === 'time-clock' && !canUseTimeClock) return;
     if (href) {
       const modalMap = {
         'daily-report': { type: 'daily-report' },
@@ -336,6 +339,12 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   const runQuickAction = (action) => {
     if (!action) return;
+    if (
+      !canUseTimeClock &&
+      (action.key === 'time_clock' || action.href === 'time-clock')
+    ) {
+      return;
+    }
 
     const byKey = QUICK_ACTION_MODAL_BY_KEY[action.key];
     const byHref = QUICK_ACTION_MODAL_BY_HREF[action.href];
@@ -374,12 +383,21 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   ).filter((kpi) => kpi.visible !== false);
   const primaryItems = dashboardSummary?.sections?.primary?.items ?? [];
   const activeJobsSection = dashboardSummary?.sections?.activeJobs ?? primaryItems.find((item) => item.type === 'active_jobs')?.meta;
-  const quickActionsSection = dashboardSummary?.sections?.quickActions ?? primaryItems.find((item) => item.type === 'quick_actions')?.meta;
+  const rawQuickActionsSection = dashboardSummary?.sections?.quickActions ?? primaryItems.find((item) => item.type === 'quick_actions')?.meta;
+  const quickActionsSection = rawQuickActionsSection
+    ? {
+        ...rawQuickActionsSection,
+        items: (rawQuickActionsSection.items ?? []).filter(
+          (action) =>
+            canUseTimeClock ||
+            (action.key !== 'time_clock' && action.href !== 'time-clock'),
+        ),
+      }
+    : null;
   const gettingStartedSection = dashboardSummary?.sections?.gettingStarted ?? primaryItems.find((item) => item.type === 'getting_started')?.meta;
   const alertsSection = dashboardSummary?.sections?.alerts;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
   const showGettingStarted = Boolean(gettingStartedSection);
-  const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
   const isAdminDashboard = ['admin', 'ceo', 'executive'].includes(normalizedEffectiveRole);
   const isManagerDashboard = isAdminDashboard || normalizedEffectiveRole === 'pm';
   const estimatedPayrollLabel = new Intl.NumberFormat('en-US', {

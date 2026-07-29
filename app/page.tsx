@@ -39,8 +39,8 @@ const MessagesView = dynamic(
 const JobsiteTimeView = dynamic(
   () => import('@/app/components/views/JobsiteTimeView').then((mod) => mod.JobsiteTimeView)
 );
-const JobsiteTimeEmployeeCard = dynamic(
-  () => import('@/app/components/views/JobsiteTimeEmployeeCard').then((mod) => mod.JobsiteTimeEmployeeCard)
+const LocationBackgroundRuntime = dynamic(
+  () => import('@/app/components/location/LocationBackgroundRuntime').then((mod) => mod.LocationBackgroundRuntime)
 );
 const CompanyConfigPrompt = dynamic(
   () => import('@/app/components/company/CompanyConfigPrompt').then((mod) => mod.CompanyConfigPrompt)
@@ -1222,7 +1222,7 @@ const MobileAppShell = ({
         };
         const byRole = {
           executive: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'maintenance', 'safety', 'jobsite_time', 'messages', 'finance', 'reports', 'documents', 'team', 'training', 'schedule', 'settings'],
-          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'jobsite_time', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule', 'settings'],
+          operations: ['dashboard', 'jobs', 'bids', 'vendors', 'inventory', 'fleet', 'safety', 'messages', 'reports', 'finance', 'documents', 'team', 'training', 'schedule', 'settings'],
           foreman: ['dashboard', 'messages', 'schedule', 'jobs', 'reports', 'safety'],
           mechanic: ['dashboard', 'messages', 'fleet', 'maintenance', 'inventory', 'safety'],
           operator: ['dashboard', 'messages', 'schedule', 'safety', 'documents'],
@@ -2248,7 +2248,7 @@ const MobileAppShell = ({
           case 'dashboard': return (
             <div className="space-y-4">
               <CompanyConfigPrompt />
-              <JobsiteTimeEmployeeCard />
+              <LocationBackgroundRuntime />
               <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={navigateToView} setShowModal={setShowModal} ui={dashboardViewUi} />
             </div>
           );
@@ -2257,7 +2257,14 @@ const MobileAppShell = ({
           case 'jobs': return <JobsView jobs={jobs} jobsLoading={jobsLoading} setJobs={setJobs} equipment={equipment} setEquipment={setEquipment} employees={employees} setEmployees={setEmployees} ui={sharedViewUi} moduleAccess={moduleAccess} />;
           case 'fleet': return <FleetView equipment={equipment} equipmentLoading={equipmentLoading} setEquipment={setEquipment} jobs={jobs} workOrders={workOrders} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
           case 'team': return <TeamView employees={employees} employeesLoading={employeesLoading} setEmployees={setEmployees} jobs={jobs} setShowModal={setShowModal} currentRole={currentRole} moduleAccess={moduleAccess} />;
-          case 'jobsite_time': return <JobsiteTimeView employees={employees} jobs={jobs} />;
+          case 'jobsite_time': return isCeoRole
+            ? <JobsiteTimeView employees={employees} jobs={jobs} />
+            : (
+              <Card className="p-8 text-center text-gray-600">
+                <div className="text-lg font-semibold text-gray-800 mb-2">Access Restricted</div>
+                <div>You do not have permission to view this module.</div>
+              </Card>
+            );
           case 'inventory': return <InventoryView inventory={inventory} inventoryLoading={inventoryLoading} setInventory={setInventory} jobs={jobs} vendors={vendors} setShowModal={setShowModal} />;
           case 'maintenance': return <MaintenanceView workOrders={workOrders} workOrdersLoading={workOrdersLoading} setWorkOrders={setWorkOrders} equipment={equipment} employees={employees} companyMembers={companyMembers} setShowModal={setShowModal} moduleAccess={moduleAccess} />;
           case 'training': return <TrainingView trainingData={trainingData} setTrainingData={setTrainingData} employees={employees} setShowModal={setShowModal} trainingLoading={trainingLoading} trainingError={trainingError} onRefreshTraining={loadTraining} />;
@@ -2689,6 +2696,7 @@ const MobileAppShell = ({
             onClose={() => setShowModal({ type: null })}
             setShowModal={setShowModal}
             canFinalSafetySignOff={canRoleGiveFinalSafetySignOff(currentRole)}
+            canUseTimeClock={isCeoRole}
           />
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
@@ -2698,7 +2706,7 @@ const MobileAppShell = ({
             initialData={showModal.data}
             onCreated={() => setCalendarRefreshVersion((prev) => prev + 1)}
           />
-          <TimeClockModal isOpen={showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} />
+          <TimeClockModal isOpen={isCeoRole && showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} />
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} companyMembers={companyMembers} setWorkOrders={setWorkOrders} data={showModal.data} />
@@ -4530,9 +4538,11 @@ const MobileAppShell = ({
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
-              <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
-                <Icon name="clock" className="mr-2" /> Time Clock
-              </Button>
+              {currentRole === 'executive' && (
+                <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
+                  <Icon name="clock" className="mr-2" /> Time Clock
+                </Button>
+              )}
               {/* Native iOS: Add Employee is hidden entirely (affects seat
                   billing — managed on web only). Web CEO/admin keeps it. */}
               {!iosAppRuntime && (
@@ -11484,7 +11494,7 @@ const MobileAppShell = ({
     // MODALS
     // ============================================
 
-    const QuickActionsModal = ({ isOpen, onClose, setShowModal, canFinalSafetySignOff }) => (
+    const QuickActionsModal = ({ isOpen, onClose, setShowModal, canFinalSafetySignOff, canUseTimeClock }) => (
       <Modal isOpen={isOpen} onClose={onClose} title="Quick Actions" size="sm">
         <div className="grid grid-cols-2 gap-3">
           {[
@@ -11494,7 +11504,11 @@ const MobileAppShell = ({
             { icon: 'file-lines', label: 'Daily Report', action: 'daily-report', color: 'brand' },
             { icon: 'wrench', label: 'Work Order', action: 'work-order', color: 'yellow' },
             { icon: 'shield-halved', label: 'Safety Sign-Off', action: 'safety', color: 'red' },
-          ].filter((item) => item.action !== 'safety' || canFinalSafetySignOff).map(item => (
+          ].filter((item) => {
+            if (item.action === 'safety') return canFinalSafetySignOff;
+            if (item.action === 'time-clock') return canUseTimeClock;
+            return true;
+          }).map(item => (
             <button
               key={item.action}
               onClick={() => {

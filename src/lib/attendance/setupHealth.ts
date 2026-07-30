@@ -1,88 +1,121 @@
-// Which employees have broken or incomplete automatic-attendance setup (pure).
+// Authoritative automatic-attendance setup contract (pure).
 //
-// A manager needs to know that Dave's attendance will not record BEFORE payroll
-// day, not after. This derives per-employee setup problems from facts the
-// SERVER can see — assignment, jobsite verification, device enrollment, and
-// whether the device has actually reported anything — so the answer does not
-// depend on the employee having the app open.
-//
-// Privacy: this is a setup report, not a location report. It carries no
-// coordinates, no distances, and no location history — only whether the pieces
-// required to record attendance exist. Never add a position to it.
+// One employee population and one evaluator feed both the CEO configured count
+// and the actionable warning list. The report contains readiness facts only —
+// never coordinates, distances, or continuous location history.
 
 export type SetupProblem =
+  | "no_app_access"
   | "no_assignment"
   | "jobsite_unverified"
+  | "native_readiness_missing"
+  | "background_location_required"
+  | "precise_location_required"
+  | "native_service_unhealthy"
   | "device_not_enrolled"
   | "credential_expired"
-  | "no_recent_device_activity";
+  | "regions_not_registered";
 
 export const SETUP_PROBLEM_LABEL: Record<SetupProblem, string> = {
+  no_app_access: "No app access",
   no_assignment: "Not assigned to a job",
   jobsite_unverified: "Jobsite address not verified",
+  native_readiness_missing: "Phone setup has not reported",
+  background_location_required: "Background location needs setup",
+  precise_location_required: "Precise Location needs setup",
+  native_service_unhealthy: "Native location service is unavailable",
   device_not_enrolled: "Phone not set up for automatic attendance",
   credential_expired: "Phone needs to sign in again",
-  no_recent_device_activity: "Phone has not reported in",
+  regions_not_registered: "Assigned jobsite is not registered on the phone",
 };
 
 export const SETUP_PROBLEM_FIX: Record<SetupProblem, string> = {
+  no_app_access: "Invite the employee to the company app before configuring their phone.",
   no_assignment: "Assign the employee to a job for this workday.",
   jobsite_unverified: "Open the job and verify its address so the jobsite has real coordinates.",
-  device_not_enrolled: "Ask the employee to open the app and allow location access.",
+  native_readiness_missing: "Ask the employee to complete the one-time location setup in the current app.",
+  background_location_required: "Ask the employee to set Location access to Always.",
+  precise_location_required: "Ask the employee to enable Precise Location.",
+  native_service_unhealthy: "Confirm Location Services and Background App Refresh are enabled for the app.",
+  device_not_enrolled: "Ask the employee to open the app and complete location setup.",
   credential_expired: "Ask the employee to open the app to re-enroll their phone.",
-  no_recent_device_activity:
-    "The phone has not checked in recently. Confirm the app is installed and location is set to Always.",
+  regions_not_registered: "Ask the employee to open the app once while assigned jobs are available.",
 };
 
-// A device that has not reported in this long is treated as not reporting. Two
-// days spans a weekend off without flagging everyone on Monday morning.
-export const STALE_DEVICE_HOURS = 48;
+export type NativeReadinessReport = {
+  locationServicesEnabled: boolean | null;
+  backgroundRefreshEnabled: boolean | null;
+  background: string;
+  precise: boolean | null;
+  serviceSupported: boolean | null;
+  serviceHealthy: boolean | null;
+  hasSecureCredential: boolean | null;
+  requiredRegionIds: string[];
+  registeredRegionIds: string[];
+  reportedAt: string | null;
+};
 
 export type EmployeeSetupInput = {
   employeeId: string;
+  userId: string | null;
   name: string;
-  // Whether the employee has an assignment for the day being reported on.
+  hasAppAccess: boolean;
   hasAssignmentToday: boolean;
-  // The assigned job has a verified address with coordinates.
   jobsiteVerified: boolean;
   jobName: string | null;
-  // Device credential state (PR 10). null = never enrolled.
-  credential: { expiresAt: string | null; revokedAt: string | null; lastUsedAt: string | null } | null;
-  // Whether automatic attendance is expected to work for this employee at all —
-  // false when the company has it switched off.
+  // Server-derived region identifiers for the assigned job. These are the
+  // authority; a phone cannot make itself healthy by reporting a smaller
+  // required set.
+  requiredRegionIds: string[];
+  credential: {
+    expiresAt: string | null;
+    revokedAt: string | null;
+    lastUsedAt: string | null;
+  } | null;
+  nativeReadiness: NativeReadinessReport | null;
   automaticAttendanceEnabled: boolean;
 };
 
 export type EmployeeSetupHealth = {
   employeeId: string;
+  userId: string | null;
   name: string;
   jobName: string | null;
   problems: SetupProblem[];
-  // True when nothing blocks automatic attendance for this employee.
   healthy: boolean;
+  configured: boolean;
+  readinessReportedAt: string | null;
 };
+
+const unique = (values: string[]) => [...new Set(values)].sort();
 
 /**
  * Setup problems for one employee, most blocking first.
  *
- * Ordering is deliberate: a missing assignment makes every other check moot, so
- * it is reported alone rather than alongside four consequences of itself.
+ * App access defines participation in the CEO configured count. Assignment
+ * remains first because native regions cannot be required without a job.
  */
 export function evaluateEmployeeSetup(
   input: EmployeeSetupInput,
-  now: string = new Date().toISOString()
+  now: string = new Date().toISOString(),
 ): EmployeeSetupHealth {
-  const base = { employeeId: input.employeeId, name: input.name, jobName: input.jobName };
+  const base = {
+    employeeId: input.employeeId,
+    userId: input.userId,
+    name: input.name,
+    jobName: input.jobName,
+    readinessReportedAt: input.nativeReadiness?.reportedAt ?? null,
+  };
+  const result = (problems: SetupProblem[]): EmployeeSetupHealth => ({
+    ...base,
+    problems,
+    healthy: problems.length === 0,
+    configured: problems.length === 0,
+  });
 
-  // With the company switch off, nothing is broken — automatic attendance is
-  // simply not in use. Reporting problems here would be noise.
-  if (!input.automaticAttendanceEnabled) {
-    return { ...base, problems: [], healthy: true };
-  }
-
-  if (!input.hasAssignmentToday) {
-    return { ...base, problems: ["no_assignment"], healthy: false };
-  }
+  if (!input.automaticAttendanceEnabled) return result([]);
+  if (!input.hasAppAccess) return result(["no_app_access"]);
+  if (!input.hasAssignmentToday) return result(["no_assignment"]);
 
   const problems: SetupProblem[] = [];
   if (!input.jobsiteVerified) problems.push("jobsite_unverified");
@@ -95,31 +128,71 @@ export function evaluateEmployeeSetup(
     const nowMs = Date.parse(now);
     if (expiresAt !== null && Number.isFinite(expiresAt) && expiresAt <= nowMs) {
       problems.push("credential_expired");
-    } else {
-      const lastUsed = credential.lastUsedAt ? Date.parse(credential.lastUsedAt) : null;
-      // Never used, or silent for too long — either way the phone is not
-      // reporting, which is what the manager needs to know.
-      if (lastUsed === null || !Number.isFinite(lastUsed) || nowMs - lastUsed > STALE_DEVICE_HOURS * 3600_000) {
-        problems.push("no_recent_device_activity");
-      }
     }
   }
 
-  return { ...base, problems, healthy: problems.length === 0 };
+  const readiness = input.nativeReadiness;
+  if (!readiness?.reportedAt) {
+    problems.push("native_readiness_missing");
+    return result(problems);
+  }
+  if (
+    readiness.serviceSupported !== true ||
+    readiness.serviceHealthy !== true ||
+    readiness.locationServicesEnabled !== true ||
+    readiness.backgroundRefreshEnabled !== true
+  ) {
+    problems.push("native_service_unhealthy");
+  }
+  if (readiness.background !== "granted") {
+    problems.push("background_location_required");
+  }
+  if (readiness.precise !== true) {
+    problems.push("precise_location_required");
+  }
+  if (readiness.hasSecureCredential !== true && !problems.includes("device_not_enrolled")) {
+    problems.push("device_not_enrolled");
+  }
+
+  const required = unique(input.requiredRegionIds);
+  const nativeRequired = new Set(unique(readiness.requiredRegionIds));
+  const registered = new Set(unique(readiness.registeredRegionIds));
+  if (
+    required.length === 0 ||
+    !required.every(
+      (identifier) =>
+        nativeRequired.has(identifier) && registered.has(identifier),
+    )
+  ) {
+    problems.push("regions_not_registered");
+  }
+
+  return result(problems);
 }
 
-/** The employees a manager needs to act on, worst first. */
+export type SetupHealthSummary = {
+  // Full app-access population. Both CEO surfaces must use this exact array.
+  items: EmployeeSetupHealth[];
+  brokenCount: number;
+  healthyCount: number;
+  configuredCount: number;
+  totalCount: number;
+};
+
 export function summarizeSetupHealth(
   employees: EmployeeSetupInput[],
-  now?: string
-): { items: EmployeeSetupHealth[]; brokenCount: number; healthyCount: number } {
-  const items = employees.map((employee) => evaluateEmployeeSetup(employee, now));
-  const broken = items
-    .filter((item) => !item.healthy)
-    .sort((a, b) => b.problems.length - a.problems.length || a.name.localeCompare(b.name));
+  now?: string,
+): SetupHealthSummary {
+  const items = employees
+    .filter((employee) => employee.hasAppAccess)
+    .map((employee) => evaluateEmployeeSetup(employee, now))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const configuredCount = items.filter((item) => item.configured).length;
   return {
-    items: broken,
-    brokenCount: broken.length,
-    healthyCount: items.length - broken.length,
+    items,
+    brokenCount: items.length - configuredCount,
+    healthyCount: configuredCount,
+    configuredCount,
+    totalCount: items.length,
   };
 }

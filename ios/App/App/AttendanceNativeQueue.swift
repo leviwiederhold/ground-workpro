@@ -42,7 +42,7 @@ enum AttendanceNativeQueue {
         return [jobId, zone, transition, minute].joined(separator: "|")
     }
 
-    static func read() -> [String: Any] {
+    private static func readUnlocked() -> [String: Any] {
         guard
             let url = try? fileURL(),
             FileManager.default.fileExists(atPath: url.path),
@@ -54,20 +54,34 @@ enum AttendanceNativeQueue {
         return parsed
     }
 
-    private static func write(_ payload: [String: Any]) {
+    static func read() -> [String: Any] {
+        ioQueue.sync { readUnlocked() }
+    }
+
+    @discardableResult
+    private static func writeUnlocked(_ payload: [String: Any]) -> Bool {
         guard
             let url = try? fileURL(),
             let data = try? JSONSerialization.data(withJSONObject: payload)
-        else { return }
+        else { return false }
         // Atomic + protected until first unlock: the region handler can be
         // woken after a reboot before the user has unlocked the phone, and must
         // still be able to append.
-        try? data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        do {
+            try data.write(
+                to: url,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Append a transition, unless an event with the same id is already queued.
     /// Serialized on a private queue so two near-simultaneous region callbacks
     /// cannot interleave a read-modify-write and lose one.
+    @discardableResult
     static func enqueue(
         jobId: String,
         zone: String,
@@ -77,12 +91,12 @@ enum AttendanceNativeQueue {
         longitude: Double?,
         accuracyMeters: Double?,
         deviceId: String?
-    ) {
+    ) -> String? {
         ioQueue.sync {
-            var payload = read()
+            var payload = readUnlocked()
             var events = payload["events"] as? [[String: Any]] ?? []
             let eventId = makeEventId(jobId: jobId, zone: zone, transition: transition, occurredAt: occurredAt)
-            if events.contains(where: { $0["eventId"] as? String == eventId }) { return }
+            if events.contains(where: { $0["eventId"] as? String == eventId }) { return eventId }
 
             let now = ISO8601DateFormatter.attendance.string(from: Date())
             events.append([
@@ -108,16 +122,79 @@ enum AttendanceNativeQueue {
 
             payload["version"] = schemaVersion
             payload["events"] = events
-            write(payload)
+            guard writeUnlocked(payload) else { return nil }
             // Mirrored for getHealth(), so diagnostics report a real depth.
+            UserDefaults.standard.set(events.count, forKey: "gw_pending_queue_count")
+            return eventId
+        }
+    }
+
+    /// Pending records in original occurrence order. Native delivery uses this
+    /// directly, so an event queued while the WebView is absent can drain on a
+    /// later Core Location wake without requiring an app launch.
+    static func pendingEvents() -> [[String: Any]] {
+        ioQueue.sync {
+            let events = readUnlocked()["events"] as? [[String: Any]] ?? []
+            return events
+                .filter { ($0["state"] as? String ?? "pending") == "pending" }
+                .sorted {
+                    String(describing: $0["occurredAt"] ?? "") <
+                        String(describing: $1["occurredAt"] ?? "")
+                }
+        }
+    }
+
+    /// Remove only after the server returns 2xx. The transition is written
+    /// before the first HTTP attempt, so suspension/crash cannot create a gap
+    /// between a callback and its durable record.
+    static func markDelivered(eventId: String) {
+        ioQueue.sync {
+            var payload = readUnlocked()
+            var events = payload["events"] as? [[String: Any]] ?? []
+            events.removeAll { $0["eventId"] as? String == eventId }
+            var meta = payload["meta"] as? [String: Any] ?? [:]
+            meta["lastSuccessfulSyncAt"] = ISO8601DateFormatter.attendance.string(from: Date())
+            payload["events"] = events
+            payload["meta"] = meta
+            writeUnlocked(payload)
+            UserDefaults.standard.set(events.count, forKey: "gw_pending_queue_count")
+        }
+    }
+
+    /// Keep a failed record pending and persist the reason. JavaScript and
+    /// future native wakes share this state; neither path can silently drop it.
+    static func markFailed(eventId: String, reason: String) {
+        ioQueue.sync {
+            var payload = readUnlocked()
+            var events = payload["events"] as? [[String: Any]] ?? []
+            let now = ISO8601DateFormatter.attendance.string(from: Date())
+            for index in events.indices where events[index]["eventId"] as? String == eventId {
+                let attempts = (events[index]["attempts"] as? Int ?? 0) + 1
+                events[index]["attempts"] = attempts
+                events[index]["lastAttemptAt"] = now
+                events[index]["lastError"] = reason
+                // A future native wake may retry. The JS retry policy may apply
+                // its more detailed auth/permanent classification when open.
+                events[index]["nextAttemptAt"] = ISO8601DateFormatter.attendance.string(
+                    from: Date().addingTimeInterval(30)
+                )
+            }
+            var meta = payload["meta"] as? [String: Any] ?? [:]
+            meta["lastFailureAt"] = now
+            meta["lastFailureReason"] = reason
+            payload["events"] = events
+            payload["meta"] = meta
+            writeUnlocked(payload)
             UserDefaults.standard.set(events.count, forKey: "gw_pending_queue_count")
         }
     }
 
     /// Number of events still waiting. Read by getHealth().
     static func pendingCount() -> Int {
-        let events = read()["events"] as? [[String: Any]] ?? []
-        return events.filter { ($0["state"] as? String ?? "pending") == "pending" }.count
+        ioQueue.sync {
+            let events = readUnlocked()["events"] as? [[String: Any]] ?? []
+            return events.filter { ($0["state"] as? String ?? "pending") == "pending" }.count
+        }
     }
 }
 

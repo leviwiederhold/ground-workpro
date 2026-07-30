@@ -33,6 +33,9 @@ export async function GET() {
       .select("attendance_automatic_enabled")
       .eq("id", companyId)
       .maybeSingle();
+    if (settingsRow.error) {
+      throw new Error(`company settings: ${settingsRow.error.message}`);
+    }
     const settings = mapRowToAttendanceSettings(settingsRow.data as Record<string, unknown> | null);
 
     const employeesResult = await admin
@@ -40,11 +43,20 @@ export async function GET() {
       .select("id, full_name, user_id, status")
       .eq("company_id", companyId)
       .limit(500);
+    if (employeesResult.error) {
+      throw new Error(`employees: ${employeesResult.error.message}`);
+    }
     const employees = (employeesResult.data ?? []).filter(
       (e: Record<string, unknown>) => !INACTIVE_STATUSES.has(String(e.status ?? "").toLowerCase())
     );
     if (employees.length === 0) {
-      return NextResponse.json({ items: [], brokenCount: 0, healthyCount: 0 });
+      return NextResponse.json({
+        items: [],
+        brokenCount: 0,
+        healthyCount: 0,
+        configuredCount: 0,
+        totalCount: 0,
+      });
     }
 
     const employeeIds = employees.map((e: Record<string, unknown>) => String(e.id));
@@ -52,7 +64,7 @@ export async function GET() {
       .map((e: Record<string, unknown>) => (e.user_id ? String(e.user_id) : null))
       .filter((id: string | null): id is string => Boolean(id));
 
-    const [assignments, credentials] = await Promise.all([
+    const [assignments, credentials, permissionReports] = await Promise.all([
       admin
         .from("job_employees")
         .select("employee_id, job_id")
@@ -68,7 +80,26 @@ export async function GET() {
             .is("revoked_at", null)
             .limit(2000)
         : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+      userIds.length > 0
+        ? admin
+            .from("employee_location_permissions")
+            .select(
+              "user_id,location_services_enabled,background_refresh_enabled,background,precise,native_service_supported,native_service_healthy,native_has_secure_credential,required_region_ids,registered_region_ids,native_readiness_reported_at",
+            )
+            .eq("company_id", companyId)
+            .in("user_id", userIds)
+            .limit(500)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
     ]);
+    for (const [label, result] of [
+      ["assignments", assignments],
+      ["credentials", credentials],
+      ["native readiness", permissionReports],
+    ] as const) {
+      if ("error" in result && result.error) {
+        throw new Error(`${label}: ${result.error.message}`);
+      }
+    }
 
     const assignmentRows = (assignments.data ?? []) as Array<{ employee_id: string; job_id: string }>;
     const jobIds = Array.from(new Set(assignmentRows.map((a) => String(a.job_id))));
@@ -81,6 +112,9 @@ export async function GET() {
             .in("id", jobIds)
             .limit(2000)
         : { data: [] as Array<Record<string, unknown>> };
+    if ("error" in jobsResult && jobsResult.error) {
+      throw new Error(`jobs: ${jobsResult.error.message}`);
+    }
 
     const jobById = new Map<string, Record<string, unknown>>();
     for (const job of (jobsResult.data ?? []) as Array<Record<string, unknown>>) {
@@ -107,19 +141,64 @@ export async function GET() {
         credentialByUser.set(userId, next);
       }
     }
+    const readinessByUser = new Map<string, Record<string, unknown>>();
+    for (const row of (permissionReports.data ?? []) as Array<Record<string, unknown>>) {
+      readinessByUser.set(String(row.user_id), row);
+    }
 
     const inputs: EmployeeSetupInput[] = employees.map((employee: Record<string, unknown>) => {
       const employeeId = String(employee.id);
       const jobId = assignmentByEmployee.get(employeeId) ?? null;
       const job = jobId ? jobById.get(jobId) : null;
       const userId = employee.user_id ? String(employee.user_id) : null;
+      const readiness = userId ? readinessByUser.get(userId) : null;
       return {
         employeeId,
+        userId,
         name: String(employee.full_name ?? "Team member"),
+        hasAppAccess: Boolean(userId),
         hasAssignmentToday: Boolean(jobId),
         jobsiteVerified: Boolean(job?.address_verified) && job?.lat != null && job?.lng != null,
         jobName: job?.name ? String(job.name) : null,
+        requiredRegionIds: jobId
+          ? [`${jobId}:arrival`, `${jobId}:wake`]
+          : [],
         credential: userId ? (credentialByUser.get(userId) ?? null) : null,
+        nativeReadiness: readiness
+          ? {
+              locationServicesEnabled:
+                typeof readiness.location_services_enabled === "boolean"
+                  ? readiness.location_services_enabled
+                  : null,
+              backgroundRefreshEnabled:
+                typeof readiness.background_refresh_enabled === "boolean"
+                  ? readiness.background_refresh_enabled
+                  : null,
+              background: String(readiness.background ?? "unknown"),
+              precise: typeof readiness.precise === "boolean" ? readiness.precise : null,
+              serviceSupported:
+                typeof readiness.native_service_supported === "boolean"
+                  ? readiness.native_service_supported
+                  : null,
+              serviceHealthy:
+                typeof readiness.native_service_healthy === "boolean"
+                  ? readiness.native_service_healthy
+                  : null,
+              hasSecureCredential:
+                typeof readiness.native_has_secure_credential === "boolean"
+                  ? readiness.native_has_secure_credential
+                  : null,
+              requiredRegionIds: Array.isArray(readiness.required_region_ids)
+                ? readiness.required_region_ids.map(String)
+                : [],
+              registeredRegionIds: Array.isArray(readiness.registered_region_ids)
+                ? readiness.registered_region_ids.map(String)
+                : [],
+              reportedAt: readiness.native_readiness_reported_at
+                ? String(readiness.native_readiness_reported_at)
+                : null,
+            }
+          : null,
         automaticAttendanceEnabled: settings.automaticAttendanceEnabled,
       };
     });
@@ -129,6 +208,9 @@ export async function GET() {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: "Not permitted" }, { status: 403 });
+    return NextResponse.json(
+      { error: "Failed to load attendance setup health" },
+      { status: 500 },
+    );
   }
 }

@@ -50,6 +50,7 @@ import {
 } from '@/lib/attendance/nativeGeofence';
 import { loadAssignedAttendanceRegions } from '@/lib/attendance/assignedRegionsClient';
 import { persistNativeAttendanceReadiness } from '@/lib/attendance/backgroundLocationClient';
+import { hasActiveDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
 import { LocationRequiredGate } from './LocationRequiredGate';
 
 export function RequireLocationAccess({ children }: { children: React.ReactNode }) {
@@ -79,7 +80,9 @@ export function RequireLocationAccess({ children }: { children: React.ReactNode 
         loadAssignedAttendanceRegions(jobs),
         retryTransientNativeRead(requireRegisteredGeofencesRead),
       ]);
-      hasDeviceCredential = Boolean(health?.hasCredential);
+      hasDeviceCredential =
+        Boolean(health?.hasCredential) &&
+        await hasActiveDeviceCredential();
       const complete = isAttendanceSetupComplete({
         platform,
         permission,
@@ -92,7 +95,10 @@ export function RequireLocationAccess({ children }: { children: React.ReactNode 
       // CEO setup summary; transient bridge failures throw before reaching here
       // and therefore never flip a configured employee to false.
       if (version === evaluationVersion.current) {
-        void persistNativeAttendanceReadiness(health, complete);
+        void persistNativeAttendanceReadiness(health, complete, {
+          requiredRegionIds: requiredRegions.map((region) => region.identifier),
+          registeredRegionIds: registered.map((region) => region.identifier),
+        });
       }
       return complete ? 'granted' : 'blocked';
     }

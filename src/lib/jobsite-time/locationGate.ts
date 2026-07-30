@@ -119,6 +119,7 @@ export function isAttendanceSetupComplete(params: {
     | "authorized"
     | "authorizationStatus"
     | "locationServicesEnabled"
+    | "backgroundRefreshEnabled"
     | "preciseLocation"
   > | null;
   requiredRegionIds?: string[];
@@ -132,6 +133,7 @@ export function isAttendanceSetupComplete(params: {
     !health?.supported ||
     !health.authorized ||
     health.locationServicesEnabled !== true ||
+    health.backgroundRefreshEnabled !== true ||
     health.preciseLocation !== true ||
     params.hasDeviceCredential !== true
   ) {
@@ -202,6 +204,7 @@ export type LocationSetupResult =
       stage: "native_geofence_health";
       code:
         | "IOS_LOCATION_SERVICES_REQUIRED"
+        | "IOS_BACKGROUND_REFRESH_REQUIRED"
         | "IOS_BACKGROUND_LOCATION_REQUIRED"
         | "IOS_PRECISE_LOCATION_REQUIRED";
     }
@@ -424,6 +427,13 @@ export async function runLocationSetup<Credential>(
         status: "settings_required",
         stage: "native_geofence_health",
         code: "IOS_LOCATION_SERVICES_REQUIRED",
+      };
+    }
+    if (health.backgroundRefreshEnabled !== true) {
+      return {
+        status: "settings_required",
+        stage: "native_geofence_health",
+        code: "IOS_BACKGROUND_REFRESH_REQUIRED",
       };
     }
     if (health.preciseLocation !== true) {

@@ -128,7 +128,18 @@ function cacheLocally(stored: StoredLocationPermission) {
 /** Persist the snapshot locally (avoid re-prompting) and on the server. */
 export async function persistLocationPermission(
   snapshot: LocationPermissionSnapshot,
-  opts: { onboardingCompleted?: boolean; setupComplete?: boolean } = {}
+  opts: {
+    onboardingCompleted?: boolean;
+    setupComplete?: boolean;
+    nativeReadiness?: {
+      supported: boolean;
+      healthy: boolean;
+      backgroundRefreshEnabled: boolean | null;
+      hasSecureCredential: boolean;
+      requiredRegionIds: string[];
+      registeredRegionIds: string[];
+    };
+  } = {}
 ): Promise<void> {
   const prior = loadStoredLocationPermission();
   const completed = opts.setupComplete ?? opts.onboardingCompleted;
@@ -151,6 +162,12 @@ export async function persistLocationPermission(
         platform: snapshot.platform,
         onboardingCompleted: Boolean(opts.onboardingCompleted),
         setupComplete: opts.setupComplete,
+        nativeServiceSupported: opts.nativeReadiness?.supported,
+        nativeServiceHealthy: opts.nativeReadiness?.healthy,
+        backgroundRefreshEnabled: opts.nativeReadiness?.backgroundRefreshEnabled,
+        nativeHasSecureCredential: opts.nativeReadiness?.hasSecureCredential,
+        requiredRegionIds: opts.nativeReadiness?.requiredRegionIds,
+        registeredRegionIds: opts.nativeReadiness?.registeredRegionIds,
       }),
     });
   } catch {
@@ -204,11 +221,28 @@ export function nativeHealthToPermissionSnapshot(
 export async function persistNativeAttendanceReadiness(
   health: Pick<
     NativeGeofenceHealth,
-    "authorizationStatus" | "locationServicesEnabled" | "preciseLocation"
+    | "supported"
+    | "authorizationStatus"
+    | "locationServicesEnabled"
+    | "backgroundRefreshEnabled"
+    | "preciseLocation"
+    | "hasCredential"
   >,
   setupComplete: boolean,
+  regions: { requiredRegionIds: string[]; registeredRegionIds: string[] },
 ): Promise<void> {
   await persistLocationPermission(nativeHealthToPermissionSnapshot(health), {
     setupComplete,
+    nativeReadiness: {
+      supported: health.supported,
+      healthy:
+        health.supported &&
+        health.locationServicesEnabled === true &&
+        health.backgroundRefreshEnabled === true,
+      backgroundRefreshEnabled: health.backgroundRefreshEnabled,
+      hasSecureCredential: health.hasCredential,
+      requiredRegionIds: regions.requiredRegionIds,
+      registeredRegionIds: regions.registeredRegionIds,
+    },
   });
 }

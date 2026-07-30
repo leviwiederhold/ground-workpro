@@ -18,7 +18,7 @@ import { AutoAttendanceSetupCard } from '@/app/components/views/AutoAttendanceSe
 import {
   SETUP_PROBLEM_FIX,
   SETUP_PROBLEM_LABEL,
-  type EmployeeSetupHealth,
+  type SetupHealthSummary,
   type SetupProblem,
 } from '@/lib/attendance/setupHealth';
 import {
@@ -212,7 +212,7 @@ export function JobsiteTimeView({
   // jobsite verification, and device enrollment — so a manager finds out that
   // an employee's attendance will not record BEFORE payroll day, and without
   // that employee needing to have the app open.
-  const [setupHealth, setSetupHealth] = useState<{ items: EmployeeSetupHealth[]; brokenCount: number; healthyCount: number } | null>(null);
+  const [setupHealth, setSetupHealth] = useState<SetupHealthSummary | null>(null);
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -450,13 +450,11 @@ export function JobsiteTimeView({
         </button>
       </div>
 
-      {/* Two complementary setup surfaces, deliberately both kept.
-          #66's card reports DEVICE-side background-location permission, which
-          only the phone can answer. The panel below reports SERVER-visible
-          setup (assignment, jobsite verification, device enrollment), which
-          does not need the employee to have the app open. Neither can see what
-          the other sees. */}
-      <AutoAttendanceSetupCard employees={employees} />
+      {/* The summary and warning below consume the same server-built employee
+          population and readiness evaluation. Never reintroduce a second
+          permission-only fetch here: it produced contradictory 0/0 and 0/1
+          counts beside a separate warning for the same employee. */}
+      <AutoAttendanceSetupCard items={setupHealth?.items ?? null} />
 
       {/* Broken automatic-attendance setup. Shown above the roster because an
           employee whose phone cannot report is invisible in every panel below
@@ -473,7 +471,7 @@ export function JobsiteTimeView({
             </p>
           </div>
           <div className="divide-y divide-amber-200 dark:divide-amber-900/40">
-            {setupHealth.items.map((item) => (
+            {setupHealth.items.filter((item) => !item.healthy).map((item) => (
               <div key={item.employeeId} className="px-4 py-2.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-sm font-medium text-amber-950 dark:text-amber-100">{item.name}</p>

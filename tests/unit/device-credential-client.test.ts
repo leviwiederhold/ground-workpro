@@ -32,7 +32,7 @@ function installNativeWindow(store: {
   };
 }
 
-test("a healthy Keychain credential is reused without minting another server row", async () => {
+test("a healthy Keychain credential is reused after server validation", async () => {
   let writes = 0;
   const restore = installNativeWindow({
     getToken: async () => ({
@@ -45,9 +45,14 @@ test("a healthy Keychain credential is reused without minting another server row
     clear: async () => {},
   });
   let fetches = 0;
-  globalThis.fetch = (async () => {
+  globalThis.fetch = (async (input, init) => {
     fetches += 1;
-    throw new Error("must not enroll");
+    assert.match(String(input), /\/api\/attendance\/device-credential\?deviceId=/);
+    assert.equal(init?.method, undefined);
+    return new Response(JSON.stringify({ active: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }) as typeof fetch;
 
   try {
@@ -56,7 +61,88 @@ test("a healthy Keychain credential is reused without minting another server row
       Date.parse("2026-07-29T12:00:00.000Z"),
     );
     assert.equal(ready, true);
-    assert.equal(fetches, 0);
+    assert.equal(fetches, 1);
+    assert.equal(writes, 0);
+  } finally {
+    restore();
+  }
+});
+
+test("a revoked but locally unexpired token is cleared and re-enrolled", async () => {
+  let writes = 0;
+  let clears = 0;
+  const restore = installNativeWindow({
+    getToken: async () => ({
+      hasToken: true,
+      expiresAt: "2026-08-15T00:00:00.000Z",
+    }),
+    setToken: async () => {
+      writes += 1;
+    },
+    clear: async () => {
+      clears += 1;
+    },
+  });
+  let fetches = 0;
+  globalThis.fetch = (async (input) => {
+    fetches += 1;
+    if (String(input).includes("?deviceId=")) {
+      return new Response(JSON.stringify({ active: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return new Response(
+      JSON.stringify({
+        token: "replacement-token",
+        expiresAt: "2026-08-29T00:00:00.000Z",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  try {
+    assert.equal(
+      await ensureDeviceCredential(
+        "ios",
+        Date.parse("2026-07-29T12:00:00.000Z"),
+      ),
+      true,
+    );
+    assert.equal(fetches, 2);
+    assert.equal(clears, 1);
+    assert.equal(writes, 1);
+  } finally {
+    restore();
+  }
+});
+
+test("a failed server validation preserves the Keychain token and stays retryable", async () => {
+  let clears = 0;
+  let writes = 0;
+  const restore = installNativeWindow({
+    getToken: async () => ({
+      hasToken: true,
+      expiresAt: "2026-08-15T00:00:00.000Z",
+    }),
+    setToken: async () => {
+      writes += 1;
+    },
+    clear: async () => {
+      clears += 1;
+    },
+  });
+  globalThis.fetch = (async () => new Response("down", { status: 503 })) as typeof fetch;
+
+  try {
+    assert.equal(
+      await ensureDeviceCredential(
+        "ios",
+        Date.parse("2026-07-29T12:00:00.000Z"),
+      ),
+      false,
+    );
+    assert.equal(clears, 0);
     assert.equal(writes, 0);
   } finally {
     restore();

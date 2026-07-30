@@ -141,15 +141,15 @@ test("iOS owns region callbacks before the WebView for terminated-app arrival an
   const geofence = read("ios/App/App/JobsiteGeofencePlugin.swift");
   assert.match(
     appDelegate,
-    /AttendanceGeofenceCoordinator\.shared\.start\(\)/,
+    /launchOptions\?\[\.location\][\s\S]{0,220}AttendanceGeofenceCoordinator\.shared\.start\(launchReason:/,
     "AppDelegate must install the Core Location delegate on a headless location relaunch",
   );
   assert.match(geofence, /final class AttendanceGeofenceCoordinator/);
-  assert.match(geofence, /didEnterRegion[\s\S]{0,160}transition: "enter"/);
-  assert.match(geofence, /didExitRegion[\s\S]{0,160}transition: "exit"/);
-  assert.match(geofence, /didDetermineState[\s\S]{0,260}state == \.inside/);
-  assert.match(geofence, /didStartMonitoringFor[\s\S]{0,420}requestState/);
-  assert.match(geofence, /JobsiteGeofencePlugin\.submitOrQueue/);
+  assert.match(geofence, /didEnterRegion[\s\S]{0,700}transition: "enter"/);
+  assert.match(geofence, /didExitRegion[\s\S]{0,700}transition: "exit"/);
+  assert.match(geofence, /didDetermineState[\s\S]{0,900}state == \.inside/);
+  assert.match(geofence, /didStartMonitoringFor[\s\S]{0,1200}requestState/);
+  assert.match(geofence, /AttendanceNativeDelivery\.enqueueAndDrain/);
 });
 
 test("iOS registration reconciles in place instead of dropping every live region", () => {
@@ -238,12 +238,14 @@ test("the geofence PendingIntent stays mutable where the flag exists", () => {
 
 // ── Both platforms feed the same queue ───────────────────────────────────────
 
-test("native transitions are queued rather than dropped when they cannot be sent", () => {
-  // This is what makes "native enter/exit events reach the offline queue" true:
-  // a failed POST appends to the same file the JS layer flushes, instead of
-  // vanishing.
+test("native transitions are written ahead before any HTTP attempt", () => {
+  // Queue-before-network closes the suspension/crash gap. The old implementation
+  // queued only from the URLSession failure callback, which iOS need not run
+  // before suspending a short background wake.
   const swift = read("ios/App/App/JobsiteGeofencePlugin.swift");
-  assert.ok(swift.includes("AttendanceNativeQueue.enqueue"), "iOS drops failed transitions");
+  const enqueue = swift.indexOf("AttendanceNativeQueue.enqueue(");
+  const attempt = swift.indexOf('code: "http_attempt"');
+  assert.ok(enqueue >= 0 && attempt > enqueue, "iOS must durably queue before HTTP");
 
   const kotlin = read("android/app/src/main/java/com/groundworkpro/app/GeofenceBroadcastReceiver.kt");
   assert.ok(kotlin.includes("AttendanceNativeQueue.enqueue"), "Android drops failed transitions");

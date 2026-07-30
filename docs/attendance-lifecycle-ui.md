@@ -83,23 +83,30 @@ server-side guards.
 ## Managers: who is not set up
 
 `GET /api/attendance/setup-health` (admin/pm only) reports employees whose
-automatic attendance cannot record, derived entirely from **server-visible**
-facts — assignment, jobsite verification, device enrollment, credential expiry,
-and last device check-in. It does not depend on that employee having the app
-open, so a manager finds out before payroll day rather than after.
+automatic attendance cannot record. One authoritative roster combines app
+access, assignment/job verification, active server credential, and the latest
+native report (Always authorization, Precise Location, Background App Refresh,
+native service health, Keychain credential, and required/registered regions).
+The same roster supplies both the configured count and warning list.
 
 | Problem | Meaning |
 | --- | --- |
 | `no_assignment` | Not assigned to a job |
 | `jobsite_unverified` | Assigned job has no verified address |
+| `native_readiness_missing` | The phone has not submitted a definitive native setup report |
+| `background_location_required` | iOS authorization is not Always |
+| `precise_location_required` | Precise Location is disabled |
+| `native_service_unhealthy` | Location Services, Background App Refresh, or native monitoring is unavailable |
 | `device_not_enrolled` | No active device credential |
 | `credential_expired` | Credential expired; the phone must re-enroll |
-| `no_recent_device_activity` | Enrolled but silent for 48 h+ (or never used) |
+| `regions_not_registered` | A required assigned-job region is missing from the OS registration report |
 
 A missing assignment is reported **alone** — every other check is moot without
 one, and listing four consequences of the same cause is noise. With the company
 switch off, nothing is reported: automatic attendance is not in use, so nothing
-is broken.
+is broken. Setup does not become unhealthy merely because the app has stayed
+closed for days; the report represents durable configuration, not an app-open
+heartbeat.
 
 The panel renders above the roster, because an employee whose phone cannot
 report is otherwise invisible: they look exactly like someone who simply hasn't

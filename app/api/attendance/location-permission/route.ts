@@ -20,6 +20,12 @@ const putSchema = z.object({
   platform: z.enum(["ios", "android", "web", "unknown"]).optional(),
   onboardingCompleted: z.boolean().optional(),
   setupComplete: z.boolean().optional(),
+  nativeServiceSupported: z.boolean().optional(),
+  nativeServiceHealthy: z.boolean().optional(),
+  backgroundRefreshEnabled: z.boolean().optional(),
+  nativeHasSecureCredential: z.boolean().optional(),
+  requiredRegionIds: z.array(z.string().min(1).max(300)).max(20).optional(),
+  registeredRegionIds: z.array(z.string().min(1).max(300)).max(20).optional(),
 });
 
 function rowToSnapshot(row: Record<string, unknown>): LocationPermissionSnapshot {
@@ -159,6 +165,34 @@ export async function PUT(request: Request) {
     if (d.background !== undefined) payload.background = d.background;
     if (d.precise !== undefined) payload.precise = d.precise;
     if (d.platform !== undefined) payload.platform = d.platform;
+    if (d.nativeServiceSupported !== undefined) {
+      payload.native_service_supported = d.nativeServiceSupported;
+    }
+    if (d.nativeServiceHealthy !== undefined) {
+      payload.native_service_healthy = d.nativeServiceHealthy;
+    }
+    if (d.backgroundRefreshEnabled !== undefined) {
+      payload.background_refresh_enabled = d.backgroundRefreshEnabled;
+    }
+    if (d.nativeHasSecureCredential !== undefined) {
+      payload.native_has_secure_credential = d.nativeHasSecureCredential;
+    }
+    if (d.requiredRegionIds !== undefined) {
+      payload.required_region_ids = [...new Set(d.requiredRegionIds)].sort();
+    }
+    if (d.registeredRegionIds !== undefined) {
+      payload.registered_region_ids = [...new Set(d.registeredRegionIds)].sort();
+    }
+    if (
+      d.nativeServiceSupported !== undefined ||
+      d.nativeServiceHealthy !== undefined ||
+      d.backgroundRefreshEnabled !== undefined ||
+      d.nativeHasSecureCredential !== undefined ||
+      d.requiredRegionIds !== undefined ||
+      d.registeredRegionIds !== undefined
+    ) {
+      payload.native_readiness_reported_at = new Date().toISOString();
+    }
     if (d.setupComplete === true || d.onboardingCompleted) {
       payload.onboarding_completed_at = new Date().toISOString();
     } else if (d.setupComplete === false) {

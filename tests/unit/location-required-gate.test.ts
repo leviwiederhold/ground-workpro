@@ -156,6 +156,7 @@ const completeNativeHealth = {
   authorized: true,
   authorizationStatus: "authorized_always" as const,
   locationServicesEnabled: true,
+  backgroundRefreshEnabled: true,
   preciseLocation: true,
   registeredCount: 2,
   lastEventAt: null,
@@ -198,6 +199,14 @@ test("native setup requires Always authorization, Precise Location, credential, 
     }),
     false,
     "reduced-accuracy location must not dismiss the gate",
+  );
+  assert.equal(
+    isAttendanceSetupComplete({
+      ...complete,
+      nativeHealth: { ...completeNativeHealth, backgroundRefreshEnabled: false },
+    }),
+    false,
+    "disabled Background App Refresh cannot support closed-app region delivery",
   );
   assert.equal(
     isAttendanceSetupComplete({ ...complete, hasDeviceCredential: false }),

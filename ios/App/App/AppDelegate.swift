@@ -45,8 +45,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         configureAttendanceBackgroundContext()
         // Install the Core Location delegate even when iOS relaunched the app
         // only to deliver a region transition and no Capacitor WebView/plugin
-        // instance will be created.
-        AttendanceGeofenceCoordinator.shared.start()
+        // instance will be created. The launch reason is persisted before any
+        // WebView work; on a Core Location relaunch the coordinator also asks
+        // the OS for the current state of every surviving monitored region.
+        let attendanceLaunchReason =
+            launchOptions?[.location] != nil ? "core_location" : "user_or_system"
+        AttendanceGeofenceCoordinator.shared.start(launchReason: attendanceLaunchReason)
 
         clearWebViewAssetCache()
         window?.backgroundColor = appBackgroundColor

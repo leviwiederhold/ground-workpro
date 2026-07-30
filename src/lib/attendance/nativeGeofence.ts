@@ -50,6 +50,9 @@ export type NativeGeofenceHealth = {
     | "authorized_always"
     | "unknown";
   locationServicesEnabled: boolean | null;
+  // iOS does not relaunch the app for region notifications when Background App
+  // Refresh is disabled globally or for the app.
+  backgroundRefreshEnabled: boolean | null;
   preciseLocation: boolean | null;
   registeredCount: number;
   lastEventAt: string | null;
@@ -161,6 +164,7 @@ const UNAVAILABLE_HEALTH: NativeGeofenceHealth = {
   authorized: false,
   authorizationStatus: "unknown",
   locationServicesEnabled: null,
+  backgroundRefreshEnabled: null,
   preciseLocation: null,
   registeredCount: 0,
   lastEventAt: null,

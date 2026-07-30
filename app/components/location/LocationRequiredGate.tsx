@@ -47,6 +47,7 @@ import { fetchAssignedJobsRequired } from '@/lib/jobsite-time/geofence-client';
 import { loadAssignedAttendanceRegions } from '@/lib/attendance/assignedRegionsClient';
 import { persistNativeAttendanceReadiness } from '@/lib/attendance/backgroundLocationClient';
 import {
+  hasActiveDeviceCredential,
   requestDeviceCredential,
   writeDeviceCredentialToSecureStore,
   type DeviceCredentialPayload,
@@ -123,7 +124,14 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
           if (!native) return requestLocationPermissionInteractive();
           return requestNativeLocationPermissionFromPrompt(await loadCapacitorGeolocation());
         },
-        checkNativeGeofenceHealth: requireNativeGeofenceHealth,
+        checkNativeGeofenceHealth: async () => {
+          const health = await requireNativeGeofenceHealth();
+          if (!health.hasCredential) return health;
+          return {
+            ...health,
+            hasCredential: await hasActiveDeviceCredential(),
+          };
+        },
         requestBackgroundAuthorization: interactive
           ? requestNativeAlwaysAuthorization
           : async () => {},
@@ -142,15 +150,20 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             loadRequiredRegions(),
             getRegisteredGeofences(),
           ]);
+          const hasActiveCredential =
+            health.hasCredential && await hasActiveDeviceCredential();
           const complete = isAttendanceSetupComplete({
             platform: 'native',
             permission: finalPermission,
-            hasDeviceCredential: health.hasCredential,
+            hasDeviceCredential: hasActiveCredential,
             nativeHealth: health,
             requiredRegionIds: requiredRegions.map((region) => region.identifier),
             registeredRegionIds: registered.map((region) => region.identifier),
           });
-          await persistNativeAttendanceReadiness(health, complete);
+          await persistNativeAttendanceReadiness(health, complete, {
+            requiredRegionIds: requiredRegions.map((region) => region.identifier),
+            registeredRegionIds: registered.map((region) => region.identifier),
+          });
           return complete;
         },
         onTransition: reportTransition,

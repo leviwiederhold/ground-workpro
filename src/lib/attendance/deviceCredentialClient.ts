@@ -13,6 +13,7 @@ const DEVICE_ID_KEY = "attendance.deviceId.v1";
 // be bounded — an un-timed fetch that stalls was one cause of the gate hanging
 // on "Requesting…".
 const ENROLL_FETCH_TIMEOUT_MS = 15_000;
+const STATUS_FETCH_TIMEOUT_MS = 8_000;
 
 interface SecureAttendanceStorePlugin {
   setToken(opts: { token: string; expiresAt: string }): Promise<void>;
@@ -87,6 +88,35 @@ export function getStableDeviceId(): string {
 }
 
 /**
+ * Server authority for whether this install's credential is still active.
+ *
+ * Keychain can only prove that bytes exist locally. Logout, admin revocation,
+ * or a prior rotation can invalidate the corresponding server row without
+ * changing the token's locally mirrored expiry date.
+ */
+export async function hasActiveDeviceCredential(): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), STATUS_FETCH_TIMEOUT_MS);
+  try {
+    const deviceId = encodeURIComponent(getStableDeviceId());
+    const res = await fetch(
+      `/api/attendance/device-credential?deviceId=${deviceId}`,
+      { cache: "no-store", signal: controller.signal },
+    );
+    if (!res.ok) {
+      throw new Error(`credential status endpoint returned HTTP ${res.status}`);
+    }
+    const payload = await res.json().catch(() => null);
+    if (typeof payload?.active !== "boolean") {
+      throw new Error("credential status endpoint returned an invalid payload");
+    }
+    return payload.active;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Enroll this device: mint a credential and store the token in the native
  * secure store. No-op (returns false) when no secure store is available — we
  * never mint a token we can't store securely.
@@ -117,7 +147,8 @@ let ensureCredentialInFlight: Promise<boolean> | null = null;
  * physical-test day produced 65 server credential rows, with each mint revoking
  * the previous token. Concurrent mints could therefore write an already-revoked
  * token to the Keychain last. This single-flight check rotates only when the
- * secure store is empty or the token is close to expiry.
+ * secure store is empty, the token is close to expiry, or the server confirms
+ * that the locally unexpired token was revoked.
  */
 export async function ensureDeviceCredential(
   platform?: string,
@@ -135,7 +166,16 @@ export async function ensureDeviceCredential(
         current?.hasToken === true &&
         Number.isFinite(expiresAt) &&
         expiresAt - now > 24 * 60 * 60 * 1000;
-      if (usableForAtLeastOneDay) return true;
+      if (usableForAtLeastOneDay) {
+        try {
+          if (await hasActiveDeviceCredential()) return true;
+          await store.clear();
+        } catch {
+          // Preserve a potentially valid token on transient network failure.
+          // Returning false keeps setup retryable without rotating blindly.
+          return false;
+        }
+      }
     } catch {
       // A failed read is recoverable by one enrollment attempt below.
     }

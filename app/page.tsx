@@ -24,6 +24,8 @@ import { recoveryRedirectUrl } from '@/lib/auth/passwordReset';
 import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
+import { NativePushNotifications } from '@/app/components/native/NativePushNotifications';
+import { revokeCurrentNativePushDevice } from '@/lib/push/client';
 
 const DashboardView = dynamic(
   () => import('@/app/components/views/DashboardView').then((mod) => mod.DashboardView)
@@ -2294,6 +2296,7 @@ const MobileAppShell = ({
 
       return (
         <>
+        <NativePushNotifications />
         <MobileAppShell
           mobileSidebarOpen={mobileSidebarOpen}
           setMobileSidebarOpen={setMobileSidebarOpen}
@@ -14023,6 +14026,7 @@ const MobileAppShell = ({
             safeLocalStorageRemove('app.currentView');
           }
           applyAppearancePreference('light');
+          await revokeCurrentNativePushDevice().catch(() => undefined);
           await fetch('/api/logout', { method: 'POST' }).catch(() => null);
         } finally {
           await supabaseBrowser().auth.signOut().catch(() => null);

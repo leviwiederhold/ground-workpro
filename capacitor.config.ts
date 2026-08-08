@@ -91,6 +91,12 @@ const config: CapacitorConfig = {
     contentInset: "never",
   },
   plugins: {
+    PushNotifications: {
+      // Background/terminated alerts are presented by iOS. In the foreground,
+      // the web app refreshes its message state without a second intrusive
+      // system banner (especially when that conversation is already open).
+      presentationOptions: [],
+    },
     SocialLogin: {
       providers: {
         apple: true,

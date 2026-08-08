@@ -20,6 +20,7 @@ import { runUnifiedSave } from '@/lib/settings/unifiedSave';
 import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativeApp';
 import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
 import { resolveSignOutRoute } from '@/lib/auth/loginFlow';
+import { recoveryRedirectUrl } from '@/lib/auth/passwordReset';
 import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
@@ -10565,7 +10566,7 @@ const MobileAppShell = ({
           const email = String(currentUser?.email || '').trim();
           if (!email) { setPwdMsg('No email on file.'); return; }
           const { error } = await supabaseBrowser().auth.resetPasswordForEmail(email, {
-            redirectTo: `${window.location.origin}/reset-password`,
+            redirectTo: recoveryRedirectUrl(window.location.origin),
           });
           setPwdMsg(error ? error.message : 'Password reset link sent to your email.');
         } catch { setPwdMsg('Failed to send reset link.'); }

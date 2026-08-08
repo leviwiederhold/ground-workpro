@@ -1,18 +1,46 @@
 'use client';
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { isStrongPassword, STRONG_PASSWORD_MESSAGE } from "@/lib/auth/passwordPolicy";
 import PasswordChecklist from "@/app/components/auth/PasswordChecklist";
+import { supabaseBrowser } from "@/lib/supabase/client";
+
+type LinkState = "checking" | "valid" | "invalid";
 
 export default function ResetPasswordPage() {
   const router = useRouter();
+  const [linkState, setLinkState] = useState<LinkState>("checking");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+
+  // The callback restores the recovery session (via Set-Cookie) before landing
+  // here. Confirm a session exists before showing the form; a missing session or
+  // an `error` param from the callback means the link was expired, malformed, or
+  // already used — show a clear recovery error instead of a dead form.
+  useEffect(() => {
+    let active = true;
+    if (new URLSearchParams(window.location.search).get("error")) {
+      setLinkState("invalid");
+      return;
+    }
+    supabaseBrowser()
+      .auth.getSession()
+      .then(({ data }) => {
+        if (!active) return;
+        setLinkState(data.session ? "valid" : "invalid");
+      })
+      .catch(() => {
+        if (active) setLinkState("invalid");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -27,7 +55,7 @@ export default function ResetPasswordPage() {
     }
     setLoading(true);
     try {
-      // The recovery link establishes a session. The API repeats policy
+      // The recovery link established a session. The API repeats policy
       // validation server-side before updating the authenticated user.
       const response = await fetch("/api/auth/reset-password", {
         method: "POST",
@@ -36,12 +64,26 @@ export default function ResetPasswordPage() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        if (response.status === 401) {
+          // Session lost/expired mid-flow — treat as an invalid link.
+          setLinkState("invalid");
+          return;
+        }
         setError(payload?.error || "Unable to update password.");
         return;
       }
       setDone(true);
+      // Sign the recovery session out so the user re-authenticates with the new
+      // password, then send them back to login. Clearing the session also stops
+      // the login page from bouncing an authenticated user to the dashboard.
+      try {
+        await fetch("/api/logout", { method: "POST" }).catch(() => {});
+        await supabaseBrowser().auth.signOut();
+      } catch {
+        // Best-effort: even if sign-out fails, still route to login.
+      }
       setTimeout(() => {
-        router.replace("/");
+        router.replace("/login?reset=1");
         router.refresh();
       }, 1200);
     } catch (err) {
@@ -55,8 +97,25 @@ export default function ResetPasswordPage() {
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">Set a new password</h1>
-        {done ? (
-          <p className="text-sm text-emerald-700 mt-4">Password updated. Taking you to your workspace…</p>
+
+        {linkState === "checking" ? (
+          <p className="text-sm text-gray-500 mt-4">Verifying your reset link…</p>
+        ) : linkState === "invalid" ? (
+          <>
+            <p className="text-sm text-red-600 mt-4" role="alert">
+              This reset link is invalid or has expired. Reset links can only be used once and
+              expire after a short time.
+            </p>
+            <p className="text-sm text-gray-500 mt-5 text-center">
+              <Link href="/forgot-password" className="text-brand-600 hover:text-brand-700 font-medium">
+                Request a new reset link
+              </Link>
+            </p>
+          </>
+        ) : done ? (
+          <p className="text-sm text-emerald-700 mt-4">
+            Password updated. Taking you to sign in with your new password…
+          </p>
         ) : (
           <>
             <p className="text-sm text-gray-500 mb-6">Choose a strong password for your account.</p>

@@ -87,7 +87,17 @@ function resolveApiGuardedModule(request: NextRequest) {
 // stay reachable while signed out, and an unauthenticated native user must never
 // be bounced to the website's /login (which would strand them on the web UI
 // inside the app).
-const PAGE_GUARD_BYPASSES = new Set(["/settings/billing/success", "/native", "/native/login"]);
+// `/reset-password` and `/forgot-password` must stay reachable during recovery.
+// A recovery link establishes a real (but purpose-limited) session, so a future
+// role/membership guard here could bounce the recovery user to `/` before they
+// set a new password. Bypass guards explicitly to keep the reset page reachable.
+const PAGE_GUARD_BYPASSES = new Set([
+  "/settings/billing/success",
+  "/native",
+  "/native/login",
+  "/reset-password",
+  "/forgot-password",
+]);
 
 function findGuardedRoles(pathname: string): AppRole[] | null {
   if (PAGE_GUARD_BYPASSES.has(pathname)) return null;

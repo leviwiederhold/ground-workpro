@@ -3,6 +3,7 @@
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { recoveryRedirectUrl } from "@/lib/auth/passwordReset";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -15,7 +16,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError("");
     try {
-      const redirectTo = `${window.location.origin}/reset-password`;
+      const redirectTo = recoveryRedirectUrl(window.location.origin);
       const { error: resetError } = await supabaseBrowser().auth.resetPasswordForEmail(email.trim(), {
         redirectTo,
       });

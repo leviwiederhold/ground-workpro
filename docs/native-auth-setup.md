@@ -90,10 +90,16 @@ Vercel `NEXT_PUBLIC_*` variables, the Xcode project, or this repository.
 ### Apple
 
 1. Enable the Apple provider.
-2. Add `com.leviwiederhold.groundworkpro` as an Apple **authorized client ID**.
-   This is required because the native token's `aud` claim is the bundle ID.
-3. Configure the Apple Services ID / team ID / key values Supabase requires for
-   Apple auth.
+2. Set the **Client IDs** field to this exact ordered value:
+   `com.groundwork-pro.web,com.leviwiederhold.groundworkpro`.
+   The web Services ID must remain first because Supabase uses the first value
+   for web OAuth. The native bundle ID remains second so Supabase can validate
+   native Apple tokens whose `aud` claim is the bundle ID.
+3. The OAuth secret JWT's `sub` must be `com.groundwork-pro.web`.
+4. Configure the existing team ID / key values Supabase requires for Apple
+   auth. Do not create another Services ID.
+5. Run `pnpm auth:contract` to verify the live production request still sends
+   the Services ID and Supabase callback that Apple accepts.
 
 ### Google
 

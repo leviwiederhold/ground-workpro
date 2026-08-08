@@ -24,10 +24,13 @@ implemented and verified.
 ## Apple Developer
 
 1. Configure Sign in with Apple.
-2. Create the Service ID required for the web flow.
+2. Use the existing `com.groundwork-pro.web` Services ID for the web flow.
 3. Add the Supabase provider callback URL shown in the Supabase Apple provider
    settings as the return URL.
-4. Add the resulting Apple credentials to the Supabase Apple provider settings.
+4. In Supabase, set **Client IDs** to the exact ordered value
+   `com.groundwork-pro.web,com.leviwiederhold.groundworkpro`.
+5. Keep the OAuth secret JWT's `sub` set to `com.groundwork-pro.web`.
+6. Run `pnpm auth:contract` after any provider change.
 
 ## Password recovery
 

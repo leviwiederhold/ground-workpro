@@ -14,6 +14,9 @@ test.describe('native App Store auth compliance', () => {
     await expect(page.getByTestId('login-submit')).toBeVisible();
     await expect(page.getByText('Already part of a company? Sign in')).toBeVisible();
     await expect(page.getByText('Need access? Contact your company administrator for an invitation.')).toBeVisible();
+    await expect(page.getByTestId('native-auth-update-required')).toContainText(
+      'Update required for Apple or Google Sign-In',
+    );
     await expect(page.getByRole('link', { name: /sign up/i })).toHaveCount(0);
   });
 

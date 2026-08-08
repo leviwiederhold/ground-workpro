@@ -18,6 +18,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const read = (rel: string) => readFileSync(join(repoRoot, rel), "utf8");
 
 const PRODUCTION_BUNDLE_ID = "com.leviwiederhold.groundworkpro";
+const APPLE_WEB_SERVICES_ID = "com.groundwork-pro.web";
 
 // Whether git tracks a path. Local files holding real credentials are expected
 // to EXIST on a configured machine — what must never happen is them being
@@ -135,6 +136,39 @@ test("Sign in with Apple entitlement is wired for both configurations", () => {
   for (const [, value] of entitlementRefs) {
     assert.equal(value.trim(), "App/App.entitlements");
   }
+});
+
+test("Apple web and native identities have one explicit ordered production contract", () => {
+  const contract = JSON.parse(read("config/auth-contract.json"));
+
+  assert.equal(contract.apple.webServicesId, APPLE_WEB_SERVICES_ID);
+  assert.equal(contract.apple.nativeBundleId, PRODUCTION_BUNDLE_ID);
+  assert.equal(
+    contract.supabaseAuthCallback,
+    "https://ucyalowqzvkybnfgucem.supabase.co/auth/v1/callback",
+  );
+  assert.deepEqual(contract.apple.supabaseClientIdsInOrder, [
+    APPLE_WEB_SERVICES_ID,
+    PRODUCTION_BUNDLE_ID,
+  ]);
+});
+
+test("Apple secret generator rejects the native bundle ID before reading a private key", () => {
+  assert.throws(
+    () =>
+      execFileSync(process.execPath, ["scripts/generate-apple-secret.js"], {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          APPLE_TEAM_ID: "TESTTEAM",
+          APPLE_KEY_ID: "TESTKEY",
+          APPLE_CLIENT_ID: PRODUCTION_BUNDLE_ID,
+          APPLE_PRIVATE_KEY_PATH: "/definitely/not/a/private/key.p8",
+        },
+        encoding: "utf8",
+      }),
+    new RegExp(`APPLE_CLIENT_ID must be the web Services ID ${APPLE_WEB_SERVICES_ID.replace(/\./g, "\\.")}`),
+  );
 });
 
 // ── No committed secrets ─────────────────────────────────────────────────────

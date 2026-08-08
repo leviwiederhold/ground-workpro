@@ -381,6 +381,19 @@ export default function LoginPage() {
           </div>
         )}
 
+        {nativeRuntime ? (
+          <div
+            className="mt-5 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"
+            data-testid="native-auth-update-required"
+          >
+            <p className="font-semibold">Update required for Apple or Google Sign-In</p>
+            <p className="mt-1">
+              Install the latest Groundwork Pro version from TestFlight or the App Store. You can
+              still sign in with email and password here.
+            </p>
+          </div>
+        ) : null}
+
         {nativeRuntime ? null : (
           <p className="text-sm text-gray-500 mt-5 text-center">
             Need an account?{" "}

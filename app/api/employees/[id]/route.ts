@@ -3,10 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
-import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { isCompanyOwnerEmployee } from "@/lib/auth/ownerLock";
+import { ASSIGNMENT_CONFLICT_CODE } from "@/lib/jobs/assignmentConflict";
+import { runJobAssignmentSideEffects } from "@/lib/jobs/assignmentSideEffects";
+import { assignEmployeeToJob } from "@/lib/jobs/assignmentService";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -203,6 +205,112 @@ export async function PATCH(
       }
     }
 
+    const requestedJobId =
+      payload.jobId === undefined
+        ? undefined
+        : payload.jobId === "" || payload.jobId === null
+          ? null
+          : String(payload.jobId);
+    let assignmentTargetJob: Record<string, any> | null = null;
+    let assignmentWasCreated = false;
+    let explicitlyUnassignedJobId: string | null = null;
+
+    // job_employees is authoritative. Handle its mutation before profile edits
+    // so a conflict cannot partially save unrelated form fields, and never use
+    // the legacy delete-then-insert reassignment sequence.
+    if (requestedJobId !== undefined) {
+      const admin = getSupabaseAdmin();
+      if (!admin) {
+        return NextResponse.json({ error: "Atomic assignment service unavailable" }, { status: 503 });
+      }
+
+      if (requestedJobId === null) {
+        const memberships = await admin
+          .from("job_employees")
+          .select("job_id")
+          .eq("company_id", companyId)
+          .eq("employee_id", employeeId);
+        if (memberships.error) {
+          return NextResponse.json({ error: memberships.error.message }, { status: 400 });
+        }
+        if ((memberships.data ?? []).length > 1) {
+          return NextResponse.json(
+            {
+              code: "EMPLOYEE_ASSIGNMENT_REMEDIATION_REQUIRED",
+              error: "This employee has multiple existing job assignments. Resolve them separately before unassigning.",
+            },
+            { status: 409 },
+          );
+        }
+        explicitlyUnassignedJobId = String(memberships.data?.[0]?.job_id ?? "") || null;
+        if (explicitlyUnassignedJobId) {
+          const removal = await admin
+            .from("job_employees")
+            .delete()
+            .eq("company_id", companyId)
+            .eq("employee_id", employeeId)
+            .eq("job_id", explicitlyUnassignedJobId);
+          if (removal.error) {
+            return NextResponse.json({ error: removal.error.message }, { status: 400 });
+          }
+        }
+      } else {
+        const targetJobResult = await supabase
+          .from("jobs")
+          .select("id, name, status")
+          .eq("company_id", companyId)
+          .eq("id", requestedJobId)
+          .maybeSingle();
+        if (targetJobResult.error || !targetJobResult.data) {
+          return NextResponse.json({ error: "Job not found" }, { status: 404 });
+        }
+        assignmentTargetJob = targetJobResult.data;
+
+        const assignmentResult = await assignEmployeeToJob({
+          supabase: admin,
+          companyId,
+          jobId: requestedJobId,
+          employeeId: String(employeeId),
+        });
+        if (assignmentResult.status === "conflict") {
+          const name = String(existingEmployee.name ?? existingEmployee.full_name ?? "Employee");
+          return NextResponse.json(
+            {
+              code: ASSIGNMENT_CONFLICT_CODE,
+              error: `${name} is already assigned to ${assignmentResult.currentJob.name}.`,
+              employee: { id: String(employeeId), name },
+              currentJob: assignmentResult.currentJob,
+            },
+            { status: 409 },
+          );
+        }
+        if (assignmentResult.status === "job_not_found") {
+          return NextResponse.json({ error: "Job not found" }, { status: 404 });
+        }
+        if (assignmentResult.status === "employee_not_found") {
+          return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+        }
+        if (assignmentResult.status === "unavailable") {
+          return NextResponse.json({ error: assignmentResult.message }, { status: 503 });
+        }
+        if (
+          assignmentResult.status !== "assigned" &&
+          assignmentResult.status !== "already_assigned"
+        ) {
+          return NextResponse.json(
+            {
+              error:
+                "message" in assignmentResult
+                  ? assignmentResult.message
+                  : "Failed to assign employee",
+            },
+            { status: 400 },
+          );
+        }
+        assignmentWasCreated = assignmentResult.status === "assigned";
+      }
+    }
+
     const updatePayload: Record<string, unknown> = {};
 
     if (payload.name !== undefined) {
@@ -219,16 +327,21 @@ export async function PATCH(
       updatePayload.rate = payload.hourlyRate;
     }
     if (payload.certifications !== undefined) updatePayload.certifications = payload.certifications;
-    if (payload.jobId !== undefined) updatePayload.job_id = payload.jobId === "" ? null : payload.jobId;
     if (payload.status !== undefined) updatePayload.status = payload.status;
     if (payload.clockedInAt !== undefined) updatePayload.clocked_in_at = payload.clockedInAt;
 
-    let { data, error } = await updateWithColumnFallback(
-      supabase,
-      companyId,
-      employeeId,
-      updatePayload
-    );
+    let data: any = existingEmployee;
+    let error: any = null;
+    if (Object.keys(updatePayload).length > 0) {
+      const updateResult = await updateWithColumnFallback(
+        supabase,
+        companyId,
+        employeeId,
+        updatePayload
+      );
+      data = updateResult.data;
+      error = updateResult.error;
+    }
 
     if (error && payload.status !== undefined && isStatusCheckError(error.message)) {
       const statusCandidates = getStatusCandidates(payload.status);
@@ -289,90 +402,25 @@ export async function PATCH(
       }
       updatedEmployee = refreshedEmployeeResult.data;
     }
-    const oldJobId = existingEmployee.job_id == null ? null : String(existingEmployee.job_id);
-    const requestedJobId =
-      payload.jobId !== undefined
-        ? payload.jobId === "" || payload.jobId === null
-          ? null
-          : String(payload.jobId)
-        : updatedEmployee?.job_id == null
-          ? null
-          : String(updatedEmployee.job_id);
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (payload.jobId !== undefined) {
-      const deleteJoinAssignments = await supabase
-        .from("job_employees")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("employee_id", employeeId);
-      if (deleteJoinAssignments.error && !/relation .* does not exist|Could not find the table/i.test(deleteJoinAssignments.error.message || "")) {
-        return NextResponse.json({ error: deleteJoinAssignments.error.message }, { status: 400 });
-      }
-
-      const deleteTodayAssignments = await supabase
-        .from("schedule_assignments")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("employee_id", employeeId)
-        .eq("date", today);
-      if (deleteTodayAssignments.error && !/relation .* does not exist|Could not find the table/i.test(deleteTodayAssignments.error.message || "")) {
-        return NextResponse.json({ error: deleteTodayAssignments.error.message }, { status: 400 });
-      }
-
-      if (requestedJobId) {
-        const joinInsertResult = await supabase
-          .from("job_employees")
-          .insert({
-            company_id: companyId,
-            job_id: requestedJobId,
-            employee_id: employeeId,
-          });
-        if (joinInsertResult.error && !/relation .* does not exist|Could not find the table|duplicate key|unique/i.test(joinInsertResult.error.message || "")) {
-          return NextResponse.json({ error: joinInsertResult.error.message }, { status: 400 });
-        }
-
-        const scheduleInsertResult = await supabase
+    if (assignmentWasCreated && assignmentTargetJob) {
+      await runJobAssignmentSideEffects({
+        supabase,
+        companyId,
+        actorUserId,
+        employee: updatedEmployee ?? existingEmployee,
+        job: assignmentTargetJob,
+      });
+    } else if (explicitlyUnassignedJobId) {
+      try {
+        await supabase
           .from("schedule_assignments")
-          .insert({
-            company_id: companyId,
-            job_id: requestedJobId,
-            employee_id: employeeId,
-            date: today,
-            created_by: actorUserId || null,
-            notes: "Auto-added from Team assignment",
-          });
-        if (scheduleInsertResult.error && !/relation .* does not exist|Could not find the table|duplicate key|unique/i.test(scheduleInsertResult.error.message || "")) {
-          return NextResponse.json({ error: scheduleInsertResult.error.message }, { status: 400 });
-        }
-
-        if (requestedJobId !== oldJobId) {
-          const jobResult = await supabase
-            .from("jobs")
-            .select("id, name")
-            .eq("company_id", companyId)
-            .eq("id", requestedJobId)
-            .maybeSingle();
-          const linkedUserId = String(updatedEmployee?.user_id ?? "").trim();
-          if (linkedUserId) {
-            try {
-              await enqueueNotifications({
-                supabase,
-                companyId,
-                userIds: [linkedUserId],
-                type: "job_assigned",
-                payload: {
-                  jobId: String(requestedJobId),
-                  jobName: String(jobResult.data?.name ?? "Assigned Job"),
-                  date: today,
-                  href: "/schedule",
-                },
-              });
-            } catch {
-              // no-op: assignment save should not fail on notification issue
-            }
-          }
-        }
+          .delete()
+          .eq("company_id", companyId)
+          .eq("employee_id", employeeId)
+          .eq("job_id", explicitlyUnassignedJobId)
+          .eq("date", new Date().toISOString().slice(0, 10));
+      } catch {
+        // Membership removal is authoritative; today's schedule is a mirror.
       }
     }
 
@@ -395,7 +443,7 @@ export async function PATCH(
       payload.jobId !== undefined
         ? {
             ...(updatedEmployee ?? {}),
-            job_id: requestedJobId,
+            job_id: requestedJobId ?? null,
           }
         : updatedEmployee
     );

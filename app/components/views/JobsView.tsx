@@ -50,6 +50,9 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
   const [employeeToAssign, setEmployeeToAssign] = useState([]);
   const [crewActionLoading, setCrewActionLoading] = useState(false);
   const [crewActionError, setCrewActionError] = useState('');
+  const [reassignPrompt, setReassignPrompt] = useState(null);
+  const [reassignLoading, setReassignLoading] = useState(false);
+  const [reassignError, setReassignError] = useState('');
   const [equipmentActionLoading, setEquipmentActionLoading] = useState(false);
   const [equipmentActionError, setEquipmentActionError] = useState('');
   const [financialSummary, setFinancialSummary] = useState(null);
@@ -437,9 +440,21 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           payload = null;
         }
 
+        if (response.status === 409 && payload?.code === 'EMPLOYEE_ASSIGNMENT_CONFLICT') {
+          const employee = employees.find((candidate) => String(candidate.id) === String(employeeId));
+          setReassignPrompt({
+            employeeId: String(payload?.employee?.id ?? employeeId),
+            employeeName: payload?.employee?.name || employee?.name || 'This employee',
+            currentJobId: String(payload?.currentJob?.id ?? ''),
+            currentJobName: payload?.currentJob?.name || 'another active job',
+          });
+          setReassignError('');
+          await refreshAssignmentState();
+          return;
+        }
+
         if (!response.ok || !payload?.employee) {
           setCrewActionError(payload?.error || raw || 'Failed to assign employee');
-          setCrewActionLoading(false);
           return;
         }
       }
@@ -450,6 +465,56 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
       setCrewActionError('Failed to assign employee');
     } finally {
       setCrewActionLoading(false);
+    }
+  };
+
+  const handleCancelReassign = () => {
+    if (reassignLoading) return;
+    setReassignPrompt(null);
+    setReassignError('');
+    setEmployeeToAssign([]);
+  };
+
+  const handleConfirmReassign = async () => {
+    if (!canEditJobs || !reassignPrompt || !selectedJob) return;
+    setReassignLoading(true);
+    setReassignError('');
+    try {
+      const response = await fetch(`/api/jobs/${selectedJob.id}/employees/reassign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: reassignPrompt.employeeId,
+          from_job_id: reassignPrompt.currentJobId,
+        }),
+      });
+      const raw = await response.text();
+      let payload = null;
+      try {
+        payload = raw ? JSON.parse(raw) : null;
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok || !payload?.success) {
+        if (response.status === 409 && payload?.code === 'EMPLOYEE_ASSIGNMENT_CONFLICT') {
+          setReassignPrompt((current) => current ? {
+            ...current,
+            currentJobId: String(payload?.currentJob?.id ?? current.currentJobId),
+            currentJobName: payload?.currentJob?.name || current.currentJobName,
+          } : current);
+        }
+        setReassignError(payload?.error || raw || 'Reassignment failed. Please try again.');
+        return;
+      }
+
+      setReassignPrompt(null);
+      setEmployeeToAssign([]);
+      await refreshAssignmentState();
+    } catch {
+      setReassignError('Reassignment failed. Please try again.');
+    } finally {
+      setReassignLoading(false);
     }
   };
 
@@ -871,8 +936,64 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
     </div>
   );
 
+  const renderReassignDialog = () => {
+    if (!reassignPrompt) return null;
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reassign-dialog-title"
+        data-testid="employee-reassignment-dialog"
+        onClick={handleCancelReassign}
+      >
+        <div
+          className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <h3 id="reassign-dialog-title" className="text-lg font-semibold text-gray-900">
+            Employee already assigned
+          </h3>
+          <p className="mt-2 text-sm text-gray-600">
+            <span className="font-medium">{reassignPrompt.employeeName}</span> is currently assigned to{' '}
+            <span className="font-medium">{reassignPrompt.currentJobName}</span>.
+          </p>
+          <p className="mt-2 text-sm text-gray-600">
+            Remove them from the current job and assign them to {selectedJob?.name || 'the new job'}?
+          </p>
+          {reassignError && (
+            <p className="mt-3 text-sm text-red-600" role="alert">
+              {reassignError}
+            </p>
+          )}
+          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleCancelReassign}
+              disabled={reassignLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="brand"
+              size="sm"
+              onClick={handleConfirmReassign}
+              disabled={reassignLoading}
+            >
+              {reassignLoading
+                ? 'Reassigning…'
+                : 'Remove from current job and assign to new job'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
+      {renderReassignDialog()}
       {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4 min-w-0">

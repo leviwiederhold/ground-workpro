@@ -1,8 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { ForbiddenError, requireModuleAccess } from "@/lib/auth/requireRole";
+import { ASSIGNMENT_CONFLICT_CODE } from "@/lib/jobs/assignmentConflict";
+import { runJobAssignmentSideEffects } from "@/lib/jobs/assignmentSideEffects";
+import { assignEmployeeToJob } from "@/lib/jobs/assignmentService";
+import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
-import { enqueueNotifications } from "@/lib/notifications/enqueue";
 
 const assignEmployeeSchema = z.object({
   employee_id: z.union([z.number(), z.string()]),
@@ -59,10 +63,9 @@ async function getEmployeeById(supabase: any, companyId: string, employeeId: str
     .eq("id", employeeId)
     .limit(1);
 }
-
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
@@ -80,7 +83,6 @@ export async function GET(
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    // Preferred schema: join table
     const assignmentsResult = await supabase
       .from("job_employees")
       .select("employee_id, assigned_role")
@@ -89,31 +91,28 @@ export async function GET(
 
     if (!assignmentsResult.error) {
       const assignments = assignmentsResult.data ?? [];
-      if (assignments.length === 0) {
-        return NextResponse.json({ employees: [] });
-      }
+      if (assignments.length === 0) return NextResponse.json({ employees: [] });
 
       const ids = assignments
         .map((assignment: any) => normalizeId(assignment.employee_id))
         .filter((value) => value !== null);
-      if (ids.length === 0) {
-        return NextResponse.json({ employees: [] });
-      }
+      if (ids.length === 0) return NextResponse.json({ employees: [] });
 
       const { data: employeeRows, error: employeesError } = await supabase
         .from("employees")
         .select("*")
         .eq("company_id", companyId)
         .in("id", ids as Array<string | number>);
-
       if (employeesError) {
         return NextResponse.json({ error: employeesError.message }, { status: 400 });
       }
 
       const roleMap = new Map(
-        assignments.map((assignment: any) => [String(assignment.employee_id), assignment.assigned_role ?? null])
+        assignments.map((assignment: any) => [
+          String(assignment.employee_id),
+          assignment.assigned_role ?? null,
+        ]),
       );
-
       const mapped = (employeeRows ?? []).map((employee: any) => ({
         ...mapEmployee(employee),
         assigned_role: roleMap.get(String(employee.id)) ?? null,
@@ -121,23 +120,23 @@ export async function GET(
       return NextResponse.json({ employees: mapped });
     }
 
-    // Fallback schema: assignment column on employees table
+    // Read-only compatibility for older workspaces. Writes intentionally do
+    // not have a legacy fallback because assignment enforcement must be atomic.
     if (!isMissingColumnOrTable(assignmentsResult.error?.message || "")) {
-      return NextResponse.json({ error: assignmentsResult.error?.message || "Failed to load job employees" }, { status: 400 });
+      return NextResponse.json(
+        { error: assignmentsResult.error?.message || "Failed to load job employees" },
+        { status: 400 },
+      );
     }
 
-    const assignmentColumns = ["job_id", "assigned_job_id", "current_job_id"];
-    for (const column of assignmentColumns) {
+    for (const column of ["job_id", "assigned_job_id", "current_job_id"]) {
       const result = await supabase
         .from("employees")
         .select("*")
         .eq("company_id", companyId)
         .eq(column, jobId);
-
       if (result.error) {
-        if (isMissingColumnOrTable(result.error.message || "")) {
-          continue;
-        }
+        if (isMissingColumnOrTable(result.error.message || "")) continue;
         return NextResponse.json({ error: result.error.message }, { status: 400 });
       }
       return NextResponse.json({ employees: (result.data ?? []).map(mapEmployee) });
@@ -155,21 +154,21 @@ export async function GET(
 
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const { id } = await params;
-    const body = await request.json();
-    const parsed = assignEmployeeSchema.safeParse(body);
-
+    const parsed = assignEmployeeSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Invalid assignment payload", details: parsed.error.flatten() },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const { supabase, companyId, userId } = await getCompanyId();
+    const access = await requireModuleAccess("jobs", "edit");
+    const { supabase } = await getCompanyId();
+    const { companyId, userId } = access;
     const jobId = normalizeId(id);
     const employeeId = normalizeId(parsed.data.employee_id);
     if (jobId === null || employeeId === null) {
@@ -178,204 +177,85 @@ export async function POST(
 
     const { data: jobRows, error: jobError } = await supabase
       .from("jobs")
-      .select("id")
+      .select("id, name, status")
       .eq("company_id", companyId)
       .eq("id", jobId)
       .limit(1);
-
     if (jobError || !(jobRows && jobRows.length > 0)) {
       return NextResponse.json({ error: "Job not found" }, { status: 404 });
     }
 
-    const { data: employeeRows, error: employeeError } = await getEmployeeById(supabase, companyId, employeeId);
-
+    const { data: employeeRows, error: employeeError } = await getEmployeeById(
+      supabase,
+      companyId,
+      employeeId,
+    );
     if (employeeError || !(employeeRows && employeeRows.length > 0)) {
       return NextResponse.json({ error: "Employee not found" }, { status: 404 });
     }
     const employee = employeeRows[0];
+    const mappedEmployee = mapEmployee(employee);
 
-    // Preferred schema: join table
-    const checkExisting = await supabase
-      .from("job_employees")
-      .select("id, employee_id")
-      .eq("company_id", companyId)
-      .eq("job_id", jobId)
-      .eq("employee_id", employeeId)
-      .limit(1);
-
-    if (!checkExisting.error) {
-      if ((checkExisting.data ?? []).length > 0) {
-        return NextResponse.json({ error: "Employee is already assigned to this job" }, { status: 409 });
-      }
-
-      const insertPayload: Record<string, unknown> = {
-        company_id: companyId,
-        job_id: jobId,
-        employee_id: employeeId,
-      };
-      if (parsed.data.assigned_role) insertPayload.assigned_role = parsed.data.assigned_role;
-
-      let insertResult = await supabase
-        .from("job_employees")
-        .insert(insertPayload)
-        .select("employee_id")
-        .limit(1);
-
-      if (insertResult.error && /assigned_role/i.test(insertResult.error.message || "")) {
-        delete insertPayload.assigned_role;
-        insertResult = await supabase
-          .from("job_employees")
-          .insert(insertPayload)
-          .select("employee_id")
-          .limit(1);
-      }
-
-      if (insertResult.error) {
-        const message = insertResult.error.message || "";
-        if (/duplicate key|unique/i.test(message)) {
-          return NextResponse.json({ error: "Employee is already assigned to this job" }, { status: 409 });
-        }
-        return NextResponse.json({ error: message }, { status: 400 });
-      }
-
-      const employeeUserId = String((employee as any).user_id ?? "").trim();
-      if (employeeUserId) {
-        try {
-          await enqueueNotifications({
-            supabase,
-            companyId,
-            userIds: [employeeUserId],
-            type: "job_assigned",
-            payload: {
-              jobId: String(jobId),
-              jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
-              date: new Date().toISOString().slice(0, 10),
-              href: "/schedule",
-            },
-          });
-        } catch {
-          // Keep assignment successful even if notifications table is unavailable.
-        }
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-      const existingScheduleResult = await supabase
-        .from("schedule_assignments")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("job_id", jobId)
-        .eq("employee_id", employeeId)
-        .eq("date", today)
-        .limit(1);
-      if (!existingScheduleResult.error && (existingScheduleResult.data ?? []).length === 0) {
-        await supabase.from("schedule_assignments").insert({
-          company_id: companyId,
-          job_id: jobId,
-          employee_id: employeeId,
-          date: today,
-          created_by: userId,
-          notes: "Auto-added from job assignment",
-        });
-      }
-
-      return NextResponse.json({
-        employee: { ...mapEmployee(employee), assigned_role: parsed.data.assigned_role ?? null, jobId: jobId },
-      });
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      return NextResponse.json({ error: "Atomic assignment service unavailable" }, { status: 503 });
     }
 
-    if (!isMissingColumnOrTable(checkExisting.error?.message || "")) {
-      return NextResponse.json({ error: checkExisting.error?.message || "Failed to assign employee" }, { status: 400 });
+    const result = await assignEmployeeToJob({
+      supabase: admin,
+      companyId,
+      jobId: String(jobId),
+      employeeId: String(employeeId),
+      assignedRole: parsed.data.assigned_role ?? null,
+    });
+
+    if (result.status === "conflict") {
+      return NextResponse.json(
+        {
+          code: ASSIGNMENT_CONFLICT_CODE,
+          error: `${mappedEmployee.name || "Employee"} is already assigned to ${result.currentJob.name}.`,
+          employee: { id: String(employeeId), name: mappedEmployee.name || "Employee" },
+          currentJob: result.currentJob,
+        },
+        { status: 409 },
+      );
+    }
+    if (result.status === "already_assigned") {
+      return NextResponse.json({ error: "Employee is already assigned to this job" }, { status: 409 });
+    }
+    if (result.status === "job_not_found") {
+      return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    }
+    if (result.status === "employee_not_found") {
+      return NextResponse.json({ error: "Employee not found" }, { status: 404 });
+    }
+    if (result.status === "unavailable") {
+      return NextResponse.json({ error: result.message }, { status: 503 });
+    }
+    if (result.status !== "assigned") {
+      return NextResponse.json(
+        { error: "message" in result ? result.message : "Failed to assign employee" },
+        { status: 400 },
+      );
     }
 
-    // Fallback schema: assignment column on employees table
-    const assignmentColumns = ["job_id", "assigned_job_id", "current_job_id"];
-    for (const column of assignmentColumns) {
-      const currentValue = normalizeId((employee as any)[column]);
-      if (currentValue === jobId) {
-        return NextResponse.json({ error: "Employee is already assigned to this job" }, { status: 409 });
-      }
+    await runJobAssignmentSideEffects({
+      supabase,
+      companyId,
+      actorUserId: userId,
+      employee,
+      job: jobRows[0],
+    });
 
-      const payload: Record<string, unknown> = {
-        [column]: jobId,
-      };
-      if (parsed.data.assigned_role) payload.assigned_role = parsed.data.assigned_role;
-
-      let updateResult = await supabase
-        .from("employees")
-        .update(payload)
-        .eq("company_id", companyId)
-        .eq("id", employeeId)
-        .select("*")
-        .limit(1);
-
-      if (updateResult.error && /assigned_role/i.test(updateResult.error.message || "")) {
-        delete payload.assigned_role;
-        updateResult = await supabase
-          .from("employees")
-          .update(payload)
-          .eq("company_id", companyId)
-          .eq("id", employeeId)
-          .select("*")
-          .limit(1);
-      }
-
-      if (updateResult.error) {
-        if (isMissingColumnOrTable(updateResult.error.message || "")) {
-          continue;
-        }
-        return NextResponse.json({ error: updateResult.error.message }, { status: 400 });
-      }
-
-      const updated = (updateResult.data ?? [])[0];
-      if (!updated) {
-        return NextResponse.json({ error: "Employee update was blocked or not found" }, { status: 400 });
-      }
-
-      const employeeUserId = String((updated as any).user_id ?? (employee as any).user_id ?? "").trim();
-      if (employeeUserId) {
-        try {
-          await enqueueNotifications({
-            supabase,
-            companyId,
-            userIds: [employeeUserId],
-            type: "job_assigned",
-            payload: {
-              jobId: String(jobId),
-              jobName: String((jobRows[0] as any)?.name ?? "Assigned Job"),
-              date: new Date().toISOString().slice(0, 10),
-              href: "/schedule",
-            },
-          });
-        } catch {
-          // Keep assignment successful even if notifications table is unavailable.
-        }
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-      const existingScheduleResult = await supabase
-        .from("schedule_assignments")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("job_id", jobId)
-        .eq("employee_id", employeeId)
-        .eq("date", today)
-        .limit(1);
-      if (!existingScheduleResult.error && (existingScheduleResult.data ?? []).length === 0) {
-        await supabase.from("schedule_assignments").insert({
-          company_id: companyId,
-          job_id: jobId,
-          employee_id: employeeId,
-          date: today,
-          created_by: userId,
-          notes: "Auto-added from job assignment",
-        });
-      }
-      return NextResponse.json({ employee: mapEmployee(updated) });
-    }
-
-    return NextResponse.json({ error: "No supported employee assignment schema found" }, { status: 400 });
+    return NextResponse.json({
+      employee: {
+        ...mappedEmployee,
+        assigned_role: parsed.data.assigned_role ?? null,
+        jobId,
+      },
+    });
   } catch (error) {
-    if (error instanceof TenantResolverError) {
+    if (error instanceof TenantResolverError || error instanceof ForbiddenError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     const message = error instanceof Error ? error.message : String(error);

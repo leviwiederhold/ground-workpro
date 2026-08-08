@@ -37,7 +37,9 @@ test('job detail actions are role scoped', async ({ page }) => {
   await setRole(page, 'admin');
 
   const createAssignedJobRes = await page.request.post('/api/jobs', {
-    data: { name: `e2e-role-assigned-${stamp}`, status: 'in_progress' },
+    // Keep this fixture inactive so assigning the shared E2E employee does not
+    // depend on creating a second active-job assignment.
+    data: { name: `e2e-role-assigned-${stamp}`, status: 'draft' },
   });
   expect(createAssignedJobRes.status()).toBe(200);
   const assignedJobId = (await createAssignedJobRes.json())?.job?.id as string;

@@ -225,6 +225,34 @@ test("native setup requires Always authorization, Precise Location, credential, 
   );
 });
 
+test("native readiness follows Always → When In Use → Always", () => {
+  const complete = {
+    platform: "native" as const,
+    permission: "granted" as const,
+    hasDeviceCredential: true,
+    nativeHealth: completeNativeHealth,
+    requiredRegionIds: ["shop:arrival", "shop:wake"],
+    registeredRegionIds: ["shop:arrival", "shop:wake"],
+  };
+  assert.equal(isAttendanceSetupComplete(complete), true);
+  assert.equal(isAttendanceSetupComplete({
+    ...complete,
+    nativeHealth: {
+      ...completeNativeHealth,
+      authorized: false,
+      authorizationStatus: "authorized_when_in_use" as const,
+    },
+  }), false);
+  assert.equal(isAttendanceSetupComplete(complete), true);
+});
+
+test("the wrapper immediately blocks on native downgrade and fully revalidates restoration", () => {
+  const source = code(read("app/components/location/RequireLocationAccess.tsx"));
+  assert.match(source, /onGeofenceAuthorizationChanged/);
+  assert.match(source, /if \(!authorized\)[\s\S]{0,140}setStatus\('blocked'\)/);
+  assert.match(source, /else \{\s*void sync\(\)/);
+});
+
 test("web setup requires only location — never a native credential", () => {
   assert.equal(
     isAttendanceSetupComplete({ platform: "web", permission: "granted", hasDeviceCredential: false }),

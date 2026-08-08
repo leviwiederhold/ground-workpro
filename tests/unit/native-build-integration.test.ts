@@ -136,6 +136,14 @@ test("iOS never uses a background URLSession for a data task", () => {
   );
 });
 
+test("iOS reports Always → When In Use → Always authorization transitions", () => {
+  const swift = code("ios/App/App/JobsiteGeofencePlugin.swift");
+  assert.match(swift, /locationManagerDidChangeAuthorization/);
+  assert.match(swift, /authorizedWhenInUse/);
+  assert.match(swift, /geofenceAuthorizationChanged/);
+  assert.match(swift, /AttendanceNativeReadinessReporter\.submit\(manager: manager\)/);
+});
+
 test("iOS owns region callbacks before the WebView for terminated-app arrival and departure", () => {
   const appDelegate = read("ios/App/App/AppDelegate.swift");
   const geofence = read("ios/App/App/JobsiteGeofencePlugin.swift");

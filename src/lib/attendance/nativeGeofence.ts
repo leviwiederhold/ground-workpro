@@ -37,6 +37,11 @@ export type GeofenceTransitionEvent = {
   occurredAt: string; // ISO
 };
 
+export type GeofenceAuthorizationEvent = {
+  authorized: boolean;
+  authorizationStatus: NativeGeofenceHealth["authorizationStatus"];
+};
+
 // Health/registration status the native layer reports up to the web layer, so
 // the app (and diagnostics) can confirm monitoring is actually live.
 export type NativeGeofenceHealth = {
@@ -76,6 +81,19 @@ export interface JobsiteGeofencePlugin {
     eventName: "geofenceTransition",
     listener: (event: GeofenceTransitionEvent) => void
   ): { remove: () => void } | Promise<{ remove: () => void }>;
+  addListener(
+    eventName: "geofenceAuthorizationChanged",
+    listener: (event: GeofenceAuthorizationEvent) => void
+  ): { remove: () => void } | Promise<{ remove: () => void }>;
+}
+
+export async function onGeofenceAuthorizationChanged(
+  handler: (event: GeofenceAuthorizationEvent) => void,
+): Promise<() => void> {
+  const plugin = getPlugin();
+  if (!plugin) return () => {};
+  const handle = await plugin.addListener("geofenceAuthorizationChanged", handler);
+  return () => handle.remove();
 }
 
 function getPlugin(): JobsiteGeofencePlugin | null {

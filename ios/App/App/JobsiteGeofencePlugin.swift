@@ -410,6 +410,7 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
 
     let manager = CLLocationManager()
     var eventSink: ((JSObject) -> Void)?
+    var authorizationSink: ((JSObject) -> Void)?
     private var started = false
     private var stateRequests = Set<String>()
 
@@ -639,10 +640,30 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        if manager.authorizationStatus == .authorizedAlways {
+        let authorizedAlways = manager.authorizationStatus == .authorizedAlways
+        if authorizedAlways {
             manager.allowsBackgroundLocationUpdates = true
+        } else {
+            manager.allowsBackgroundLocationUpdates = false
         }
+        authorizationSink?([
+            "authorized": authorizedAlways,
+            "authorizationStatus": authorizationStatus(manager.authorizationStatus)
+        ])
+        // Native credential-backed reporting keeps CEO readiness authoritative
+        // even when Apple's reminder suspends the WebView.
         AttendanceNativeReadinessReporter.submit(manager: manager)
+    }
+
+    private func authorizationStatus(_ status: CLAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: return "not_determined"
+        case .restricted: return "restricted"
+        case .denied: return "denied"
+        case .authorizedWhenInUse: return "authorized_when_in_use"
+        case .authorizedAlways: return "authorized_always"
+        @unknown default: return "unknown"
+        }
     }
 
     private func persistedRegionState(_ identifier: String) -> String? {
@@ -706,6 +727,9 @@ public class JobsiteGeofencePlugin: CAPPlugin, CAPBridgedPlugin {
         coordinator.start()
         coordinator.eventSink = { [weak self] event in
             self?.notifyListeners("geofenceTransition", data: event)
+        }
+        coordinator.authorizationSink = { [weak self] event in
+            self?.notifyListeners("geofenceAuthorizationChanged", data: event)
         }
     }
 

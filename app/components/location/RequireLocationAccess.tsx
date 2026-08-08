@@ -45,6 +45,7 @@ import {
 import { fetchAssignedJobsRequired } from '@/lib/jobsite-time/geofence-client';
 import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
 import {
+  onGeofenceAuthorizationChanged,
   requireNativeGeofenceHealth,
   requireRegisteredGeofencesRead,
 } from '@/lib/attendance/nativeGeofence';
@@ -119,6 +120,30 @@ export function RequireLocationAccess({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     void sync();
+  }, [sync]);
+
+  useEffect(() => {
+    if (!isCapacitorNativePlatform()) return;
+    let active = true;
+    let unsubscribe = () => {};
+    void onGeofenceAuthorizationChanged(({ authorized }) => {
+      if (!active) return;
+      if (!authorized) {
+        evaluationVersion.current += 1;
+        setStatus('blocked');
+      } else {
+        // Always restoration must revalidate the credential and actual region
+        // set before the neutral gate can disappear.
+        void sync();
+      }
+    }).then((remove) => {
+      if (active) unsubscribe = remove;
+      else remove();
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [sync]);
 
   // Re-check on focus/visibility. Covers BOTH directions: completing setup in

@@ -3838,6 +3838,9 @@ const MobileAppShell = ({
       });
       const [employeeSaveLoading, setEmployeeSaveLoading] = useState(false);
       const [employeeDeleteLoading, setEmployeeDeleteLoading] = useState(false);
+      const [teamReassignPrompt, setTeamReassignPrompt] = useState(null);
+      const [teamReassignLoading, setTeamReassignLoading] = useState(false);
+      const [teamReassignError, setTeamReassignError] = useState('');
       const [inviteFeedback, setInviteFeedback] = useState('');
       const [showNativeAdminModal, setShowNativeAdminModal] = useState(false);
       const permissionModules = [
@@ -4147,6 +4150,22 @@ const MobileAppShell = ({
           } catch {
             payload = null;
           }
+          if (response.status === 409 && payload?.code === 'EMPLOYEE_ASSIGNMENT_CONFLICT') {
+            const profilePatch = { ...requestBody };
+            delete profilePatch.jobId;
+            const targetJob = jobs.find((job) => String(job.id) === String(requestBody.jobId));
+            setTeamReassignPrompt({
+              employeeId: String(payload?.employee?.id ?? selectedEmployee.id),
+              employeeName: payload?.employee?.name || selectedEmployee.name || 'This employee',
+              currentJobId: String(payload?.currentJob?.id ?? ''),
+              currentJobName: payload?.currentJob?.name || 'another active job',
+              targetJobId: String(requestBody.jobId ?? ''),
+              targetJobName: targetJob?.name || 'the new job',
+              profilePatch,
+            });
+            setTeamReassignError('');
+            return;
+          }
           if (!response.ok || !payload?.employee) {
             setEmployeeActionError(payload?.error || raw || 'Failed to update employee');
             setEmployeeSaveLoading(false);
@@ -4161,6 +4180,83 @@ const MobileAppShell = ({
           setEmployeeActionError('Failed to update employee');
         } finally {
           setEmployeeSaveLoading(false);
+        }
+      };
+
+      const handleCancelTeamReassign = () => {
+        if (teamReassignLoading) return;
+        if (teamReassignPrompt?.currentJobId) {
+          setEmployeeForm((current) => ({
+            ...current,
+            jobId: teamReassignPrompt.currentJobId,
+          }));
+        }
+        setTeamReassignPrompt(null);
+        setTeamReassignError('');
+      };
+
+      const handleConfirmTeamReassign = async () => {
+        if (!teamReassignPrompt) return;
+        setTeamReassignLoading(true);
+        setTeamReassignError('');
+        try {
+          const response = await fetch(
+            `/api/jobs/${teamReassignPrompt.targetJobId}/employees/reassign`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                employee_id: teamReassignPrompt.employeeId,
+                from_job_id: teamReassignPrompt.currentJobId,
+              }),
+            }
+          );
+          const raw = await response.text();
+          let payload = null;
+          try {
+            payload = raw ? JSON.parse(raw) : null;
+          } catch {
+            payload = null;
+          }
+          if (!response.ok || !payload?.success) {
+            if (response.status === 409 && payload?.code === 'EMPLOYEE_ASSIGNMENT_CONFLICT') {
+              setTeamReassignPrompt((current) => current ? {
+                ...current,
+                currentJobId: String(payload?.currentJob?.id ?? current.currentJobId),
+                currentJobName: payload?.currentJob?.name || current.currentJobName,
+              } : current);
+            }
+            setTeamReassignError(payload?.error || raw || 'Reassignment failed. Please try again.');
+            return;
+          }
+
+          if (Object.keys(teamReassignPrompt.profilePatch || {}).length > 0) {
+            const profileResponse = await fetch(`/api/employees/${teamReassignPrompt.employeeId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(teamReassignPrompt.profilePatch),
+            });
+            const profilePayload = await profileResponse.json().catch(() => null);
+            if (!profileResponse.ok || !profilePayload?.employee) {
+              setTeamReassignPrompt(null);
+              setEmployeeActionError(
+                `The job was reassigned, but the other profile changes could not be saved.${
+                  profilePayload?.error ? ` ${profilePayload.error}` : ''
+                }`
+              );
+              await refreshEmployees();
+              await loadTeamItems();
+              return;
+            }
+          }
+
+          setTeamReassignPrompt(null);
+          await refreshEmployees();
+          await loadTeamItems();
+        } catch {
+          setTeamReassignError('Reassignment failed. Please try again.');
+        } finally {
+          setTeamReassignLoading(false);
         }
       };
 
@@ -4909,6 +5005,47 @@ const MobileAppShell = ({
             )}
 
           </div>
+
+          <Modal
+            isOpen={Boolean(teamReassignPrompt)}
+            onClose={handleCancelTeamReassign}
+            title="Employee already assigned"
+            size="sm"
+            portal
+          >
+            <div className="space-y-4">
+              <p className="text-sm text-gray-700">
+                <span className="font-medium">{teamReassignPrompt?.employeeName}</span> is currently assigned to{' '}
+                <span className="font-medium">{teamReassignPrompt?.currentJobName}</span>.
+              </p>
+              <p className="text-sm text-gray-700">
+                Remove them from the current job and assign them to {teamReassignPrompt?.targetJobName}?
+              </p>
+              {teamReassignError && <InlineError>{teamReassignError}</InlineError>}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleCancelTeamReassign}
+                  disabled={teamReassignLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  variant="brand"
+                  size="sm"
+                  onClick={handleConfirmTeamReassign}
+                  disabled={teamReassignLoading}
+                >
+                  {teamReassignLoading
+                    ? 'Reassigning…'
+                    : 'Remove from current job and assign to new job'}
+                </Button>
+              </div>
+            </div>
+          </Modal>
 
           <Modal
             isOpen={showInviteModal && !showSeatCostWarning && !showSensitiveInviteConfirm && !showInviteResult}

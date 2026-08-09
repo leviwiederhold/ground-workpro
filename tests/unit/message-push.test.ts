@@ -226,6 +226,8 @@ test("push tables are server-only and membership removal revokes tokens", () => 
   assert.match(migration, /after delete on public\.memberships/i);
   assert.match(migration, /revoked_reason = 'membership_removed'/i);
   assert.match(scheduler, /revoke all on public\.private_push_dispatch_config from anon, authenticated/i);
+  assert.match(scheduler, /perform net\.http_post/i);
+  assert.doesNotMatch(scheduler, /extensions\.net\.http_post/i);
 });
 
 test("iOS push capability and Capacitor bridge wiring stay in the native target", () => {

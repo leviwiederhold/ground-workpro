@@ -53,7 +53,7 @@ begin
     return;
   end if;
 
-  perform extensions.net.http_post(
+  perform net.http_post(
     url := config.endpoint,
     headers := jsonb_build_object(
       'Content-Type', 'application/json',

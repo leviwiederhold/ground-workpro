@@ -10,14 +10,22 @@
  * session that merely spoofs the broad native heuristic has no secure store to
  * hold a credential, so requiring one there would lock it out permanently.
  */
-export function isCapacitorNativePlatform(): boolean {
-  if (typeof window === "undefined") return false;
+export type CapacitorNativePlatform = "ios" | "android";
+
+export function getCapacitorNativePlatform(): CapacitorNativePlatform | null {
+  if (typeof window === "undefined") return null;
   try {
-    return (
-      (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() ===
-      true
-    );
+    const capacitor = (window as unknown as {
+      Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
+    }).Capacitor;
+    if (capacitor?.isNativePlatform?.() !== true) return null;
+    const platform = String(capacitor.getPlatform?.() ?? "").toLowerCase();
+    return platform === "ios" || platform === "android" ? platform : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export function isCapacitorNativePlatform(): boolean {
+  return getCapacitorNativePlatform() !== null;
 }

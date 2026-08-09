@@ -1,5 +1,31 @@
+import groovy.json.JsonSlurper
+
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
+
+def releaseKeystoreProperties = new Properties()
+def releaseKeystorePropertiesFile = rootProject.file('keystore.properties')
+if (releaseKeystorePropertiesFile.exists()) {
+    releaseKeystorePropertiesFile.withInputStream { releaseKeystoreProperties.load(it) }
+}
+
+def releaseSigningValue = { String envName, String propertyName ->
+    def fromEnvironment = System.getenv(envName)
+    return fromEnvironment ?: releaseKeystoreProperties.getProperty(propertyName)
+}
+def releaseStorePath = releaseSigningValue('ANDROID_UPLOAD_STORE_FILE', 'storeFile')
+def releaseStorePassword = releaseSigningValue('ANDROID_UPLOAD_STORE_PASSWORD', 'storePassword')
+def releaseKeyAlias = releaseSigningValue('ANDROID_UPLOAD_KEY_ALIAS', 'keyAlias')
+def releaseKeyPassword = releaseSigningValue('ANDROID_UPLOAD_KEY_PASSWORD', 'keyPassword')
+def releaseSigningComplete = [
+    releaseStorePath,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword,
+].every { value -> value != null && !value.toString().trim().isEmpty() }
+
+def releaseVersionCode = (System.getenv('ANDROID_VERSION_CODE') ?: '1').toInteger()
+def releaseVersionName = System.getenv('ANDROID_VERSION_NAME') ?: '1.1'
 
 android {
     namespace = "com.groundworkpro.app"
@@ -8,8 +34,10 @@ android {
         applicationId "com.groundworkpro.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        // First Play release defaults to 1.1 (1). Override the code/name in CI
+        // once Play Console identifies the next unused version code.
+        versionCode releaseVersionCode
+        versionName releaseVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -24,10 +52,23 @@ android {
     kotlinOptions {
         jvmTarget = '21'
     }
+    signingConfigs {
+        if (releaseSigningComplete) {
+            release {
+                storeFile rootProject.file(releaseStorePath)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (releaseSigningComplete) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -54,6 +95,45 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+tasks.register('verifyReleaseSigning') {
+    doLast {
+        if (!releaseSigningComplete) {
+            throw new GradleException(
+                'Android upload signing is not configured. Copy android/keystore.properties.example ' +
+                'to android/keystore.properties or set the ANDROID_UPLOAD_* environment variables.'
+            )
+        }
+    }
+}
+
+tasks.register('verifyReleaseConfiguration') {
+    dependsOn tasks.named('verifyReleaseSigning')
+    doLast {
+        def firebaseConfig = file('google-services.json')
+        if (!firebaseConfig.exists()) {
+            throw new GradleException(
+                'Firebase Android configuration is missing. Download google-services.json for ' +
+                'com.groundworkpro.app to android/app/google-services.json.'
+            )
+        }
+        def parsed = new JsonSlurper().parse(firebaseConfig)
+        def configured = parsed.client?.any { client ->
+            client?.client_info?.android_client_info?.package_name == android.defaultConfig.applicationId
+        }
+        if (!configured) {
+            throw new GradleException(
+                'google-services.json does not contain the release package com.groundworkpro.app.'
+            )
+        }
+    }
+}
+
+if (project.findProperty('groundworkReleaseBuild') == 'true') {
+    tasks.matching { task -> task.name == 'bundleRelease' }.configureEach {
+        dependsOn tasks.named('verifyReleaseConfiguration')
+    }
+}
 
 try {
     def servicesJSON = file('google-services.json')

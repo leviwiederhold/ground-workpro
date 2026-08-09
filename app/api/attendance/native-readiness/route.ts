@@ -114,7 +114,9 @@ export async function POST(request: Request) {
                 ? "prompt"
                 : "denied",
           precise: readiness.preciseLocation,
-          platform: "ios",
+          // The credential was enrolled by the native container, so its stored
+          // platform is authoritative and cannot be spoofed by this payload.
+          platform: credential.platform ?? "unknown",
           background_refresh_enabled: readiness.backgroundRefreshEnabled,
           native_service_supported: readiness.supported,
           native_service_healthy: nativeServiceHealthy,

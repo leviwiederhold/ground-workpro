@@ -1,6 +1,7 @@
 import "server-only";
 
 import { sendApnsNotification, type ApnsSendResult } from "@/lib/push/apns";
+import { sendFcmNotification } from "@/lib/push/fcm";
 import type { PushDeviceCandidate } from "@/lib/push/domain";
 
 export type PushProviderResult = ApnsSendResult;
@@ -23,15 +24,11 @@ export async function sendMessagePushToDevice(input: {
     });
   }
 
-  // The durable model and provider boundary are Android-ready, but FCM remains
-  // deliberately unconfigured until the Android release work supplies a Google
-  // service account and google-services.json.
-  return {
-    ok: false,
-    status: 501,
-    providerId: null,
-    reason: "AndroidPushProviderNotConfigured",
-    invalidToken: false,
-    retryable: false,
-  };
+  return sendFcmNotification({
+    token: input.device.push_token,
+    title: input.title,
+    body: input.body,
+    threadId: input.threadId,
+    messageId: input.messageId,
+  });
 }

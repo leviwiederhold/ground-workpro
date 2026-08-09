@@ -48,6 +48,8 @@ export function AccountSettingsClient() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -156,6 +158,27 @@ export function AccountSettingsClient() {
     setStatus("Password reset email sent.");
   };
 
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmation !== "DELETE" || deletingAccount) return;
+    setDeletingAccount(true);
+    setStatus("");
+    setError("");
+    try {
+      const response = await fetch("/api/account", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: deleteConfirmation }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload?.error || "Account deletion failed.");
+      await supabaseBrowser().auth.signOut({ scope: "local" }).catch(() => undefined);
+      window.location.assign("/login?accountDeleted=1");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Account deletion failed.");
+      setDeletingAccount(false);
+    }
+  };
+
   if (loading) {
     return (
       <main className="min-h-screen bg-gray-50 p-6">
@@ -258,6 +281,31 @@ export function AccountSettingsClient() {
               className="mt-3 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
             >
               Send Password Reset Email
+            </button>
+          </div>
+
+          <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4">
+            <h2 className="text-sm font-semibold text-red-900">Delete Account</h2>
+            <p className="mt-1 text-sm text-red-800">
+              Permanently deletes your login and personal profile. Active company owners must transfer ownership or
+              end the subscription first.
+            </p>
+            <label className="mt-3 block text-sm text-red-900">
+              <span className="mb-1 block font-medium">Type DELETE to confirm</span>
+              <input
+                value={deleteConfirmation}
+                onChange={(event) => setDeleteConfirmation(event.target.value)}
+                className="w-full rounded-lg border border-red-300 bg-white px-3 py-2"
+                autoComplete="off"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleDeleteAccount}
+              disabled={deleteConfirmation !== "DELETE" || deletingAccount}
+              className="mt-3 rounded-lg bg-red-700 px-3 py-2 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deletingAccount ? "Deleting Account..." : "Delete Account Permanently"}
             </button>
           </div>
 

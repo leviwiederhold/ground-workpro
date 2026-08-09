@@ -571,14 +571,24 @@ export const LOCATION_GATE_COPY = {
   settings: "Open Settings",
 } as const;
 
+/** Google Play requires this Android-only disclosure immediately before the
+ * background-location permission flow. It is deliberately separate from the
+ * neutral iOS downgrade gate. */
+export const ANDROID_BACKGROUND_LOCATION_DISCLOSURE = {
+  title: "Background location",
+  body:
+    "Groundwork Pro collects location data to enable automatic jobsite arrival and departure attendance, even when the app is closed or not in use. It records discrete jobsite events and does not create a continuous location history.",
+  continue: "Continue",
+} as const;
+
 /** The exact recoverable failure code shown by the gate. */
 export type LocationSetupErrorKind = LocationSetupFailureCode;
 
 export const LOCATION_GATE_ERROR_COPY: Record<LocationSetupErrorKind, string> = {
-  LOCATION_PERMISSION_CHECK_TIMEOUT: "Timed out checking iOS location permission.",
-  LOCATION_PERMISSION_CHECK_FAILED: "Could not check iOS location permission.",
-  LOCATION_PERMISSION_REQUEST_TIMEOUT: "Timed out requesting iOS location permission.",
-  LOCATION_PERMISSION_REQUEST_FAILED: "Could not request iOS location permission.",
+  LOCATION_PERMISSION_CHECK_TIMEOUT: "Timed out checking location permission.",
+  LOCATION_PERMISSION_CHECK_FAILED: "Could not check location permission.",
+  LOCATION_PERMISSION_REQUEST_TIMEOUT: "Timed out requesting location permission.",
+  LOCATION_PERMISSION_REQUEST_FAILED: "Could not request location permission.",
   NATIVE_GEOFENCE_HEALTH_TIMEOUT: "Timed out verifying location services.",
   NATIVE_GEOFENCE_HEALTH_FAILED: "Could not verify location services.",
   BACKGROUND_AUTHORIZATION_REQUEST_TIMEOUT: "Timed out requesting complete location access.",

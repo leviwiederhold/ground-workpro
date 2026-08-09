@@ -17,6 +17,7 @@ export type AttendanceCredentialContext = {
   userId: string;
   employeeId: string | null;
   deviceId: string;
+  platform: "ios" | "android" | null;
 };
 
 export type MintedCredential = { token: string; credentialId: string; expiresAt: string };
@@ -106,7 +107,7 @@ export async function verifyAttendanceCredential(
 
   const result = await admin
     .from("device_attendance_credentials")
-    .select("id, company_id, user_id, employee_id, device_id, scope, expires_at, revoked_at")
+    .select("id, company_id, user_id, employee_id, device_id, platform, scope, expires_at, revoked_at")
     .eq("token_hash", token_hash)
     .maybeSingle();
   const row = result.data;
@@ -128,5 +129,6 @@ export async function verifyAttendanceCredential(
     userId: String(row.user_id),
     employeeId: row.employee_id ? String(row.employee_id) : null,
     deviceId: String(row.device_id),
+    platform: row.platform === "ios" || row.platform === "android" ? row.platform : null,
   };
 }

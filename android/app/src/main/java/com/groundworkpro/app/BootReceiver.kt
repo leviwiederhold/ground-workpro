@@ -86,20 +86,32 @@ class BootReceiver : BroadcastReceiver() {
             .addGeofences(geofences)
             .build()
 
+        // Keep this receiver alive until Play Services has accepted or rejected
+        // the restored region set. Returning immediately makes the callback a
+        // best-effort race and can silently leave a rebooted device unmonitored.
+        val pending = goAsync()
         try {
             LocationServices.getGeofencingClient(context)
                 .addGeofences(request, pendingIntent)
-                .addOnSuccessListener {
-                    prefs.edit()
-                        .putInt("gw_registered_count", geofences.size)
-                        .putString("gw_last_error", "")
-                        .apply()
-                }
-                .addOnFailureListener { e ->
-                    prefs.edit().putString("gw_last_error", "Boot re-registration failed: ${e.message}").apply()
+                .addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        prefs.edit()
+                            .putInt("gw_registered_count", geofences.size)
+                            .putString("gw_last_error", "")
+                            .apply()
+                    } else {
+                        prefs.edit()
+                            .putString("gw_last_error", "Boot re-registration failed: ${task.exception?.message}")
+                            .apply()
+                    }
+                    pending.finish()
                 }
         } catch (e: SecurityException) {
             prefs.edit().putString("gw_last_error", "Boot re-registration denied: ${e.message}").apply()
+            pending.finish()
+        } catch (e: Exception) {
+            prefs.edit().putString("gw_last_error", "Boot re-registration failed: ${e.message}").apply()
+            pending.finish()
         }
     }
 }

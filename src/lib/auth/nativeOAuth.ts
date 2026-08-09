@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Native (iOS) Sign in with Apple + Google via Supabase's ID-token flow.
+// Native iOS/Android provider sign-in via Supabase's ID-token flow.
 //
 // The Groundwork Pro iOS app is a remote-URL Capacitor WebView. Redirect-based
 // OAuth is blocked by Google inside embedded WebViews, so we use the NATIVE
@@ -188,7 +188,7 @@ export function isUserCancelledError(err: unknown): boolean {
 // Google client configuration + validation
 // ---------------------------------------------------------------------------
 
-export type GoogleClientConfig = { iosClientId: string; webClientId: string };
+export type GoogleClientConfig = { iosClientId?: string; webClientId: string };
 
 export type GoogleClientConfigResult =
   | { ok: true; config: GoogleClientConfig }
@@ -209,12 +209,12 @@ const GOOGLE_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com";
 export function validateGoogleClientConfig(input: {
   iosClientId: string | undefined;
   webClientId: string | undefined;
-}): GoogleClientConfigResult {
+}, platform: "ios" | "android" = "ios"): GoogleClientConfigResult {
   const iosClientId = String(input.iosClientId ?? "").trim();
   const webClientId = String(input.webClientId ?? "").trim();
 
   const missing: string[] = [];
-  if (!iosClientId) missing.push("NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID");
+  if (platform === "ios" && !iosClientId) missing.push("NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID");
   if (!webClientId) missing.push("NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID");
   if (missing.length > 0) {
     return {
@@ -227,10 +227,13 @@ export function validateGoogleClientConfig(input: {
 
   // A client ID that doesn't look like one is almost always a copy/paste of the
   // wrong field (project number, client secret, or the reversed iOS ID).
-  const malformed = [
-    ["NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID", iosClientId],
-    ["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId],
-  ].filter(([, value]) => !value.endsWith(GOOGLE_CLIENT_ID_SUFFIX));
+  const configuredIds = platform === "ios"
+    ? [
+        ["NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID", iosClientId],
+        ["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId],
+      ]
+    : [["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId]];
+  const malformed = configuredIds.filter(([, value]) => !value.endsWith(GOOGLE_CLIENT_ID_SUFFIX));
   if (malformed.length > 0) {
     return {
       ok: false,
@@ -242,7 +245,7 @@ export function validateGoogleClientConfig(input: {
 
   // The iOS and Web client IDs are different OAuth clients. If they match, the
   // iOS one was never created, and Supabase would reject the token's audience.
-  if (iosClientId === webClientId) {
+  if (platform === "ios" && iosClientId === webClientId) {
     return {
       ok: false,
       message:
@@ -250,16 +253,31 @@ export function validateGoogleClientConfig(input: {
     };
   }
 
-  return { ok: true, config: { iosClientId, webClientId } };
+  return {
+    ok: true,
+    config: platform === "ios" ? { iosClientId, webClientId } : { webClientId },
+  };
+}
+
+function nativeOAuthPlatform(): "ios" | "android" {
+  try {
+    return String((globalThis as any)?.Capacitor?.getPlatform?.() ?? "ios").toLowerCase() === "android"
+      ? "android"
+      : "ios";
+  } catch {
+    return "ios";
+  }
 }
 
 // Read + validate in one step. The env vars are referenced as static literals
 // because Next.js only inlines NEXT_PUBLIC_* on literal member access.
-export function readGoogleClientConfig(): GoogleClientConfigResult {
+export function readGoogleClientConfig(
+  platform: "ios" | "android" = nativeOAuthPlatform(),
+): GoogleClientConfigResult {
   return validateGoogleClientConfig({
     iosClientId: process.env.NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID,
     webClientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-  });
+  }, platform);
 }
 
 // Post-authentication routing now lives in src/lib/auth/loginFlow.ts as
@@ -315,7 +333,8 @@ export async function signInWithAppleNative(supabase: SupabaseClient): Promise<N
 
 export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<NativeSignInResult> {
   try {
-    const configResult = readGoogleClientConfig();
+    const platform = nativeOAuthPlatform();
+    const configResult = readGoogleClientConfig(platform);
     if (!configResult.ok) {
       return { status: "error", message: configResult.message };
     }
@@ -324,13 +343,12 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
     const { SocialLogin } = (await import("@capgo/capacitor-social-login")) as any;
     await SocialLogin.initialize({
       google: {
-        // The OAuth client of type iOS. This is the audience (`aud`) of the ID
-        // token Google returns, so it must also be listed in Supabase's Google
-        // "authorized client IDs".
-        iOSClientId: iosClientId,
-        // The Web client, which Supabase itself is configured with. Google
-        // requires the server client ID to be the Web client.
-        iOSServerClientId: webClientId,
+        // Android Credential Manager takes the Web client id here; its Android
+        // OAuth client is selected by package + signing SHA-1 in Google Cloud.
+        // iOS additionally needs its platform client and server client ids.
+        ...(platform === "ios"
+          ? { iOSClientId: iosClientId!, iOSServerClientId: webClientId }
+          : {}),
         webClientId,
         // "online" returns GoogleLoginResponseOnline, which carries `idToken`.
         // "offline" would return only `serverAuthCode` — no ID token — and the

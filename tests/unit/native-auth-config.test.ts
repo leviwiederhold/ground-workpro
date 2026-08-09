@@ -252,6 +252,29 @@ test("validateGoogleClientConfig accepts a well-formed pair", () => {
   });
 });
 
+test("Android Google sign-in uses the Web client ID and does not require the iOS client", () => {
+  const result = validateGoogleClientConfig(
+    { iosClientId: undefined, webClientId: "111-web.apps.googleusercontent.com" },
+    "android",
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    config: { webClientId: "111-web.apps.googleusercontent.com" },
+  });
+
+  const missing = validateGoogleClientConfig(
+    { iosClientId: "111-ios.apps.googleusercontent.com", webClientId: undefined },
+    "android",
+  );
+  assert.equal(missing.ok, false);
+  assert.doesNotMatch(missing.ok === false ? missing.message : "", /NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID/);
+  assert.match(missing.ok === false ? missing.message : "", /NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID/);
+
+  const nativeLogin = read("app/native/login/page.tsx");
+  assert.match(nativeLogin, /runtimePlatform === "ios"/);
+  assert.doesNotMatch(nativeLogin, /runtimePlatform !== "android"/);
+});
+
 test("validateGoogleClientConfig names the exact missing Vercel variables", () => {
   const none = validateGoogleClientConfig({ iosClientId: undefined, webClientId: undefined });
   assert.equal(none.ok, false);

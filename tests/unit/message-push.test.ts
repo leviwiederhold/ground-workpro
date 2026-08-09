@@ -215,14 +215,17 @@ test("unauthorized callers cannot run arbitrary push dispatch", () => {
 });
 
 test("push tables are server-only and membership removal revokes tokens", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
   const migration = readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), "../../supabase/migrations/20260808_02_native_message_push.sql"),
+    join(repoRoot, "supabase/migrations/20260808_02_native_message_push.sql"),
     "utf8"
   );
+  const scheduler = readFileSync(join(repoRoot, "scripts/setup-push-scheduler.sql"), "utf8");
   assert.match(migration, /alter table public\.push_devices enable row level security/i);
   assert.match(migration, /revoke all on public\.push_devices from anon, authenticated/i);
   assert.match(migration, /after delete on public\.memberships/i);
   assert.match(migration, /revoked_reason = 'membership_removed'/i);
+  assert.match(scheduler, /revoke all on public\.private_push_dispatch_config from anon, authenticated/i);
 });
 
 test("iOS push capability and Capacitor bridge wiring stay in the native target", () => {

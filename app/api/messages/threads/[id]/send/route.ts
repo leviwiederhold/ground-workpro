@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { after } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
@@ -10,6 +11,8 @@ import {
 } from "@/lib/messages/attachments";
 import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { enqueueMessagePushSafely } from "@/lib/push/domain";
+import { enqueueMessagePushJob, processPushNotificationJobs } from "@/lib/push/worker";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +91,8 @@ export async function POST(
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
-    const db = getSupabaseAdmin() ?? supabase;
+    const admin = getSupabaseAdmin();
+    const db = admin ?? supabase;
 
     const { thread, participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
     if (!participant) {
@@ -159,6 +163,39 @@ export async function POST(
         .eq("company_id", companyId)
         .eq("id", thread.id),
     ]);
+
+    // Persist only a reference to the already-authorized, already-saved
+    // message. Provider delivery runs after the response and a scheduled worker
+    // retries the durable job, so APNs can never fail the message send itself.
+    const pushQueued = await enqueueMessagePushSafely(
+      () =>
+        enqueueMessagePushJob({
+          db,
+          companyId,
+          messageId: insertResult.data.id,
+          threadId: thread.id,
+          senderUserId: userId,
+        }),
+      (error) => {
+        console.warn(
+          "[push] Failed to enqueue message notification",
+          error instanceof Error ? error.message : "unknown error"
+        );
+      }
+    );
+    if (pushQueued && admin) {
+      after(async () => {
+        try {
+          await processPushNotificationJobs({ db: admin, limit: 10 });
+        } catch (error) {
+          // The durable queued job remains available to the scheduled retry.
+          console.warn(
+            "[push] Immediate message notification dispatch failed",
+            error instanceof Error ? error.message : "unknown error"
+          );
+        }
+      });
+    }
 
     void (async () => {
       try {

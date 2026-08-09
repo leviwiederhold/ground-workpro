@@ -103,6 +103,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        // Capacitor's PushNotifications plugin listens for this notification
+        // and forwards the APNs token to the authenticated web layer.
+        NotificationCenter.default.post(
+            name: .capacitorDidRegisterForRemoteNotifications,
+            object: deviceToken
+        )
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        NotificationCenter.default.post(
+            name: .capacitorDidFailToRegisterForRemoteNotifications,
+            object: error
+        )
+    }
+
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         // Called when the app was launched with a url. Feel free to add additional processing here,
         // but if you want the App API to support tracking app url opens, make sure to keep this call
@@ -147,9 +163,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
 
         didInstallNativeMarker = true
+        #if DEBUG
+        let pushEnvironment = "sandbox"
+        #else
+        let pushEnvironment = "production"
+        #endif
         let source = """
         window.__GROUNDWORK_NATIVE_APP__ = true;
         window.__GROUNDWORK_NATIVE_PLATFORM__ = 'ios';
+        window.__GROUNDWORK_PUSH_ENVIRONMENT__ = '\(pushEnvironment)';
         try { window.localStorage.setItem('groundwork.nativeApp', '1'); } catch (error) {}
         """
         let script = WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)

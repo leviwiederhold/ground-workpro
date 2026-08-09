@@ -6,6 +6,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { MobileSheet } from '@/app/components/ui/MobileSheet';
+import {
+  ACTIVE_MESSAGE_THREAD_KEY,
+  PENDING_MESSAGE_THREAD_KEY,
+} from '@/lib/push/navigation';
+import { MESSAGE_PUSH_RECEIVED_EVENT } from '@/lib/push/client';
 
 const hasRecordId = (value) => {
   const id = value?.id;
@@ -421,10 +426,34 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     }
   }, [availableUsersSeed, loadChannels, loadUsers]);
 
-  // Default conversation: open the permanent Companywide chat when Messaging
-  // first loads and nothing is selected yet (once).
   const didDefaultSelectRef = useRef(false);
+  const didResolvePushThreadRef = useRef(false);
+
+  // Resolve a notification target before applying the normal Companywide-chat
+  // default. The localStorage value is a cold-start fallback for Capacitor.
   useEffect(() => {
+    if (didResolvePushThreadRef.current || channels.length === 0) return;
+    let targetThreadId = '';
+    try {
+      const queryThread = new URLSearchParams(window.location.search).get('thread');
+      targetThreadId = String(queryThread || window.localStorage.getItem(PENDING_MESSAGE_THREAD_KEY) || '');
+    } catch {
+      targetThreadId = '';
+    }
+    didResolvePushThreadRef.current = true;
+    if (!targetThreadId) return;
+    const target = channels.find((channel) => String(channel?.id || '') === targetThreadId);
+    try { window.localStorage.removeItem(PENDING_MESSAGE_THREAD_KEY); } catch { /* ignore */ }
+    if (!target) return;
+    didDefaultSelectRef.current = true;
+    setActiveChannel(target);
+    window.history.replaceState({}, '', '/messages');
+  }, [channels]);
+
+  // Default conversation: open the permanent Companywide chat when Messaging
+  // first loads and no notification target or user selection exists (once).
+  useEffect(() => {
+    if (!didResolvePushThreadRef.current && channels.length > 0) return;
     if (didDefaultSelectRef.current) return;
     if (activeChannel) {
       didDefaultSelectRef.current = true;
@@ -436,6 +465,20 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       setActiveChannel(companywide);
     }
   }, [channels, activeChannel]);
+
+  useEffect(() => {
+    try {
+      if (activeChannelId) window.localStorage.setItem(ACTIVE_MESSAGE_THREAD_KEY, activeChannelId);
+      else window.localStorage.removeItem(ACTIVE_MESSAGE_THREAD_KEY);
+    } catch { /* ignore */ }
+    return () => {
+      try {
+        if (window.localStorage.getItem(ACTIVE_MESSAGE_THREAD_KEY) === activeChannelId) {
+          window.localStorage.removeItem(ACTIVE_MESSAGE_THREAD_KEY);
+        }
+      } catch { /* ignore */ }
+    };
+  }, [activeChannelId]);
 
   // First open by an owner of an UNNAMED company-wide chat -> prompt to name it.
   // Shows once per chat (until named or explicitly dismissed this device).
@@ -521,6 +564,16 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       }
     };
   }, [loadChannels]);
+
+  useEffect(() => {
+    const refreshFromPush = (event) => {
+      const threadId = String(event?.detail?.threadId || '');
+      void loadChannels(true);
+      if (threadId && threadId === activeChannelId) void loadMessages(threadId);
+    };
+    window.addEventListener(MESSAGE_PUSH_RECEIVED_EVENT, refreshFromPush);
+    return () => window.removeEventListener(MESSAGE_PUSH_RECEIVED_EVENT, refreshFromPush);
+  }, [activeChannelId, loadChannels, loadMessages]);
 
   useEffect(() => {
     if (!activeChannelId) {

@@ -11,6 +11,17 @@ import {
   PENDING_MESSAGE_THREAD_KEY,
 } from '@/lib/push/navigation';
 import { MESSAGE_PUSH_RECEIVED_EVENT } from '@/lib/push/client';
+import { validateAttachmentMetadata } from '@/lib/attachments/security';
+import {
+  MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES,
+  MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
+  MAX_VIDEO_ATTACHMENT_BYTES,
+  VIDEO_ATTACHMENT_EXTENSIONS,
+  inferVideoAttachmentContentType,
+  isVideoAttachmentContentType,
+  validateVideoAttachmentPolicy,
+} from '@/lib/messages/attachmentPolicy';
+import { readVideoDurationSeconds, uploadAttachmentWithProgress } from '@/lib/messages/videoClient';
 
 const hasRecordId = (value) => {
   const id = value?.id;
@@ -64,6 +75,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [namingSaving, setNamingSaving] = useState(false);
   const [namingError, setNamingError] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState([]);
+  const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const previousUnreadRef = useRef(0);
@@ -663,7 +675,6 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   };
 
   const MAX_ATTACHMENTS = 10;
-  const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
   const formatFileSize = (bytes) => {
     const n = Number(bytes || 0);
@@ -676,9 +687,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const isImageAttachment = (att) =>
     Boolean(att?.is_image) || String(att?.content_type || '').toLowerCase().startsWith('image/');
 
+  const isVideoAttachment = (att) =>
+    Boolean(att?.is_video) || isVideoAttachmentContentType(att?.content_type);
+
   const iconForContentType = (contentType) => {
     const t = String(contentType || '').toLowerCase();
     if (t.startsWith('image/')) return 'image';
+    if (t.startsWith('video/')) return 'file-video';
     if (t.includes('pdf')) return 'file-pdf';
     if (t.includes('word') || t.includes('msword')) return 'file-word';
     if (t.includes('sheet') || t.includes('excel') || t.includes('csv')) return 'file-excel';
@@ -686,29 +701,82 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   };
 
   // Single source of truth for selected files = pendingAttachments state.
-  const addFilesToPending = (files) => {
+  const addFilesToPending = async (files) => {
     setSendError('');
     const incoming = Array.from(files || []);
     if (incoming.length === 0) return;
-    setPendingAttachments((prev) => {
-      const next = [...prev];
+    setAttachmentPreparing(true);
+    try {
+      const prepared = [];
+      let nextCount = pendingAttachments.length;
+      let nextTotalBytes = pendingAttachments.reduce((sum, item) => sum + Number(item.file?.size || 0), 0);
       for (const file of incoming) {
-        if (next.length >= MAX_ATTACHMENTS) {
+        if (nextCount >= MAX_ATTACHMENTS) {
           setSendError(`You can attach at most ${MAX_ATTACHMENTS} files.`);
           break;
         }
-        if (file.size > MAX_ATTACHMENT_BYTES) {
-          setSendError(`"${file.name}" is larger than 10 MB.`);
+        const extension = String(file.name || '').split('.').pop()?.toLowerCase() || '';
+        const isVideo = isVideoAttachmentContentType(file.type) || VIDEO_ATTACHMENT_EXTENSIONS.has(extension);
+        let durationSeconds;
+        let contentType = file.type || 'application/octet-stream';
+        if (isVideo) {
+          if (file.size > MAX_VIDEO_ATTACHMENT_BYTES) {
+            setSendError(`"${file.name}": Video is larger than 25 MB.`);
+            continue;
+          }
+          try {
+            durationSeconds = await readVideoDurationSeconds(file);
+          } catch (error) {
+            setSendError(`"${file.name}": ${error instanceof Error ? error.message : 'Video is not supported'}.`);
+            continue;
+          }
+          const validation = validateVideoAttachmentPolicy({
+            fileName: file.name,
+            contentType: inferVideoAttachmentContentType(file.name, file.type),
+            sizeBytes: file.size,
+            durationSeconds,
+          });
+          if (!validation.ok) {
+            setSendError(`"${file.name}": ${validation.error}.`);
+            continue;
+          }
+          contentType = validation.contentType;
+        } else {
+          const validation = validateAttachmentMetadata({
+            fileName: file.name,
+            contentType: file.type || 'application/octet-stream',
+            sizeBytes: file.size,
+          });
+          if (!validation.ok) {
+            const sizeMessage = file.size > MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES
+              ? 'File is larger than 10 MB'
+              : validation.error;
+            setSendError(`"${file.name}": ${sizeMessage}.`);
+            continue;
+          }
+          contentType = validation.contentType;
+        }
+        if (nextTotalBytes + file.size > MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES) {
+          setSendError('Attachments exceed the 50 MB total message limit.');
           continue;
         }
-        next.push({
+        prepared.push({
           id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
           file,
-          previewUrl: file.type.startsWith('image/') ? URL.createObjectURL(file) : '',
+          duration_seconds: durationSeconds,
+          content_type: contentType,
+          previewUrl: file.type.startsWith('image/') || isVideo ? URL.createObjectURL(file) : '',
+          isVideo,
+          progress: 0,
+          status: 'ready',
         });
+        nextCount += 1;
+        nextTotalBytes += file.size;
       }
-      return next;
-    });
+      if (prepared.length > 0) setPendingAttachments((prev) => [...prev, ...prepared]);
+    } finally {
+      setAttachmentPreparing(false);
+    }
   };
 
   // Open the ONE stable hidden file input via ref. Programmatic .click() inside
@@ -734,7 +802,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       window.__groundworkSuppressSetupRefreshUntil = Date.now() + 8000;
     }
     const files = Array.from(event.currentTarget.files ?? []);
-    if (files.length > 0) addFilesToPending(files);
+    if (files.length > 0) void addFilesToPending(files);
     // Clear AFTER storing so re-selecting the same file still fires onChange.
     event.currentTarget.value = '';
   };
@@ -760,7 +828,16 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         <div className="mb-2 flex flex-wrap gap-2" data-testid="messages-attachment-previews">
           {pendingAttachments.map((att) => (
             <div key={att.id} className="relative flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 p-1.5 pr-7 dark:border-zinc-800 dark:bg-[#111111]">
-              {att.previewUrl ? (
+              {att.previewUrl && att.isVideo ? (
+                <video
+                  src={`${att.previewUrl}#t=0.001`}
+                  aria-label={`Video preview for ${att.file.name}`}
+                  className="h-10 w-10 rounded bg-black object-cover"
+                  muted
+                  playsInline
+                  preload="metadata"
+                />
+              ) : att.previewUrl ? (
                 <img src={att.previewUrl} alt={att.file.name} className="h-10 w-10 rounded object-cover" />
               ) : (
                 <span className="flex h-10 w-10 items-center justify-center rounded bg-gray-200 text-gray-600 dark:bg-zinc-800 dark:text-zinc-300">
@@ -769,11 +846,25 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               )}
               <div className="min-w-0 max-w-[9rem]">
                 <p className="truncate text-xs font-medium text-gray-800 dark:text-zinc-200">{att.file.name}</p>
-                <p className="text-[10px] text-gray-500 dark:text-zinc-500">{formatFileSize(att.file.size)}</p>
+                <p className="text-[10px] text-gray-500 dark:text-zinc-500">
+                  {att.status === 'uploading'
+                    ? `Uploading ${att.progress || 0}%`
+                    : att.status === 'uploaded'
+                      ? 'Uploaded'
+                      : att.status === 'error'
+                        ? 'Upload failed — retry'
+                        : `${formatFileSize(att.file.size)}${att.isVideo && att.duration_seconds ? ` · ${Math.ceil(att.duration_seconds)} sec` : ''}`}
+                </p>
+                {att.status === 'uploading' && (
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-gray-200 dark:bg-zinc-700" role="progressbar" aria-valuenow={att.progress || 0} aria-valuemin="0" aria-valuemax="100">
+                    <div className="h-full bg-brand-500" style={{ width: `${att.progress || 0}%` }} />
+                  </div>
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => removePendingAttachment(att.id)}
+                disabled={sendLoading || attachmentPreparing}
                 className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-zinc-700"
                 aria-label={`Remove ${att.file.name}`}
               >
@@ -783,10 +874,15 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           ))}
         </div>
       )}
+      {attachmentPreparing && (
+        <p className="mb-2 text-xs text-gray-500 dark:text-zinc-400" data-testid="messages-attachment-preparing">
+          Preparing video preview…
+        </p>
+      )}
     </>
   );
 
-  const attachDisabled = sendLoading || pendingAttachments.length >= MAX_ATTACHMENTS;
+  const attachDisabled = sendLoading || attachmentPreparing || pendingAttachments.length >= MAX_ATTACHMENTS;
   // A real button that programmatically clicks the ONE stable hidden input (see
   // the top-level return). The input is NOT inside this conditional composer, so
   // it never remounts when the active thread changes mid-selection.
@@ -795,7 +891,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       type="button"
       onClick={openFilePicker}
       disabled={attachDisabled}
-      title="Attach photos or files"
+      title="Attach photos, videos, or files"
       data-testid="messages-attach-button"
       className="shrink-0 rounded-xl p-2.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-[#111111]"
     >
@@ -807,7 +903,8 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     const list = Array.isArray(msg?.attachments) ? msg.attachments : [];
     if (list.length === 0) return null;
     const images = list.filter((att) => isImageAttachment(att) && att.download_url);
-    const files = list.filter((att) => !(isImageAttachment(att) && att.download_url));
+    const videos = list.filter((att) => isVideoAttachment(att) && att.download_url);
+    const files = list.filter((att) => !((isImageAttachment(att) || isVideoAttachment(att)) && att.download_url));
 
     return (
       <div className="mt-2 flex flex-col gap-2">
@@ -845,6 +942,33 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             ))}
           </div>
         )}
+        {videos.map((att) => (
+          <div
+            key={att.id}
+            className="max-w-[20rem] overflow-hidden rounded-lg border border-black/10 bg-black dark:border-white/10"
+            data-testid={`messages-video-${att.id}`}
+          >
+            <video
+              src={`${att.download_url}#t=0.001`}
+              aria-label={att.file_name || 'Video attachment'}
+              className="max-h-72 w-full bg-black object-contain"
+              controls
+              playsInline
+              preload="metadata"
+            />
+            <div className="flex items-center justify-between gap-2 bg-black/80 px-2.5 py-2 text-white">
+              <span className="min-w-0 truncate text-[11px]">{att.file_name || 'Video'}</span>
+              <a
+                href={att.download_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 text-[11px] font-medium text-white underline underline-offset-2"
+              >
+                Open video
+              </a>
+            </div>
+          </div>
+        ))}
         {files.map((att) => (
           <a
             key={att.id}
@@ -878,7 +1002,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     const trimmedText = messageText.trim();
-    if (!trimmedText && pendingAttachments.length === 0) return;
+    if ((!trimmedText && pendingAttachments.length === 0) || attachmentPreparing) return;
     try {
       setSendLoading(true);
       setSendError('');
@@ -902,18 +1026,20 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
 
       // Attachments upload DIRECTLY to Supabase Storage via short-lived signed
       // upload URLs, so file bytes never pass through the serverless function
-      // (which caps request bodies well below our 10 MB limit). We then send the
+      // (which caps request bodies well below the attachment limits). We then send the
       // message with only the resulting object metadata.
       const attachmentPayload = [];
       if (pendingAttachments.length > 0) {
+        setPendingAttachments((prev) => prev.map((att) => ({ ...att, status: 'uploading', progress: 0 })));
         const signRes = await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             files: pendingAttachments.map((att) => ({
               file_name: att.file.name,
-              content_type: att.file.type || 'application/octet-stream',
+              content_type: att.content_type,
               file_size: att.file.size,
+              duration_seconds: att.duration_seconds,
             })),
           }),
         });
@@ -921,19 +1047,51 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         if (!signRes.ok || !Array.isArray(signPayload?.uploads)) {
           throw new Error(signPayload?.error || 'Failed to prepare upload');
         }
-        const storage = supabaseBrowser().storage;
+        const supabase = supabaseBrowser();
+        const sessionResult = await supabase.auth.getSession();
+        const storageHeaders = {
+          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+          authorization: sessionResult.data.session?.access_token
+            ? `Bearer ${sessionResult.data.session.access_token}`
+            : '',
+        };
         for (let i = 0; i < signPayload.uploads.length; i += 1) {
           const up = signPayload.uploads[i];
           const file = pendingAttachments[i].file;
-          const { error: upErr } = await storage
-            .from(up.bucket)
-            .uploadToSignedUrl(up.path, up.token, file, { contentType: up.content_type });
-          if (upErr) throw new Error(upErr.message || 'Failed to upload attachment');
+          const attachmentId = pendingAttachments[i].id;
+          try {
+            await uploadAttachmentWithProgress({
+              signedUrl: up.signed_url,
+              file,
+              contentType: up.content_type,
+              headers: storageHeaders,
+              allowedOrigin: process.env.NEXT_PUBLIC_SUPABASE_URL,
+              onProgress: (progress) => {
+                setPendingAttachments((prev) => prev.map((att) => (
+                  att.id === attachmentId ? { ...att, status: 'uploading', progress } : att
+                )));
+              },
+            });
+            setPendingAttachments((prev) => prev.map((att) => (
+              att.id === attachmentId ? { ...att, status: 'uploaded', progress: 100 } : att
+            )));
+          } catch (error) {
+            setPendingAttachments((prev) => prev.map((att) => (
+              att.id === attachmentId ? { ...att, status: 'error' } : att
+            )));
+            await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ paths: signPayload.uploads.map((upload) => upload.path) }),
+            }).catch(() => null);
+            throw new Error(`"${file.name}": ${error instanceof Error ? error.message : 'Upload failed'}`);
+          }
           attachmentPayload.push({
             path: up.path,
             file_name: up.file_name,
             content_type: up.content_type,
             file_size: up.file_size,
+            duration_seconds: up.duration_seconds,
           });
         }
       }
@@ -1011,6 +1169,9 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       }
       loadChannels(true);
     } catch (error) {
+      setPendingAttachments((prev) => prev.map((att) => (
+        att.status === 'error' ? att : { ...att, status: 'ready', progress: 0 }
+      )));
       setSendError(error instanceof Error ? error.message : 'Failed to send message');
     } finally {
       setSendLoading(false);
@@ -1119,7 +1280,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         ref={fileInputRef}
         type="file"
         multiple
-        accept="image/*,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
+        accept="image/*,video/mp4,video/quicktime,video/webm,video/x-m4v,.mp4,.mov,.m4v,.webm,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
         className="hidden"
         onChange={handleAttachmentSelect}
         data-testid="messages-attach-input"
@@ -1367,7 +1528,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : activeChannel.is_companywide ? (companyName ? `Send a message to everyone in ${companyName}` : 'Message your team') : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading || attachmentPreparing} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
@@ -1402,7 +1563,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <div className="relative min-w-0 flex-1">
                 <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
-              <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
+              <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading || attachmentPreparing} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>

@@ -1,6 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { randomUUID } from "crypto";
-import { validateAttachmentMetadata } from "@/src/lib/attachments/security";
+import {
+  sanitizeAttachmentFileName,
+  validateAttachmentMetadata,
+} from "../attachments/security.ts";
+import {
+  isVideoAttachmentContentType,
+  validateMessageAttachmentTotalSize,
+  validateVideoAttachmentPolicy,
+} from "./attachmentPolicy.ts";
 
 export const MESSAGE_ATTACHMENTS_BUCKET = "message-attachments";
 export const MAX_MESSAGE_ATTACHMENTS = 10;
@@ -11,6 +19,7 @@ export type MessageAttachmentInput = {
   file_name: string;
   content_type: string;
   file_size: number;
+  duration_seconds?: number;
 };
 
 // Validate a single file's METADATA (name/type/size) against the shared
@@ -21,9 +30,26 @@ export function validateMessageFileMeta(input: {
   file_name: string;
   content_type: string;
   file_size: number;
+  duration_seconds?: number;
 }):
-  | { ok: true; safeFileName: string; contentType: string }
+  | { ok: true; safeFileName: string; contentType: string; durationSeconds?: number }
   | { ok: false; error: string } {
+  const safeFileName = sanitizeAttachmentFileName(input.file_name || "upload.bin");
+  if (isVideoAttachmentContentType(input.content_type)) {
+    const videoValidation = validateVideoAttachmentPolicy({
+      fileName: safeFileName,
+      contentType: input.content_type,
+      sizeBytes: Number(input.file_size),
+      durationSeconds: input.duration_seconds,
+    });
+    if (!videoValidation.ok) return videoValidation;
+    return {
+      ok: true,
+      safeFileName,
+      contentType: videoValidation.contentType,
+      durationSeconds: videoValidation.durationSeconds,
+    };
+  }
   const validation = validateAttachmentMetadata({
     fileName: input.file_name || "upload.bin",
     contentType: input.content_type || "application/octet-stream",
@@ -51,6 +77,10 @@ export function isImageContentType(contentType: string | null | undefined): bool
   return String(contentType ?? "").toLowerCase().startsWith("image/");
 }
 
+export function isVideoContentType(contentType: string | null | undefined): boolean {
+  return isVideoAttachmentContentType(contentType);
+}
+
 export function mapMessageAttachment(row: any, signedUrl: string | null = null) {
   return {
     id: row.id,
@@ -61,6 +91,7 @@ export function mapMessageAttachment(row: any, signedUrl: string | null = null) 
     content_type: row.content_type ?? "application/octet-stream",
     file_size: Number(row.file_size ?? 0),
     is_image: isImageContentType(row.content_type),
+    is_video: isVideoContentType(row.content_type),
     bucket: row.storage_bucket ?? MESSAGE_ATTACHMENTS_BUCKET,
     path: row.storage_path ?? "",
     created_at: row.created_at ?? "",
@@ -87,40 +118,56 @@ export async function persistMessageAttachments(params: {
   if (attachments.length > MAX_MESSAGE_ATTACHMENTS) {
     throw new Error(`You can attach at most ${MAX_MESSAGE_ATTACHMENTS} files per message`);
   }
+  const totalSizeValidation = validateMessageAttachmentTotalSize(attachments);
+  if (!totalSizeValidation.ok) throw new Error(totalSizeValidation.error);
 
-  const rows: any[] = [];
-  for (const attachment of attachments) {
-    // Ownership: never allow linking an object outside this company's namespace.
-    if (!isCompanyScopedMessagePath(companyId, attachment.path)) {
-      throw new Error("Invalid attachment path");
-    }
-    const validation = validateMessageFileMeta(attachment);
-    if (!validation.ok) throw new Error(validation.error);
-
-    // Confirm the object actually exists (signing a missing object errors),
-    // preventing rows that reference nothing.
-    const check = await db.storage
-      .from(MESSAGE_ATTACHMENTS_BUCKET)
-      .createSignedUrl(attachment.path, 60);
-    if (check.error || !check.data?.signedUrl) {
-      throw new Error("Uploaded file not found");
-    }
-
-    rows.push({
-      company_id: companyId,
-      message_id: messageId,
-      thread_id: threadId,
-      uploader_id: uploaderId,
-      file_name: validation.safeFileName,
-      content_type: validation.contentType,
-      file_size: Number(attachment.file_size),
-      storage_bucket: MESSAGE_ATTACHMENTS_BUCKET,
-      storage_path: attachment.path,
-    });
-  }
-
-  const paths = rows.map((r) => r.storage_path);
+  const paths = attachments
+    .filter((attachment) => isCompanyScopedMessagePath(companyId, attachment.path))
+    .map((attachment) => attachment.path);
   try {
+    const rows: any[] = [];
+    for (const attachment of attachments) {
+      // Ownership: never allow linking an object outside this company's namespace.
+      if (!isCompanyScopedMessagePath(companyId, attachment.path)) {
+        throw new Error("Invalid attachment path");
+      }
+      const validation = validateMessageFileMeta(attachment);
+      if (!validation.ok) throw new Error(validation.error);
+
+      const bucket = db.storage.from(MESSAGE_ATTACHMENTS_BUCKET);
+      // A signed URL proves the object exists. Storage info additionally proves
+      // the completed object has the exact byte count and MIME type the client
+      // declared, so a partial or substituted upload can never be linked.
+      const check = await bucket.createSignedUrl(attachment.path, 60);
+      if (check.error || !check.data?.signedUrl) {
+        throw new Error("Uploaded file not found");
+      }
+      if (typeof bucket.info === "function") {
+        const info = await bucket.info(attachment.path);
+        if (info.error || !info.data) throw new Error("Uploaded file not found");
+        const actualSize = Number(info.data.size);
+        if (!Number.isFinite(actualSize) || actualSize !== Number(attachment.file_size)) {
+          throw new Error("Uploaded file is incomplete or has an unexpected size");
+        }
+        const actualContentType = String(info.data.contentType ?? "").toLowerCase().split(";")[0].trim();
+        if (actualContentType && actualContentType !== validation.contentType) {
+          throw new Error("Uploaded file content type does not match");
+        }
+      }
+
+      rows.push({
+        company_id: companyId,
+        message_id: messageId,
+        thread_id: threadId,
+        uploader_id: uploaderId,
+        file_name: validation.safeFileName,
+        content_type: validation.contentType,
+        file_size: Number(attachment.file_size),
+        storage_bucket: MESSAGE_ATTACHMENTS_BUCKET,
+        storage_path: attachment.path,
+      });
+    }
+
     const insertResult = await db.from("message_attachments").insert(rows).select("*");
     if (insertResult.error) throw new Error(insertResult.error.message || "Failed to save attachments");
     return signAttachments(db, insertResult.data ?? []);

@@ -13,6 +13,10 @@ import { enqueueNotifications } from "@/lib/notifications/enqueue";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { enqueueMessagePushSafely } from "@/lib/push/domain";
 import { enqueueMessagePushJob, processPushNotificationJobs } from "@/lib/push/worker";
+import {
+  MAX_VIDEO_DURATION_SECONDS,
+  validateMessageAttachmentTotalSize,
+} from "@/lib/messages/attachmentPolicy";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +36,7 @@ const sendMessageSchema = z.object({
         file_name: z.string().min(1),
         content_type: z.string().min(1),
         file_size: z.number().finite().positive(),
+        duration_seconds: z.number().finite().positive().max(MAX_VIDEO_DURATION_SECONDS).optional(),
       })
     )
     .max(MAX_MESSAGE_ATTACHMENTS)
@@ -84,6 +89,12 @@ export async function POST(
 
     const messageBody = parsedBody.data.body.trim();
     const attachmentInputs = parsedBody.data.attachments;
+    if (attachmentInputs.length > 0) {
+      const totalSizeValidation = validateMessageAttachmentTotalSize(attachmentInputs);
+      if (!totalSizeValidation.ok) {
+        return validationError([{ path: "attachments", message: totalSizeValidation.error }]);
+      }
+    }
     // Do not send an empty message unless at least one attachment is present.
     if (!messageBody && attachmentInputs.length === 0) {
       return validationError([{ path: "body", message: "Message cannot be empty" }]);

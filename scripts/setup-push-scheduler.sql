@@ -22,6 +22,7 @@ create table if not exists private_push_dispatch_config (
 );
 
 alter table private_push_dispatch_config enable row level security;
+revoke all on public.private_push_dispatch_config from anon, authenticated;
 
 insert into private_push_dispatch_config (id, endpoint, secret)
 values (

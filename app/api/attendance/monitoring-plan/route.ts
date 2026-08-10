@@ -7,6 +7,11 @@
 import { NextResponse } from "next/server";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  ATTENDANCE_UNAVAILABLE_MESSAGE,
+  getAttendanceWriteDb,
+} from "@/lib/attendance/attendanceDb";
+import { verifyAttendanceCredential } from "@/lib/attendance/deviceCredentialServer";
 import { resolveCompanyWorkSchedule, type CompanyConfigRow } from "@/lib/company/companyConfig";
 import {
   buildJobsiteRegions,
@@ -38,11 +43,35 @@ function addDays(dateKey: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const session = await getCompanyId();
-    const db = getSupabaseAdmin() ?? session.supabase;
-    const { companyId, userId } = session;
+    // Headless iOS launches have no WebView cookies. Resolve the same restricted
+    // device bearer used for native events; browser callers keep the existing
+    // session path.
+    const hasBearer = /^Bearer\s+/i.test(request.headers.get("authorization") ?? "");
+    let companyId: string;
+    let userId: string;
+    let db;
+    if (hasBearer) {
+      db = getAttendanceWriteDb("GET /api/attendance/monitoring-plan");
+      if (!db) {
+        return NextResponse.json({ error: ATTENDANCE_UNAVAILABLE_MESSAGE }, { status: 503 });
+      }
+      const credential = await verifyAttendanceCredential(db, request);
+      if (!credential) {
+        return NextResponse.json(
+          { error: "Invalid or expired attendance credential" },
+          { status: 401 },
+        );
+      }
+      companyId = credential.companyId;
+      userId = credential.userId;
+    } else {
+      const session = await getCompanyId();
+      db = getSupabaseAdmin() ?? session.supabase;
+      companyId = session.companyId;
+      userId = session.userId;
+    }
 
     const settingsRow = await db.from("companies").select(SETTINGS_COLUMNS).eq("id", companyId).maybeSingle();
     const settings = mapRowToAttendanceSettings(settingsRow.data as unknown as Record<string, unknown> | null);
@@ -117,9 +146,11 @@ export async function GET() {
       hasMonitorableJob: Boolean(hasMonitorableJob),
     });
 
-    // Regions are returned through the entire scheduled window, including
-    // after an ordinary departure. After the end-of-day cutoff the empty set is
-    // the instruction to deregister.
+    // Keep the fixed assigned regions registered across nights and days. Region
+    // monitoring is discrete and low-power; the server still applies the work
+    // schedule to every transition. Clearing regions after the cutoff would
+    // require a guaranteed time-based background launch to restore them the
+    // next morning, and iOS deliberately offers no such guarantee.
     const arrivalRadiusFeet = Number(
       (settingsRow.data as Record<string, unknown> | null)?.jobsite_geofence_radius_feet ??
         DEFAULT_ARRIVAL_RADIUS_FEET
@@ -128,10 +159,9 @@ export async function GET() {
       (settingsRow.data as Record<string, unknown> | null)?.jobsite_wake_radius_meters ??
         DEFAULT_WAKE_RADIUS_METERS
     );
-    const regions =
-      plan.active && assignedJob
-        ? buildJobsiteRegions(assignedJob, feetToMeters(arrivalRadiusFeet), wakeRadiusMeters)
-        : [];
+    const regions = hasMonitorableJob && assignedJob
+      ? buildJobsiteRegions(assignedJob, feetToMeters(arrivalRadiusFeet), wakeRadiusMeters)
+      : [];
 
     return NextResponse.json({
       plan,

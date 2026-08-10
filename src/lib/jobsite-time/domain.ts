@@ -332,6 +332,10 @@ export function evaluateJobsiteEvent(params: {
   hasSchedule: boolean;
   earlyArrivalWindowMinutes?: number;
   lateGraceMinutes?: number;
+  // A bearer-authenticated Core Location region callback already represents
+  // an OS-verified boundary crossing. Its callback does not guarantee a GPS
+  // point, so missing coordinates must not be fabricated as (0, 0).
+  trustedRegionTransition?: boolean;
 }): JobsiteEvaluation {
   let confidence: TimecardConfidence = confidenceForAccuracy(params.accuracyMeters);
   let needsReview = false;
@@ -346,8 +350,14 @@ export function evaluateJobsiteEvent(params: {
   const jobLng = Number(params.jobLng);
   const ptLat = Number(params.pointLat);
   const ptLng = Number(params.pointLng);
-  const hasJobCoords = Number.isFinite(jobLat) && Number.isFinite(jobLng);
-  const hasPointCoords = Number.isFinite(ptLat) && Number.isFinite(ptLng);
+  const hasJobCoords =
+    params.jobLat !== null && params.jobLat !== undefined &&
+    params.jobLng !== null && params.jobLng !== undefined &&
+    Number.isFinite(jobLat) && Number.isFinite(jobLng);
+  const hasPointCoords =
+    params.pointLat !== null && params.pointLat !== undefined &&
+    params.pointLng !== null && params.pointLng !== undefined &&
+    Number.isFinite(ptLat) && Number.isFinite(ptLng);
   const accuracyM = Number.isFinite(Number(params.accuracyMeters)) ? Number(params.accuracyMeters) : null;
 
   if (hasJobCoords && hasPointCoords) {
@@ -377,6 +387,11 @@ export function evaluateJobsiteEvent(params: {
         needsReview = true;
       }
     }
+  } else if (params.trustedRegionTransition && hasJobCoords) {
+    // Core Location did the spatial check against the registered region. Keep
+    // schedule/assignment validation server-side, but do not turn an absent
+    // optional GPS sample into a manager-review failure.
+    confidence = "high";
   } else {
     // No coordinates to verify against → cannot confirm the jobsite match.
     downgrade("low");

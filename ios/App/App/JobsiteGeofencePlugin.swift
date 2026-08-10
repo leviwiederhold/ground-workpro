@@ -86,6 +86,137 @@ enum AttendanceNativeDiagnostics {
     }
 }
 
+/// Access-token renewal that never touches Capacitor, cookies, or the WebView.
+///
+/// The refresh secret is separately scoped and Keychain-backed. It can only
+/// rotate this device's attendance access token; revoking the device row makes
+/// both secrets unusable immediately.
+enum AttendanceNativeCredentialRefresher {
+    private static let workQueue = DispatchQueue(label: "com.groundworkpro.attendance.credential")
+    private static var inFlight = false
+    private static var waiters: [(String?) -> Void] = []
+    private static let refreshLeadTime: TimeInterval = 3 * 24 * 60 * 60
+
+    static func accessToken(
+        baseUrl: String,
+        forceRefresh: Bool,
+        completion: @escaping (String?) -> Void
+    ) {
+        workQueue.async {
+            let current = SecureAttendanceStorePlugin.loadToken()
+            let storedRefreshToken = SecureAttendanceStorePlugin.loadRefreshToken()
+            let expiresAt = ISO8601DateFormatter.attendance.date(
+                from: SecureAttendanceStorePlugin.accessExpiresAt()
+            )
+            if !forceRefresh,
+               storedRefreshToken != nil,
+               let current = current,
+               let expiresAt = expiresAt,
+               expiresAt.timeIntervalSinceNow > refreshLeadTime {
+                completion(current)
+                return
+            }
+
+            let legacyAccessToken = (expiresAt?.timeIntervalSinceNow ?? -1) > 0
+                ? current
+                : nil
+            guard
+                let authorizationToken = storedRefreshToken ?? legacyAccessToken,
+                !baseUrl.isEmpty,
+                let url = URL(string: "\(baseUrl)/api/attendance/device-credential/refresh")
+            else {
+                // Backward compatibility for a still-valid pre-refresh token.
+                if !forceRefresh,
+                   let current = current,
+                   (expiresAt?.timeIntervalSinceNow ?? -1) > 0 {
+                    completion(current)
+                } else {
+                    completion(nil)
+                }
+                return
+            }
+
+            waiters.append(completion)
+            guard !inFlight else { return }
+            inFlight = true
+            AttendanceNativeDiagnostics.record(
+                code: "credential_refresh",
+                stage: "credential",
+                status: "started"
+            )
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 20
+            request.setValue("Bearer \(authorizationToken)", forHTTPHeaderField: "Authorization")
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                workQueue.async {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                    var nextToken: String? = nil
+                    if error == nil,
+                       (200...299).contains(status),
+                       let data = data,
+                       let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let token = payload["token"] as? String,
+                       let accessExpiry = payload["expiresAt"] as? String {
+                        let saved: Bool
+                        if let refreshToken = payload["refreshToken"] as? String,
+                           let refreshExpiry = payload["refreshExpiresAt"] as? String {
+                            saved = SecureAttendanceStorePlugin.saveCredential(
+                                token: token,
+                                expiresAt: accessExpiry,
+                                refreshToken: refreshToken,
+                                refreshExpiresAt: refreshExpiry
+                            )
+                        } else {
+                            saved = SecureAttendanceStorePlugin.save(
+                                token: token,
+                                expiresAt: accessExpiry
+                            )
+                        }
+                        guard saved else {
+                            AttendanceNativeDiagnostics.record(
+                                code: "credential_refresh",
+                                stage: "credential",
+                                status: "failed",
+                                details: ["httpStatus": status, "reason": "Keychain write failed"]
+                            )
+                            let callbacks = waiters
+                            waiters.removeAll()
+                            inFlight = false
+                            callbacks.forEach { $0(nil) }
+                            return
+                        }
+                        if let deviceId = payload["deviceId"] as? String, !deviceId.isEmpty {
+                            UserDefaults.standard.set(deviceId, forKey: "gw_device_id")
+                        }
+                        nextToken = token
+                        AttendanceNativeDiagnostics.record(
+                            code: "credential_refresh",
+                            stage: "credential",
+                            status: "succeeded",
+                            details: ["httpStatus": status]
+                        )
+                    } else {
+                        let reason = error?.localizedDescription ?? "HTTP \(status)"
+                        AttendanceNativeDiagnostics.record(
+                            code: "credential_refresh",
+                            stage: "credential",
+                            status: "failed",
+                            details: ["httpStatus": status, "reason": reason]
+                        )
+                        UserDefaults.standard.set(reason, forKey: "gw_last_error")
+                    }
+                    let callbacks = waiters
+                    waiters.removeAll()
+                    inFlight = false
+                    callbacks.forEach { $0(nextToken) }
+                }
+            }.resume()
+        }
+    }
+}
+
 /// Upload the last definitive native state and any unsent lifecycle breadcrumbs.
 ///
 /// This path is entirely native and cookie-independent, so a Core Location
@@ -214,7 +345,10 @@ enum AttendanceNativeDelivery {
         jobId: String,
         zone: String,
         transition: String,
-        occurredAt: String
+        occurredAt: String,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        accuracyMeters: Double? = nil
     ) {
         let deviceId = UserDefaults.standard.string(forKey: "gw_device_id")
         guard let eventId = AttendanceNativeQueue.enqueue(
@@ -222,9 +356,9 @@ enum AttendanceNativeDelivery {
             zone: zone,
             transition: transition,
             occurredAt: occurredAt,
-            latitude: nil,
-            longitude: nil,
-            accuracyMeters: nil,
+            latitude: latitude,
+            longitude: longitude,
+            accuracyMeters: accuracyMeters,
             deviceId: deviceId
         ) else {
             AttendanceNativeDiagnostics.record(
@@ -266,22 +400,6 @@ enum AttendanceNativeDelivery {
                 draining = false
                 return
             }
-            guard let token = SecureAttendanceStorePlugin.loadToken() else {
-                AttendanceNativeDiagnostics.record(
-                    code: "credential_load_failed",
-                    stage: "credential",
-                    status: "failed"
-                )
-                UserDefaults.standard.set("No attendance credential", forKey: "gw_last_error")
-                draining = false
-                return
-            }
-            AttendanceNativeDiagnostics.record(
-                code: "credential_loaded",
-                stage: "credential",
-                status: "succeeded"
-            )
-
             let pending = AttendanceNativeQueue.pendingEvents()
             guard !pending.isEmpty else {
                 draining = false
@@ -322,7 +440,7 @@ enum AttendanceNativeDelivery {
                 AttendanceNativeReadinessReporter.submit(manager: AttendanceGeofenceCoordinator.shared.manager)
             }
 
-            func send(_ index: Int) {
+            func send(_ index: Int, token: String, refreshedAfterUnauthorized: Bool) {
                 guard index < pending.count else {
                     finish()
                     return
@@ -357,6 +475,9 @@ enum AttendanceNativeDelivery {
                     "zone": zone,
                     "transition": transition,
                     "occurredAt": occurredAt,
+                    "latitude": event["latitude"] ?? NSNull(),
+                    "longitude": event["longitude"] ?? NSNull(),
+                    "accuracyMeters": event["accuracyMeters"] ?? NSNull(),
                     "source": "jobsite_auto"
                 ])
 
@@ -373,7 +494,44 @@ enum AttendanceNativeDelivery {
                                 details: ["eventId": eventId, "httpStatus": status]
                             )
                             UserDefaults.standard.set("", forKey: "gw_last_error")
-                            send(index + 1)
+                            send(index + 1, token: token, refreshedAfterUnauthorized: false)
+                        } else if status == 401 && !refreshedAfterUnauthorized {
+                            AttendanceNativeCredentialRefresher.accessToken(
+                                baseUrl: baseUrl,
+                                forceRefresh: true
+                            ) { refreshedToken in
+                                workQueue.async {
+                                    if let refreshedToken = refreshedToken {
+                                        send(
+                                            index,
+                                            token: refreshedToken,
+                                            refreshedAfterUnauthorized: true
+                                        )
+                                    } else {
+                                        AttendanceNativeQueue.markFailed(
+                                            eventId: eventId,
+                                            reason: "Attendance credential refresh failed"
+                                        )
+                                        finish()
+                                    }
+                                }
+                            }
+                        } else if (400...499).contains(status) &&
+                                    status != 408 && status != 409 && status != 429 {
+                            let reason = "HTTP \(status)"
+                            AttendanceNativeQueue.markQuarantined(
+                                eventId: eventId,
+                                reason: reason
+                            )
+                            AttendanceNativeDiagnostics.record(
+                                code: "http_result",
+                                stage: "http",
+                                status: "rejected",
+                                transition: transition,
+                                details: ["eventId": eventId, "httpStatus": status]
+                            )
+                            UserDefaults.standard.set(reason, forKey: "gw_last_error")
+                            send(index + 1, token: token, refreshedAfterUnauthorized: false)
                         } else {
                             let reason = error?.localizedDescription ?? "HTTP \(status)"
                             AttendanceNativeQueue.markFailed(eventId: eventId, reason: reason)
@@ -393,7 +551,122 @@ enum AttendanceNativeDelivery {
                 }.resume()
             }
 
-            send(0)
+            AttendanceNativeCredentialRefresher.accessToken(
+                baseUrl: baseUrl,
+                forceRefresh: false
+            ) { token in
+                workQueue.async {
+                    guard let token = token else {
+                        AttendanceNativeDiagnostics.record(
+                            code: "credential_load_failed",
+                            stage: "credential",
+                            status: "failed"
+                        )
+                        UserDefaults.standard.set("No valid attendance credential", forKey: "gw_last_error")
+                        finish()
+                        return
+                    }
+                    AttendanceNativeDiagnostics.record(
+                        code: "credential_loaded",
+                        stage: "credential",
+                        status: "succeeded"
+                    )
+                    send(0, token: token, refreshedAfterUnauthorized: false)
+                }
+            }
+        }
+    }
+}
+
+/// Fetch and apply the server's current assigned-region plan without cookies.
+///
+/// Significant-location wakes are the durable reconciliation trigger when the
+/// app has not been opened: movement that can lead to a jobsite also gives iOS
+/// an opportunity to repair missing regions or pick up a changed assignment.
+enum AttendanceNativePlanSync {
+    private static let workQueue = DispatchQueue(label: "com.groundworkpro.attendance.plan")
+    private static var inFlight = false
+    private static var lastStartedAt: Date? = nil
+    private static let minimumInterval: TimeInterval = 60
+
+    static func sync(reason: String, force: Bool = false) {
+        workQueue.async {
+            if !force,
+               let lastStartedAt = lastStartedAt,
+               Date().timeIntervalSince(lastStartedAt) < minimumInterval {
+                return
+            }
+            guard !inFlight else { return }
+            let baseUrl = UserDefaults.standard.string(forKey: "gw_server_base_url") ?? ""
+            guard !baseUrl.isEmpty else { return }
+            inFlight = true
+            lastStartedAt = Date()
+            AttendanceNativeDiagnostics.record(
+                code: "monitoring_plan_sync",
+                stage: "assignment_reconciliation",
+                status: "started",
+                details: ["reason": reason]
+            )
+
+            AttendanceNativeCredentialRefresher.accessToken(
+                baseUrl: baseUrl,
+                forceRefresh: false
+            ) { token in
+                workQueue.async {
+                    guard
+                        let token = token,
+                        let url = URL(string: "\(baseUrl)/api/attendance/monitoring-plan")
+                    else {
+                        inFlight = false
+                        AttendanceNativeDiagnostics.record(
+                            code: "monitoring_plan_sync",
+                            stage: "assignment_reconciliation",
+                            status: "failed",
+                            details: ["reason": "no valid attendance credential"]
+                        )
+                        return
+                    }
+
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "GET"
+                    request.timeoutInterval = 20
+                    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+                    URLSession.shared.dataTask(with: request) { data, response, error in
+                        workQueue.async {
+                            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                            guard
+                                error == nil,
+                                (200...299).contains(status),
+                                let data = data,
+                                let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                let regions = payload["regions"] as? [JSObject]
+                            else {
+                                inFlight = false
+                                AttendanceNativeDiagnostics.record(
+                                    code: "monitoring_plan_sync",
+                                    stage: "assignment_reconciliation",
+                                    status: "failed",
+                                    details: [
+                                        "httpStatus": status,
+                                        "reason": error?.localizedDescription ?? "invalid monitoring plan",
+                                    ]
+                                )
+                                return
+                            }
+                            DispatchQueue.main.async {
+                                let registered = AttendanceGeofenceCoordinator.shared.reconcile(regions)
+                                AttendanceNativeDiagnostics.record(
+                                    code: "monitoring_plan_sync",
+                                    stage: "assignment_reconciliation",
+                                    status: "succeeded",
+                                    details: ["httpStatus": status, "registered": registered]
+                                )
+                                inFlight = false
+                            }
+                        }
+                    }.resume()
+                }
+            }
         }
     }
 }
@@ -413,8 +686,10 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
     var authorizationSink: ((JSObject) -> Void)?
     private var started = false
     private var stateRequests = Set<String>()
+    private static let desiredRegionsKey = "gw_desired_attendance_regions_v1"
 
     func start(launchReason: String = "capacitor_plugin") {
+        let firstStart = !started
         if !started {
             manager.delegate = self
             manager.pausesLocationUpdatesAutomatically = false
@@ -428,6 +703,10 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         }
         if manager.authorizationStatus == .authorizedAlways {
             manager.allowsBackgroundLocationUpdates = true
+        }
+        updateSignificantLocationMonitoring()
+        if firstStart {
+            restorePersistedRegions()
         }
         if launchReason == "core_location" {
             for region in manager.monitoredRegions {
@@ -444,6 +723,30 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         }
         AttendanceNativeDelivery.drain()
         AttendanceNativeReadinessReporter.submit(manager: manager)
+        if launchReason != "capacitor_plugin" {
+            AttendanceNativePlanSync.sync(reason: launchReason, force: true)
+        }
+    }
+
+    private func restorePersistedRegions() {
+        let regions = UserDefaults.standard.array(forKey: Self.desiredRegionsKey) as? [JSObject] ?? []
+        guard !regions.isEmpty else { return }
+        AttendanceNativeDiagnostics.record(
+            code: "persisted_regions_restored",
+            stage: "region_registration",
+            status: "started",
+            details: ["count": regions.count]
+        )
+        _ = reconcile(regions)
+    }
+
+    private func updateSignificantLocationMonitoring() {
+        guard CLLocationManager.significantLocationChangeMonitoringAvailable() else { return }
+        if manager.authorizationStatus == .authorizedAlways {
+            manager.startMonitoringSignificantLocationChanges()
+        } else {
+            manager.stopMonitoringSignificantLocationChanges()
+        }
     }
 
     private func matches(_ existing: CLCircularRegion, _ desired: JSObject) -> Bool {
@@ -512,6 +815,10 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
 
         UserDefaults.standard.set(desiredById.count, forKey: "gw_registered_count")
         UserDefaults.standard.set(Array(desiredById.keys).sorted(), forKey: "gw_required_region_ids")
+        UserDefaults.standard.set(
+            desiredById.keys.sorted().compactMap { desiredById[$0] },
+            forKey: Self.desiredRegionsKey
+        )
         AttendanceNativeReadinessReporter.submit(manager: manager)
         return desiredById.count
     }
@@ -524,6 +831,7 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         }
         UserDefaults.standard.set(0, forKey: "gw_registered_count")
         UserDefaults.standard.set([], forKey: "gw_required_region_ids")
+        UserDefaults.standard.set([], forKey: Self.desiredRegionsKey)
         AttendanceNativeReadinessReporter.submit(manager: manager)
     }
 
@@ -624,6 +932,16 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         handleTransition(region: region, transition: "exit")
     }
 
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard !locations.isEmpty else { return }
+        AttendanceNativeDiagnostics.record(
+            code: "significant_location_wake",
+            stage: "assignment_reconciliation",
+            status: "observed"
+        )
+        AttendanceNativePlanSync.sync(reason: "significant_location", force: true)
+    }
+
     func locationManager(_ manager: CLLocationManager, monitoringDidFailFor region: CLRegion?, withError error: Error) {
         if let identifier = region?.identifier {
             stateRequests.remove(identifier)
@@ -646,6 +964,7 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         } else {
             manager.allowsBackgroundLocationUpdates = false
         }
+        updateSignificantLocationMonitoring()
         authorizationSink?([
             "authorized": authorizedAlways,
             "authorizationStatus": authorizationStatus(manager.authorizationStatus)
@@ -653,6 +972,9 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         // Native credential-backed reporting keeps CEO readiness authoritative
         // even when Apple's reminder suspends the WebView.
         AttendanceNativeReadinessReporter.submit(manager: manager)
+        if authorizedAlways {
+            AttendanceNativePlanSync.sync(reason: "authorization_restored", force: true)
+        }
     }
 
     private func authorizationStatus(_ status: CLAuthorizationStatus) -> String {
@@ -693,14 +1015,31 @@ final class AttendanceGeofenceCoordinator: NSObject, CLLocationManagerDelegate {
         event["zone"] = zone
         event["transition"] = transition
         event["occurredAt"] = occurredAt
+        let recentLocation = manager.location.flatMap { location -> CLLocation? in
+            guard
+                location.horizontalAccuracy >= 0,
+                abs(location.timestamp.timeIntervalSinceNow) <= 5 * 60
+            else { return nil }
+            return location
+        }
+        event["latitude"] = recentLocation?.coordinate.latitude
+        event["longitude"] = recentLocation?.coordinate.longitude
+        event["accuracyMeters"] = recentLocation?.horizontalAccuracy
         eventSink?(event)
 
         AttendanceNativeDelivery.enqueueAndDrain(
             jobId: jobId,
             zone: zone,
             transition: transition,
-            occurredAt: occurredAt
+            occurredAt: occurredAt,
+            latitude: recentLocation?.coordinate.latitude,
+            longitude: recentLocation?.coordinate.longitude,
+            accuracyMeters: recentLocation?.horizontalAccuracy
         )
+        // Also reconcile assignment/regions while iOS has granted background
+        // execution. If this callback belonged to a stale assignment, the new
+        // region is installed and requestState(for:) can emit the real arrival.
+        AttendanceNativePlanSync.sync(reason: "region_transition", force: true)
     }
 }
 

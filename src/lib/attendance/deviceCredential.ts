@@ -8,8 +8,13 @@
 
 export const ATTENDANCE_SCOPE = "attendance:events";
 export const ATTENDANCE_TOKEN_PREFIX = "gwa_";
+export const ATTENDANCE_REFRESH_TOKEN_PREFIX = "gwr_";
 // Credentials expire and must be rotated; 30 days balances churn vs exposure.
 export const ATTENDANCE_TOKEN_TTL_DAYS = 30;
+// Refresh credentials can only mint another attendance-scoped access token.
+// Keeping that capability separate lets the native process rotate access
+// credentials for a year without holding a WebView session or user password.
+export const ATTENDANCE_REFRESH_TOKEN_TTL_DAYS = 365;
 // A background transition older than this is stale (likely a replay/queue flush
 // gone wrong); more than this into the future indicates a bad clock.
 export const ATTENDANCE_EVENT_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
@@ -26,6 +31,13 @@ export function generateAttendanceToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   return `${ATTENDANCE_TOKEN_PREFIX}${toBase64Url(bytes)}`;
+}
+
+/** Generate the independent, refresh-only secret stored beside the access token. */
+export function generateAttendanceRefreshToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return `${ATTENDANCE_REFRESH_TOKEN_PREFIX}${toBase64Url(bytes)}`;
 }
 
 /** SHA-256 hex of the token — only the hash is ever persisted. */
@@ -46,7 +58,23 @@ export function parseBearerToken(header: string | null | undefined): string | nu
   return token;
 }
 
+/** Extract a refresh-only bearer token. Access tokens are intentionally rejected. */
+export function parseAttendanceRefreshBearer(header: string | null | undefined): string | null {
+  if (!header) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  const token = match?.[1]?.trim();
+  if (!token || !token.startsWith(ATTENDANCE_REFRESH_TOKEN_PREFIX)) return null;
+  return token;
+}
+
 export function expiresAtFromNow(now: Date = new Date(), ttlDays = ATTENDANCE_TOKEN_TTL_DAYS): string {
+  return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+export function refreshExpiresAtFromNow(
+  now: Date = new Date(),
+  ttlDays = ATTENDANCE_REFRESH_TOKEN_TTL_DAYS,
+): string {
   return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
 }
 

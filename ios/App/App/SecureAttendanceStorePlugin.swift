@@ -29,16 +29,18 @@ public class SecureAttendanceStorePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private static let service = "com.groundworkpro.attendance"
     private static let account = "attendance-credential"
+    private static let refreshAccount = "attendance-refresh-credential"
     private static let expiresAtKey = "gw_attendance_token_expires_at"
+    private static let refreshExpiresAtKey = "gw_attendance_refresh_expires_at"
 
     // MARK: - Keychain primitives (also used by the geofence handler)
 
-    static func save(token: String, expiresAt: String) -> Bool {
+    private static func saveSecret(_ token: String, account: String) -> Bool {
         guard let data = token.data(using: .utf8) else { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account
+            kSecAttrAccount as String: account,
         ]
         // Delete-then-add: SecItemUpdate cannot change the accessibility class,
         // so a rotated token would silently keep the old one's protection.
@@ -48,15 +50,31 @@ public class SecureAttendanceStorePlugin: CAPPlugin, CAPBridgedPlugin {
         attributes[kSecValueData as String] = data
         attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(attributes as CFDictionary, nil)
-        if status == errSecSuccess {
-            UserDefaults.standard.set(expiresAt, forKey: expiresAtKey)
-            return true
-        }
-        return false
+        return status == errSecSuccess
     }
 
-    /// The stored token, or nil. Safe to call from a background region callback.
-    static func loadToken() -> String? {
+    static func save(token: String, expiresAt: String) -> Bool {
+        guard saveSecret(token, account: account) else { return false }
+        UserDefaults.standard.set(expiresAt, forKey: expiresAtKey)
+        return true
+    }
+
+    static func saveCredential(
+        token: String,
+        expiresAt: String,
+        refreshToken: String,
+        refreshExpiresAt: String
+    ) -> Bool {
+        guard save(token: token, expiresAt: expiresAt) else { return false }
+        guard saveSecret(refreshToken, account: refreshAccount) else {
+            clearToken()
+            return false
+        }
+        UserDefaults.standard.set(refreshExpiresAt, forKey: refreshExpiresAtKey)
+        return true
+    }
+
+    private static func loadSecret(account: String) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -73,20 +91,46 @@ public class SecureAttendanceStorePlugin: CAPPlugin, CAPBridgedPlugin {
         return token
     }
 
+    /// The stored token, or nil. Safe to call from a background region callback.
+    static func loadToken() -> String? {
+        loadSecret(account: account)
+    }
+
+    static func loadRefreshToken() -> String? {
+        loadSecret(account: refreshAccount)
+    }
+
+    static func accessExpiresAt() -> String {
+        UserDefaults.standard.string(forKey: expiresAtKey) ?? ""
+    }
+
+    static func refreshExpiresAt() -> String {
+        UserDefaults.standard.string(forKey: refreshExpiresAtKey) ?? ""
+    }
+
     static func hasCredential() -> Bool {
-        loadToken() != nil
+        loadToken() != nil && loadRefreshToken() != nil
     }
 
     @discardableResult
     static func clearToken() -> Bool {
-        let query: [String: Any] = [
+        let accessQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        let status = SecItemDelete(query as CFDictionary)
+        let refreshQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: refreshAccount,
+        ]
+        let accessStatus = SecItemDelete(accessQuery as CFDictionary)
+        let refreshStatus = SecItemDelete(refreshQuery as CFDictionary)
         UserDefaults.standard.removeObject(forKey: expiresAtKey)
-        return status == errSecSuccess || status == errSecItemNotFound
+        UserDefaults.standard.removeObject(forKey: refreshExpiresAtKey)
+        let accessCleared = accessStatus == errSecSuccess || accessStatus == errSecItemNotFound
+        let refreshCleared = refreshStatus == errSecSuccess || refreshStatus == errSecItemNotFound
+        return accessCleared && refreshCleared
     }
 
     // MARK: - Plugin surface
@@ -97,7 +141,22 @@ public class SecureAttendanceStorePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         let expiresAt = call.getString("expiresAt") ?? ""
-        if Self.save(token: token, expiresAt: expiresAt) {
+        guard let refreshToken = call.getString("refreshToken"), !refreshToken.isEmpty else {
+            call.reject("refreshToken required")
+            return
+        }
+        let refreshExpiresAt = call.getString("refreshExpiresAt") ?? ""
+        if Self.saveCredential(
+            token: token,
+            expiresAt: expiresAt,
+            refreshToken: refreshToken,
+            refreshExpiresAt: refreshExpiresAt
+        ) {
+            if let deviceId = call.getString("deviceId"), !deviceId.isEmpty {
+                // The Keychain credential and native queue must name the same
+                // install even before localStorage/the WebView exists.
+                UserDefaults.standard.set(deviceId, forKey: "gw_device_id")
+            }
             call.resolve()
         } else {
             call.reject("Failed to store the attendance credential in the Keychain")
@@ -110,7 +169,9 @@ public class SecureAttendanceStorePlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func getToken(_ call: CAPPluginCall) {
         call.resolve([
             "hasToken": Self.hasCredential(),
-            "expiresAt": UserDefaults.standard.string(forKey: Self.expiresAtKey) ?? ""
+            "expiresAt": Self.accessExpiresAt(),
+            "hasRefreshToken": Self.loadRefreshToken() != nil,
+            "refreshExpiresAt": Self.refreshExpiresAt(),
         ])
     }
 

@@ -15,6 +15,7 @@ import {
   getAttendanceWriteDb,
 } from "@/lib/attendance/attendanceDb";
 import { verifyAttendanceCredential } from "@/lib/attendance/deviceCredentialServer";
+import { shouldAcceptReadinessReport } from "@/lib/attendance/readinessReport";
 
 export const dynamic = "force-dynamic";
 
@@ -63,14 +64,17 @@ export async function POST(request: Request) {
 
     const credential = await verifyAttendanceCredential(db, request);
     if (!credential) {
-      return NextResponse.json({ error: "Invalid or expired attendance credential" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Invalid or expired attendance credential" },
+        { status: 401 }
+      );
     }
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Validation error", details: parsed.error.flatten() },
-        { status: 422 },
+        { status: 422 }
       );
     }
 
@@ -92,9 +96,22 @@ export async function POST(request: Request) {
       required.size > 0 &&
       [...required].every((identifier) => registered.has(identifier));
 
-    const permissionWrite = await db
+    const currentReadiness = await db
       .from("employee_location_permissions")
-      .upsert(
+      .select("native_readiness_reported_at")
+      .eq("company_id", credential.companyId)
+      .eq("user_id", credential.userId)
+      .maybeSingle();
+    if (currentReadiness.error) {
+      return NextResponse.json({ error: currentReadiness.error.message }, { status: 400 });
+    }
+    const readinessAccepted = shouldAcceptReadinessReport(
+      currentReadiness.data?.native_readiness_reported_at ?? null,
+      readiness.reportedAt
+    );
+
+    if (readinessAccepted) {
+      const permissionWrite = await db.from("employee_location_permissions").upsert(
         {
           company_id: credential.companyId,
           user_id: credential.userId,
@@ -126,10 +143,11 @@ export async function POST(request: Request) {
           ...(setupComplete ? { onboarding_completed_at: readiness.reportedAt } : {}),
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "company_id,user_id" },
+        { onConflict: "company_id,user_id" }
       );
-    if (permissionWrite.error) {
-      return NextResponse.json({ error: permissionWrite.error.message }, { status: 400 });
+      if (permissionWrite.error) {
+        return NextResponse.json({ error: permissionWrite.error.message }, { status: 400 });
+      }
     }
 
     if (diagnostics.length > 0) {
@@ -148,12 +166,10 @@ export async function POST(request: Request) {
         occurred_at: item.occurredAt,
         details: item.details ?? {},
       }));
-      const diagnosticWrite = await db
-        .from("attendance_native_diagnostics")
-        .upsert(rows, {
-          onConflict: "credential_id,diagnostic_id",
-          ignoreDuplicates: true,
-        });
+      const diagnosticWrite = await db.from("attendance_native_diagnostics").upsert(rows, {
+        onConflict: "credential_id,diagnostic_id",
+        ignoreDuplicates: true,
+      });
       if (diagnosticWrite.error) {
         return NextResponse.json({ error: diagnosticWrite.error.message }, { status: 400 });
       }
@@ -162,6 +178,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       nativeServiceHealthy,
+      readinessAccepted,
       acceptedDiagnosticIds: diagnostics.map((item) => item.id),
     });
   } catch {

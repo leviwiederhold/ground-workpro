@@ -6,8 +6,15 @@ import {
   AttendanceWriteError,
   getAttendanceWriteDb,
 } from "@/lib/attendance/attendanceDb";
-import { canManageTimecards, mapCompanyJobsiteSettings, mapTimecard } from "@/lib/jobsite-time/domain";
+import {
+  canManageTimecards,
+  mapCompanyJobsiteSettings,
+  mapTimecard,
+  mapTimecardEvent,
+} from "@/lib/jobsite-time/domain";
 import { finalizePendingAttendance } from "@/lib/jobsite-time/finalizeAttendance";
+import { mapRowToAttendanceSettings } from "@/lib/attendance/attendanceSettings";
+import { companyLocalDayUtcBounds, resolveAttendanceDateKey } from "@/lib/attendance/dashboardDate";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +44,16 @@ export async function GET(request: Request) {
 
     const settingsRow = await db
       .from("companies")
-      .select("jobsite_time_enabled,jobsite_arrival_confirmation_seconds,jobsite_departure_grace_minutes")
+      .select(
+        "jobsite_time_enabled,jobsite_arrival_confirmation_seconds,jobsite_departure_grace_minutes,timezone"
+      )
       .eq("id", companyId)
       .maybeSingle();
+    if (settingsRow.error) {
+      return NextResponse.json({ error: settingsRow.error.message }, { status: 400 });
+    }
     const settings = mapCompanyJobsiteSettings(settingsRow.data);
+    const attendanceSettings = mapRowToAttendanceSettings(settingsRow.data);
     // Attendance is permanent — always finalize pending arrivals/departures.
     await finalizePendingAttendance({
       db,
@@ -51,8 +64,24 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const p = url.searchParams;
+    const requestedDate = p.get("date");
+    if (requestedDate && !isManager) {
+      return NextResponse.json(
+        { error: "Attendance history is available to company administrators only" },
+        { status: 403 }
+      );
+    }
+    const nowIso = new Date().toISOString();
+    const today = resolveAttendanceDateKey("today", nowIso, attendanceSettings.timezone)!;
+    const selectedDate = requestedDate
+      ? resolveAttendanceDateKey(requestedDate, nowIso, attendanceSettings.timezone)
+      : null;
+    if (requestedDate && !selectedDate) {
+      return NextResponse.json({ error: "date must be today or YYYY-MM-DD" }, { status: 422 });
+    }
 
     let query = db.from("jobsite_timecards").select("*").eq("company_id", companyId);
+    if (selectedDate) query = query.eq("work_date", selectedDate);
 
     // TENANT/ROLE ISOLATION: employees can only ever see their own rows. A
     // manager may pass ?employee to scope to one person.
@@ -81,26 +110,69 @@ export async function GET(request: Request) {
     if (to) query = query.lte("work_date", to);
 
     if (p.get("needsReview") === "1") query = query.eq("status", "needs_review");
-    if (p.get("unapproved") === "1") query = query.in("status", ["active", "pending_review", "needs_review"]);
+    if (p.get("unapproved") === "1")
+      query = query.in("status", ["active", "pending_review", "needs_review"]);
     if (p.get("approved") === "1") query = query.eq("status", "approved");
     if (p.get("missingClockOut") === "1") query = query.is("clock_out_at", null);
 
-    query = query.order("work_date", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+    query = query
+      .order("work_date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(500);
 
     const result = await query;
     if (result.error) return NextResponse.json({ error: result.error.message }, { status: 400 });
 
     let items = (result.data ?? []).map(mapTimecard);
 
+    let activity: ReturnType<typeof mapTimecardEvent>[] = [];
+    if (selectedDate) {
+      const bounds = companyLocalDayUtcBounds(selectedDate, attendanceSettings.timezone);
+      let activityQuery = db
+        .from("jobsite_timecard_events")
+        .select("*")
+        .eq("company_id", companyId)
+        .gte("occurred_at", bounds.startInclusive)
+        .lt("occurred_at", bounds.endExclusive);
+      const employee = p.get("employee");
+      if (employee) {
+        activityQuery = activityQuery.or(`user_id.eq.${employee},employee_id.eq.${employee}`);
+      }
+      if (jobId) {
+        activityQuery = activityQuery.eq("job_id", /^\d+$/.test(jobId) ? Number(jobId) : jobId);
+      }
+      const activityResult = await activityQuery
+        .order("occurred_at", { ascending: false })
+        .limit(500);
+      if (activityResult.error) {
+        return NextResponse.json({ error: activityResult.error.message }, { status: 400 });
+      }
+      activity = (activityResult.data ?? []).map(mapTimecardEvent);
+    }
+
     // Derived filters (need scheduled window comparison).
     if (p.get("lateArrival") === "1") {
       items = items.filter((t) => t.arrivalStatus === "late");
     }
     if (p.get("earlyDeparture") === "1") {
-      items = items.filter((t) => t.scheduledEnd && t.clockOutAt && Date.parse(t.clockOutAt) < Date.parse(t.scheduledEnd) - 5 * 60000);
+      items = items.filter(
+        (t) =>
+          t.scheduledEnd &&
+          t.clockOutAt &&
+          Date.parse(t.clockOutAt) < Date.parse(t.scheduledEnd) - 5 * 60000
+      );
     }
 
-    return NextResponse.json({ items, canManage: isManager });
+    return NextResponse.json({
+      items,
+      activity,
+      canManage: isManager,
+      attendanceDate: {
+        selectedDate,
+        today,
+        timezone: attendanceSettings.timezone,
+      },
+    });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

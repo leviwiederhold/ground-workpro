@@ -102,16 +102,17 @@ test("CEO configured count and warnings share one setup-health payload", () => {
   const card = read("app/components/views/AutoAttendanceSetupCard.tsx");
   const route = read("app/api/attendance/setup-health/route.ts");
   assert.equal(
-    (view.match(/fetch\('\/api\/attendance\/setup-health'/g) ?? []).length,
+    (view.match(/fetch\(["']\/api\/attendance\/setup-health["']/g) ?? []).length,
     1,
   );
   assert.doesNotMatch(card, /fetch\(/);
   assert.match(view, /<AutoAttendanceSetupCard items=\{setupHealth\?\.items/);
-  assert.match(view, /setupHealth\.items\.filter\(\(item\) => !item\.healthy\)/);
+  assert.match(view, /setupHealth\.items\s*\.filter\(\(item\) => !item\.healthy\)/);
   assert.doesNotMatch(view, /location-permission\?scope=company/);
   assert.match(route, /employeesResult\.error/);
   assert.match(route, /result\.error\.message/);
   assert.match(route, /Failed to load attendance setup health/);
+  assert.match(route, /buildJobsiteRegions/);
 });
 
 test("a revoked server credential cannot masquerade as a healthy Keychain token", () => {

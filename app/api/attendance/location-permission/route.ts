@@ -26,6 +26,7 @@ const putSchema = z.object({
   nativeHasSecureCredential: z.boolean().optional(),
   requiredRegionIds: z.array(z.string().min(1).max(300)).max(20).optional(),
   registeredRegionIds: z.array(z.string().min(1).max(300)).max(20).optional(),
+  reportedAt: z.string().datetime().optional(),
 });
 
 function rowToSnapshot(row: Record<string, unknown>): LocationPermissionSnapshot {
@@ -74,13 +75,10 @@ export async function GET(request: Request) {
               .gt("expires_at", new Date().toISOString())
           : { data: [] as Array<{ user_id: string }> };
       if ("error" in credentialResult && credentialResult.error) {
-        return NextResponse.json(
-          { error: credentialResult.error.message },
-          { status: 400 },
-        );
+        return NextResponse.json({ error: credentialResult.error.message }, { status: 400 });
       }
       const activeCredentialUsers = new Set(
-        (credentialResult.data ?? []).map((row: { user_id: string }) => String(row.user_id)),
+        (credentialResult.data ?? []).map((row: { user_id: string }) => String(row.user_id))
       );
       const items = (result.data ?? []).map((row: Record<string, unknown>) => {
         const snapshot = rowToSnapshot(row);
@@ -124,8 +122,8 @@ export async function GET(request: Request) {
     if (credential.error) {
       return NextResponse.json({ error: credential.error.message }, { status: 400 });
     }
-    const onboardingCompletedAt =
-      (result.data as Record<string, unknown>).onboarding_completed_at as string | null;
+    const onboardingCompletedAt = (result.data as Record<string, unknown>)
+      .onboarding_completed_at as string | null;
     return NextResponse.json({
       item: {
         onboardingCompletedAt: onboardingCompletedAt ?? null,
@@ -151,7 +149,10 @@ export async function PUT(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const parsed = putSchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
-      return NextResponse.json({ error: "Validation error", details: parsed.error.flatten() }, { status: 422 });
+      return NextResponse.json(
+        { error: "Validation error", details: parsed.error.flatten() },
+        { status: 422 }
+      );
     }
     const d = parsed.data;
 
@@ -160,7 +161,8 @@ export async function PUT(request: Request) {
       user_id: userId,
       updated_at: new Date().toISOString(),
     };
-    if (d.locationServicesEnabled !== undefined) payload.location_services_enabled = d.locationServicesEnabled;
+    if (d.locationServicesEnabled !== undefined)
+      payload.location_services_enabled = d.locationServicesEnabled;
     if (d.foreground !== undefined) payload.foreground = d.foreground;
     if (d.background !== undefined) payload.background = d.background;
     if (d.precise !== undefined) payload.precise = d.precise;
@@ -191,7 +193,10 @@ export async function PUT(request: Request) {
       d.requiredRegionIds !== undefined ||
       d.registeredRegionIds !== undefined
     ) {
-      payload.native_readiness_reported_at = new Date().toISOString();
+      // Use capture time, not request completion time. The database freshness
+      // trigger prevents a delayed foreground write from replacing a newer
+      // native background report.
+      payload.native_readiness_reported_at = d.reportedAt ?? new Date().toISOString();
     }
     if (d.setupComplete === true || d.onboardingCompleted) {
       payload.onboarding_completed_at = new Date().toISOString();
@@ -221,8 +226,8 @@ export async function PUT(request: Request) {
     if (credential.error) {
       return NextResponse.json({ error: credential.error.message }, { status: 400 });
     }
-    const onboardingCompletedAt =
-      (result.data as Record<string, unknown>).onboarding_completed_at as string | null;
+    const onboardingCompletedAt = (result.data as Record<string, unknown>)
+      .onboarding_completed_at as string | null;
     return NextResponse.json({
       item: {
         onboardingCompletedAt: onboardingCompletedAt ?? null,

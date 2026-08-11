@@ -1,7 +1,18 @@
-export const MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES = 100 * 1024 * 1024;
-export const MAX_VIDEO_ATTACHMENT_BYTES = 250 * 1024 * 1024;
-export const MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES = 500 * 1024 * 1024;
+const MEBIBYTE_BYTES = 1024 * 1024;
+
+// Single application-level switch for the largest message attachment. Keep
+// this below the live Supabase global Storage limit. When the project moves off
+// the Free plan, raising this value and the private bucket limit is sufficient;
+// the signed, resumable TUS upload architecture does not need to change.
+export const MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB = 45;
+export const MAX_MESSAGE_ATTACHMENT_BYTES = MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB * MEBIBYTE_BYTES;
+export const MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES = MAX_MESSAGE_ATTACHMENT_BYTES;
+export const MAX_VIDEO_ATTACHMENT_BYTES = MAX_MESSAGE_ATTACHMENT_BYTES;
+export const MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES = MAX_MESSAGE_ATTACHMENT_BYTES * 10;
 export const MAX_VIDEO_DURATION_SECONDS = 10 * 60;
+
+export const messageAttachmentSizeError = (label = "Attachment") =>
+  `${label} is larger than ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB} MiB`;
 
 export const VIDEO_ATTACHMENT_TYPES = new Set([
   "video/mp4",
@@ -64,7 +75,7 @@ export function validateVideoAttachmentPolicy(input: {
     return { ok: false, error: "Invalid file size" };
   }
   if (input.sizeBytes > MAX_VIDEO_ATTACHMENT_BYTES) {
-    return { ok: false, error: "Video is larger than 250 MB" };
+    return { ok: false, error: messageAttachmentSizeError("Video") };
   }
 
   const durationSeconds = Number(input.durationSeconds);
@@ -89,7 +100,10 @@ export function validateMessageAttachmentTotalSize(
     return { ok: false, error: "Invalid attachment size" };
   }
   if (totalBytes > MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES) {
-    return { ok: false, error: "Attachments exceed the 500 MB total message limit" };
+    return {
+      ok: false,
+      error: `Attachments exceed the ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB * 10} MiB total message limit`,
+    };
   }
   return { ok: true };
 }

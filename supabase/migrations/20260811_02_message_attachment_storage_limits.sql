@@ -1,10 +1,10 @@
--- Messaging now uses signed TUS uploads, with an application cap of 250 MiB
--- per video, 100 MiB per image/document, and 500 MiB combined per message.
+-- Messaging now uses signed TUS uploads with a temporary Supabase Free-plan
+-- application cap of 45 MiB per attachment and 450 MiB combined per message.
 -- Keep the bucket private and enforce the largest individual-file cap at the
 -- Storage layer as defense in depth.
 update storage.buckets
 set public = false,
-    file_size_limit = 262144000,
+    file_size_limit = 47185920,
     allowed_mime_types = array[
       'image/jpeg',
       'image/png',

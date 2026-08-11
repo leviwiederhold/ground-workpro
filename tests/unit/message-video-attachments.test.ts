@@ -4,10 +4,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  MAX_MESSAGE_ATTACHMENT_BYTES,
   MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES,
   MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   MAX_VIDEO_ATTACHMENT_BYTES,
   MAX_VIDEO_DURATION_SECONDS,
+  MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB,
   validateMessageAttachmentTotalSize,
   validateVideoAttachmentPolicy,
   inferVideoAttachmentContentType,
@@ -101,9 +103,11 @@ function attachmentDbFixture(
 }
 
 test("short MP4, MOV, M4V, and WebM videos pass the message policy", () => {
-  assert.equal(MAX_VIDEO_ATTACHMENT_BYTES, 250 * 1024 * 1024);
-  assert.equal(MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES, 100 * 1024 * 1024);
-  assert.equal(MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES, 500 * 1024 * 1024);
+  assert.equal(MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB, 45);
+  assert.equal(MAX_MESSAGE_ATTACHMENT_BYTES, 45 * 1024 * 1024);
+  assert.equal(MAX_VIDEO_ATTACHMENT_BYTES, MAX_MESSAGE_ATTACHMENT_BYTES);
+  assert.equal(MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES, MAX_MESSAGE_ATTACHMENT_BYTES);
+  assert.equal(MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES, 450 * 1024 * 1024);
   assert.equal(validateVideoAttachmentPolicy(video()).ok, true);
   assert.equal(
     validateVideoAttachmentPolicy(video({ fileName: "site.mov", contentType: "video/quicktime" })).ok,
@@ -131,7 +135,7 @@ test("unsupported, mismatched, oversized, and over-duration videos fail cleanly"
   );
   assert.match(
     validationError(validateVideoAttachmentPolicy(video({ sizeBytes: MAX_VIDEO_ATTACHMENT_BYTES + 1 }))),
-    /larger than 250 MB/i
+    /larger than 45 MiB/i
   );
   assert.match(
     validationError(validateVideoAttachmentPolicy(video({ durationSeconds: MAX_VIDEO_DURATION_SECONDS + 0.01 }))),
@@ -153,16 +157,25 @@ test("mixed image and video attachments share a bounded total message size", () 
       { file_size: MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES },
       { file_size: 1 },
     ])),
-    /500 MB/i
+    /450 MiB/i
   );
 });
 
-test("message files accept practical business sizes while retaining an individual cap", () => {
+test("the temporary Free-plan boundary accepts just under 45 MiB and rejects one byte over", () => {
+  const justUnderLimit = MAX_MESSAGE_ATTACHMENT_BYTES - 1;
+  assert.equal(
+    validateVideoAttachmentPolicy(video({ sizeBytes: 40 * 1024 * 1024 })).ok,
+    true
+  );
+  assert.equal(
+    validateVideoAttachmentPolicy(video({ sizeBytes: justUnderLimit })).ok,
+    true
+  );
   assert.equal(
     validateMessageFileMeta({
       file_name: "project-manual.pdf",
       content_type: "application/pdf",
-      file_size: 80 * 1024 * 1024,
+      file_size: justUnderLimit,
     }).ok,
     true
   );
@@ -172,7 +185,11 @@ test("message files accept practical business sizes while retaining an individua
       content_type: "application/pdf",
       file_size: MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES + 1,
     })),
-    /too large/i
+    /larger than 45 MiB/i
+  );
+  assert.match(
+    validationError(validateVideoAttachmentPolicy(video({ sizeBytes: MAX_VIDEO_ATTACHMENT_BYTES + 1 }))),
+    /larger than 45 MiB/i
   );
 });
 
@@ -406,6 +423,11 @@ test("UI and API retain private, participant-scoped attachment behavior", () => 
   const attachmentDomain = readFileSync(join(repoRoot, "src/lib/messages/attachments.ts"), "utf8");
   const uploadClient = readFileSync(join(repoRoot, "src/lib/messages/videoClient.ts"), "utf8");
   const pushWorker = readFileSync(join(repoRoot, "src/lib/push/worker.ts"), "utf8");
+  const storageMigration = readFileSync(
+    join(repoRoot, "supabase/migrations/20260811_02_message_attachment_storage_limits.sql"),
+    "utf8"
+  );
+  const attachmentDocs = readFileSync(join(repoRoot, "docs/message-video-attachments.md"), "utf8");
 
   assert.match(view, /accept="[^"]*video\/mp4[^"]*video\/quicktime[^"]*video\/webm/);
   assert.match(view, /<video[\s\S]*controls[\s\S]*playsInline[\s\S]*preload="metadata"/);
@@ -418,6 +440,10 @@ test("UI and API retain private, participant-scoped attachment behavior", () => 
   assert.ok(view.indexOf("await uploadAttachmentWithProgress") < view.indexOf("/send`"));
   assert.match(signRoute, /getThreadIfParticipant/);
   assert.match(signRoute, /if \(!participant \|\| !thread\) return forbidden\(\)/);
+  assert.ok(
+    signRoute.indexOf("validateMessageFileMeta(file)") < signRoute.indexOf("createSignedUploadUrl(path)"),
+    "Groundwork validates the 45 MiB limit before asking Supabase to create a signed TUS upload"
+  );
   assert.match(signRoute, /export async function DELETE/);
   assert.match(signRoute, /isCompanyScopedMessagePath\(companyId, path\)/);
   assert.match(signRoute, /from\("message_attachments"\)[\s\S]*in\("storage_path", parsed\.data\.paths\)/);
@@ -430,6 +456,12 @@ test("UI and API retain private, participant-scoped attachment behavior", () => 
   assert.match(uploadClient, /chunkSize: SUPABASE_TUS_CHUNK_BYTES/);
   assert.match(uploadClient, /"x-signature": input\.token/);
   assert.match(uploadClient, /upload\.abort\(true\)/);
+  assert.doesNotMatch(view, /250 MB|100 MB|500 MB/);
+  assert.match(storageMigration, /public = false/);
+  assert.match(storageMigration, /file_size_limit = 47185920/);
+  assert.doesNotMatch(storageMigration, /262144000/);
+  assert.match(attachmentDocs, /MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB/);
+  assert.doesNotMatch(attachmentDocs, /250 MB|250 MiB/);
   assert.match(pushWorker, /from\("message_attachments"\)[\s\S]{0,100}select\("id", \{ count: "exact", head: true \}\)/);
   assert.doesNotMatch(pushWorker, /select\([^\n]*(storage_path|download_url|signedDownloadUrl)/);
 });

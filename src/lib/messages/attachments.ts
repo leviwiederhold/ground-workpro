@@ -7,6 +7,7 @@ import {
 import {
   MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   isVideoAttachmentContentType,
+  messageAttachmentSizeError,
   validateMessageAttachmentTotalSize,
   validateVideoAttachmentPolicy,
 } from "./attachmentPolicy.ts";
@@ -57,7 +58,14 @@ export function validateMessageFileMeta(input: {
     sizeBytes: Number(input.file_size),
     maxBytes: MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   });
-  if (!validation.ok) return { ok: false, error: validation.error };
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: Number(input.file_size) > MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES
+        ? messageAttachmentSizeError("File")
+        : validation.error,
+    };
+  }
   return { ok: true, safeFileName: validation.safeFileName, contentType: validation.contentType };
 }
 

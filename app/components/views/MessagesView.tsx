@@ -16,6 +16,7 @@ import {
   MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES,
   MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   MAX_VIDEO_ATTACHMENT_BYTES,
+  MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB,
   VIDEO_ATTACHMENT_EXTENSIONS,
   inferVideoAttachmentContentType,
   isVideoAttachmentContentType,
@@ -936,7 +937,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         let contentType = file.type || 'application/octet-stream';
         if (isVideo) {
           if (file.size > MAX_VIDEO_ATTACHMENT_BYTES) {
-            setSendError(`"${file.name}": Video is larger than 250 MB.`);
+            setSendError(`"${file.name}": Video is larger than ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB} MiB.`);
             continue;
           }
           try {
@@ -965,7 +966,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           });
           if (!validation.ok) {
             const sizeMessage = file.size > MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES
-              ? 'File is larger than 100 MB'
+              ? `File is larger than ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB} MiB`
               : validation.error;
             setSendError(`"${file.name}": ${sizeMessage}.`);
             continue;
@@ -973,7 +974,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           contentType = validation.contentType;
         }
         if (nextTotalBytes + file.size > MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES) {
-          setSendError('Attachments exceed the 500 MB total message limit.');
+          setSendError(`Attachments exceed the ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB * MAX_ATTACHMENTS} MiB total message limit.`);
           continue;
         }
         prepared.push({

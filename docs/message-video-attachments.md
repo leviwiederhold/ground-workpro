@@ -9,10 +9,9 @@ No public bucket or public object URL is used.
 
 - Video formats: MP4 (`video/mp4`), MOV (`video/quicktime`), M4V (`video/x-m4v`), and WebM
   (`video/webm`).
-- Maximum video size: 250 MB per file.
+- Maximum individual attachment size: 45 MiB per file while production uses the Supabase Free plan.
 - Maximum video duration: 10 minutes.
-- Image/document maximum: 100 MB per file.
-- Maximum combined attachment size: 500 MB per message.
+- Maximum combined attachment size: 450 MiB per message.
 - Maximum attachment count: 10 per message.
 
 The client reads browser-native video metadata before requesting a signed upload token. Every
@@ -29,7 +28,7 @@ message. A message is created only after every object finishes and passes that v
 ## Storage configuration required before deployment
 
 Migration `20260811_02_message_attachment_storage_limits.sql` keeps the existing
-`message-attachments` bucket private, raises its bucket limit to 250 MB, and preserves the existing
+`message-attachments` bucket private, sets its bucket limit to 45 MiB, and preserves the existing
 image/document MIME types alongside:
 
 - `video/mp4`
@@ -37,11 +36,22 @@ image/document MIME types alongside:
 - `video/webm`
 - `video/x-m4v`
 
-The Supabase project's global Storage file-size limit must also be at least 250 MB because the global
-limit takes precedence over the bucket. No attachment-table schema change is required. Existing
-rows, indexes, RLS, private signed downloads, and authorization continue to apply. Push dispatch
+The Supabase Free-plan global Storage limit is 50 MiB and takes precedence over the bucket. The
+application and private bucket intentionally use a 45 MiB ceiling so Groundwork rejects oversized
+metadata before requesting a signed upload and retains provider headroom. No attachment-table schema
+change is required. Existing rows, indexes, RLS, private signed downloads, and authorization continue
+to apply. Push dispatch
 only counts attachments for a generic safe preview; it does not read or send media paths, signed
 URLs, MIME metadata, or tokens.
 
 Large private downloads consume Storage egress each time they are served. Videos keep
 `preload="metadata"` so opening a conversation does not eagerly download every video body.
+
+## Raising the limit after a Supabase upgrade
+
+The resumable upload design does not change. Update the single
+`MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB` constant in `src/lib/messages/attachmentPolicy.ts`, update the
+private `message-attachments` bucket's `file_size_limit` (and this migration for new environments),
+and keep both values at or below the new Supabase global Storage limit. Client validation, API token
+issuance, send-time object verification, progress, retries, chunking, and cleanup all continue to use
+the same signed TUS path.

@@ -5,7 +5,9 @@ import {
   validateAttachmentMetadata,
 } from "../attachments/security.ts";
 import {
+  MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   isVideoAttachmentContentType,
+  messageAttachmentSizeError,
   validateMessageAttachmentTotalSize,
   validateVideoAttachmentPolicy,
 } from "./attachmentPolicy.ts";
@@ -54,8 +56,16 @@ export function validateMessageFileMeta(input: {
     fileName: input.file_name || "upload.bin",
     contentType: input.content_type || "application/octet-stream",
     sizeBytes: Number(input.file_size),
+    maxBytes: MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   });
-  if (!validation.ok) return { ok: false, error: validation.error };
+  if (!validation.ok) {
+    return {
+      ok: false,
+      error: Number(input.file_size) > MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES
+        ? messageAttachmentSizeError("File")
+        : validation.error,
+    };
+  }
   return { ok: true, safeFileName: validation.safeFileName, contentType: validation.contentType };
 }
 

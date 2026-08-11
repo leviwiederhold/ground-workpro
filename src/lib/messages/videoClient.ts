@@ -67,7 +67,10 @@ export function buildSupabaseResumableEndpoint(supabaseUrl: string): string {
   if (url.hostname.endsWith(".supabase.co") && !url.hostname.endsWith(".storage.supabase.co")) {
     url.hostname = url.hostname.replace(/\.supabase\.co$/, ".storage.supabase.co");
   }
-  url.pathname = "/storage/v1/upload/resumable";
+  // Signed upload tokens are only verified on Supabase Storage's dedicated
+  // TUS signed route. Sending x-signature to the authenticated route makes
+  // Storage parse the token as an Auth JWT and reject it as an invalid JWS.
+  url.pathname = "/storage/v1/upload/resumable/sign";
   url.search = "";
   url.hash = "";
   return url.toString();

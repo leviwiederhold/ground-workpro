@@ -345,7 +345,7 @@ test("signed TUS upload uses direct Storage, fixed chunks, progress, and resumab
 
   assert.deepEqual(progress, [40, 100]);
   assert.equal(resumed, true);
-  assert.equal(options.endpoint, "https://example.storage.supabase.co/storage/v1/upload/resumable");
+  assert.equal(options.endpoint, "https://example.storage.supabase.co/storage/v1/upload/resumable/sign");
   assert.equal(options.chunkSize, SUPABASE_TUS_CHUNK_BYTES);
   assert.deepEqual(options.retryDelays, MESSAGE_UPLOAD_RETRY_DELAYS_MS);
   assert.equal(options.headers?.["x-signature"], "short-lived-signed-token");
@@ -375,7 +375,7 @@ test("upload failures terminate partial data and reject before a message can be 
     /mobile network unavailable/
   );
   assert.equal(terminated, true);
-  assert.equal(buildSupabaseResumableEndpoint("http://localhost:54321"), "http://localhost:54321/storage/v1/upload/resumable");
+  assert.equal(buildSupabaseResumableEndpoint("http://localhost:54321"), "http://localhost:54321/storage/v1/upload/resumable/sign");
   assert.throws(() => buildSupabaseResumableEndpoint("http://attacker.example"), /HTTPS/);
 });
 

@@ -340,7 +340,10 @@ export async function listMessagesForThread(
       .select(columns, { count: "exact" })
       .eq("company_id", companyId)
       .eq("thread_id", threadId)
-      .order("created_at", { ascending: true })
+      // Page from the newest edge so page 1 always opens on the latest
+      // conversation state. Each page is reversed below for chronological UI.
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .range(from, to);
 
   // Prefer selecting edited_at; tolerate environments where the migration that
@@ -352,7 +355,7 @@ export async function listMessagesForThread(
 
   if (result.error) throw new Error(result.error.message);
   return {
-    items: (result.data ?? []) as unknown as MessageRow[],
+    items: ((result.data ?? []) as unknown as MessageRow[]).reverse(),
     count: Number(result.count ?? 0),
   };
 }

@@ -5,18 +5,15 @@ import { ensureCompanyHasAtLeastOneCeoMembership } from "@/lib/auth/ceoGuard";
 import { upsertProfileColumns } from "@/lib/user/profileRecord";
 import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 import { getStripe } from "@/lib/billing/stripe";
+import {
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
-const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
-
-const normalizeMembershipRole = (value: unknown) => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (!raw) return "operator";
-  if (raw.includes("ceo") || raw.includes("admin") || raw.includes("executive")) return COMPANY_OWNER_MEMBERSHIP_ROLE;
-  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
-  if (raw.includes("foreman")) return "foreman";
-  if (raw.includes("mechanic")) return "mechanic";
-  return "operator";
-};
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "owner";
 
 async function seedPersonalProfile(
   supabase: Awaited<ReturnType<typeof supabaseServer>>,
@@ -208,7 +205,7 @@ export async function POST(request: Request) {
     if (userEmail) {
       let linkedEmployee = await supabase
         .from("employees")
-        .select("id, company_id, role")
+        .select("*")
         .ilike("email", userEmail)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -217,7 +214,7 @@ export async function POST(request: Request) {
       if (linkedEmployee.error && /created_at|Could not find the 'created_at' column/i.test(linkedEmployee.error.message || "")) {
         linkedEmployee = await supabase
           .from("employees")
-          .select("id, company_id, role")
+          .select("*")
           .ilike("email", userEmail)
           .order("id", { ascending: false })
           .limit(1)
@@ -231,29 +228,62 @@ export async function POST(request: Request) {
       if (linkedEmployee.data?.company_id) {
         await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
         await ensureCompanyBootstrapDefaults(supabase, String(linkedEmployee.data.company_id), userMetadata);
-        const membershipRole = normalizeMembershipRole(linkedEmployee.data.role);
-        const { error: membershipUpsertError } = await supabase.from("memberships").upsert(
+        const membershipRole = {
+          role: normalizeCanonicalTeamRole(linkedEmployee.data.role) ?? "team_member",
+          legacy_permission_profile:
+            normalizeLegacyPermissionProfile(
+              linkedEmployee.data.role,
+              linkedEmployee.data.legacy_permission_profile
+            ) ?? canonicalizeRoleWrite(linkedEmployee.data.role).legacy_permission_profile,
+        };
+        let membershipUpsert = await supabase.from("memberships").upsert(
           {
             company_id: linkedEmployee.data.company_id,
             user_id: user.id,
-            role: membershipRole,
+            ...membershipRole,
           },
           { onConflict: "company_id,user_id" }
         );
-        if (membershipUpsertError) {
-          return errorResponse(membershipUpsertError.message, 400);
+        if (isMissingLegacyPermissionProfileColumn(membershipUpsert.error)) {
+          membershipUpsert = await supabase.from("memberships").upsert(
+            {
+              company_id: linkedEmployee.data.company_id,
+              user_id: user.id,
+              role: legacyCompatibleRoleValue(
+                membershipRole.legacy_permission_profile,
+                "memberships"
+              ),
+            },
+            { onConflict: "company_id,user_id" }
+          );
+        }
+        if (membershipUpsert.error) {
+          return errorResponse(membershipUpsert.error.message, 400);
         }
 
-        await supabase
+        let employeeUpdate = await supabase
           .from("employees")
-          .update({ user_id: user.id, role: membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole })
+          .update({ user_id: user.id, ...membershipRole })
           .eq("id", linkedEmployee.data.id)
           .eq("company_id", linkedEmployee.data.company_id);
+        if (isMissingLegacyPermissionProfileColumn(employeeUpdate.error)) {
+          employeeUpdate = await supabase
+            .from("employees")
+            .update({
+              user_id: user.id,
+              role: legacyCompatibleRoleValue(
+                membershipRole.legacy_permission_profile,
+                "employees"
+              ),
+            })
+            .eq("id", linkedEmployee.data.id)
+            .eq("company_id", linkedEmployee.data.company_id);
+        }
 
         try {
           await ensureCompanyHasAtLeastOneCeoMembership(supabase, String(linkedEmployee.data.company_id));
         } catch (error) {
-          return errorResponse(error instanceof Error ? error.message : "Failed to enforce CEO role", 400);
+          return errorResponse(error instanceof Error ? error.message : "Failed to enforce Owner role", 400);
         }
 
         return Response.json({ success: true, company_id: linkedEmployee.data.company_id });
@@ -320,22 +350,29 @@ export async function POST(request: Request) {
     }
     await applyStripeCheckoutBilling(supabase, String(company.id), stripeSessionId);
 
-    // The memberships table stores company owners as "admin"; app role normalization
-    // still treats admin as the top-level CEO/executive role.
-    const { error: membershipError } = await supabase.from("memberships").insert({
+    // Access-role ownership is separate from any future billing/creator identity.
+    let membershipInsert = await supabase.from("memberships").insert({
       company_id: company.id,
       user_id: user.id,
-      role: COMPANY_OWNER_MEMBERSHIP_ROLE,
+      ...canonicalizeRoleWrite(COMPANY_OWNER_MEMBERSHIP_ROLE),
     });
 
-    if (membershipError) {
-      return errorResponse(membershipError.message, 400);
+    if (isMissingLegacyPermissionProfileColumn(membershipInsert.error)) {
+      membershipInsert = await supabase.from("memberships").insert({
+        company_id: company.id,
+        user_id: user.id,
+        role: legacyCompatibleRoleValue(COMPANY_OWNER_MEMBERSHIP_ROLE, "memberships"),
+      });
+    }
+
+    if (membershipInsert.error) {
+      return errorResponse(membershipInsert.error.message, 400);
     }
 
     try {
       await ensureCompanyHasAtLeastOneCeoMembership(supabase, String(company.id));
     } catch (error) {
-      return errorResponse(error instanceof Error ? error.message : "Failed to enforce CEO role", 400);
+      return errorResponse(error instanceof Error ? error.message : "Failed to enforce Owner role", 400);
     }
 
     return Response.json({ success: true, company });

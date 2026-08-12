@@ -2,17 +2,10 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { canonicalTeamRoleLabel } from "@/lib/auth/teamRoles";
 
 function toRoleLabel(role: unknown) {
-  const normalized = String(role ?? "").trim().toLowerCase();
-  if (normalized === "ceo") return "CEO";
-  if (normalized === "admin") return "CEO";
-  if (normalized === "pm") return "Operations Manager";
-  if (normalized === "foreman") return "Foreman";
-  if (normalized === "mechanic") return "Mechanic";
-  if (normalized === "fieldstaff" || normalized === "field_staff" || normalized === "field staff") return "Field Staff";
-  if (normalized === "operator") return "Operator";
-  return normalized || "Member";
+  return canonicalTeamRoleLabel(role);
 }
 
 function tenantError(error: TenantResolverError) {

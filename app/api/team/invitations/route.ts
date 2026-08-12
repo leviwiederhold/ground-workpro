@@ -5,11 +5,18 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { isCeoMembershipRole } from "@/lib/auth/ceoGuard";
 import {
+  canAssignTeamRole,
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+} from "@/lib/auth/teamRoles";
+import {
   getDefaultPermissionsByRole,
   normalizePermissionPayload,
 } from "@/lib/permissions/access";
 import {
-  invitationRoleSchema,
+  compatibleInvitationRoleSchema,
   moduleAccessLevelSchema,
   modulePermissionKeys,
   type ModulePermissionMap,
@@ -19,7 +26,8 @@ type PendingInvitationRow = {
   id: string;
   company_id: string;
   email: string | null;
-  role: z.infer<typeof invitationRoleSchema>;
+  role: string;
+  legacy_permission_profile?: string | null;
   full_name: string | null;
   job_title: string | null;
   invite_token: string;
@@ -37,7 +45,7 @@ const permissionOverrideSchema = z.object({
 // New flow: the admin supplies role, job title, and permissions only. The
 // employee provides their own email/name when they accept the invite.
 const createInvitationSchema = z.object({
-  role: invitationRoleSchema,
+  role: compatibleInvitationRoleSchema,
   job_title: z.string().trim().max(120).optional(),
   permissions: z.array(permissionOverrideSchema).optional(),
 });
@@ -63,13 +71,6 @@ const permissionsToRows = (permissions: ModulePermissionMap) =>
     access_level: permissions[moduleKey],
   }));
 
-const invitationRoleToAppRole = (role: z.infer<typeof invitationRoleSchema>) => {
-  if (role === "ceo") return "admin";
-  if (role === "manager") return "pm";
-  if (role === "fieldstaff") return "fieldstaff";
-  return role;
-};
-
 const loadPermissionMap = async (
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
@@ -91,7 +92,7 @@ const loadPermissionMap = async (
   for (const row of permissionsResult.data ?? []) {
     const invitationId = String(row.invitation_id ?? "");
     if (!invitationId) continue;
-    const current = permissionsByInvitation.get(invitationId) ?? getDefaultPermissionsByRole("fieldstaff");
+    const current = permissionsByInvitation.get(invitationId) ?? getDefaultPermissionsByRole("team_member");
     current[row.module_key as (typeof modulePermissionKeys)[number]] =
       row.access_level as ModulePermissionMap[(typeof modulePermissionKeys)[number]];
     permissionsByInvitation.set(invitationId, current);
@@ -103,7 +104,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    await requireModuleAccess("team_management", "view");
+    const { role: actorRole } = await requireModuleAccess("team_management", "view");
     const { supabase, companyId } = await getCompanyId();
 
     // Active pending = not accepted and not expired (company-scoped).
@@ -111,29 +112,65 @@ export async function GET(request: Request) {
 
     const invitationWithName = await supabase
       .from("pending_invitations")
-      .select("id, company_id, email, role, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
+      .select("id, company_id, email, role, legacy_permission_profile, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
       .eq("company_id", companyId)
       .is("accepted_at", null)
       .gt("expires_at", nowIso)
       .order("created_at", { ascending: false });
+    let invitationRows = invitationWithName.data as PendingInvitationRow[] | null;
+    let invitationError = invitationWithName.error;
 
-    const invitationWithoutName =
-      invitationWithName.error && /full_name|job_title/i.test(invitationWithName.error.message || "")
-        ? await supabase
+    if (isMissingLegacyPermissionProfileColumn(invitationError)) {
+      const legacyInvitationsWithNames = await supabase
         .from("pending_invitations")
-        .select("id, company_id, email, role, invite_token, expires_at, created_at, updated_at, accepted_at")
+        .select("id, company_id, email, role, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
         .eq("company_id", companyId)
         .is("accepted_at", null)
         .gt("expires_at", nowIso)
-        .order("created_at", { ascending: false })
-        : null;
+        .order("created_at", { ascending: false });
+      if (legacyInvitationsWithNames.error && /full_name|job_title/i.test(legacyInvitationsWithNames.error.message || "")) {
+        const legacyInvitationsWithoutNames = await supabase
+          .from("pending_invitations")
+          .select("id, company_id, email, role, invite_token, expires_at, created_at, updated_at, accepted_at")
+          .eq("company_id", companyId)
+          .is("accepted_at", null)
+          .gt("expires_at", nowIso)
+          .order("created_at", { ascending: false });
+        invitationRows = (legacyInvitationsWithoutNames.data ?? []).map((row) => ({
+          ...row,
+          legacy_permission_profile: null,
+          full_name: null,
+          job_title: null,
+        })) as PendingInvitationRow[];
+        invitationError = legacyInvitationsWithoutNames.error;
+      } else {
+        invitationRows = (legacyInvitationsWithNames.data ?? []).map((row) => ({
+          ...row,
+          legacy_permission_profile: null,
+        })) as PendingInvitationRow[];
+        invitationError = legacyInvitationsWithNames.error;
+      }
+    } else if (invitationError && /full_name|job_title/i.test(invitationError.message || "")) {
+      const invitationWithoutName = await supabase
+        .from("pending_invitations")
+        .select("id, company_id, email, role, legacy_permission_profile, invite_token, expires_at, created_at, updated_at, accepted_at")
+        .eq("company_id", companyId)
+        .is("accepted_at", null)
+        .gt("expires_at", nowIso)
+        .order("created_at", { ascending: false });
+      invitationRows = (invitationWithoutName.data ?? []).map((row) => ({
+        ...row,
+        full_name: null,
+        job_title: null,
+      })) as PendingInvitationRow[];
+      invitationError = invitationWithoutName.error;
+    }
 
-    const invitationError = invitationWithoutName?.error ?? invitationWithName.error;
     if (invitationError) {
       return NextResponse.json({ error: invitationError.message }, { status: 400 });
     }
 
-    const rows = ((invitationWithoutName?.data ?? invitationWithName.data) ?? []) as PendingInvitationRow[];
+    const rows = invitationRows ?? [];
     const permissionMap = await loadPermissionMap(
       supabase,
       companyId,
@@ -142,18 +179,29 @@ export async function GET(request: Request) {
 
     const origin = buildOrigin(request);
     const items = rows.map((row) => {
-      const defaultPermissions = getDefaultPermissionsByRole(row.role);
+      const defaultPermissions = getDefaultPermissionsByRole(
+        row.role,
+        row.legacy_permission_profile
+      );
       const permissions = permissionMap.get(row.id) ?? defaultPermissions;
       return {
         id: row.id,
         full_name: row.full_name ?? "",
         email: row.email ?? "",
         job_title: row.job_title ?? "",
-        role: row.role,
-        app_role: invitationRoleToAppRole(row.role),
+        role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
+        app_role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
         status: "pending",
-        invite_url: origin ? `${origin}/signup?invite=1&token=${encodeURIComponent(row.invite_token)}` : "",
-        invite_token: row.invite_token,
+        invite_url:
+          normalizeCanonicalTeamRole(row.role) === "owner" && !isCeoMembershipRole(actorRole)
+            ? ""
+            : origin
+              ? `${origin}/signup?invite=1&token=${encodeURIComponent(row.invite_token)}`
+              : "",
+        invite_token:
+          normalizeCanonicalTeamRole(row.role) === "owner" && !isCeoMembershipRole(actorRole)
+            ? ""
+            : row.invite_token,
         created_at: row.created_at,
         updated_at: row.updated_at,
         expires_at: row.expires_at,
@@ -181,9 +229,10 @@ export async function POST(request: Request) {
       return NextResponse.json(toValidationError(parsed.error.issues), { status: 422 });
     }
 
-    if (parsed.data.role === "ceo" && !isCeoMembershipRole(role)) {
+    const requestedRole = canonicalizeRoleWrite(parsed.data.role);
+    if (!canAssignTeamRole(role, requestedRole.role)) {
       return NextResponse.json(
-        { error: "Only CEO/admin users can invite another CEO." },
+        { error: "Only Owners can invite another Owner." },
         { status: 403 }
       );
     }
@@ -198,27 +247,39 @@ export async function POST(request: Request) {
     const jobTitle = parsed.data.job_title?.trim() || null;
     const baseInsert: Record<string, unknown> = {
       company_id: companyId,
-      role: parsed.data.role,
+      role: normalized.role,
+      legacy_permission_profile: requestedRole.legacy_permission_profile,
       job_title: jobTitle,
       invite_token: inviteToken,
       invited_by: userId,
     };
 
-    // Insert with job_title; if the column doesn't exist yet (migration not run),
-    // retry without it so invite creation still works.
+    // The application deploy can precede the database migration. On the legacy
+    // schema, the legacy role value itself preserves the permission profile.
+    const compatibleInsert = { ...baseInsert };
     let insertResult = await supabase
       .from("pending_invitations")
-      .insert(baseInsert)
-      .select("id, company_id, email, role, full_name, job_title, invite_token, expires_at, created_at, updated_at, accepted_at")
+      .insert(compatibleInsert)
+      .select("*")
       .single();
 
-    if (insertResult.error && /job_title/i.test(insertResult.error.message || "")) {
-      const withoutJobTitle = { ...baseInsert };
-      delete withoutJobTitle.job_title;
+    for (let attempt = 0; insertResult.error && attempt < 4; attempt += 1) {
+      const message = insertResult.error.message || "";
+      if (isMissingLegacyPermissionProfileColumn(insertResult.error)) {
+        delete compatibleInsert.legacy_permission_profile;
+        compatibleInsert.role = legacyCompatibleRoleValue(
+          parsed.data.role,
+          "pending_invitations"
+        );
+      } else if (/job_title/i.test(message) && "job_title" in compatibleInsert) {
+        delete compatibleInsert.job_title;
+      } else {
+        break;
+      }
       insertResult = await supabase
         .from("pending_invitations")
-        .insert(withoutJobTitle)
-        .select("id, company_id, email, role, full_name, invite_token, expires_at, created_at, updated_at, accepted_at")
+        .insert(compatibleInsert)
+        .select("*")
         .single();
     }
 
@@ -255,8 +316,8 @@ export async function POST(request: Request) {
         full_name: invitation.full_name ?? "",
         email: invitation.email ?? "",
         job_title: invitation.job_title ?? jobTitle ?? "",
-        role: invitation.role,
-        app_role: invitationRoleToAppRole(invitation.role),
+        role: normalizeCanonicalTeamRole(invitation.role) ?? normalized.role,
+        app_role: normalizeCanonicalTeamRole(invitation.role) ?? normalized.role,
         status: "pending",
         invite_url: inviteUrl,
         invite_token: inviteToken,

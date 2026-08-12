@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { getCompanyId } from "@/lib/tenant/getCompanyId";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
+import { isMissingLegacyPermissionProfileColumn } from "@/lib/auth/teamRoles";
 
 export const ACTING_ROLE_COOKIE = "gw_acting_role";
 
@@ -30,15 +31,34 @@ export async function resolveRealRole(
   // valid member (CEO/co-CEO included). Reading role via admin keeps role
   // resolution consistent with tenancy resolution. Falls back to the RLS client.
   const client = getSupabaseAdmin() ?? supabase;
-  const { data, error } = await client
+  const preferredMembershipResult = await client
     .from("memberships")
-    .select("role")
+    .select("role, legacy_permission_profile")
     .eq("company_id", companyId)
     .eq("user_id", userId)
     .limit(1);
+  let membershipData = preferredMembershipResult.data;
+  let membershipError = preferredMembershipResult.error;
 
-  if (error) return null;
-  return normalizeAppRole(data?.[0]?.role);
+  if (isMissingLegacyPermissionProfileColumn(membershipError)) {
+    const legacyMembershipResult = await client
+      .from("memberships")
+      .select("role")
+      .eq("company_id", companyId)
+      .eq("user_id", userId)
+      .limit(1);
+    membershipData = (legacyMembershipResult.data ?? []).map((row) => ({
+      ...row,
+      legacy_permission_profile: null,
+    }));
+    membershipError = legacyMembershipResult.error;
+  }
+
+  if (membershipError) return null;
+  return normalizeAppRole(
+    membershipData?.[0]?.role,
+    membershipData?.[0]?.legacy_permission_profile
+  );
 }
 
 export async function getEffectiveRole(): Promise<AppRole | null> {

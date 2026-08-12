@@ -12,6 +12,7 @@ import {
   TEST_MODULE_ACCESS_COOKIE,
 } from "@/lib/permissions/runtime";
 import type { ModuleAccessLevel, ModulePermissionKey } from "@/lib/permissions/types";
+import { isMissingLegacyPermissionProfileColumn } from "@/lib/auth/teamRoles";
 
 const shouldLogRequests = process.env.REQUEST_LOGGING_ENABLED !== "false";
 const REQUEST_ID_HEADER = "x-request-id";
@@ -238,15 +239,34 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         // unreadable → a blanket 403 on every guarded API. Scoped to this user
         // id, so no cross-tenant exposure. Falls back to the RLS client.
         const membershipClient = getSupabaseAdmin() ?? supabase;
-        const { data: memberships, error: membershipError } = await withMiddlewareTimeout(
+        const preferredMembershipResult = await withMiddlewareTimeout(
           "middleware membership lookup",
           membershipClient
             .from("memberships")
-            .select("company_id, role")
+            .select("company_id, role, legacy_permission_profile")
             .eq("user_id", userId)
             .limit(1),
           MIDDLEWARE_DB_TIMEOUT_MS
         );
+        let memberships = preferredMembershipResult.data;
+        let membershipError = preferredMembershipResult.error;
+
+        if (isMissingLegacyPermissionProfileColumn(membershipError)) {
+          const legacyMembershipResult = await withMiddlewareTimeout(
+            "middleware legacy membership lookup",
+            membershipClient
+              .from("memberships")
+              .select("company_id, role")
+              .eq("user_id", userId)
+              .limit(1),
+            MIDDLEWARE_DB_TIMEOUT_MS
+          );
+          memberships = (legacyMembershipResult.data ?? []).map((row) => ({
+            ...row,
+            legacy_permission_profile: null,
+          }));
+          membershipError = legacyMembershipResult.error;
+        }
 
         if (membershipError) {
           if (!isApi) return NextResponse.redirect(new URL("/", request.url));
@@ -254,7 +274,10 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         }
 
         companyId = String(memberships?.[0]?.company_id ?? "");
-        const realRole = normalizeAppRole(memberships?.[0]?.role);
+        const realRole = normalizeAppRole(
+          memberships?.[0]?.role,
+          memberships?.[0]?.legacy_permission_profile
+        );
         if (!realRole) {
           if (!isApi) return NextResponse.redirect(new URL("/", request.url));
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });

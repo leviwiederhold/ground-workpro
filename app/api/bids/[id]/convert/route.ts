@@ -178,7 +178,7 @@ export async function POST(
           .from("memberships")
           .select("user_id, role")
           .eq("company_id", companyId)
-          .in("role", ["ceo", "admin", "pm"]);
+          .in("role", ["owner", "administrator", "manager", "ceo", "admin", "pm"]);
         if (!membersResult.error) {
           const recipientUserIds = (membersResult.data ?? [])
             .map((row) => String((row as { user_id?: string }).user_id ?? ""))
@@ -245,7 +245,7 @@ export async function POST(
         .from("memberships")
         .select("user_id, role")
         .eq("company_id", companyId)
-        .in("role", ["ceo", "admin", "pm"]);
+        .in("role", ["owner", "administrator", "manager", "ceo", "admin", "pm"]);
       if (!membersResult.error) {
         const recipientUserIds = (membersResult.data ?? [])
           .map((row) => String((row as { user_id?: string }).user_id ?? ""))

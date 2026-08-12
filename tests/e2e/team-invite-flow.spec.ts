@@ -11,15 +11,9 @@ test("team invite flow requires role+permissions before link and supports pendin
   await loginViaUI(page);
   await setRoleAdmin(page);
 
-  const stamp = Date.now();
-  const fullName = `Invite User ${stamp}`;
-  const email = `invite-flow-${stamp}@example.com`;
-
   const createResponse = await page.request.post("/api/team/invitations", {
     data: {
-      full_name: fullName,
-      email,
-      role: "foreman",
+      role: "crew_lead",
       permissions: [
         { module_key: "jobs", access_level: "view" },
         { module_key: "messages", access_level: "edit" },
@@ -40,7 +34,7 @@ test("team invite flow requires role+permissions before link and supports pendin
   const listJson = JSON.parse(listBody);
   const pending = (listJson?.items ?? []).find((item: { id: string }) => String(item.id) === invitationId);
   expect(pending).toBeTruthy();
-  expect(String(pending.email)).toBe(email);
+  expect(String(pending.role)).toBe("crew_lead");
   const pendingPermissions = new Map(
     ((pending?.permissions ?? []) as Array<{ module_key: string; access_level: string }>).map((row) => [row.module_key, row.access_level])
   );

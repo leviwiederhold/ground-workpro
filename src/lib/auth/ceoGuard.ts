@@ -1,11 +1,11 @@
 import type { getCompanyId } from "@/lib/tenant/getCompanyId";
+import { isOwnerTeamRole } from "./teamRoles.ts";
 
 export type MembershipRole = "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator";
 type SupabaseClientLike = Awaited<ReturnType<typeof getCompanyId>>["supabase"];
 
 export function isCeoMembershipRole(value: unknown): boolean {
-  const raw = String(value ?? "").trim().toLowerCase();
-  return raw.includes("admin") || raw.includes("executive") || raw.includes("ceo");
+  return isOwnerTeamRole(value);
 }
 
 export async function listCompanyMembershipRoles(
@@ -32,6 +32,6 @@ export async function ensureCompanyHasAtLeastOneCeoMembership(
   const roles = await listCompanyMembershipRoles(supabase, companyId);
   const hasCeo = roles.some((row) => isCeoMembershipRole(row.role));
   if (!hasCeo) {
-    throw new Error("Company must always have at least one CEO membership");
+    throw new Error("Company must always have at least one Owner membership");
   }
 }

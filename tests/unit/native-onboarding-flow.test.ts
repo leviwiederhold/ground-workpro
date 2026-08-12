@@ -52,9 +52,9 @@ test("carousel chrome is intact: skip, dots, and Next/Get started", () => {
 test("the original entry choices are preserved and not collapsed into one card", () => {
   const source = gate();
 
-  // Company / employee / existing-account are three distinct actions.
+  // Company / join-team / existing-account are three distinct actions.
   assert.match(source, /Already part of a company\?/);
-  assert.match(source, /I&apos;m an employee/);
+  assert.match(source, /I&apos;m joining a team/);
   assert.match(source, /Already have an account\? Sign In/);
 
   assert.match(source, /onClick=\{\(\) => goTo\("company-access"\)\}/, "company path must remain");
@@ -147,7 +147,7 @@ test("/native/login keeps the original login-screen design and navigation", () =
   assert.match(source, /className="back-btn"/, "the back button must remain");
   assert.match(source, /router\.push\("\/native"\)/, "back must return to onboarding");
   assert.match(source, /Sign in to Groundwork Pro/, "the original heading must remain");
-  assert.match(source, /Use your existing employee or company account\./, "the original subcopy must remain");
+  assert.match(source, /Use your existing team or company account\./, "the sign-in subcopy uses current team terminology");
 });
 
 test("email fields stay hidden until Continue with Email is tapped", () => {

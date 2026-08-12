@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { normalizeAppRole } from "@/lib/nav/config";
+import { isMissingLegacyPermissionProfileColumn } from "@/lib/auth/teamRoles";
 
 export type WorkOrderAssignmentMode = "in_house" | "outsourced";
 
@@ -51,20 +53,38 @@ export async function resolveWorkOrderAssignment({
     };
   }
 
-  const membership = await supabase
+  let membership = await supabase
     .from("memberships")
-    .select("user_id, role")
+    .select("user_id, role, legacy_permission_profile")
     .eq("company_id", companyId)
     .eq("user_id", normalizedAssignedTo)
     .maybeSingle();
+
+  if (isMissingLegacyPermissionProfileColumn(membership.error)) {
+    const legacyMembership = await supabase
+      .from("memberships")
+      .select("user_id, role")
+      .eq("company_id", companyId)
+      .eq("user_id", normalizedAssignedTo)
+      .maybeSingle();
+    membership = {
+      ...legacyMembership,
+      data: legacyMembership.data
+        ? { ...legacyMembership.data, legacy_permission_profile: null }
+        : null,
+    } as typeof membership;
+  }
 
   if (membership.error) {
     return { ok: false, error: membership.error.message || "Failed to validate assigned technician." };
   }
 
-  const role = String(membership.data?.role ?? "").trim().toLowerCase();
+  const role = normalizeAppRole(
+    membership.data?.role,
+    membership.data?.legacy_permission_profile
+  );
   if (!membership.data || role !== "mechanic") {
-    return { ok: false, status: 422, error: "Assigned technician must be an active company mechanic." };
+    return { ok: false, status: 422, error: "Assigned technician must be an active Team Member with maintenance access." };
   }
 
   const employee = await supabase

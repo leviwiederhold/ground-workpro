@@ -11,14 +11,37 @@ async function signupFromInvite(browser: Browser, inviteUrl: string, email: stri
   const context = await browser.newContext();
   const page = await context.newPage();
   await page.goto(inviteUrl);
-  await page.locator('input[type="email"]').fill(email);
-  await page.locator('input[type="password"]').fill(password);
+  const fillInviteForm = async () => {
+    await page.locator('input[autocomplete="given-name"]').fill('Field');
+    await page.locator('input[autocomplete="family-name"]').fill('Staff');
+    await page.locator('input[type="email"]').fill(email);
+    await page.locator('input[type="password"]').fill(password);
+  };
+  await fillInviteForm();
   await page.getByRole('button', { name: 'Create account' }).click();
-  await page.waitForURL(/\/($|setup|profile)/, { timeout: 30_000 });
+  const ownerProtection = page.getByRole('button', {
+    name: 'Sign out and accept as team member',
+  });
+  await expect
+    .poll(
+      async () =>
+        (await ownerProtection.isVisible().catch(() => false)) ||
+        new URL(page.url()).pathname !== '/signup',
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+  if (await ownerProtection.isVisible().catch(() => false)) {
+    await ownerProtection.click();
+    await fillInviteForm();
+    await page.getByRole('button', { name: 'Create account' }).click();
+  }
+  await expect
+    .poll(() => new URL(page.url()).pathname, { timeout: 30_000 })
+    .toMatch(/^\/(?:$|setup|profile)/);
   return { context, page };
 }
 
-test('field staff invite is accepted, removed from pending, and keeps field staff display role', async ({ page, browser }) => {
+test('legacy field staff invite is accepted and displayed as Team Member', async ({ page, browser }) => {
   await loginViaUI(page);
   await setRole(page, 'admin');
 
@@ -52,7 +75,12 @@ test('field staff invite is accepted, removed from pending, and keeps field staf
   const navBody = await navResponse.text();
   expect(navResponse.status(), navBody).toBe(200);
   const navJson = JSON.parse(navBody);
-  expect(String(navJson?.displayRole ?? '')).toBe('fieldstaff');
+  expect(String(navJson?.displayRole ?? '')).toBe('team_member');
+
+  // Other role specs deliberately mutate the shared E2E actor. Reassert the
+  // Owner role before reading the company-scoped pending and Team collections.
+  await loginViaUI(page);
+  await setRole(page, 'admin');
 
   await expect
     .poll(
@@ -82,7 +110,7 @@ test('field staff invite is accepted, removed from pending, and keeps field staf
       },
       { timeout: 30_000 }
     )
-    .toBe('active::fieldstaff');
+    .toBe('active::team_member');
 
   await context.close();
 });

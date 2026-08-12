@@ -33,7 +33,7 @@ test.describe('native App Store auth compliance', () => {
 
     await expect(page.getByRole('button', { name: /Already part of a company/ })).toBeVisible();
     await expect(page.getByText('Sign in with your company account. New company signup is available on the web.')).toBeVisible();
-    await expect(page.getByRole('button', { name: /I'm an employee/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /I'm joining a team/ })).toBeVisible();
     await expect(page.getByTestId('onboarding-existing-login')).toBeVisible();
     await expect(page.getByText('Create your company')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /create account/i })).toHaveCount(0);
@@ -51,6 +51,21 @@ test.describe('native App Store auth compliance', () => {
     await expect(page.getByRole('button', { name: /create account/i })).toHaveCount(0);
     await expect(page.locator('input[type="email"]')).toHaveCount(0);
 
+    await page.route('**/api/invite/validate', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          item: {
+            company_name: 'Groundwork Test Company',
+            role: 'team_member',
+            job_title: 'Equipment Operator',
+            viewer_is_owner: false,
+            viewer_is_member: false,
+          },
+        }),
+      });
+    });
     await page.goto('/signup?gw_native=1&invite=1&token=test-token');
     await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
     await expect(page.locator('input[type="email"]')).toBeVisible();

@@ -68,6 +68,23 @@ const confirmDestructiveAction = (targetLabel) =>
 const canRoleGiveFinalSafetySignOff = (role) =>
   ['executive', 'operations', 'admin', 'pm'].includes(String(role || '').toLowerCase());
 
+const canonicalTeamRole = (value) => {
+  const role = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (['owner', 'admin', 'executive', 'ceo', 'coceo'].includes(role)) return 'owner';
+  if (role === 'administrator') return 'administrator';
+  if (['manager', 'pm', 'operations', 'operationsmanager', 'projectmanager'].includes(role)) return 'manager';
+  if (['crewlead', 'foreman'].includes(role)) return 'crew_lead';
+  return 'team_member';
+};
+
+const teamRoleLabel = (value) => ({
+  owner: 'Owner',
+  administrator: 'Administrator',
+  manager: 'Manager',
+  crew_lead: 'Crew Lead',
+  team_member: 'Team Member',
+})[canonicalTeamRole(value)];
+
 const pickDisplayName = ({ fullName, displayName, email }) => {
   const normalizedFullName = String(fullName ?? '').trim();
   if (normalizedFullName) return normalizedFullName;
@@ -324,14 +341,14 @@ const MobileAppShell = ({
     ];
 
     const EMPLOYEES = [
-      { id: 1, name: 'Mike Johnson', role: 'Foreman', phone: '(614) 555-0101', email: 'mjohnson@groundwork.com', certifications: [{ name: 'OSHA 30', expires: '2026-08-15' }, { name: 'CDL Class A', expires: '2026-03-22' }], jobId: 1, status: 'clocked-in', clockedInAt: '06:45 AM' },
-      { id: 2, name: 'Sarah Williams', role: 'Equipment Operator', phone: '(614) 555-0102', email: 'swilliams@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2025-12-01' }, { name: 'CDL Class B', expires: '2027-01-15' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:00 AM' },
-      { id: 3, name: 'James Rodriguez', role: 'Equipment Operator', phone: '(614) 555-0103', email: 'jrodriguez@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-05-20' }, { name: 'Excavator Cert', expires: '2026-11-30' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:30 AM' },
-      { id: 4, name: 'David Chen', role: 'Foreman', phone: '(614) 555-0104', email: 'dchen@groundwork.com', certifications: [{ name: 'OSHA 30', expires: '2026-02-28' }, { name: 'CDL Class A', expires: '2025-09-10' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:45 AM' },
-      { id: 5, name: 'Tom Martinez', role: 'Laborer', phone: '(614) 555-0105', email: 'tmartinez@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-07-12' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:15 AM' },
-      { id: 6, name: 'Chris Taylor', role: 'Equipment Operator', phone: '(614) 555-0106', email: 'ctaylor@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-04-18' }, { name: 'CDL Class A', expires: '2026-12-05' }], jobId: 3, status: 'clocked-in', clockedInAt: '07:00 AM' },
-      { id: 7, name: 'Brian Wilson', role: 'Mechanic', phone: '(614) 555-0107', email: 'bwilson@groundwork.com', certifications: [{ name: 'ASE Master', expires: '2027-03-01' }, { name: 'CAT Certified', expires: '2026-06-30' }], jobId: null, status: 'clocked-in', clockedInAt: '07:30 AM' },
-      { id: 8, name: 'Kevin Brown', role: 'Laborer', phone: '(614) 555-0108', email: 'kbrown@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-09-25' }], jobId: null, status: 'off', clockedInAt: null },
+      { id: 1, name: 'Mike Johnson', role: 'crew_lead', jobTitle: 'Foreman', phone: '(614) 555-0101', email: 'mjohnson@groundwork.com', certifications: [{ name: 'OSHA 30', expires: '2026-08-15' }, { name: 'CDL Class A', expires: '2026-03-22' }], jobId: 1, status: 'clocked-in', clockedInAt: '06:45 AM' },
+      { id: 2, name: 'Sarah Williams', role: 'team_member', jobTitle: 'Equipment Operator', phone: '(614) 555-0102', email: 'swilliams@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2025-12-01' }, { name: 'CDL Class B', expires: '2027-01-15' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:00 AM' },
+      { id: 3, name: 'James Rodriguez', role: 'team_member', jobTitle: 'Equipment Operator', phone: '(614) 555-0103', email: 'jrodriguez@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-05-20' }, { name: 'Excavator Cert', expires: '2026-11-30' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:30 AM' },
+      { id: 4, name: 'David Chen', role: 'crew_lead', jobTitle: 'Foreman', phone: '(614) 555-0104', email: 'dchen@groundwork.com', certifications: [{ name: 'OSHA 30', expires: '2026-02-28' }, { name: 'CDL Class A', expires: '2025-09-10' }], jobId: 2, status: 'clocked-in', clockedInAt: '06:45 AM' },
+      { id: 5, name: 'Tom Martinez', role: 'team_member', jobTitle: 'Laborer', phone: '(614) 555-0105', email: 'tmartinez@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-07-12' }], jobId: 1, status: 'clocked-in', clockedInAt: '07:15 AM' },
+      { id: 6, name: 'Chris Taylor', role: 'team_member', jobTitle: 'Equipment Operator', phone: '(614) 555-0106', email: 'ctaylor@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-04-18' }, { name: 'CDL Class A', expires: '2026-12-05' }], jobId: 3, status: 'clocked-in', clockedInAt: '07:00 AM' },
+      { id: 7, name: 'Brian Wilson', role: 'team_member', jobTitle: 'Mechanic', phone: '(614) 555-0107', email: 'bwilson@groundwork.com', certifications: [{ name: 'ASE Master', expires: '2027-03-01' }, { name: 'CAT Certified', expires: '2026-06-30' }], jobId: null, status: 'clocked-in', clockedInAt: '07:30 AM' },
+      { id: 8, name: 'Kevin Brown', role: 'team_member', jobTitle: 'Laborer', phone: '(614) 555-0108', email: 'kbrown@groundwork.com', certifications: [{ name: 'OSHA 10', expires: '2026-09-25' }], jobId: null, status: 'off', clockedInAt: null },
     ];
 
     const WORK_ORDERS = [
@@ -913,12 +930,12 @@ const MobileAppShell = ({
 
     // Role definitions with permissions
     const ROLES = {
-      executive: { label: 'Executive / CEO', icon: 'crown', color: 'text-yellow-500' },
-      operations: { label: 'Operations Manager', icon: 'sitemap', color: 'text-blue-500' },
-      foreman: { label: 'Foreman', icon: 'helmet-safety', color: 'text-orange-500' },
-      mechanic: { label: 'Mechanic', icon: 'wrench', color: 'text-red-500' },
-      operator: { label: 'Operator', icon: 'user-gear', color: 'text-green-500' },
-      field: { label: 'Field Staff', icon: 'user-gear', color: 'text-green-500' },
+      executive: { label: 'Owner', icon: 'crown', color: 'text-yellow-500' },
+      operations: { label: 'Manager', icon: 'sitemap', color: 'text-blue-500' },
+      foreman: { label: 'Crew Lead', icon: 'helmet-safety', color: 'text-orange-500' },
+      mechanic: { label: 'Team Member', icon: 'wrench', color: 'text-red-500' },
+      operator: { label: 'Team Member', icon: 'user-gear', color: 'text-green-500' },
+      field: { label: 'Team Member', icon: 'user-gear', color: 'text-green-500' },
     };
 
     const App = ({ currentUser, onLogout }) => {
@@ -990,20 +1007,16 @@ const MobileAppShell = ({
       }));
       const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
       const [feedbackStatus, setFeedbackStatus] = useState({ type: 'idle', message: '' });
-      const roleBadgeLabel =
-        currentRoleDisplay === 'executive'
-          ? 'CEO'
-          : currentRoleDisplay === 'operations'
-            ? 'Operations Manager'
-            : currentRoleDisplay === 'foreman'
-              ? 'Foreman'
-              : currentRoleDisplay === 'mechanic'
-                ? 'Mechanic'
-                : currentRoleDisplay === 'field'
-                  ? 'Field Staff'
-                  : currentRoleDisplay === 'operator'
-                  ? 'Operator'
-                  : 'Team Member';
+      const roleBadgeLabel = ({
+        owner: 'Owner',
+        administrator: 'Administrator',
+        manager: 'Manager',
+        crew_lead: 'Crew Lead',
+        team_member: 'Team Member',
+        executive: 'Owner',
+        operations: 'Manager',
+        foreman: 'Crew Lead',
+      })[currentRoleDisplay] || 'Team Member';
       const isCeoRole = currentRole === 'executive';
       const canLoadProtectedData =
         subscriptionGate.loaded &&
@@ -1193,6 +1206,7 @@ const MobileAppShell = ({
       });
 
       const mapServerRoleToUiRole = useCallback((role) => {
+        if (['owner', 'administrator', 'manager', 'crew_lead', 'team_member'].includes(role)) return role;
         if (role === 'admin') return 'executive';
         if (role === 'pm') return 'operations';
         if (role === 'foreman') return 'foreman';
@@ -3833,7 +3847,7 @@ const MobileAppShell = ({
       const [assignSuccess, setAssignSuccess] = useState('');
       const [employeeForm, setEmployeeForm] = useState({
         name: '',
-        role: 'operator',
+        role: 'team_member',
         phone: '',
         email: '',
         jobId: '',
@@ -3865,30 +3879,28 @@ const MobileAppShell = ({
       // Finance and Reports are Manager-or-above only. Below Manager they are
       // hidden in the invite form and force-stripped from the payload (server
       // enforces too).
-      const MANAGER_LEVEL_INVITE_ROLES = ['ceo', 'manager'];
+      const MANAGER_LEVEL_INVITE_ROLES = ['owner', 'administrator', 'manager'];
       const SENSITIVE_MANAGER_ONLY_KEYS = ['finance', 'reports'];
       const isManagerLevelInviteRole = (role) =>
         MANAGER_LEVEL_INVITE_ROLES.includes(String(role || '').toLowerCase());
-      const isCeoLevelUiRole = (role) =>
-        ['admin', 'executive', 'ceo'].includes(String(role || '').toLowerCase());
+      const isOwnerLevelUiRole = (role) =>
+        ['admin', 'executive', 'ceo', 'owner'].includes(String(role || '').toLowerCase());
       const canSeeSensitiveModule = (moduleKey, role) =>
         !SENSITIVE_MANAGER_ONLY_KEYS.includes(moduleKey) || isManagerLevelInviteRole(role);
       const roleTemplateDefaults = {
-        ceo: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
+        owner: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
+        administrator: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'view', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'view', team_management: 'view' },
         manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'view', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'view', team_management: 'view' },
-        foreman: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', team_management: 'none' },
-        mechanic: { jobs: 'none', fleet: 'edit', maintenance: 'edit', daily_reports: 'none', safety: 'view', messages: 'edit', inventory: 'edit', reports: 'none', vendors: 'none', documents: 'none', training: 'view', finance: 'none', team_management: 'none' },
-        operator: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', team_management: 'none' },
-        fieldstaff: { jobs: 'none', fleet: 'none', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'view', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', team_management: 'none' },
+        crew_lead: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', team_management: 'none' },
+        team_member: { jobs: 'none', fleet: 'view', maintenance: 'none', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'none', finance: 'none', team_management: 'none' },
       };
       const appRoleToInviteRole = (role) => {
         const normalized = String(role || '').toLowerCase();
-        if (normalized === 'admin' || normalized === 'executive' || normalized === 'ceo') return 'ceo';
+        if (normalized === 'admin' || normalized === 'executive' || normalized === 'ceo' || normalized === 'owner') return 'owner';
+        if (normalized === 'administrator') return 'administrator';
         if (normalized === 'pm' || normalized === 'operations' || normalized === 'manager') return 'manager';
-        if (normalized === 'foreman') return 'foreman';
-        if (normalized === 'mechanic') return 'mechanic';
-        if (normalized === 'fieldstaff') return 'fieldstaff';
-        return 'operator';
+        if (normalized === 'foreman' || normalized === 'crew_lead') return 'crew_lead';
+        return 'team_member';
       };
       const [showInviteModal, setShowInviteModal] = useState(false);
       const [showInviteResult, setShowInviteResult] = useState(false);
@@ -3904,17 +3916,19 @@ const MobileAppShell = ({
         full_name: '',
         email: '',
         job_title: '',
-        role: 'operator',
+        role: 'team_member',
         invite_url: '',
       });
-      const [permissionForm, setPermissionForm] = useState({ ...roleTemplateDefaults.operator });
+      const [permissionForm, setPermissionForm] = useState({ ...roleTemplateDefaults.team_member });
       const [isMobileTeam, setIsMobileTeam] = useState(false);
       const [showTeamDetails, setShowTeamDetails] = useState(false);
       const isTeamMemberOnSite = (employee) => employee.status === 'active' || Boolean(employee.assignedToday);
       const mapEmployeeSeedToTeamItem = useCallback((employee) => ({
         id: employee.id,
         name: employee.name || employee.full_name || employee.displayName || '',
-        role: employee.role || 'operator',
+        role: canonicalTeamRole(employee.role),
+        jobTitle: employee.jobTitle || employee.job_title || '',
+        accessProfile: employee.accessProfile || employee.legacy_permission_profile || '',
         status: employee.status === 'clocked-in' ? 'active' : (employee.status || 'inactive'),
         user_id: employee.user_id || null,
         accountStatus: employee.user_id ? 'active' : 'invited',
@@ -3931,6 +3945,7 @@ const MobileAppShell = ({
         email: employee.email || '',
         avatarUrl: employee.avatarUrl || '',
         clockedInAt: employee.clockedInAt || null,
+        recordSource: 'employee',
       }), [currentRole, jobs]);
 
       const filteredEmployees = teamItems.filter(emp => {
@@ -3943,14 +3958,15 @@ const MobileAppShell = ({
       const selectedEmployee = teamItems.find(e => String(e.id) === String(selectedEmployeeId));
       const selectedEmployeeRecord = employees.find((employee) => String(employee.id) === String(selectedEmployeeId));
       const normalizeRoleLabel = (value) => String(value || '').trim().toLowerCase();
-      const isSelectedEmployeeCeo = ['admin', 'executive', 'ceo'].includes(
-        normalizeRoleLabel(selectedEmployeeRecord?.role || selectedEmployee?.role)
-      );
+      const isSelectedEmployeeOwner = canonicalTeamRole(
+        selectedEmployeeRecord?.role || selectedEmployee?.role
+      ) === 'owner';
+      const isSelectedMembershipOnly = selectedEmployee?.recordSource === 'membership';
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
       const canManageTeamProfiles = String(moduleAccess?.team_management || 'none') === 'edit';
       const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
-      const canInviteCeo = isCeoLevelUiRole(currentRole);
+      const canInviteOwner = isOwnerLevelUiRole(currentRole);
 
       const stats = {
         total: teamItems.length,
@@ -3993,7 +4009,9 @@ const MobileAppShell = ({
           const mappedItems = payload.items.map((item) => ({
             id: item.id,
             name: item.displayName || '',
-            role: item.role || 'operator',
+            role: canonicalTeamRole(item.role),
+            jobTitle: item.jobTitle || '',
+            accessProfile: item.accessProfile || '',
             status: item.status || 'inactive',
             user_id: item.userId || null,
             accountStatus: item.accountStatus || (item.userId ? 'active' : 'invited'),
@@ -4005,6 +4023,7 @@ const MobileAppShell = ({
             email: item.email || '',
             avatarUrl: item.avatarUrl || '',
             clockedInAt: item.clockedInAt,
+            recordSource: item.recordSource || 'employee',
           }));
           setTeamItems(mappedItems);
         } catch (error) {
@@ -4076,7 +4095,7 @@ const MobileAppShell = ({
         if (!selectedEmployee) return;
         setEmployeeForm({
           name: selectedEmployeeRecord?.name || selectedEmployee.name || '',
-          role: selectedEmployeeRecord?.role || selectedEmployee.role || 'operator',
+          role: canonicalTeamRole(selectedEmployeeRecord?.role || selectedEmployee.role),
           phone: selectedEmployeeRecord?.phone || selectedEmployee.phone || '',
           email: selectedEmployeeRecord?.email || selectedEmployee.email || '',
           jobId:
@@ -4103,8 +4122,8 @@ const MobileAppShell = ({
         setShowSensitiveInviteConfirm(false);
         setShowSeatCostWarning(false);
         setPermissionModalMode('invite-create');
-        setInviteForm({ id: '', full_name: '', email: '', job_title: '', role: 'operator', invite_url: '' });
-        setPermissionForm({ ...roleTemplateDefaults.operator });
+        setInviteForm({ id: '', full_name: '', email: '', job_title: '', role: 'team_member', invite_url: '' });
+        setPermissionForm({ ...roleTemplateDefaults.team_member });
         setShowInviteModal(true);
       };
 
@@ -4114,7 +4133,7 @@ const MobileAppShell = ({
         setEmployeeActionError('');
         try {
           const baselineName = selectedEmployeeRecord?.name || selectedEmployee.name || '';
-          const baselineRole = (selectedEmployeeRecord?.role || selectedEmployee.role || 'operator').toLowerCase();
+          const baselineRole = canonicalTeamRole(selectedEmployeeRecord?.role || selectedEmployee.role);
           const baselinePhone = selectedEmployeeRecord?.phone || selectedEmployee.phone || '';
           const baselineEmail = selectedEmployeeRecord?.email || selectedEmployee.email || '';
           const baselineJobId = selectedEmployeeRecord?.jobId
@@ -4126,7 +4145,7 @@ const MobileAppShell = ({
 
           const requestBody = {};
           if ((employeeForm.name || '').trim() !== String(baselineName)) requestBody.name = (employeeForm.name || '').trim();
-          if (String(employeeForm.role || '').toLowerCase() !== String(baselineRole)) requestBody.role = employeeForm.role || 'operator';
+          if (canonicalTeamRole(employeeForm.role) !== baselineRole) requestBody.role = employeeForm.role || 'team_member';
           if ((employeeForm.phone || '') !== String(baselinePhone)) requestBody.phone = employeeForm.phone || '';
           if ((employeeForm.email || '') !== String(baselineEmail)) requestBody.email = employeeForm.email || '';
           if (String(employeeForm.jobId || '') !== String(baselineJobId || '')) {
@@ -4458,7 +4477,7 @@ const MobileAppShell = ({
             return;
           }
           if (action === 'edit') {
-            const nextPermissions = { ...roleTemplateDefaults[invite.role || 'operator'] };
+            const nextPermissions = { ...roleTemplateDefaults[canonicalTeamRole(invite.role)] };
             for (const row of invite.permissions || []) nextPermissions[row.module_key] = row.access_level;
             setPermissionForm(nextPermissions);
             setShowSensitiveInviteConfirm(false);
@@ -4467,7 +4486,7 @@ const MobileAppShell = ({
               full_name: invite.full_name || '',
               email: invite.email || '',
               job_title: invite.job_title || '',
-              role: invite.role || 'operator',
+              role: canonicalTeamRole(invite.role),
               invite_url: invite.invite_url || '',
             });
             setPermissionModalMode('invite-edit');
@@ -4507,8 +4526,8 @@ const MobileAppShell = ({
           const response = await fetch(`/api/team/members/${selectedEmployee.id}/permissions`, { cache: 'no-store' });
           const payload = await response.json().catch(() => ({}));
           if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to load permissions');
-          const role = payload.item.role || appRoleToInviteRole(selectedEmployee.role || 'operator');
-          const nextPermissions = { ...roleTemplateDefaults[role || 'operator'] };
+          const role = canonicalTeamRole(payload.item.role || appRoleToInviteRole(selectedEmployee.role));
+          const nextPermissions = { ...roleTemplateDefaults[role] };
           for (const row of payload.item.permissions || []) nextPermissions[row.module_key] = row.access_level;
           setPermissionForm(nextPermissions);
           setInviteForm({
@@ -4528,8 +4547,8 @@ const MobileAppShell = ({
 
       const handleSaveMemberPermissions = async () => {
         if (!selectedEmployee?.id) return;
-        if (permissionModalMode === 'member-edit' && inviteForm.role === 'ceo') {
-          setInviteFeedback('CEO role and permissions are locked at full access.');
+        if (permissionModalMode === 'member-edit' && inviteForm.role === 'owner') {
+          setInviteFeedback('Owner role and permissions are locked at full access.');
           return;
         }
         setInviteSaveLoading(true);
@@ -4610,9 +4629,9 @@ const MobileAppShell = ({
         <div className="space-y-6">
           {/* Stats */}
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
-            <StatCard icon="users" label="Total Employees" value={stats.total} color="brand" />
+            <StatCard icon="users" label="Team Members" value={stats.total} color="brand" />
             <StatCard icon="user-check" label="On Site Today" value={stats.onSite} color="green" />
-            <StatCard icon="hard-hat" label="Foremen" value={teamItems.filter(e => String(e.role).toLowerCase() === 'foreman').length} color="blue" />
+            <StatCard icon="hard-hat" label="Crew Leads" value={teamItems.filter(e => canonicalTeamRole(e.role) === 'crew_lead').length} color="blue" />
             <StatCard icon="id-card" label="Expiring Certs" value={teamItems.flatMap(e => (e.certifications || []).filter(c => getDaysUntil(c.expires) < 60)).length} color="red" />
           </StatGrid>
 
@@ -4643,11 +4662,10 @@ const MobileAppShell = ({
                   <Icon name="clock" className="mr-2" /> Time Clock
                 </Button>
               )}
-              {/* Native iOS: Add Employee is hidden entirely (affects seat
-                  billing — managed on web only). Web CEO/admin keeps it. */}
+              {/* Native iOS: team/seat management remains on the web dashboard. */}
               {!iosAppRuntime && (
                 <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={!canManageTeamProfiles}>
-                  <Icon name="user-plus" className="mr-2" /> Add Employee
+                  <Icon name="user-plus" className="mr-2" /> Add Team Member
                 </Button>
               )}
             </div>
@@ -4671,10 +4689,10 @@ const MobileAppShell = ({
                   <div className="space-y-3">
                     {pendingInvites.map((invite) => {
                       const roleLabels = {
-                        ceo: 'CEO', admin: 'CEO', manager: 'Operations Manager', pm: 'Operations Manager',
-                        foreman: 'Foreman', mechanic: 'Mechanic', operator: 'Operator', fieldstaff: 'Field Staff',
+                        owner: 'Owner', administrator: 'Administrator', manager: 'Manager',
+                        crew_lead: 'Crew Lead', team_member: 'Team Member',
                       };
-                      const roleLabel = roleLabels[String(invite.role || '').toLowerCase()] || (invite.role || 'Member');
+                      const roleLabel = roleLabels[canonicalTeamRole(invite.role)] || 'Team Member';
                       const jobTitle = String(invite.job_title || '').trim();
                       const headline = jobTitle || roleLabel;
                       const accessCount = Array.isArray(invite.permissions)
@@ -4756,7 +4774,8 @@ const MobileAppShell = ({
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-gray-500">{emp.role}</p>
+                        <p className="text-sm text-gray-500">{emp.jobTitle || teamRoleLabel(emp.role)}</p>
+                        {emp.jobTitle && <p className="text-xs text-gray-500">{teamRoleLabel(emp.role)}</p>}
                         <p className="text-xs text-gray-500">
                           Account: {emp.accountStatus === 'active' ? 'Active' : 'Invite pending'}
                         </p>
@@ -4831,7 +4850,8 @@ const MobileAppShell = ({
                     </button>
                   )}
                   <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>
-                  <p className="text-sm text-gray-500">{selectedEmployee.role}</p>
+                  <p className="text-sm text-gray-500">{selectedEmployee.jobTitle || teamRoleLabel(selectedEmployee.role)}</p>
+                  {selectedEmployee.jobTitle && <p className="text-xs text-gray-500">{teamRoleLabel(selectedEmployee.role)}</p>}
                   <Badge className={`mt-2 ${getStatusColor(selectedEmployee.status)}`}>
                     {selectedEmployee.status === 'active' ? 'On Site' : 'Off'}
                   </Badge>
@@ -4845,7 +4865,7 @@ const MobileAppShell = ({
                       value={employeeForm.name}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, name: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      disabled={!canManageTeamProfiles}
+                      disabled={!canManageTeamProfiles || isSelectedMembershipOnly}
                     />
                   </div>
 
@@ -4855,18 +4875,19 @@ const MobileAppShell = ({
                       value={employeeForm.role}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, role: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      disabled={!canManageTeamProfiles || isSelectedEmployeeCeo}
+                      disabled={!canManageTeamProfiles || isSelectedEmployeeOwner || isSelectedMembershipOnly}
                     >
-                      <option value="admin">Admin</option>
-                      <option value="pm">PM</option>
-                      <option value="foreman">Foreman</option>
-                      <option value="mechanic">Mechanic</option>
-                      <option value="operator">Operator</option>
-                      <option value="fieldstaff">Field Staff</option>
-                      <option value="operator">Laborer</option>
+                      {(canInviteOwner || isSelectedEmployeeOwner) && <option value="owner">Owner</option>}
+                      <option value="administrator">Administrator</option>
+                      <option value="manager">Manager</option>
+                      <option value="crew_lead">Crew Lead</option>
+                      <option value="team_member">Team Member</option>
                     </select>
-                    {isSelectedEmployeeCeo && (
-                      <p className="text-xs text-amber-700 mt-1">CEO role is locked.</p>
+                    {isSelectedEmployeeOwner && (
+                      <p className="text-xs text-amber-700 mt-1">Owner role is locked.</p>
+                    )}
+                    {isSelectedMembershipOnly && (
+                      <p className="text-xs text-gray-500 mt-1">This access record is not linked to an employee profile.</p>
                     )}
                   </div>
 
@@ -4878,7 +4899,7 @@ const MobileAppShell = ({
                         value={employeeForm.phone}
                         onChange={(e) => setEmployeeForm((prev) => ({ ...prev, phone: e.target.value }))}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        disabled={!canManageTeamProfiles}
+                        disabled={!canManageTeamProfiles || isSelectedMembershipOnly}
                       />
                     </div>
                     <div>
@@ -4888,7 +4909,7 @@ const MobileAppShell = ({
                         value={employeeForm.email}
                         onChange={(e) => setEmployeeForm((prev) => ({ ...prev, email: e.target.value }))}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        disabled={!canManageTeamProfiles}
+                        disabled={!canManageTeamProfiles || isSelectedMembershipOnly}
                       />
                     </div>
                   </div>
@@ -4900,7 +4921,7 @@ const MobileAppShell = ({
                         value={employeeForm.status}
                         onChange={(e) => setEmployeeForm((prev) => ({ ...prev, status: e.target.value }))}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        disabled={!canManageTeamProfiles}
+                        disabled={!canManageTeamProfiles || isSelectedMembershipOnly}
                       >
                         <option value="active">active</option>
                         <option value="inactive">inactive</option>
@@ -4914,7 +4935,7 @@ const MobileAppShell = ({
                       value={employeeForm.jobId}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, jobId: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      disabled={!canManageTeamProfiles}
+                      disabled={!canManageTeamProfiles || isSelectedMembershipOnly}
                     >
                       <option value="">Unassigned</option>
                       {jobs.map((job) => (
@@ -4957,20 +4978,20 @@ const MobileAppShell = ({
                     <Button variant="secondary" size="sm" className="flex-1">
                       <Icon name="clock-rotate-left" className="mr-1" /> Timesheet
                     </Button>
-                    {canManageTeamProfiles && (
+                    {canManageTeamProfiles && !isSelectedMembershipOnly && (
                       <Button variant="brand" size="sm" className="flex-1" onClick={handleSaveEmployee} disabled={employeeSaveLoading}>
                         <Icon name="floppy-disk" className="mr-1" /> {employeeSaveLoading ? 'Saving...' : 'Save'}
                       </Button>
                     )}
                   </div>
-                  {canManageTeamProfiles && selectedEmployee.accountStatus === 'active' && (
+                  {canManageTeamProfiles && !isSelectedMembershipOnly && selectedEmployee.accountStatus === 'active' && (
                     <div className="pt-2">
                       <Button variant="secondary" size="sm" className="w-full" onClick={handleEditMemberPermissions}>
                         <Icon name="shield-halved" className="mr-1" /> Edit Permissions
                       </Button>
                     </div>
                   )}
-                  {canManageTeamProfiles && (
+                  {canManageTeamProfiles && !isSelectedMembershipOnly && (
                     <div className="pt-2">
                       <Button
                         variant="danger"
@@ -4983,7 +5004,7 @@ const MobileAppShell = ({
                       </Button>
                     </div>
                   )}
-                  {canManageTeamProfiles && (
+                  {canManageTeamProfiles && !isSelectedMembershipOnly && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <Button variant="secondary" size="sm" onClick={handleCopyInviteLink} disabled={!inviteForm.invite_url}>
                         <Icon name="link" className="mr-1" /> Copy Invite Link
@@ -5002,7 +5023,7 @@ const MobileAppShell = ({
             ) : (
               !isMobileTeam ? <Card className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 p-8 text-center text-gray-500 shadow-sm">
                 <Icon name="user" className="mb-3 text-4xl text-gray-300" />
-                <p className="font-medium text-gray-600">Employee details stay here.</p>
+                <p className="font-medium text-gray-600">Team member details stay here.</p>
                 <p className="mt-1 text-sm text-gray-500">Pick someone from the roster to review role, contact info, and assignments.</p>
               </Card> : null
             )}
@@ -5012,7 +5033,7 @@ const MobileAppShell = ({
           <Modal
             isOpen={Boolean(teamReassignPrompt)}
             onClose={handleCancelTeamReassign}
-            title="Employee already assigned"
+            title="Team member already assigned"
             size="sm"
             portal
           >
@@ -5057,7 +5078,7 @@ const MobileAppShell = ({
               setShowSensitiveInviteConfirm(false);
               setPermissionModalMode('invite-create');
             }}
-            title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Employee'}
+            title={permissionModalMode === 'member-edit' ? 'Edit Member Permissions' : permissionModalMode === 'invite-edit' ? 'Edit Pending Invite' : 'Invite Team Member'}
             size="md"
             portal
             panelClassName="!max-w-3xl"
@@ -5083,7 +5104,7 @@ const MobileAppShell = ({
                   <label className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-gray-500 dark:text-zinc-500">Job Title <span className="font-normal normal-case tracking-normal text-gray-400">(optional)</span></label>
                   <input
                     type="text"
-                    placeholder="e.g. Site Foreman"
+                    placeholder="e.g. Equipment Operator"
                     className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
                     value={inviteForm.job_title}
                     onChange={(event) => setInviteForm((prev) => ({ ...prev, job_title: event.target.value }))}
@@ -5099,21 +5120,20 @@ const MobileAppShell = ({
                 <select
                   className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
                   value={inviteForm.role}
-                  disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'ceo'}
+                  disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'owner'}
                   onChange={(event) => {
                     const nextRole = event.target.value;
                     setInviteForm((prev) => ({ ...prev, role: nextRole }));
                     setPermissionForm({ ...roleTemplateDefaults[nextRole] });
                   }}
                 >
-                  {(canInviteCeo || (permissionModalMode === 'member-edit' && inviteForm.role === 'ceo')) && (
-                    <option value="ceo">Co-CEO</option>
+                  {(canInviteOwner || (permissionModalMode === 'member-edit' && inviteForm.role === 'owner')) && (
+                    <option value="owner">Owner</option>
                   )}
+                  <option value="administrator">Administrator</option>
                   <option value="manager">Manager</option>
-                  <option value="foreman">Foreman</option>
-                  <option value="mechanic">Mechanic</option>
-                  <option value="operator">Operator</option>
-                  <option value="fieldstaff">Field Staff</option>
+                  <option value="crew_lead">Crew Lead</option>
+                  <option value="team_member">Team Member</option>
                 </select>
               </div>
 
@@ -5138,7 +5158,7 @@ const MobileAppShell = ({
                       <select
                         className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                         value={permissionForm[module.key] || 'none'}
-                        disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'ceo'}
+                        disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'owner'}
                         onChange={(event) =>
                           setPermissionForm((prev) => ({
                             ...prev,
@@ -5154,7 +5174,7 @@ const MobileAppShell = ({
                   ))}
                 </div>
                 <p className="mt-2 text-[11px] text-gray-500 dark:text-zinc-400">
-                  Billing is sensitive and follows CEO-level access.
+                  Billing is sensitive and follows Owner-level access.
                 </p>
                 {sensitivePermissionGrants.length > 0 && (
                   <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-950/25">
@@ -5165,8 +5185,8 @@ const MobileAppShell = ({
                 )}
               </div>
 
-              {permissionModalMode === 'member-edit' && inviteForm.role === 'ceo' && (
-                <p className="text-xs text-amber-700">CEO role and permissions are locked at full access.</p>
+              {permissionModalMode === 'member-edit' && inviteForm.role === 'owner' && (
+                <p className="text-xs text-amber-700">Owner role and permissions are locked at full access.</p>
               )}
 
               {inviteFeedback && <p className="text-xs text-gray-600 dark:text-zinc-300">{inviteFeedback}</p>}
@@ -6433,7 +6453,7 @@ const MobileAppShell = ({
                   size="sm"
                   onClick={() => applyPreset('ceo_weekly')}
                 >
-                  CEO Weekly
+                  Owner Weekly
                 </Button>
                 <Button
                   variant={activeReportPreset === 'ops_review' ? 'brand' : 'secondary'}
@@ -6921,7 +6941,7 @@ const MobileAppShell = ({
               <Table
                 columns={[
                   { header: 'Employee', render: (row) => <span className="font-medium">{row.name}</span> },
-                  { header: 'Role', key: 'role' },
+                  { header: 'Role', render: (row) => teamRoleLabel(row.role) },
                   { header: 'Status', render: (row) => <Badge className={getStatusColor(row.status)}>{row.status}</Badge> },
                   { header: 'Current Job', render: (row) => jobs.find(j => j.id === row.jobId)?.name || '-' },
                 ]}
@@ -10723,7 +10743,7 @@ const MobileAppShell = ({
       };
 
       const teamByRole = employees.reduce((acc, emp) => {
-        const key = String(emp?.role || 'operator').toLowerCase();
+        const key = canonicalTeamRole(emp?.role);
         acc[key] = (acc[key] || 0) + 1;
         return acc;
       }, {});
@@ -10901,9 +10921,9 @@ const MobileAppShell = ({
               </Button>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {['admin', 'pm', 'foreman', 'mechanic', 'operator'].map((role) => (
+              {['owner', 'administrator', 'manager', 'crew_lead', 'team_member'].map((role) => (
                 <div key={role} className="min-w-0 rounded-lg border border-gray-200 p-3">
-                  <p className="text-xs uppercase text-gray-500">{role === 'admin' ? 'CEO' : role}</p>
+                  <p className="text-xs uppercase text-gray-500">{teamRoleLabel(role)}</p>
                   <p className="text-xl font-semibold text-gray-900">{Number(teamByRole[role] || 0)}</p>
                 </div>
               ))}
@@ -12343,7 +12363,12 @@ const MobileAppShell = ({
       });
       const eligibleOperators = (employees || []).filter((employee) => {
         const role = String(employee?.role || '').toLowerCase();
-        return role.includes('operator') || role.includes('laborer') || role.includes('labourer') || role.includes('field');
+        const accessProfile = String(employee?.accessProfile || employee?.legacy_permission_profile || '').toLowerCase();
+        return ['operator', 'fieldstaff'].includes(accessProfile)
+          || role.includes('operator')
+          || role.includes('laborer')
+          || role.includes('labourer')
+          || role.includes('field');
       });
 
       const handleSubmit = async () => {
@@ -12602,11 +12627,11 @@ const MobileAppShell = ({
       const mechanicOptions = useMemo(() => {
         const members = Array.isArray(companyMembers) ? companyMembers : [];
         return members
-          .filter((member) => String(member?.role || '').toLowerCase() === 'mechanic')
+          .filter((member) => String(member?.accessProfile || '').toLowerCase() === 'mechanic')
           .filter((member) => !['inactive', 'deleted', 'archived'].includes(String(member?.status || '').toLowerCase()))
           .map((member) => ({
             value: String(member.userId || ''),
-            label: member.displayName || member.email || 'Mechanic',
+            label: member.displayName || member.email || 'Technician',
           }))
           .filter((member) => member.value);
       }, [companyMembers]);
@@ -12777,7 +12802,7 @@ const MobileAppShell = ({
       const handleSubmit = async () => {
         setSubmitError('');
         if (!canFinalSafetySignOff) {
-          setSubmitError('Only manager/admin roles can submit final safety sign-off.');
+          setSubmitError('Only Manager, Administrator, or Owner roles can submit final safety sign-off.');
           return;
         }
         if (!form.topic) {
@@ -12804,7 +12829,7 @@ const MobileAppShell = ({
           <div className="space-y-4">
             {!canFinalSafetySignOff && (
               <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-                Only manager/admin roles can submit final safety sign-off.
+                Only Manager, Administrator, or Owner roles can submit final safety sign-off.
               </div>
             )}
             <div>
@@ -13021,8 +13046,8 @@ const MobileAppShell = ({
 
       const testimonials = [
         { name: 'Marcus Johnson', role: 'Owner, Johnson Excavating', quote: 'Groundwork Pro cut our admin time in half. The scheduling alone saves us 10 hours a week.', avatar: 'MJ' },
-        { name: 'Sarah Williams', role: 'Operations Manager, Williams Grading', quote: 'Finally, software built for excavation. The equipment tracking and job costing features are game-changers.', avatar: 'SW' },
-        { name: 'Robert Chen', role: 'CEO, Pacific Earthworks', quote: 'We went from spreadsheets to Groundwork Pro and never looked back. ROI in the first month.', avatar: 'RC' },
+        { name: 'Sarah Williams', role: 'Manager, Williams Grading', quote: 'Finally, software built for excavation. The equipment tracking and job costing features are game-changers.', avatar: 'SW' },
+        { name: 'Robert Chen', role: 'Owner, Pacific Earthworks', quote: 'We went from spreadsheets to Groundwork Pro and never looked back. ROI in the first month.', avatar: 'RC' },
       ];
 
       const plans = [

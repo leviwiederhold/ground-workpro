@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServer } from "@/lib/supabase/server";
+import { isOwnerTeamRole, normalizeCanonicalTeamRole } from "@/lib/auth/teamRoles";
 
 export const dynamic = "force-dynamic";
 
@@ -115,8 +116,7 @@ export async function POST(request: Request) {
     if (!viewerMembership.error && viewerMembership.data) {
       viewerIsMember = true;
       const viewerRole = String(viewerMembership.data.role ?? "").trim().toLowerCase();
-      viewerIsOwner =
-        viewerRole.includes("admin") || viewerRole.includes("ceo") || viewerRole.includes("executive");
+      viewerIsOwner = isOwnerTeamRole(viewerRole);
     }
   }
 
@@ -125,7 +125,7 @@ export async function POST(request: Request) {
       valid: true,
       token,
       email: invitation.email ?? "",
-      role: invitation.role ?? "",
+      role: normalizeCanonicalTeamRole(invitation.role) ?? "team_member",
       job_title: invitation.job_title ?? "",
       company_id: invitation.company_id,
       company_name: companyName,

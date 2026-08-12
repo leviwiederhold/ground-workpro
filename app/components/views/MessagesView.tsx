@@ -39,6 +39,14 @@ const hasUserId = (value) => {
   return userId !== null && userId !== undefined && String(userId).trim() !== '';
 };
 
+const teamRoleLabel = (value) => ({
+  owner: 'Owner',
+  administrator: 'Administrator',
+  manager: 'Manager',
+  crew_lead: 'Crew Lead',
+  team_member: 'Team Member',
+})[String(value || '').trim().toLowerCase()] || String(value || 'Team Member');
+
 export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const { Button, Icon } = ui;
   const [activeChannel, setActiveChannel] = useState(null);
@@ -282,7 +290,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         email: employee?.email,
         displayName: matchedUser?.displayName,
       });
-      const preferredRole = matchedUser?.role || employee?.role || "";
+      const preferredRole =
+        matchedUser?.role ||
+        employee?.jobTitle ||
+        employee?.job_title ||
+        teamRoleLabel(employee?.role);
       options.push({
         key: explicitUserId ? `user:${explicitUserId}` : `employee:${employee.id}`,
         label: String(preferredLabel),

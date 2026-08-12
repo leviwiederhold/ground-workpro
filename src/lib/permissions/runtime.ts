@@ -5,7 +5,6 @@ import {
   getDefaultPermissionsByRole,
 } from "@/lib/permissions/access";
 import type {
-  InvitationRole,
   ModuleAccessLevel,
   ModulePermissionKey,
   ModulePermissionMap,
@@ -13,20 +12,12 @@ import type {
 
 export const TEST_MODULE_ACCESS_COOKIE = "gw_test_module_access";
 
-const appRoleToInvitationRole: Record<AppRole, InvitationRole> = {
-  admin: "ceo",
-  pm: "manager",
-  foreman: "foreman",
-  mechanic: "mechanic",
-  operator: "operator",
-};
-
 export function isRoleFullAccess(role: AppRole): boolean {
   return role === "admin";
 }
 
 export function getDefaultPermissionMapForAppRole(role: AppRole): ModulePermissionMap {
-  return getDefaultPermissionsByRole(appRoleToInvitationRole[role] ?? "fieldstaff");
+  return getDefaultPermissionsByRole(role);
 }
 
 export async function resolveUserModulePermissions(params: {
@@ -36,7 +27,7 @@ export async function resolveUserModulePermissions(params: {
   role: AppRole;
 }): Promise<ModulePermissionMap> {
   if (isRoleFullAccess(params.role)) {
-    return getDefaultPermissionsByRole("ceo");
+    return getDefaultPermissionsByRole("owner");
   }
 
   const base = getDefaultPermissionMapForAppRole(params.role);

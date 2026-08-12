@@ -331,7 +331,7 @@ export function JobsiteTimeView({
           })
         : { status: 'none' as const, departureAt: null, returnAt: null, returnDueAt: null };
 
-      // Roster subtitle: "{roleLabel} - {jobName}" (e.g. "PM - Smith Excavation").
+      // Roster subtitle: "{roleLabel} - {jobName}" (e.g. "Manager - Smith Excavation").
       const rosterSubtitle = formatAssignedJobSubtitle({
         role: e.role,
         jobName: assignedJobName,

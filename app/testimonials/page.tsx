@@ -9,13 +9,13 @@ const testimonials = [
   },
   {
     name: "Sarah Williams",
-    role: "Operations Manager, Williams Grading",
+    role: "Manager, Williams Grading",
     quote: "This feels built for excavation teams. Job costing and fleet visibility changed how we run projects.",
     initials: "SW",
   },
   {
     name: "Robert Chen",
-    role: "CEO, Pacific Earthworks",
+    role: "Owner, Pacific Earthworks",
     quote: "We moved from spreadsheets to one operating system. The visibility is night and day.",
     initials: "RC",
   },

@@ -35,6 +35,9 @@ export async function POST(request: Request) {
     }
 
     const effectiveRole = clampActingRole(realRole, parsed.data.role);
+    if (effectiveRole !== parsed.data.role) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     const response = NextResponse.json({ item: { role: effectiveRole }, success: true });
     response.cookies.set(ACTING_ROLE_COOKIE, effectiveRole, { path: "/", sameSite: "lax" });
     if (process.env.NODE_ENV !== "production" || process.env.E2E === "true") {

@@ -39,7 +39,7 @@ test('prod live latency + error sweep', async ({ page }) => {
     }
   }
 
-  const buttons = ['Add Event','New Job','Add Employee','Add Equipment','New Bid','Add Vendor','Add Item','New Work Order','New Safety Log','Create Report'];
+  const buttons = ['Add Event','New Job','Add Team Member','Add Equipment','New Bid','Add Vendor','Add Item','New Work Order','New Safety Log','Create Report'];
   for (const label of buttons) {
     const btn = page.getByRole('button', { name: label }).first();
     if (await btn.isVisible().catch(() => false)) {

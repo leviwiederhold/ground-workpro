@@ -197,7 +197,7 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
               </button>
               <button className="role-card employee" onClick={() => goTo("employee-invite")}>
                 <div className="role-icon employee"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2L3 7v5c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V7l-9-5z"/><path d="M12 11v4"/><circle cx="12" cy="8" r="1"/></svg></div>
-                <div><div className="role-title">I&apos;m an employee</div><div className="role-desc">Join your company&apos;s workspace. You&apos;ll need an invite from your employer.</div></div>
+                <div><div className="role-title">I&apos;m joining a team</div><div className="role-desc">Join your company&apos;s workspace with an invitation from a team administrator.</div></div>
               </button>
               <button className="secondary-link" onClick={goToLogin} data-testid="onboarding-existing-login">
                 Already have an account? Sign In
@@ -233,7 +233,7 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
                 Sign in to Groundwork Pro
               </div>
               <div style={{ fontSize: 13, color: "#666" }}>
-                Use your existing employee or company account.
+                Use your existing team or company account.
               </div>
             </div>
             <div className="nav-tabs">
@@ -256,7 +256,7 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
             <div className="invite-icon"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="1.8" strokeLinecap="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div>
             <div className="invite-title">Join your team</div>
-            <div className="invite-desc">Your employer needs to invite you before you can access the company workspace. Enter your invite code or link below.</div>
+            <div className="invite-desc">A team administrator needs to invite you before you can access the company workspace. Enter your invite code or link below.</div>
             <div style={{ width: "100%" }}>
               <label className="form-label">Invite code or link</label>
               <input className="form-input blue" placeholder="Paste your invite code or link" value={inviteValue} onChange={(event) => setInviteValue(event.target.value)} />
@@ -266,7 +266,7 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
             <div className="divider"><div className="divider-line" /><div className="divider-text">or</div><div className="divider-line" /></div>
             <div className="info-box" style={{ width: "100%" }}>
               <div className="info-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
-              <div><div className="info-title">Don&apos;t have an invite?</div><div className="info-desc">Ask your employer or supervisor to send you one from their Groundwork Pro dashboard under <strong style={{ color: "#aaa" }}>Team → Invite member</strong>.</div></div>
+              <div><div className="info-title">Don&apos;t have an invite?</div><div className="info-desc">Ask a team administrator to send you one from their Groundwork Pro dashboard under <strong style={{ color: "#aaa" }}>Team → Invite Team Member</strong>.</div></div>
             </div>
             <button className="secondary-link" onClick={goToLogin}>
               Already have an account? Sign In

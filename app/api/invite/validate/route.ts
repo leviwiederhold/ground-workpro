@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
   const pendingInvitation = await client
     .from("pending_invitations")
-    .select("id, company_id, role, email, job_title, accepted_at, expires_at")
+    .select("id, company_id, role, email, job_title, accepted_at, accepted_user_id, expires_at")
     .eq("invite_token", token)
     .limit(1)
     .maybeSingle();
@@ -33,7 +33,7 @@ export async function POST(request: Request) {
     pendingInvitation.error && /job_title/i.test(pendingInvitation.error.message || "")
       ? await client
           .from("pending_invitations")
-          .select("id, company_id, role, email, accepted_at, expires_at")
+          .select("id, company_id, role, email, accepted_at, accepted_user_id, expires_at")
           .eq("invite_token", token)
           .limit(1)
           .maybeSingle()
@@ -63,6 +63,7 @@ export async function POST(request: Request) {
         email: pendingData.email,
         job_title: (pendingData as { job_title?: string | null }).job_title ?? "",
         used_at: pendingData.accepted_at,
+        accepted_user_id: (pendingData as { accepted_user_id?: string | null }).accepted_user_id ?? null,
         expires_at: pendingData.expires_at,
       }
     : legacyInvitation?.data
@@ -72,6 +73,7 @@ export async function POST(request: Request) {
           email: legacyInvitation.data.email,
           job_title: "",
           used_at: legacyInvitation.data.used_at,
+          accepted_user_id: null,
           expires_at: legacyInvitation.data.expires_at,
         }
       : null;
@@ -79,10 +81,21 @@ export async function POST(request: Request) {
   if (!invitation) {
     return NextResponse.json({ error: "Invalid invite code" }, { status: 404 });
   }
-  if (invitation.used_at) {
+  const { data: viewerAuth } = await fallback.auth.getUser();
+  const viewerUserId = String(viewerAuth?.user?.id ?? "").trim();
+  const alreadyAcceptedByViewer = Boolean(
+    invitation.used_at &&
+      invitation.accepted_user_id &&
+      String(invitation.accepted_user_id) === viewerUserId
+  );
+  if (invitation.used_at && !alreadyAcceptedByViewer) {
     return NextResponse.json({ error: "Invite already used" }, { status: 409 });
   }
-  if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
+  if (
+    !alreadyAcceptedByViewer &&
+    invitation.expires_at &&
+    new Date(invitation.expires_at).getTime() < Date.now()
+  ) {
     return NextResponse.json({ error: "Invite expired" }, { status: 410 });
   }
 
@@ -99,13 +112,11 @@ export async function POST(request: Request) {
   }
 
   // Detect whether the CURRENT browser session already belongs to the invited
-  // company. The signup/accept screen uses this to block an owner/admin (or any
+  // company. The signup/accept screen uses this to block an Owner (or any
   // existing member) from accepting the invite in their own session — they must
   // use a different browser or sign out so the invitee gets their own account.
   let viewerIsMember = false;
   let viewerIsOwner = false;
-  const { data: viewerAuth } = await fallback.auth.getUser();
-  const viewerUserId = String(viewerAuth?.user?.id ?? "").trim();
   if (viewerUserId) {
     const viewerMembership = await client
       .from("memberships")
@@ -131,6 +142,7 @@ export async function POST(request: Request) {
       company_name: companyName,
       viewer_is_member: viewerIsMember,
       viewer_is_owner: viewerIsOwner,
+      already_accepted_by_viewer: alreadyAcceptedByViewer,
     },
   });
 }

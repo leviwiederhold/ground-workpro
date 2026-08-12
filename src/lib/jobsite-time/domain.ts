@@ -650,29 +650,37 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceDisplayStatus, string> = 
   missing_clock_out: "Missing clock-out",
 };
 
-// Short role codes / acronyms that read best fully uppercased in the UI
-// (e.g. "PM - Smith Excavation", not "Pm - …").
-const UPPERCASE_ROLE_LABELS = new Set([
-  "pm",
-  "ceo",
-  "cfo",
-  "coo",
-  "cto",
-  "vp",
-  "hr",
-  "it",
-  "admin",
-]);
+const CANONICAL_ATTENDANCE_ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  admin: "Owner",
+  executive: "Owner",
+  ceo: "Owner",
+  coceo: "Owner",
+  administrator: "Administrator",
+  manager: "Manager",
+  pm: "Manager",
+  operations: "Manager",
+  operationsmanager: "Manager",
+  projectmanager: "Manager",
+  crewlead: "Crew Lead",
+  foreman: "Crew Lead",
+  teammember: "Team Member",
+  employee: "Team Member",
+  mechanic: "Team Member",
+  operator: "Team Member",
+  field: "Team Member",
+  fieldstaff: "Team Member",
+};
 
-// Human-facing role label for the Attendance roster. Uppercases short role
-// codes/acronyms (PM, CEO, admin…), Title-cases everything else. Empty/unknown
-// falls back to "Employee".
+// Human-facing access-role label for the Attendance roster. Released clients
+// may still supply legacy values, so map those values to the same canonical
+// terminology instead of leaking the old hierarchy into current UI.
 export function formatAttendanceRoleLabel(role: string | null | undefined): string {
   const raw = String(role ?? "").trim();
-  if (!raw) return "Employee";
-  const lower = raw.toLowerCase();
-  if (UPPERCASE_ROLE_LABELS.has(lower) || (/^[a-z]+$/.test(lower) && lower.length <= 3)) {
-    return raw.toUpperCase();
+  if (!raw) return "Team Member";
+  const compact = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (CANONICAL_ATTENDANCE_ROLE_LABELS[compact]) {
+    return CANONICAL_ATTENDANCE_ROLE_LABELS[compact];
   }
   return raw
     .split(/[\s_-]+/)
@@ -681,7 +689,7 @@ export function formatAttendanceRoleLabel(role: string | null | undefined): stri
     .join(" ");
 }
 
-// Roster subtitle: "{roleLabel} - {jobName}", e.g. "PM - Smith Excavation".
+// Roster subtitle: "{roleLabel} - {jobName}", e.g. "Manager - Smith Excavation".
 // Only shows "Unassigned" when there is genuinely no job name/id — a bare jobId
 // with no resolvable name still counts as assigned (shows "Assigned job")
 // rather than wrongly reading as unassigned.

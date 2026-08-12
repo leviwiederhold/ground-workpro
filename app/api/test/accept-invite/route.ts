@@ -6,8 +6,14 @@ import {
   isCeoMembershipRole,
   listCompanyMembershipRoles,
 } from "@/lib/auth/ceoGuard";
-
-const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
+import {
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  isOwnerTeamRole,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
 const bodySchema = z.object({
   token: z.string().min(20),
@@ -21,6 +27,7 @@ type InviteRow = {
   employee_id: string;
   email: string;
   role: string;
+  legacy_permission_profile?: string | null;
   used_at: string | null;
   expires_at: string | null;
 };
@@ -31,20 +38,10 @@ type PendingInviteRow = {
   employee_id?: string | null;
   email?: string | null;
   role?: string | null;
+  legacy_permission_profile?: string | null;
   accepted_at?: string | null;
   expires_at?: string | null;
   invited_by?: string | null;
-};
-
-const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" | "fieldstaff" => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (raw.includes("ceo")) return "ceo";
-  if (raw.includes("admin") || raw.includes("executive")) return "admin";
-  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
-  if (raw.includes("foreman")) return "foreman";
-  if (raw.includes("mechanic")) return "mechanic";
-  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
-  return "operator";
 };
 
 const isMissingSchemaError = (message: string | undefined) =>
@@ -84,7 +81,7 @@ export async function POST(request: Request) {
 
   const pendingInvite = await admin
     .from("pending_invitations")
-    .select("id, company_id, employee_id, email, role, accepted_at, expires_at, invited_by")
+    .select("*")
     .eq("invite_token", token)
     .maybeSingle<PendingInviteRow>();
   if (pendingInvite.error) {
@@ -94,7 +91,7 @@ export async function POST(request: Request) {
   const inviteResult = !pendingInvite.data
     ? await admin
         .from("invite_tokens")
-        .select("token, company_id, employee_id, email, role, used_at, expires_at")
+        .select("*")
         .eq("token", token)
         .maybeSingle<InviteRow>()
     : null;
@@ -108,6 +105,7 @@ export async function POST(request: Request) {
         employee_id: pendingInvite.data.employee_id,
         email: pendingInvite.data.email,
         role: pendingInvite.data.role,
+        legacy_permission_profile: pendingInvite.data.legacy_permission_profile,
         used_at: pendingInvite.data.accepted_at,
         expires_at: pendingInvite.data.expires_at,
         pending_id: pendingInvite.data.id,
@@ -119,6 +117,7 @@ export async function POST(request: Request) {
           employee_id: inviteResult.data.employee_id,
           email: inviteResult.data.email,
           role: inviteResult.data.role,
+          legacy_permission_profile: inviteResult.data.legacy_permission_profile,
           used_at: inviteResult.data.used_at,
           expires_at: inviteResult.data.expires_at,
           pending_id: null,
@@ -135,7 +134,8 @@ export async function POST(request: Request) {
   if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ error: "Invite expired" }, { status: 410 });
   }
-  if (String(invitation.email ?? "").trim().toLowerCase() !== email) {
+  const invitationEmail = String(invitation.email ?? "").trim().toLowerCase();
+  if (invitationEmail && invitationEmail !== email) {
     return NextResponse.json({ error: "Invite email does not match" }, { status: 403 });
   }
 
@@ -166,7 +166,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Failed to resolve invite user" }, { status: 500 });
   }
 
-  const role = normalizeRole(invitation.role);
+  const role = normalizeCanonicalTeamRole(invitation.role) ?? "team_member";
+  const legacyPermissionProfile =
+    normalizeLegacyPermissionProfile(
+      invitation.role,
+      invitation.legacy_permission_profile
+    ) ?? canonicalizeRoleWrite(role).legacy_permission_profile;
   const existingCompanyMemberships = await listCompanyMembershipRoles(
     admin,
     String(invitation.company_id)
@@ -177,38 +182,46 @@ export async function POST(request: Request) {
       .map((row) => row.user_id)
   );
   const userIsExistingCeo = ceoUserIds.has(userId);
-  const roleIsCeo = isCeoMembershipRole(role);
+  const roleIsCeo = isOwnerTeamRole(role);
   if (!roleIsCeo && ceoUserIds.size === 0) {
-    return NextResponse.json({ error: "Company must always have at least one CEO membership" }, { status: 409 });
+    return NextResponse.json({ error: "Company must always have at least one Owner membership" }, { status: 409 });
   }
   if (!roleIsCeo && userIsExistingCeo && ceoUserIds.size <= 1) {
-    return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
+    return NextResponse.json({ error: "Cannot demote the last Owner membership" }, { status: 409 });
   }
 
-  const membershipRole =
-    role === "ceo"
-      ? COMPANY_OWNER_MEMBERSHIP_ROLE
-      : role === "fieldstaff"
-        ? "operator"
-        : role;
-  const membershipInsert = await admin.from("memberships").upsert(
+  let membershipInsert = await admin.from("memberships").upsert(
     {
       company_id: invitation.company_id,
       user_id: userId,
-      role: membershipRole,
+      role,
+      legacy_permission_profile: legacyPermissionProfile,
     },
     { onConflict: "company_id,user_id" }
   );
+  if (isMissingLegacyPermissionProfileColumn(membershipInsert.error)) {
+    membershipInsert = await admin.from("memberships").upsert(
+      {
+        company_id: invitation.company_id,
+        user_id: userId,
+        role: legacyCompatibleRoleValue(
+          legacyPermissionProfile,
+          "memberships"
+        ),
+      },
+      { onConflict: "company_id,user_id" }
+    );
+  }
   if (membershipInsert.error) {
     return NextResponse.json({ error: membershipInsert.error.message }, { status: 400 });
   }
   try {
     await ensureCompanyHasAtLeastOneCeoMembership(admin, String(invitation.company_id));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce Owner role" }, { status: 409 });
   }
 
-  const employeeRole = membershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : membershipRole;
+  const employeeRole = role;
 
   const profileName = "";
   let employeeId = String(invitation.employee_id ?? "").trim();
@@ -229,6 +242,7 @@ export async function POST(request: Request) {
       company_id: invitation.company_id,
       email,
       role: employeeRole,
+      legacy_permission_profile: legacyPermissionProfile,
       user_id: userId,
       name: profileName,
       full_name: profileName,
@@ -254,6 +268,13 @@ export async function POST(request: Request) {
           break;
         }
       }
+      if (/role/i.test(message) && /check constraint/i.test(message)) {
+        insertPayload.role = legacyCompatibleRoleValue(
+          legacyPermissionProfile,
+          "employees"
+        );
+        continue;
+      }
       if (!isMissingSchemaError(message)) {
         return NextResponse.json({ error: message || "Failed to create employee" }, { status: 400 });
       }
@@ -270,6 +291,7 @@ export async function POST(request: Request) {
 
   const employeeUpdatePayload: Record<string, unknown> = {
     role: employeeRole,
+    legacy_permission_profile: legacyPermissionProfile,
     user_id: userId,
     email,
     name: profileName,
@@ -283,6 +305,13 @@ export async function POST(request: Request) {
       .eq("id", employeeId);
     if (!employeeUpdate.error) break;
     const message = employeeUpdate.error.message ?? "";
+    if (/role/i.test(message) && /check constraint/i.test(message)) {
+      employeeUpdatePayload.role = legacyCompatibleRoleValue(
+        legacyPermissionProfile,
+        "employees"
+      );
+      continue;
+    }
     if (!isMissingSchemaError(message)) {
       return NextResponse.json({ error: message }, { status: 400 });
     }

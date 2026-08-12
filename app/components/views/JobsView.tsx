@@ -8,6 +8,15 @@ import { AddressAutocomplete } from '@/app/components/AddressAutocomplete';
 
 const confirmDestructiveAction = (targetLabel) => window.confirm(`Delete ${targetLabel}? This cannot be undone.`);
 const isTemporaryJobId = (id) => String(id ?? '').startsWith('temp-job-');
+const teamRoleLabel = (value) => ({
+  owner: 'Owner',
+  administrator: 'Administrator',
+  manager: 'Manager',
+  crew_lead: 'Crew Lead',
+  team_member: 'Team Member',
+})[String(value || '').trim().toLowerCase()] || 'Team Member';
+const employeeRoleSummary = (employee) =>
+  String(employee?.jobTitle || employee?.job_title || '').trim() || teamRoleLabel(employee?.role);
 export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, employees, setEmployees, ui, moduleAccess = {} }) {
   const { SearchInput, Card, Button, Icon, Badge, AttachmentPanel, formatDate } = ui;
   const canEditJobs = String(moduleAccess?.jobs || 'none') === 'edit';
@@ -897,7 +906,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
                       });
                     }}
                   />
-                  <span>{employee.name} - {employee.role}</span>
+                  <span>{employee.name} - {employeeRoleSummary(employee)}</span>
                 </label>
               );
             })}
@@ -918,7 +927,7 @@ export function JobsView({ jobs, jobsLoading, setJobs, equipment, setEquipment, 
           <div key={emp.id} className="flex items-center justify-between text-sm p-2 bg-gray-50 rounded">
             <span>{emp.name}</span>
             <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-500">{emp.role}</span>
+              <span className="text-xs text-gray-500">{employeeRoleSummary(emp)}</span>
               <button
                 type="button"
                 onClick={() => handleUnassignEmployee(emp.id)}

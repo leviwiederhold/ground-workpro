@@ -1,16 +1,24 @@
 import { z } from "zod";
-import type { AppRole } from "@/lib/nav/config";
+import type { AppRole } from "../nav/config.ts";
 import {
-  invitationRoleSchema,
+  canonicalizeRoleWrite,
+  isOwnerTeamRole,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+  type LegacyPermissionProfile,
+} from "../auth/teamRoles.ts";
+import {
+  compatibleInvitationRoleSchema,
   moduleAccessLevelSchema,
   modulePermissionKeySchema,
   modulePermissionKeys,
   type InvitationRole,
+  type CompatibleInvitationRole,
   type ModuleAccessLevel,
   type ModulePermissionKey,
   type ModulePermissionMap,
   type ModulePermissionRow,
-} from "./types";
+} from "./types.ts";
 
 const accessRank: Record<ModuleAccessLevel, number> = {
   none: 0,
@@ -22,23 +30,16 @@ const accessRank: Record<ModuleAccessLevel, number> = {
 // and above (manager + owner/admin "ceo"). Any role below Manager must never be
 // granted Finance/Reports, even if a request includes them — they are stripped
 // server-side here.
-const MANAGER_LEVEL_TEMPLATE_ROLES = new Set<InvitationRole>(["ceo", "manager"]);
+const MANAGER_LEVEL_TEMPLATE_ROLES = new Set(["admin", "pm"]);
 const SENSITIVE_MANAGER_ONLY_MODULES: ModulePermissionKey[] = ["finance", "reports"];
 
-export function isManagerLevelInvitationRole(role: InvitationRole): boolean {
-  return MANAGER_LEVEL_TEMPLATE_ROLES.has(role);
+export function isManagerLevelInvitationRole(role: CompatibleInvitationRole | AppRole): boolean {
+  const profile = normalizeLegacyPermissionProfile(role);
+  return profile ? MANAGER_LEVEL_TEMPLATE_ROLES.has(profile) : false;
 }
 
-const roleToTemplateRole: Record<AppRole, InvitationRole> = {
-  admin: "ceo",
-  pm: "manager",
-  foreman: "foreman",
-  mechanic: "mechanic",
-  operator: "operator",
-};
-
-const templateDefaults: Record<InvitationRole, ModulePermissionMap> = {
-  ceo: {
+const templateDefaults: Record<LegacyPermissionProfile, ModulePermissionMap> = {
+  admin: {
     jobs: "edit",
     fleet: "edit",
     maintenance: "edit",
@@ -54,7 +55,7 @@ const templateDefaults: Record<InvitationRole, ModulePermissionMap> = {
     integrations: "edit",
     team_management: "edit",
   },
-  manager: {
+  pm: {
     jobs: "edit",
     fleet: "view",
     maintenance: "edit",
@@ -140,7 +141,7 @@ const templateDefaults: Record<InvitationRole, ModulePermissionMap> = {
 };
 
 const normalizedPayloadSchema = z.object({
-  role: invitationRoleSchema,
+  role: compatibleInvitationRoleSchema,
   permissions: z
     .array(
       z.object({
@@ -151,11 +152,11 @@ const normalizedPayloadSchema = z.object({
     .default([]),
 });
 
-export function getDefaultPermissionsByRole(role: InvitationRole | AppRole): ModulePermissionMap {
-  const templateRole =
-    invitationRoleSchema.safeParse(role).success
-      ? (role as InvitationRole)
-      : roleToTemplateRole[role as AppRole] ?? "fieldstaff";
+export function getDefaultPermissionsByRole(
+  role: unknown,
+  explicitProfile?: unknown
+): ModulePermissionMap {
+  const templateRole = normalizeLegacyPermissionProfile(role, explicitProfile) ?? "fieldstaff";
   return { ...templateDefaults[templateRole] };
 }
 
@@ -182,12 +183,12 @@ export function normalizePermissionPayload(input: unknown): {
     for (const key of SENSITIVE_MANAGER_ONLY_MODULES) merged[key] = "none";
   }
 
-  if (parsed.role === "ceo") {
+  if (isOwnerTeamRole(parsed.role)) {
     for (const key of modulePermissionKeys) merged[key] = "edit";
   }
 
   return {
-    role: parsed.role,
+    role: canonicalizeRoleWrite(parsed.role).role,
     permissions: merged,
   };
 }
@@ -210,19 +211,14 @@ export function assertCeoSelfAccessNotReduced(params: {
   targetRole: InvitationRole | AppRole;
   nextPermissions: ModulePermissionMap;
 }) {
-  const targetTemplateRole =
-    invitationRoleSchema.safeParse(params.targetRole).success
-      ? (params.targetRole as InvitationRole)
-      : roleToTemplateRole[params.targetRole as AppRole] ?? "fieldstaff";
-
   if (params.actorUserId !== params.targetUserId) return;
-  if (targetTemplateRole !== "ceo") return;
+  if (!isOwnerTeamRole(params.targetRole)) return;
 
   const lowered = modulePermissionKeys.find(
     (key) => params.nextPermissions[key] !== "edit"
   );
   if (lowered) {
-    throw new Error("CEO must retain edit access for all modules");
+    throw new Error("Owner must retain edit access for all modules");
   }
 }
 
@@ -233,19 +229,14 @@ export function assertCeoAccessLocked(params: {
 }) {
   if (!params.isTargetCeo) return;
 
-  const templateRole =
-    invitationRoleSchema.safeParse(params.requestedRole).success
-      ? (params.requestedRole as InvitationRole)
-      : roleToTemplateRole[params.requestedRole as AppRole] ?? "fieldstaff";
-
-  if (templateRole !== "ceo") {
-    throw new Error("CEO role is locked and cannot be changed");
+  if (normalizeCanonicalTeamRole(params.requestedRole) !== "owner") {
+    throw new Error("Owner role is locked and cannot be changed");
   }
 
   const lowered = modulePermissionKeys.find(
     (key) => params.nextPermissions[key] !== "edit"
   );
   if (lowered) {
-    throw new Error("CEO must retain edit access for all modules");
+    throw new Error("Owner must retain edit access for all modules");
   }
 }

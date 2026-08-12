@@ -17,6 +17,15 @@ test("native onboarding exposes existing account login with app typography", asy
     });
   });
   const page = await context.newPage();
+  await page.route("**/api/onboarding/setup-status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        item: { role: "admin", has_company: true, required_complete: true, is_complete: true },
+      }),
+    });
+  });
 
   await page.goto("/");
   await page.getByRole("button", { name: "Skip" }).click();
@@ -56,13 +65,13 @@ test("native onboarding keeps invite flow separate from existing login", async (
 
   await page.goto("/");
   await page.getByRole("button", { name: "Skip" }).click();
-  await page.getByRole("button", { name: /I'm an employee/i }).click();
+  await page.getByRole("button", { name: /I'm joining a team/i }).click();
 
   await expect(page.getByText("Join your team")).toBeVisible();
   await expect(page.getByText("Invite code or link", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Already have an account? Sign In" }).click();
   await expect(page.getByText("Sign in to Groundwork Pro")).toBeVisible();
-  await expect(page.getByText("Use your existing employee or company account.")).toBeVisible();
+  await expect(page.getByText("Use your existing team or company account.")).toBeVisible();
 
   await context.close();
 });

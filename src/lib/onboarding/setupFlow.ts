@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 import { upsertFallbackChecklistRow } from "@/lib/onboarding/fallbackStore";
 import { isMissingColumnError, selectProfileColumns } from "@/lib/user/profileRecord";
+import { isMissingLegacyPermissionProfileColumn } from "@/lib/auth/teamRoles";
 
 export type SetupStepKey = "finish_profile" | "complete_account_settings" | "complete_company_settings";
 export type SetupStepScope = "user" | "company";
@@ -99,14 +100,33 @@ async function resolveRole(
   userId: string
 ): Promise<SetupRole> {
   if (!companyId) return "admin";
-  const membershipResult = await supabase
+  let membershipResult = await supabase
     .from("memberships")
-    .select("role")
+    .select("role, legacy_permission_profile")
     .eq("company_id", companyId)
     .eq("user_id", userId)
     .limit(1)
     .maybeSingle();
-  const normalized = normalizeAppRole(membershipResult.data?.role);
+
+  if (isMissingLegacyPermissionProfileColumn(membershipResult.error)) {
+    const legacyResult = await supabase
+      .from("memberships")
+      .select("role")
+      .eq("company_id", companyId)
+      .eq("user_id", userId)
+      .limit(1)
+      .maybeSingle();
+    membershipResult = {
+      ...legacyResult,
+      data: legacyResult.data
+        ? { ...legacyResult.data, legacy_permission_profile: null }
+        : null,
+    } as typeof membershipResult;
+  }
+  const normalized = normalizeAppRole(
+    membershipResult.data?.role,
+    membershipResult.data?.legacy_permission_profile
+  );
   return normalized ?? "operator";
 }
 

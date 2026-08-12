@@ -10,8 +10,16 @@ import {
 import { upsertProfileColumns } from "@/lib/user/profileRecord";
 import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
+import {
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  isOwnerTeamRole,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
-const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "owner";
 
 const bodySchema = z.object({
   role: z.string().optional(),
@@ -27,24 +35,13 @@ type PendingInvitationRow = {
   company_id: string;
   employee_id?: string | null;
   role?: string | null;
+  legacy_permission_profile?: string | null;
   email?: string | null;
   job_title?: string | null;
   accepted_at?: string | null;
   accepted_user_id?: string | null;
   expires_at?: string | null;
   invited_by?: string | null;
-};
-
-const normalizeRole = (value: unknown): "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator" | "fieldstaff" => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (raw.includes("ceo")) return "ceo";
-  if (raw.includes("admin") || raw.includes("executive")) return "admin";
-  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
-  if (raw.includes("foreman")) return "foreman";
-  if (raw.includes("mechanic")) return "mechanic";
-  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
-  if (raw.includes("laborer") || raw.includes("labourer")) return "operator";
-  return "operator";
 };
 
 const toValidationError = (issues: { path: (string | number)[]; message: string }[]) => ({
@@ -122,7 +119,7 @@ export async function POST(request: Request) {
 
     const existingMembership = await client
       .from("memberships")
-      .select("company_id, role")
+      .select("*")
       .eq("user_id", userId)
       .limit(1)
       .maybeSingle();
@@ -148,20 +145,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invite token is required" }, { status: 422 });
     }
 
-    let pendingInvitation = await client
+    const pendingInvitation = await client
       .from("pending_invitations")
-      .select("id, company_id, employee_id, role, email, job_title, accepted_at, accepted_user_id, expires_at, invited_by")
+      .select("*")
       .eq("invite_token", inviteToken)
       .limit(1)
       .maybeSingle<PendingInvitationRow>();
-    if (pendingInvitation.error && /job_title/i.test(pendingInvitation.error.message || "")) {
-      pendingInvitation = await client
-        .from("pending_invitations")
-        .select("id, company_id, employee_id, role, email, accepted_at, accepted_user_id, expires_at, invited_by")
-        .eq("invite_token", inviteToken)
-        .limit(1)
-        .maybeSingle<PendingInvitationRow>();
-    }
     if (pendingInvitation.error) {
       return NextResponse.json({ error: pendingInvitation.error.message }, { status: 400 });
     }
@@ -169,7 +158,7 @@ export async function POST(request: Request) {
     const legacyInvitation = !pendingInvitation.data
       ? await client
           .from("invite_tokens")
-          .select("token, company_id, employee_id, role, email, used_at, expires_at")
+          .select("*")
           .eq("token", inviteToken)
           .limit(1)
           .maybeSingle()
@@ -183,6 +172,7 @@ export async function POST(request: Request) {
           company_id: pendingInvitation.data.company_id,
           employee_id: pendingInvitation.data.employee_id,
           role: pendingInvitation.data.role,
+          legacy_permission_profile: pendingInvitation.data.legacy_permission_profile,
           email: pendingInvitation.data.email,
           job_title: pendingInvitation.data.job_title ?? null,
           used_at: pendingInvitation.data.accepted_at,
@@ -195,6 +185,7 @@ export async function POST(request: Request) {
             company_id: legacyInvitation.data.company_id,
             employee_id: legacyInvitation.data.employee_id,
             role: legacyInvitation.data.role,
+            legacy_permission_profile: legacyInvitation.data.legacy_permission_profile,
             email: legacyInvitation.data.email,
             job_title: null,
             used_at: legacyInvitation.data.used_at,
@@ -223,7 +214,7 @@ export async function POST(request: Request) {
     }
 
     // SECURITY: a user who already belongs to the invited company cannot accept
-    // an invite as a new employee. This blocks the critical "owner/admin opened
+    // an invite as a new team member. This blocks the critical "owner/admin opened
     // the invite link in their own browser" case, which would otherwise reuse
     // and OVERWRITE the owner's membership/role. The invitee must accept from
     // their own account in a separate session.
@@ -234,13 +225,12 @@ export async function POST(request: Request) {
       .eq("user_id", userId)
       .maybeSingle();
     if (!membershipInInvitedCompany.error && membershipInInvitedCompany.data) {
-      const currentRole = normalizeRole(membershipInInvitedCompany.data.role);
-      if (currentRole === "ceo" || currentRole === "admin" || isCeoMembershipRole(membershipInInvitedCompany.data.role)) {
+      if (isCeoMembershipRole(membershipInInvitedCompany.data.role)) {
         return NextResponse.json(
           {
             error: "owner_session",
             message:
-              "You're signed in as the company owner. Open this invite in a different browser or sign out to accept as a new employee.",
+              "You're signed in as the company Owner. Open this invite in a different browser or sign out to accept as a new Team Member.",
           },
           { status: 409 }
         );
@@ -249,7 +239,7 @@ export async function POST(request: Request) {
         {
           error: "already_member",
           message:
-            "You're already a member of this company. Open this invite in a different browser, or sign out and accept with the invited employee's own account.",
+            "You're already a member of this company. Open this invite in a different browser, or sign out and accept with the invited Team Member's own account.",
         },
         { status: 409 }
       );
@@ -281,7 +271,12 @@ export async function POST(request: Request) {
       }
     }
 
-    const resolvedRole = normalizeRole(invitationData.role);
+    const resolvedRole = normalizeCanonicalTeamRole(invitationData.role) ?? "team_member";
+    const resolvedPermissionProfile =
+      normalizeLegacyPermissionProfile(
+        invitationData.role,
+        invitationData.legacy_permission_profile
+      ) ?? canonicalizeRoleWrite(resolvedRole).legacy_permission_profile;
     const existingCompanyMemberships = await listCompanyMembershipRoles(
       client,
       String(invitationData.company_id)
@@ -292,30 +287,40 @@ export async function POST(request: Request) {
         .map((row) => row.user_id)
     );
     const userIsExistingCeo = ceoUserIds.has(userId);
-    const resolvedIsCeo = isCeoMembershipRole(resolvedRole);
+    const resolvedIsCeo = isOwnerTeamRole(resolvedRole);
     if (!resolvedIsCeo && ceoUserIds.size === 0) {
-      return NextResponse.json({ error: "Company must always have at least one CEO membership" }, { status: 409 });
+      return NextResponse.json({ error: "Company must always have at least one Owner membership" }, { status: 409 });
     }
     if (!resolvedIsCeo && userIsExistingCeo && ceoUserIds.size <= 1) {
-      return NextResponse.json({ error: "Cannot demote the last CEO membership" }, { status: 409 });
+      return NextResponse.json({ error: "Cannot demote the last Owner membership" }, { status: 409 });
     }
 
-    const membershipRole =
-      resolvedRole === "ceo"
-        ? COMPANY_OWNER_MEMBERSHIP_ROLE
-        : resolvedRole === "fieldstaff"
-          ? "operator"
-          : resolvedRole;
-    const upsertMembership = await client
+    let upsertMembership = await client
       .from("memberships")
       .upsert(
         {
           company_id: invitationData.company_id,
           user_id: userId,
-          role: membershipRole,
+          role: resolvedRole,
+          legacy_permission_profile: resolvedPermissionProfile,
         },
         { onConflict: "company_id,user_id" }
       );
+    if (isMissingLegacyPermissionProfileColumn(upsertMembership.error)) {
+      upsertMembership = await client
+        .from("memberships")
+        .upsert(
+          {
+            company_id: invitationData.company_id,
+            user_id: userId,
+            role: legacyCompatibleRoleValue(
+              resolvedPermissionProfile,
+              "memberships"
+            ),
+          },
+          { onConflict: "company_id,user_id" }
+        );
+    }
     if (upsertMembership.error) {
       return NextResponse.json({ error: upsertMembership.error.message }, { status: 400 });
     }
@@ -323,7 +328,7 @@ export async function POST(request: Request) {
     try {
       await ensureCompanyHasAtLeastOneCeoMembership(client, String(invitationData.company_id));
     } catch (error) {
-      return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce CEO role" }, { status: 409 });
+      return NextResponse.json({ error: error instanceof Error ? error.message : "Failed to enforce Owner role" }, { status: 409 });
     }
 
     // Prefer the name the employee typed on the invite-acceptance form, then
@@ -352,12 +357,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: profileUpsert.error.message }, { status: 400 });
     }
 
-    const employeeRole =
-      resolvedRole === "ceo"
-        ? "admin"
-        : resolvedRole === "fieldstaff"
-          ? "operator"
-          : resolvedRole;
+    const employeeRole = resolvedRole;
     const inviteEmail = tokenEmail || email;
     let employeeId = String(invitationData.employee_id ?? "").trim();
 
@@ -379,6 +379,7 @@ export async function POST(request: Request) {
         company_id: invitationData.company_id,
         email: inviteEmail,
         role: employeeRole,
+        legacy_permission_profile: resolvedPermissionProfile,
         user_id: userId,
         name: profileName || inviteEmail,
         full_name: profileName || inviteEmail,
@@ -405,6 +406,13 @@ export async function POST(request: Request) {
             break;
           }
         }
+        if (/role/i.test(message) && /check constraint/i.test(message)) {
+          insertPayload.role = legacyCompatibleRoleValue(
+            resolvedPermissionProfile,
+            "employees"
+          );
+          continue;
+        }
         if (!isMissingSchemaError(message)) {
           return NextResponse.json({ error: message || "Failed to create employee record" }, { status: 400 });
         }
@@ -422,6 +430,7 @@ export async function POST(request: Request) {
 
     const employeeUpdatePayload: Record<string, unknown> = {
       role: employeeRole,
+      legacy_permission_profile: resolvedPermissionProfile,
       user_id: userId,
       email: inviteEmail,
     };
@@ -438,6 +447,13 @@ export async function POST(request: Request) {
         .eq("company_id", invitationData.company_id);
       if (!employeeUpdate.error) break;
       const message = employeeUpdate.error.message ?? "";
+      if (/role/i.test(message) && /check constraint/i.test(message)) {
+        employeeUpdatePayload.role = legacyCompatibleRoleValue(
+          resolvedPermissionProfile,
+          "employees"
+        );
+        continue;
+      }
       if (!isMissingSchemaError(message)) {
         return NextResponse.json({ error: message }, { status: 400 });
       }

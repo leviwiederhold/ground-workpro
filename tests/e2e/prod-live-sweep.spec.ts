@@ -29,7 +29,7 @@ test('prod live sweep', async ({ page }) => {
     }
   }
 
-  const actions = ['New Job','Add Employee','Add Equipment','Add Event','New Bid','Add Vendor','Add Item','New Work Order','New Safety Log','Create Report','Upload'];
+  const actions = ['New Job','Add Team Member','Add Equipment','Add Event','New Bid','Add Vendor','Add Item','New Work Order','New Safety Log','Create Report','Upload'];
   for (const label of actions) {
     const btn = page.getByRole('button', { name: label }).first();
     if (await btn.isVisible().catch(() => false)) {

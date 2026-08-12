@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
-import { type AppRole } from "@/lib/nav/config";
+import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
 import { listFallbackEventsForWeek } from "@/lib/calendar/fallbackStore";
 import { listFallbackAssignmentsForWeek } from "@/lib/schedule/fallbackStore";
 
@@ -292,24 +292,16 @@ export async function GET(request: Request) {
       user_id: row.user_id ? String(row.user_id) : null,
       email: row.email ? String(row.email) : null,
       role: row.role ? String(row.role) : null,
+      legacy_permission_profile: row.legacy_permission_profile ? String(row.legacy_permission_profile) : null,
       name: row.name ? String(row.name) : null,
       full_name: row.full_name ? String(row.full_name) : null,
     }));
     const employeeRoleById = new Map<string, AppRole | null>();
     for (const employee of employees) {
-      const roleValue = String(employee.role ?? "").toLowerCase();
-      const normalizedRole: AppRole | null =
-        roleValue.includes("admin") || roleValue.includes("ceo")
-          ? "admin"
-          : roleValue === "pm" || roleValue.includes("project")
-            ? "pm"
-            : roleValue.includes("foreman")
-              ? "foreman"
-              : roleValue.includes("mechanic")
-                ? "mechanic"
-                : roleValue.includes("operator") || roleValue.includes("laborer") || roleValue.includes("labourer")
-                  ? "operator"
-                  : null;
+      const normalizedRole = normalizeAppRole(
+        employee.role,
+        employee.legacy_permission_profile
+      );
       employeeRoleById.set(String(employee.id), normalizedRole);
     }
 

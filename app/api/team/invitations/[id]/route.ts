@@ -3,13 +3,20 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
-import { isCeoMembershipRole } from "@/lib/auth/ceoGuard";
+import {
+  canAssignTeamRole,
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  isOwnerTeamRole,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+} from "@/lib/auth/teamRoles";
 import {
   normalizePermissionPayload,
   getDefaultPermissionsByRole,
 } from "@/lib/permissions/access";
 import {
-  invitationRoleSchema,
+  compatibleInvitationRoleSchema,
   moduleAccessLevelSchema,
   modulePermissionKeys,
   type ModulePermissionMap,
@@ -27,7 +34,7 @@ const patchSchema = z
     full_name: z.string().trim().min(1).optional(),
     email: z.string().trim().email().optional(),
     job_title: z.string().trim().max(120).optional(),
-    role: invitationRoleSchema.optional(),
+    role: compatibleInvitationRoleSchema.optional(),
     permissions: z.array(permissionOverrideSchema).optional(),
     regenerate: z.boolean().optional(),
   })
@@ -56,18 +63,12 @@ const buildOrigin = (request: Request) => {
   return request.headers.get("origin") ?? "";
 };
 
-const invitationRoleToAppRole = (role: z.infer<typeof invitationRoleSchema>) => {
-  if (role === "ceo") return "admin";
-  if (role === "manager") return "pm";
-  if (role === "fieldstaff") return "fieldstaff";
-  return role;
-};
-
 const loadPermissions = async (
   supabase: Awaited<ReturnType<typeof getCompanyId>>["supabase"],
   companyId: string,
   invitationId: string,
-  fallbackRole: z.infer<typeof invitationRoleSchema>
+  fallbackRole: z.infer<typeof compatibleInvitationRoleSchema>,
+  fallbackProfile?: unknown
 ) => {
   const permissionsResult = await supabase
     .from("module_permissions")
@@ -79,7 +80,7 @@ const loadPermissions = async (
     throw new Error(permissionsResult.error.message);
   }
 
-  const defaultPermissions = getDefaultPermissionsByRole(fallbackRole);
+  const defaultPermissions = getDefaultPermissionsByRole(fallbackRole, fallbackProfile);
   for (const row of permissionsResult.data ?? []) {
     defaultPermissions[row.module_key as (typeof modulePermissionKeys)[number]] =
       row.access_level as ModulePermissionMap[(typeof modulePermissionKeys)[number]];
@@ -109,7 +110,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const invitationId = parsedParams.data.id;
     const existing = await supabase
       .from("pending_invitations")
-      .select("id, role, full_name, email, invite_token, expires_at")
+      .select("*")
       .eq("company_id", companyId)
       .eq("id", invitationId)
       .is("accepted_at", null)
@@ -123,9 +124,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     const existingRole = String(existing.data.role ?? "").trim().toLowerCase();
     const nextRole = parsedBody.data.role ?? existingRole;
-    if ((nextRole === "ceo" || existingRole === "ceo") && !isCeoMembershipRole(role)) {
+    if (
+      (isOwnerTeamRole(nextRole) || isOwnerTeamRole(existingRole)) &&
+      !canAssignTeamRole(role, "owner")
+    ) {
       return NextResponse.json(
-        { error: "Only CEO/admin users can invite another CEO." },
+        { error: "Only Owners can invite another Owner." },
         { status: 403 }
       );
     }
@@ -134,7 +138,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (parsedBody.data.full_name !== undefined) updatePayload.full_name = parsedBody.data.full_name;
     if (parsedBody.data.email !== undefined) updatePayload.email = parsedBody.data.email.toLowerCase();
     if (parsedBody.data.job_title !== undefined) updatePayload.job_title = parsedBody.data.job_title.trim() || null;
-    if (parsedBody.data.role !== undefined) updatePayload.role = parsedBody.data.role;
+    if (parsedBody.data.role !== undefined) {
+      const roleWrite = canonicalizeRoleWrite(parsedBody.data.role);
+      updatePayload.role = roleWrite.role;
+      updatePayload.legacy_permission_profile = roleWrite.legacy_permission_profile;
+    }
     if (parsedBody.data.regenerate) {
       updatePayload.invite_token = randomBytes(32).toString("base64url");
       updatePayload.expires_at = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
@@ -142,13 +150,32 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     let updatedRow = existing.data;
     if (Object.keys(updatePayload).length > 0) {
-      const updateResult = await supabase
+      let updateResult = await supabase
         .from("pending_invitations")
         .update(updatePayload)
         .eq("company_id", companyId)
         .eq("id", invitationId)
-        .select("id, role, full_name, email, invite_token, expires_at, created_at, updated_at")
+        .select("*")
         .single();
+
+      if (
+        parsedBody.data.role !== undefined &&
+        isMissingLegacyPermissionProfileColumn(updateResult.error)
+      ) {
+        const legacyUpdate = { ...updatePayload };
+        delete legacyUpdate.legacy_permission_profile;
+        legacyUpdate.role = legacyCompatibleRoleValue(
+          parsedBody.data.role,
+          "pending_invitations"
+        );
+        updateResult = await supabase
+          .from("pending_invitations")
+          .update(legacyUpdate)
+          .eq("company_id", companyId)
+          .eq("id", invitationId)
+          .select("*")
+          .single();
+      }
 
       if (updateResult.error) {
         return NextResponse.json({ error: updateResult.error.message }, { status: 400 });
@@ -158,14 +185,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const normalizedPermissions = parsedBody.data.permissions
       ? normalizePermissionPayload({
-          role: parsedBody.data.role ?? (updatedRow.role as z.infer<typeof invitationRoleSchema>),
+          role: parsedBody.data.role ?? (updatedRow.role as z.infer<typeof compatibleInvitationRoleSchema>),
           permissions: parsedBody.data.permissions,
         }).permissions
       : await loadPermissions(
           supabase,
           companyId,
           invitationId,
-          updatedRow.role as z.infer<typeof invitationRoleSchema>
+          updatedRow.role as z.infer<typeof compatibleInvitationRoleSchema>,
+          updatedRow.legacy_permission_profile
         );
 
     if (parsedBody.data.permissions) {
@@ -200,8 +228,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         id: invitationId,
         full_name: String(updatedRow.full_name ?? ""),
         email: String(updatedRow.email),
-        role: updatedRow.role,
-        app_role: invitationRoleToAppRole(updatedRow.role as z.infer<typeof invitationRoleSchema>),
+        role: normalizeCanonicalTeamRole(updatedRow.role) ?? "team_member",
+        app_role: normalizeCanonicalTeamRole(updatedRow.role) ?? "team_member",
         status: "pending",
         invite_url: inviteUrl,
         invite_token: String(updatedRow.invite_token),

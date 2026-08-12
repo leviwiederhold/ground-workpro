@@ -75,7 +75,12 @@ export default function SignupPage() {
             role: String(data.item.role ?? "").trim(),
             jobTitle: String(data.item.job_title ?? "").trim(),
           });
-          // Block accepting in the inviter's own session: an owner/admin (or any
+          if (data.item.already_accepted_by_viewer) {
+            router.replace("/");
+            router.refresh();
+            return;
+          }
+          // Block accepting in the inviter's own session: an Owner (or any
           // existing member) must use a different browser or sign out so the
           // invitee gets their own account — never the owner's.
           if (data.item.viewer_is_owner) {
@@ -236,7 +241,7 @@ export default function SignupPage() {
       setLoading(false);
       return;
     }
-    // Invited employees must supply their own name (admin no longer enters it).
+    // Invited Team Members supply their own name instead of relying on the inviter.
     if (inviteMode && (!firstName.trim() || !lastName.trim())) {
       setError("Please enter your first and last name.");
       setLoading(false);

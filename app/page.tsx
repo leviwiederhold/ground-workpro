@@ -4084,6 +4084,25 @@ const MobileAppShell = ({
         loadPendingInvites();
       }, [showInviteModal, loadPendingInvites]);
 
+      // Invite acceptance happens in the invitee's browser. Refresh the CEO's
+      // open Team view on focus/visibility and while it remains visible so an
+      // accepted member replaces the Pending row without a manual reload.
+      useEffect(() => {
+        if (currentView !== 'team') return;
+        const refreshInviteState = () => {
+          if (document.visibilityState !== 'visible') return;
+          void Promise.all([loadTeamItems(), loadPendingInvites()]);
+        };
+        window.addEventListener('focus', refreshInviteState);
+        document.addEventListener('visibilitychange', refreshInviteState);
+        const interval = window.setInterval(refreshInviteState, 15_000);
+        return () => {
+          window.removeEventListener('focus', refreshInviteState);
+          document.removeEventListener('visibilitychange', refreshInviteState);
+          window.clearInterval(interval);
+        };
+      }, [currentView, loadPendingInvites, loadTeamItems]);
+
       useEffect(() => {
         if (!selectedEmployeeId) return;
         if (!teamItems.some((employee) => String(employee.id) === String(selectedEmployeeId))) {

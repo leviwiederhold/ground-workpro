@@ -15,6 +15,8 @@ import { requireRole } from "@/lib/auth/requireRole";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { mapRowToAttendanceSettings } from "@/lib/attendance/attendanceSettings";
 import { summarizeSetupHealth, type EmployeeSetupInput } from "@/lib/attendance/setupHealth";
+import { buildJobsiteRegions } from "@/lib/attendance/nativeGeofence";
+import { feetToMeters, mapCompanyJobsiteSettings } from "@/lib/jobsite-time/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -25,18 +27,24 @@ export async function GET() {
     const { companyId } = await requireRole(["admin", "pm"]);
     const admin = getSupabaseAdmin();
     if (!admin) {
-      return NextResponse.json({ error: "Attendance setup health requires service access" }, { status: 503 });
+      return NextResponse.json(
+        { error: "Attendance setup health requires service access" },
+        { status: 503 }
+      );
     }
 
     const settingsRow = await admin
       .from("companies")
-      .select("attendance_automatic_enabled")
+      .select(
+        "attendance_automatic_enabled,jobsite_geofence_radius_feet,jobsite_wake_radius_meters"
+      )
       .eq("id", companyId)
       .maybeSingle();
     if (settingsRow.error) {
       throw new Error(`company settings: ${settingsRow.error.message}`);
     }
     const settings = mapRowToAttendanceSettings(settingsRow.data as Record<string, unknown> | null);
+    const regionSettings = mapCompanyJobsiteSettings(settingsRow.data);
 
     const employeesResult = await admin
       .from("employees")
@@ -84,7 +92,7 @@ export async function GET() {
         ? admin
             .from("employee_location_permissions")
             .select(
-              "user_id,location_services_enabled,background_refresh_enabled,background,precise,native_service_supported,native_service_healthy,native_has_secure_credential,required_region_ids,registered_region_ids,native_readiness_reported_at",
+              "user_id,location_services_enabled,background_refresh_enabled,background,precise,native_service_supported,native_service_healthy,native_has_secure_credential,required_region_ids,registered_region_ids,native_readiness_reported_at"
             )
             .eq("company_id", companyId)
             .in("user_id", userIds)
@@ -101,7 +109,10 @@ export async function GET() {
       }
     }
 
-    const assignmentRows = (assignments.data ?? []) as Array<{ employee_id: string; job_id: string }>;
+    const assignmentRows = (assignments.data ?? []) as Array<{
+      employee_id: string;
+      job_id: string;
+    }>;
     const jobIds = Array.from(new Set(assignmentRows.map((a) => String(a.job_id))));
     const jobsResult =
       jobIds.length > 0
@@ -128,7 +139,10 @@ export async function GET() {
     }
     // Keep the credential that expires furthest out — an employee may have more
     // than one device, and the healthiest one represents their setup.
-    const credentialByUser = new Map<string, { expiresAt: string | null; revokedAt: string | null; lastUsedAt: string | null }>();
+    const credentialByUser = new Map<
+      string,
+      { expiresAt: string | null; revokedAt: string | null; lastUsedAt: string | null }
+    >();
     for (const row of (credentials.data ?? []) as Array<Record<string, unknown>>) {
       const userId = String(row.user_id);
       const next = {
@@ -160,9 +174,22 @@ export async function GET() {
         hasAssignmentToday: Boolean(jobId),
         jobsiteVerified: Boolean(job?.address_verified) && job?.lat != null && job?.lng != null,
         jobName: job?.name ? String(job.name) : null,
-        requiredRegionIds: jobId
-          ? [`${jobId}:arrival`, `${jobId}:wake`]
-          : [],
+        // Use the exact desired-state builder used by native registration. In
+        // particular, it intentionally omits a redundant wake region when the
+        // configured radii collapse to the same boundary.
+        requiredRegionIds:
+          jobId && job
+            ? buildJobsiteRegions(
+                {
+                  jobId,
+                  lat: job.lat == null ? null : Number(job.lat),
+                  lng: job.lng == null ? null : Number(job.lng),
+                  addressVerified: Boolean(job.address_verified),
+                },
+                feetToMeters(regionSettings.arrivalRadiusFeet),
+                regionSettings.wakeRadiusMeters
+              ).map((region) => region.identifier)
+            : [],
         credential: userId ? (credentialByUser.get(userId) ?? null) : null,
         nativeReadiness: readiness
           ? {
@@ -208,9 +235,6 @@ export async function GET() {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json(
-      { error: "Failed to load attendance setup health" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Failed to load attendance setup health" }, { status: 500 });
   }
 }

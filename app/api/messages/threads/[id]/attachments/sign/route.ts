@@ -47,7 +47,7 @@ function toTenantErrorResponse(error: TenantResolverError) {
 
 // Issue short-lived signed upload URLs so the browser uploads attachment bytes
 // DIRECTLY to Supabase Storage — bypassing the platform's serverless request
-// body limit (which is far below our 10 MB max). Every file's type/size is
+// body limit (which is far below our attachment limits). Every file's type/size is
 // validated here (server-side), and a URL is only issued to a thread participant
 // for a company-scoped path.
 export async function POST(

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseServer } from "@/lib/supabase/server";
-import { NAV_ITEMS, normalizeAppRole, toNavItems, type AppRole, type DisplayAppRole } from "@/lib/nav/config";
+import { NAV_ITEMS, normalizeAppRole, toNavItems, type AppRole } from "@/lib/nav/config";
 import {
   applyPermissionOverrideFromCookie,
   hasModuleAccess,
@@ -9,6 +9,10 @@ import {
   TEST_MODULE_ACCESS_COOKIE,
 } from "@/lib/permissions/runtime";
 import type { ModulePermissionKey } from "@/lib/permissions/types";
+import {
+  isMissingLegacyPermissionProfileColumn,
+  normalizeCanonicalTeamRole,
+} from "@/lib/auth/teamRoles";
 
 export const dynamic = "force-dynamic";
 
@@ -29,13 +33,23 @@ async function resolveContext() {
   }
 
   const userId = userResult.data.user.id;
-  const membershipResult = await supabase
+  let membershipResult = await supabase
     .from("memberships")
-    .select("company_id, role")
+    .select("company_id, role, legacy_permission_profile")
     .eq("user_id", userId)
     .order("company_id", { ascending: true })
     .limit(1)
     .maybeSingle();
+
+  if (isMissingLegacyPermissionProfileColumn(membershipResult.error)) {
+    membershipResult = await supabase
+      .from("memberships")
+      .select("company_id, role")
+      .eq("user_id", userId)
+      .order("company_id", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+  }
 
   if (membershipResult.error) {
     return { error: NextResponse.json({ error: membershipResult.error.message }, { status: 400 }) };
@@ -61,7 +75,12 @@ async function resolveContext() {
     userId,
     userEmail: String(userResult.data.user.email ?? "").trim().toLowerCase(),
     companyId,
-    realRole: normalizeAppRole(membershipResult.data.role) ?? "operator",
+    realRole:
+      normalizeAppRole(
+        membershipResult.data.role,
+        membershipResult.data.legacy_permission_profile
+      ) ?? "operator",
+    canonicalRole: normalizeCanonicalTeamRole(membershipResult.data.role) ?? "team_member",
   };
 }
 
@@ -119,42 +138,11 @@ export async function GET() {
       return roleNavKeys.has(item.key);
     });
 
-    let displayRole: DisplayAppRole = role;
-    const employeeRoleResult = await context.supabase
-      .from("employees")
-      .select("role")
-      .eq("company_id", context.companyId)
-      .eq("user_id", context.userId)
-      .limit(1)
-      .maybeSingle();
-    if (!employeeRoleResult.error) {
-      const rawEmployeeRole = String(employeeRoleResult.data?.role ?? "").trim().toLowerCase();
-      if (rawEmployeeRole.includes("fieldstaff") || rawEmployeeRole.includes("field_staff") || rawEmployeeRole.includes("field staff")) {
-        displayRole = "fieldstaff";
-      }
-    }
-    if (displayRole !== "fieldstaff") {
-      const acceptedInviteRoleResult = await context.supabase
-        .from("pending_invitations")
-        .select("role")
-        .eq("company_id", context.companyId)
-        .eq("accepted_user_id", context.userId)
-        .not("accepted_at", "is", null)
-        .order("accepted_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (!acceptedInviteRoleResult.error) {
-        const rawAcceptedRole = String(acceptedInviteRoleResult.data?.role ?? "").trim().toLowerCase();
-        if (rawAcceptedRole.includes("fieldstaff") || rawAcceptedRole.includes("field_staff") || rawAcceptedRole.includes("field staff")) {
-          displayRole = "fieldstaff";
-        }
-      }
-    }
-
     return NextResponse.json({
       items: filteredItems,
       role,
-      displayRole,
+      displayRole: context.canonicalRole,
+      canonicalRole: context.canonicalRole,
       realRole: context.realRole,
       canSwitchRoleView: false,
       moduleAccess: modulePermissions,

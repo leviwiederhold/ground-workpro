@@ -88,7 +88,7 @@ function getQuickActionsForRole(role: AppRole) {
       { key: "daily_report", label: "Daily Report", href: "daily-report" },
       { key: "work_order", label: "Work Order", href: "work-order" },
       { key: "create_bid", label: "Create Bid", href: "/bids" },
-      { key: "invite_employee", label: "Invite Employee", href: "/team" },
+      { key: "invite_employee", label: "Invite Team Member", href: "/team" },
     ];
   }
 
@@ -98,7 +98,7 @@ function getQuickActionsForRole(role: AppRole) {
       { key: "daily_report", label: "Daily Report", href: "daily-report" },
       { key: "work_order", label: "Work Order", href: "work-order" },
       { key: "create_bid", label: "Create Bid", href: "/bids" },
-      { key: "invite_employee", label: "Invite Employee", href: "/team" },
+      { key: "invite_employee", label: "Invite Team Member", href: "/team" },
     ];
   }
 

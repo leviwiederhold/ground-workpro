@@ -13,10 +13,18 @@ import {
 import {
   modulePermissionKeys,
   moduleAccessLevelSchema,
-  invitationRoleSchema,
+  compatibleInvitationRoleSchema,
   type ModulePermissionMap,
 } from "@/lib/permissions/types";
 import { normalizeAppRole } from "@/lib/nav/config";
+import {
+  canAssignTeamRole,
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  isOwnerTeamRole,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+} from "@/lib/auth/teamRoles";
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 
@@ -26,7 +34,7 @@ const permissionOverrideSchema = z.object({
 });
 
 const patchSchema = z.object({
-  role: invitationRoleSchema.optional(),
+  role: compatibleInvitationRoleSchema.optional(),
   permissions: z.array(permissionOverrideSchema),
 });
 
@@ -45,14 +53,7 @@ const permissionsToRows = (permissions: ModulePermissionMap) =>
   }));
 
 const toTemplateRole = (role: string) => {
-  const raw = String(role ?? "").trim().toLowerCase();
-  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) {
-    return "fieldstaff" as const;
-  }
-  const normalized = normalizeAppRole(role) ?? "operator";
-  if (normalized === "admin") return "ceo" as const;
-  if (normalized === "pm") return "manager" as const;
-  return normalized;
+  return normalizeCanonicalTeamRole(role) ?? "team_member";
 };
 
 export const dynamic = "force-dynamic";
@@ -69,7 +70,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
     const employeeResult = await supabase
       .from("employees")
-      .select("id, role, user_id, email")
+      .select("*")
       .eq("company_id", companyId)
       .eq("id", parsedParams.data.id)
       .maybeSingle();
@@ -82,7 +83,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     }
 
     const fallbackRole = toTemplateRole(String(employeeResult.data.role ?? "operator"));
-    const permissionMap = getDefaultPermissionsByRole(fallbackRole);
+    const permissionMap = getDefaultPermissionsByRole(
+      employeeResult.data.role,
+      employeeResult.data.legacy_permission_profile
+    );
 
     const userId = String(employeeResult.data.user_id ?? "").trim();
     if (userId) {
@@ -106,7 +110,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       item: {
         employee_id: parsedParams.data.id,
         user_id: userId || null,
-        role: fallbackRole,
+        role: normalizeCanonicalTeamRole(employeeResult.data.role) ?? fallbackRole,
         permissions: permissionsToRows(permissionMap),
       },
     });
@@ -114,7 +118,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    if (error instanceof Error && /CEO/i.test(error.message)) {
+    if (error instanceof Error && /Owner/i.test(error.message)) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Internal server error" }, { status: 500 });
@@ -123,7 +127,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { userId: actorUserId } = await requireModuleAccess("team_management", "edit");
+    const { userId: actorUserId, role: actorRole } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);
@@ -139,7 +143,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const employeeResult = await supabase
       .from("employees")
-      .select("id, role, user_id, email")
+      .select("*")
       .eq("company_id", companyId)
       .eq("id", parsedParams.data.id)
       .maybeSingle();
@@ -151,9 +155,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Team member not found" }, { status: 404 });
     }
 
-    // Owner/CEO lock takes precedence over the unlinked-account guard: the
+    if (
+      parsedBody.data.role &&
+      !canAssignTeamRole(actorRole, parsedBody.data.role)
+    ) {
+      return NextResponse.json(
+        { error: "Only Owners can assign the Owner role." },
+        { status: 403 }
+      );
+    }
+
+    // Owner lock takes precedence over the unlinked-account guard: the
     // owner's role cannot be changed even if their employees row isn't linked.
-    if (parsedBody.data.role && parsedBody.data.role !== "ceo") {
+    if (parsedBody.data.role && !isOwnerTeamRole(parsedBody.data.role)) {
       const adminClient = getSupabaseAdmin();
       const isOwner = await isCompanyOwnerEmployee({
         adminClient,
@@ -164,7 +178,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         employeeEmail: (employeeResult.data as { email?: unknown }).email,
       });
       if (isOwner) {
-        return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
+        return NextResponse.json({ error: "Owner role is locked and cannot be changed" }, { status: 400 });
       }
     }
 
@@ -175,7 +189,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const membershipResult = await supabase
       .from("memberships")
-      .select("role")
+      .select("*")
       .eq("company_id", companyId)
       .eq("user_id", targetUserId)
       .maybeSingle();
@@ -188,8 +202,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       permissions: parsedBody.data.permissions,
     });
 
-    const targetEmployeeRole = normalizeAppRole(String(employeeResult.data.role ?? ""));
-    const targetMembershipRole = normalizeAppRole(String(membershipResult.data?.role ?? ""));
+    const targetEmployeeRole = normalizeAppRole(
+      String(employeeResult.data.role ?? ""),
+      employeeResult.data.legacy_permission_profile
+    );
+    const targetMembershipRole = normalizeAppRole(
+      String(membershipResult.data?.role ?? ""),
+      membershipResult.data?.legacy_permission_profile
+    );
     const isTargetCeo = targetEmployeeRole === "admin" || targetMembershipRole === "admin";
 
     assertCeoAccessLocked({
@@ -204,6 +224,45 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       targetRole: normalized.role,
       nextPermissions: normalized.permissions,
     });
+
+    if (parsedBody.data.role) {
+      const roleWrite = canonicalizeRoleWrite(parsedBody.data.role);
+      let membershipUpdate = await supabase
+        .from("memberships")
+        .update(roleWrite)
+        .eq("company_id", companyId)
+        .eq("user_id", targetUserId);
+      if (isMissingLegacyPermissionProfileColumn(membershipUpdate.error)) {
+        membershipUpdate = await supabase
+          .from("memberships")
+          .update({
+            role: legacyCompatibleRoleValue(parsedBody.data.role, "memberships"),
+          })
+          .eq("company_id", companyId)
+          .eq("user_id", targetUserId);
+      }
+      if (membershipUpdate.error) {
+        return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
+      }
+
+      let employeeUpdate = await supabase
+        .from("employees")
+        .update(roleWrite)
+        .eq("company_id", companyId)
+        .eq("id", parsedParams.data.id);
+      if (isMissingLegacyPermissionProfileColumn(employeeUpdate.error)) {
+        employeeUpdate = await supabase
+          .from("employees")
+          .update({
+            role: legacyCompatibleRoleValue(parsedBody.data.role, "employees"),
+          })
+          .eq("company_id", companyId)
+          .eq("id", parsedParams.data.id);
+      }
+      if (employeeUpdate.error) {
+        return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
+      }
+    }
 
     await supabase
       .from("module_permissions")

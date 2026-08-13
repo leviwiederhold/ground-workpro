@@ -10,14 +10,20 @@ import PasswordChecklist from "@/app/components/auth/PasswordChecklist";
 import { isStrongPassword, STRONG_PASSWORD_MESSAGE } from "@/lib/auth/passwordPolicy";
 
 const ROLE_LABELS: Record<string, string> = {
-  ceo: "CEO",
-  admin: "CEO",
-  manager: "Operations Manager",
-  pm: "Operations Manager",
-  foreman: "Foreman",
-  mechanic: "Mechanic",
-  operator: "Operator",
-  fieldstaff: "Field Staff",
+  owner: "Owner",
+  administrator: "Administrator",
+  manager: "Manager",
+  crew_lead: "Crew Lead",
+  team_member: "Team Member",
+  // Released links and cached validation responses are displayed with current
+  // terminology even when they still contain a legacy value.
+  ceo: "Owner",
+  admin: "Owner",
+  pm: "Manager",
+  foreman: "Crew Lead",
+  mechanic: "Team Member",
+  operator: "Team Member",
+  fieldstaff: "Team Member",
 };
 
 export default function SignupPage() {
@@ -69,20 +75,25 @@ export default function SignupPage() {
             role: String(data.item.role ?? "").trim(),
             jobTitle: String(data.item.job_title ?? "").trim(),
           });
-          // Block accepting in the inviter's own session: an owner/admin (or any
+          if (data.item.already_accepted_by_viewer) {
+            router.replace("/");
+            router.refresh();
+            return;
+          }
+          // Block accepting in the inviter's own session: an Owner (or any
           // existing member) must use a different browser or sign out so the
           // invitee gets their own account — never the owner's.
           if (data.item.viewer_is_owner) {
             setInviteBlock({
               title: "You're signed in as the company owner",
               message:
-                "You're signed in as the company owner. Open this invite in a different browser or sign out to accept as a new employee.",
+                "You're signed in as the company Owner. Open this invite in a different browser or sign out to accept as a new Team Member.",
             });
           } else if (data.item.viewer_is_member) {
             setInviteBlock({
               title: "You're already a member",
               message:
-                "You're already a member of this company. Open this invite in a different browser, or sign out and accept with the invited employee's own account.",
+                "You're already a member of this company. Open this invite in a different browser, or sign out and accept with the invited Team Member's own account.",
             });
           }
         })
@@ -230,7 +241,7 @@ export default function SignupPage() {
       setLoading(false);
       return;
     }
-    // Invited employees must supply their own name (admin no longer enters it).
+    // Invited Team Members supply their own name instead of relying on the inviter.
     if (inviteMode && (!firstName.trim() || !lastName.trim())) {
       setError("Please enter your first and last name.");
       setLoading(false);
@@ -380,7 +391,7 @@ export default function SignupPage() {
             className="w-full rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 disabled:opacity-60"
             data-testid="invite-signout"
           >
-            {signingOut ? "Signing out…" : "Sign out and accept as employee"}
+            {signingOut ? "Signing out…" : "Sign out and accept as team member"}
           </button>
           <a href={loginHref} className="mt-3 inline-block text-sm text-gray-500 hover:text-gray-700">
             Cancel

@@ -1,17 +1,14 @@
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  canonicalTeamRoleLabel,
+  isMissingLegacyPermissionProfileColumn,
+  normalizeCanonicalTeamRole,
+} from "@/lib/auth/teamRoles";
 
 function toRoleLabel(role: unknown) {
-  const normalized = String(role ?? "").trim().toLowerCase();
-  if (normalized === "ceo") return "CEO";
-  if (normalized === "admin") return "CEO";
-  if (normalized === "pm") return "Operations Manager";
-  if (normalized === "foreman") return "Foreman";
-  if (normalized === "mechanic") return "Mechanic";
-  if (normalized === "fieldstaff" || normalized === "field_staff" || normalized === "field staff") return "Field Staff";
-  if (normalized === "operator") return "Operator";
-  return normalized || "Member";
+  return canonicalTeamRoleLabel(role);
 }
 
 function tenantError(error: TenantResolverError) {
@@ -38,6 +35,14 @@ const pickDisplayName = ({
   return "Team Member";
 };
 
+const chunkValues = <T,>(values: T[], size = 100): T[][] => {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+};
+
 export async function GET(request: Request) {
   try {
     const { supabase, companyId, userId } = await getCompanyId();
@@ -46,37 +51,77 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const excludeSelf = url.searchParams.get("excludeSelf") !== "0";
 
-    let memberships = excludeSelf
+    const preferredMemberships = excludeSelf
       ? await db
           .from("memberships")
-          .select("user_id, role")
+          .select("user_id, role, legacy_permission_profile")
           .eq("company_id", companyId)
           .neq("user_id", userId)
           .order("created_at", { ascending: true })
       : await db
           .from("memberships")
-          .select("user_id, role")
+          .select("user_id, role, legacy_permission_profile")
           .eq("company_id", companyId)
           .order("created_at", { ascending: true });
+    let membershipRows: Array<{
+      user_id?: string | null;
+      role?: string | null;
+      legacy_permission_profile?: string | null;
+    }> = [];
+    let membershipError = preferredMemberships.error;
 
-    if (memberships.error && /created_at|Could not find the 'created_at' column/i.test(memberships.error.message || "")) {
-      memberships = excludeSelf
+    if (isMissingLegacyPermissionProfileColumn(membershipError)) {
+      let legacyMemberships = excludeSelf
         ? await db
             .from("memberships")
             .select("user_id, role")
             .eq("company_id", companyId)
             .neq("user_id", userId)
-            .order("user_id", { ascending: true })
+            .order("created_at", { ascending: true })
         : await db
             .from("memberships")
             .select("user_id, role")
             .eq("company_id", companyId)
+            .order("created_at", { ascending: true });
+      if (legacyMemberships.error && /created_at|Could not find the 'created_at' column/i.test(legacyMemberships.error.message || "")) {
+        legacyMemberships = excludeSelf
+          ? await db
+              .from("memberships")
+              .select("user_id, role")
+              .eq("company_id", companyId)
+              .neq("user_id", userId)
+              .order("user_id", { ascending: true })
+          : await db
+              .from("memberships")
+              .select("user_id, role")
+              .eq("company_id", companyId)
+              .order("user_id", { ascending: true });
+      }
+      membershipRows = (legacyMemberships.data ?? []).map((row) => ({
+        ...row,
+        legacy_permission_profile: null,
+      }));
+      membershipError = legacyMemberships.error;
+    } else if (membershipError && /created_at|Could not find the 'created_at' column/i.test(membershipError.message || "")) {
+      const fallbackMemberships = excludeSelf
+        ? await db
+            .from("memberships")
+            .select("user_id, role, legacy_permission_profile")
+            .eq("company_id", companyId)
+            .neq("user_id", userId)
+            .order("user_id", { ascending: true })
+        : await db
+            .from("memberships")
+            .select("user_id, role, legacy_permission_profile")
+            .eq("company_id", companyId)
             .order("user_id", { ascending: true });
+      membershipRows = fallbackMemberships.data ?? [];
+      membershipError = fallbackMemberships.error;
+    } else {
+      membershipRows = preferredMemberships.data ?? [];
     }
 
-    if (memberships.error) return serverError();
-
-    const membershipRows = memberships.data ?? [];
+    if (membershipError) return serverError();
     const userIds = Array.from(
       new Set(
         membershipRows
@@ -85,63 +130,74 @@ export async function GET(request: Request) {
       )
     );
 
-    let profiles: {
-      data: Array<{ id?: string; full_name?: string; display_name?: string; avatar_url?: string }> | null;
-      error: { message?: string } | null;
-    } = userIds.length
-      ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
-      : { data: [], error: null };
-
-    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, avatar_url").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string; avatar_url?: string }) => ({
-          id: row.id,
-          full_name: row.full_name,
-          avatar_url: row.avatar_url,
-        })),
-        error: fallbackProfiles.error,
-      };
+    type ProfileRow = { id?: string; full_name?: string; display_name?: string; avatar_url?: string };
+    const profileRows: ProfileRow[] = [];
+    for (const userIdChunk of chunkValues(userIds)) {
+      const preferredProfiles = await db
+        .from("profiles")
+        .select("id, full_name, display_name, avatar_url")
+        .in("id", userIdChunk);
+      let chunkProfileRows = (preferredProfiles.data ?? []) as ProfileRow[];
+      let profilesError = preferredProfiles.error;
+      if (profilesError && /display_name|Could not find the 'display_name' column/i.test(profilesError.message || "")) {
+        const fallbackProfiles = await db
+          .from("profiles")
+          .select("id, full_name, avatar_url")
+          .in("id", userIdChunk);
+        chunkProfileRows = (fallbackProfiles.data ?? []).map((row) => ({
+          ...row,
+          display_name: undefined,
+        }));
+        profilesError = fallbackProfiles.error;
+      }
+      if (profilesError && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesError.message || "")) {
+        const fallbackProfiles = await db
+          .from("profiles")
+          .select("id, full_name, display_name")
+          .in("id", userIdChunk);
+        chunkProfileRows = (fallbackProfiles.data ?? []).map((row) => ({
+          ...row,
+          avatar_url: undefined,
+        }));
+        profilesError = fallbackProfiles.error;
+      }
+      if (profilesError) return serverError();
+      profileRows.push(...chunkProfileRows);
     }
 
-    if (profiles.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, display_name").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map(
-          (row: { id?: string; full_name?: string; display_name?: string }) => ({
-            id: row.id,
-            full_name: row.full_name,
-            display_name: row.display_name,
-          })
-        ),
-        error: fallbackProfiles.error,
-      };
-    }
-
-    if (profiles.error) return serverError();
-
-    let employees: {
-      data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; role?: string | null; status?: string | null }> | null;
-      error: { message?: string } | null;
-    } = userIds.length
-      ? await db
-          .from("employees")
-          .select("user_id, name, full_name, email, role, status")
-          .eq("company_id", companyId)
-          .in("user_id", userIds)
-      : { data: [], error: null };
-    if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
-      employees = await db
+    type EmployeeRow = {
+      user_id: string;
+      name?: string;
+      full_name?: string;
+      email?: string;
+      role?: string | null;
+      status?: string | null;
+    };
+    const employeeRows: EmployeeRow[] = [];
+    for (const userIdChunk of chunkValues(userIds)) {
+      const preferredEmployees = await db
         .from("employees")
-        .select("user_id, full_name, status")
+        .select("user_id, name, full_name, email, role, status")
         .eq("company_id", companyId)
-        .in("user_id", userIds);
+        .in("user_id", userIdChunk);
+      let chunkEmployeeRows = (preferredEmployees.data ?? []) as EmployeeRow[];
+      let employeesError = preferredEmployees.error;
+      if (employeesError && /column employees\.name does not exist|Could not find the 'name' column/i.test(employeesError.message || "")) {
+        const fallbackEmployees = await db
+          .from("employees")
+          .select("user_id, full_name, status")
+          .eq("company_id", companyId)
+          .in("user_id", userIdChunk);
+        chunkEmployeeRows = (fallbackEmployees.data ?? []).map((row) => ({
+          ...row,
+          name: undefined,
+          email: undefined,
+          role: undefined,
+        })) as EmployeeRow[];
+        employeesError = fallbackEmployees.error;
+      }
+      if (!employeesError) employeeRows.push(...chunkEmployeeRows);
     }
-    const employeeRows = employees.error ? [] : employees.data ?? [];
     const inactiveUserIds = new Set(
       employeeRows
         .filter((row) => ["inactive", "deleted", "archived"].includes(String(row.status ?? "").trim().toLowerCase()))
@@ -153,7 +209,7 @@ export async function GET(request: Request) {
     const emailById = new Map<string, string>();
     const avatarById = new Map<string, string>();
     const roleOverrideById = new Map<string, string>();
-    for (const profile of profiles.data ?? []) {
+    for (const profile of profileRows) {
       const key = String(profile.id ?? "").trim();
       if (!key) continue;
       const profileName = pickDisplayName({
@@ -186,19 +242,21 @@ export async function GET(request: Request) {
     }
 
     if (userIds.length > 0) {
-      const acceptedInvitesResult = await db
+      for (const userIdChunk of chunkValues(userIds)) {
+        const acceptedInvitesResult = await db
         .from("pending_invitations")
         .select("accepted_user_id, role")
         .eq("company_id", companyId)
         .not("accepted_at", "is", null)
-        .in("accepted_user_id", userIds);
-      if (!acceptedInvitesResult.error) {
-        for (const row of acceptedInvitesResult.data ?? []) {
-          const acceptedUserId = String(row.accepted_user_id ?? "").trim();
-          const inviteRole = String(row.role ?? "").trim().toLowerCase();
-          if (!acceptedUserId) continue;
-          if (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff")) {
-            roleOverrideById.set(acceptedUserId, "fieldstaff");
+        .in("accepted_user_id", userIdChunk);
+        if (!acceptedInvitesResult.error) {
+          for (const row of acceptedInvitesResult.data ?? []) {
+            const acceptedUserId = String(row.accepted_user_id ?? "").trim();
+            const inviteRole = String(row.role ?? "").trim().toLowerCase();
+            if (!acceptedUserId) continue;
+            if (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff")) {
+              roleOverrideById.set(acceptedUserId, "fieldstaff");
+            }
           }
         }
       }
@@ -231,8 +289,9 @@ export async function GET(request: Request) {
         const role = roleOverrideById.get(memberUserId) || String(row.role ?? "").trim().toLowerCase();
         return {
           userId: memberUserId,
-          role,
+          role: normalizeCanonicalTeamRole(role) ?? "team_member",
           roleLabel: toRoleLabel(role),
+          accessProfile: String(row.legacy_permission_profile ?? ""),
           displayName: nameById.get(memberUserId) || emailById.get(memberUserId) || "Team Member",
           email: emailById.get(memberUserId) || "",
           avatarUrl: avatarById.get(memberUserId) || "",

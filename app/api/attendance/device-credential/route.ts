@@ -94,6 +94,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       token: minted.token,
       expiresAt: minted.expiresAt,
+      refreshToken: minted.refreshToken,
+      refreshExpiresAt: minted.refreshExpiresAt,
       credentialId: minted.credentialId,
     });
   } catch (error) {

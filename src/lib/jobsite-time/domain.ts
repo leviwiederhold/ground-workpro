@@ -73,20 +73,14 @@ export function metersToMiles(meters: number): number {
 }
 
 // Great-circle distance in meters between two lat/lng points.
-export function haversineMeters(
-  aLat: number,
-  aLng: number,
-  bLat: number,
-  bLng: number
-): number {
+export function haversineMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(bLat - aLat);
   const dLng = toRad(bLng - aLng);
   const lat1 = toRad(aLat);
   const lat2 = toRad(bLat);
-  const h =
-    Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  const h = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
@@ -103,7 +97,9 @@ export function isWithinGeofence(params: {
 
 // GPS accuracy → confidence. Poor accuracy (or a fix that could place the
 // employee outside the fence) must be flagged for manager review.
-export function confidenceForAccuracy(accuracyMeters: number | null | undefined): TimecardConfidence {
+export function confidenceForAccuracy(
+  accuracyMeters: number | null | undefined
+): TimecardConfidence {
   const a = Number(accuracyMeters ?? NaN);
   if (!Number.isFinite(a)) return "low";
   if (a <= 25) return "high";
@@ -190,18 +186,21 @@ export function normalizeWorkTime(value: unknown, fallback: string): string {
   if (!match) return fallback;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
-  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
     return fallback;
   }
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 export function normalizeWorkDays(value: unknown): string[] {
-  const raw = Array.isArray(value)
-    ? value
-    : typeof value === "string"
-      ? value.split(",")
-      : [];
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
   const normalized = raw
     .map((day) => String(day).trim().toLowerCase().slice(0, 3))
     .filter((day): day is (typeof DAY_KEYS)[number] => DAY_KEYS.includes(day as any));
@@ -245,7 +244,7 @@ export function getCompanyLocalDateKey(iso: string, timezone: string): string {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-function zonedTimeToUtcIso(dateKey: string, time: string, timezone: string): string {
+export function zonedTimeToUtcIso(dateKey: string, time: string, timezone: string): string {
   const [year, month, day] = dateKey.split("-").map(Number);
   const [hour, minute] = normalizeWorkTime(time, DEFAULT_WORK_START_TIME).split(":").map(Number);
   let utcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
@@ -332,6 +331,10 @@ export function evaluateJobsiteEvent(params: {
   hasSchedule: boolean;
   earlyArrivalWindowMinutes?: number;
   lateGraceMinutes?: number;
+  // A bearer-authenticated Core Location region callback already represents
+  // an OS-verified boundary crossing. Its callback does not guarantee a GPS
+  // point, so missing coordinates must not be fabricated as (0, 0).
+  trustedRegionTransition?: boolean;
 }): JobsiteEvaluation {
   let confidence: TimecardConfidence = confidenceForAccuracy(params.accuracyMeters);
   let needsReview = false;
@@ -346,9 +349,23 @@ export function evaluateJobsiteEvent(params: {
   const jobLng = Number(params.jobLng);
   const ptLat = Number(params.pointLat);
   const ptLng = Number(params.pointLng);
-  const hasJobCoords = Number.isFinite(jobLat) && Number.isFinite(jobLng);
-  const hasPointCoords = Number.isFinite(ptLat) && Number.isFinite(ptLng);
-  const accuracyM = Number.isFinite(Number(params.accuracyMeters)) ? Number(params.accuracyMeters) : null;
+  const hasJobCoords =
+    params.jobLat !== null &&
+    params.jobLat !== undefined &&
+    params.jobLng !== null &&
+    params.jobLng !== undefined &&
+    Number.isFinite(jobLat) &&
+    Number.isFinite(jobLng);
+  const hasPointCoords =
+    params.pointLat !== null &&
+    params.pointLat !== undefined &&
+    params.pointLng !== null &&
+    params.pointLng !== undefined &&
+    Number.isFinite(ptLat) &&
+    Number.isFinite(ptLng);
+  const accuracyM = Number.isFinite(Number(params.accuracyMeters))
+    ? Number(params.accuracyMeters)
+    : null;
 
   if (hasJobCoords && hasPointCoords) {
     distanceMeters = haversineMeters(jobLat, jobLng, ptLat, ptLng);
@@ -377,6 +394,11 @@ export function evaluateJobsiteEvent(params: {
         needsReview = true;
       }
     }
+  } else if (params.trustedRegionTransition && hasJobCoords) {
+    // Core Location did the spatial check against the registered region. Keep
+    // schedule/assignment validation server-side, but do not turn an absent
+    // optional GPS sample into a manager-review failure.
+    confidence = "high";
   } else {
     // No coordinates to verify against → cannot confirm the jobsite match.
     downgrade("low");
@@ -394,12 +416,19 @@ export function evaluateJobsiteEvent(params: {
   // status until valid work hours and timezone exist."
   const hasCompanySchedule =
     params.earlyArrivalWindowMinutes != null && params.lateGraceMinutes != null;
-  const earlyMs = clampInt(params.earlyArrivalWindowMinutes, DEFAULT_EARLY_ARRIVAL_WINDOW_MINUTES, 0, 720) * 60000;
+  const earlyMs =
+    clampInt(params.earlyArrivalWindowMinutes, DEFAULT_EARLY_ARRIVAL_WINDOW_MINUTES, 0, 720) *
+    60000;
   const graceMs = clampInt(params.lateGraceMinutes, DEFAULT_LATE_GRACE_MINUTES, 0, 240) * 60000;
   if (params.hasSchedule && params.scheduledStart && params.scheduledEnd) {
     const s = Date.parse(params.scheduledStart);
     const e = Date.parse(params.scheduledEnd);
-    if (hasCompanySchedule && params.transition === "enter" && Number.isFinite(s) && t < s - earlyMs) {
+    if (
+      hasCompanySchedule &&
+      params.transition === "enter" &&
+      Number.isFinite(s) &&
+      t < s - earlyMs
+    ) {
       return {
         reject: false,
         ignore: true,
@@ -411,7 +440,8 @@ export function evaluateJobsiteEvent(params: {
         arrivalStatus: null,
       };
     }
-    withinSchedule = Number.isFinite(s) && Number.isFinite(e) && t >= s - earlyMs && t <= e + graceMs;
+    withinSchedule =
+      Number.isFinite(s) && Number.isFinite(e) && t >= s - earlyMs && t <= e + graceMs;
     if (hasCompanySchedule && params.transition === "enter" && Number.isFinite(s)) {
       if (t < s) arrivalStatus = "early";
       else if (t <= s + graceMs) arrivalStatus = "on_time";
@@ -582,7 +612,9 @@ export function mapCompanyJobsiteSettings(row: any): JobsiteTimeSettings {
     wakeRadiusMeters: Number(row?.jobsite_wake_radius_meters ?? DEFAULT_WAKE_RADIUS_METERS),
     // Preserve any saved radius; only fall back to the 500 ft default when unset.
     arrivalRadiusFeet: Number(row?.jobsite_geofence_radius_feet ?? DEFAULT_ARRIVAL_RADIUS_FEET),
-    departureGraceMinutes: Number(row?.jobsite_departure_grace_minutes ?? DEFAULT_DEPARTURE_GRACE_MINUTES),
+    departureGraceMinutes: Number(
+      row?.jobsite_departure_grace_minutes ?? DEFAULT_DEPARTURE_GRACE_MINUTES
+    ),
     arrivalConfirmationSeconds: Number(
       row?.jobsite_arrival_confirmation_seconds ?? DEFAULT_ARRIVAL_CONFIRMATION_SECONDS
     ),
@@ -618,29 +650,37 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceDisplayStatus, string> = 
   missing_clock_out: "Missing clock-out",
 };
 
-// Short role codes / acronyms that read best fully uppercased in the UI
-// (e.g. "PM - Smith Excavation", not "Pm - …").
-const UPPERCASE_ROLE_LABELS = new Set([
-  "pm",
-  "ceo",
-  "cfo",
-  "coo",
-  "cto",
-  "vp",
-  "hr",
-  "it",
-  "admin",
-]);
+const CANONICAL_ATTENDANCE_ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  admin: "Owner",
+  executive: "Owner",
+  ceo: "Owner",
+  coceo: "Owner",
+  administrator: "Administrator",
+  manager: "Manager",
+  pm: "Manager",
+  operations: "Manager",
+  operationsmanager: "Manager",
+  projectmanager: "Manager",
+  crewlead: "Crew Lead",
+  foreman: "Crew Lead",
+  teammember: "Team Member",
+  employee: "Team Member",
+  mechanic: "Team Member",
+  operator: "Team Member",
+  field: "Team Member",
+  fieldstaff: "Team Member",
+};
 
-// Human-facing role label for the Attendance roster. Uppercases short role
-// codes/acronyms (PM, CEO, admin…), Title-cases everything else. Empty/unknown
-// falls back to "Employee".
+// Human-facing access-role label for the Attendance roster. Released clients
+// may still supply legacy values, so map those values to the same canonical
+// terminology instead of leaking the old hierarchy into current UI.
 export function formatAttendanceRoleLabel(role: string | null | undefined): string {
   const raw = String(role ?? "").trim();
-  if (!raw) return "Employee";
-  const lower = raw.toLowerCase();
-  if (UPPERCASE_ROLE_LABELS.has(lower) || (/^[a-z]+$/.test(lower) && lower.length <= 3)) {
-    return raw.toUpperCase();
+  if (!raw) return "Team Member";
+  const compact = raw.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (CANONICAL_ATTENDANCE_ROLE_LABELS[compact]) {
+    return CANONICAL_ATTENDANCE_ROLE_LABELS[compact];
   }
   return raw
     .split(/[\s_-]+/)
@@ -649,7 +689,7 @@ export function formatAttendanceRoleLabel(role: string | null | undefined): stri
     .join(" ");
 }
 
-// Roster subtitle: "{roleLabel} - {jobName}", e.g. "PM - Smith Excavation".
+// Roster subtitle: "{roleLabel} - {jobName}", e.g. "Manager - Smith Excavation".
 // Only shows "Unassigned" when there is genuinely no job name/id — a bare jobId
 // with no resolvable name still counts as assigned (shows "Assigned job")
 // rather than wrongly reading as unassigned.
@@ -660,7 +700,8 @@ export function formatAssignedJobSubtitle(params: {
 }): string {
   const roleLabel = formatAttendanceRoleLabel(params.role);
   const name = String(params.jobName ?? "").trim();
-  const hasJobId = params.jobId !== null && params.jobId !== undefined && String(params.jobId).trim() !== "";
+  const hasJobId =
+    params.jobId !== null && params.jobId !== undefined && String(params.jobId).trim() !== "";
   const jobLabel = name || (hasJobId ? "Assigned job" : "Unassigned");
   return `${roleLabel} - ${jobLabel}`;
 }

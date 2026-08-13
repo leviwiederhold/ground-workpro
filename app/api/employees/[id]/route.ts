@@ -9,6 +9,14 @@ import { isCompanyOwnerEmployee } from "@/lib/auth/ownerLock";
 import { ASSIGNMENT_CONFLICT_CODE } from "@/lib/jobs/assignmentConflict";
 import { runJobAssignmentSideEffects } from "@/lib/jobs/assignmentSideEffects";
 import { assignEmployeeToJob } from "@/lib/jobs/assignmentService";
+import {
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  isOwnerTeamRole,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -29,21 +37,6 @@ const updateEmployeeSchema = z
   });
 
 const normalizeId = (id: string) => (/^\d+$/.test(id) ? Number(id) : id);
-const normalizeRoleValue = (value: unknown) => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (!raw) return "";
-  if (raw === "executive" || raw === "ceo") return "admin";
-  if (raw === "project manager" || raw === "manager") return "pm";
-  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
-  if (raw === "laborer") return "operator";
-  return raw;
-};
-
-const normalizeMembershipRoleValue = (value: unknown) => {
-  const normalized = normalizeRoleValue(value);
-  return normalized === "fieldstaff" ? "operator" : normalized;
-};
-
 const parseCertifications = (value: unknown) => {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -65,7 +58,10 @@ const mapEmployee = (row: any) => {
   return {
     id,
     name: row.name ?? row.full_name ?? "",
-    role: String(row.role ?? "operator").trim().toLowerCase(),
+    role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
+    jobTitle: String(row.job_title ?? ""),
+    accessProfile:
+      normalizeLegacyPermissionProfile(row.role, row.legacy_permission_profile) ?? "operator",
     user_id: row.user_id ?? null,
     phone: row.phone ?? "",
     email: row.email ?? "",
@@ -188,9 +184,9 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Owner/CEO lock: the company owner's role cannot be changed through the
+    // Owner lock: an Owner's access role cannot be changed through the
     // Employees endpoint, regardless of how the employees row is linked.
-    if (payload.role !== undefined && normalizeRoleValue(payload.role) !== "admin") {
+    if (payload.role !== undefined && !isOwnerTeamRole(payload.role)) {
       const adminClient = getSupabaseAdmin();
       const isTargetCeo = await isCompanyOwnerEmployee({
         adminClient,
@@ -201,7 +197,7 @@ export async function PATCH(
         employeeEmail: existingEmployee.email,
       });
       if (isTargetCeo) {
-        return NextResponse.json({ error: "CEO role is locked and cannot be changed" }, { status: 400 });
+        return NextResponse.json({ error: "Owner role is locked and cannot be changed" }, { status: 400 });
       }
     }
 
@@ -317,7 +313,7 @@ export async function PATCH(
       updatePayload.name = payload.name;
       updatePayload.full_name = payload.name;
     }
-    if (payload.role !== undefined) updatePayload.role = normalizeRoleValue(payload.role);
+    if (payload.role !== undefined) Object.assign(updatePayload, canonicalizeRoleWrite(payload.role));
     if (payload.phone !== undefined) updatePayload.phone = payload.phone;
     if (payload.email !== undefined) updatePayload.email = payload.email;
     if (payload.hourlyRate !== undefined) {
@@ -373,13 +369,16 @@ export async function PATCH(
     }
 
     if (error && payload.role !== undefined && isRoleCheckError(error.message)) {
-      const retryWithoutRolePayload = { ...updatePayload };
-      delete retryWithoutRolePayload.role;
+      const legacyRolePayload = {
+        ...updatePayload,
+        role: legacyCompatibleRoleValue(payload.role, "employees"),
+      };
+      delete (legacyRolePayload as Record<string, unknown>).legacy_permission_profile;
       const retryWithoutRole = await updateWithColumnFallback(
         supabase,
         companyId,
         employeeId,
-        retryWithoutRolePayload
+        legacyRolePayload
       );
       data = retryWithoutRole.data;
       error = retryWithoutRole.error;
@@ -425,17 +424,32 @@ export async function PATCH(
     }
 
     if (payload.role !== undefined && updatedEmployee?.user_id) {
-      const membershipResult = await supabase
+      const roleWrite = canonicalizeRoleWrite(payload.role);
+      let membershipResult = await supabase
         .from("memberships")
-        .update({ role: normalizeMembershipRoleValue(payload.role) })
+        .update(roleWrite)
         .eq("company_id", companyId)
         .eq("user_id", updatedEmployee.user_id);
+      if (isMissingLegacyPermissionProfileColumn(membershipResult.error)) {
+        membershipResult = await supabase
+          .from("memberships")
+          .update({ role: legacyCompatibleRoleValue(payload.role, "memberships") })
+          .eq("company_id", companyId)
+          .eq("user_id", updatedEmployee.user_id);
+      }
       if (membershipResult.error) {
-        await supabase.from("memberships").insert({
+        let membershipInsert = await supabase.from("memberships").insert({
           company_id: companyId,
           user_id: updatedEmployee.user_id,
-          role: normalizeMembershipRoleValue(payload.role),
+          ...roleWrite,
         });
+        if (isMissingLegacyPermissionProfileColumn(membershipInsert.error)) {
+          membershipInsert = await supabase.from("memberships").insert({
+            company_id: companyId,
+            user_id: updatedEmployee.user_id,
+            role: legacyCompatibleRoleValue(payload.role, "memberships"),
+          });
+        }
       }
     }
 

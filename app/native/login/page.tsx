@@ -255,7 +255,7 @@ export default function NativeLoginPage() {
               <div className="auth-title" style={{ fontSize: 20, marginBottom: 4 }}>
                 Sign in to Groundwork Pro
               </div>
-              <div style={{ fontSize: 13, color: "#666" }}>Use your existing employee or company account.</div>
+              <div style={{ fontSize: 13, color: "#666" }}>Use your existing team or company account.</div>
             </div>
 
             <div className="nav-tabs">

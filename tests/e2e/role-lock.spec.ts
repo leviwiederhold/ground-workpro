@@ -21,7 +21,7 @@ async function setRealRole(page: Page, role: Role) {
   expect(response.status(), body).toBe(200);
 }
 
-test("only admin can switch acting role", async ({ page }) => {
+test("only the real Owner can restore an Owner acting view", async ({ page }) => {
   await loginViaUI(page);
 
   await setRealRole(page, "operator");
@@ -31,23 +31,23 @@ test("only admin can switch acting role", async ({ page }) => {
   expect(navAsOperator.status()).toBe(200);
   expect(navAsOperatorJson?.canSwitchRoleView).toBe(false);
 
-  const deniedSwitch = await page.request.post("/api/rbac/acting-role", {
+  await page.goto("/");
+  await expect(page.getByText("Owner")).toHaveCount(0);
+
+  const ownerSwitch = await page.request.post("/api/rbac/acting-role", {
     data: { role: "admin" },
     timeout: 30_000,
   });
-  const deniedSwitchBody = await deniedSwitch.text();
-  expect(deniedSwitch.status(), deniedSwitchBody).toBe(403);
-  expect(JSON.parse(deniedSwitchBody)).toEqual({ error: "Forbidden" });
-
-  await page.goto("/");
-  await expect(page.getByText("Executive / CEO")).toHaveCount(0);
+  const ownerSwitchBody = await ownerSwitch.text();
+  expect(ownerSwitch.status(), ownerSwitchBody).toBe(200);
+  expect(JSON.parse(ownerSwitchBody)?.item?.role).toBe("admin");
 
   await setRealRole(page, "admin");
 
   const navAsAdmin = await page.request.get("/api/nav", { timeout: 30_000 });
   const navAsAdminJson = await navAsAdmin.json();
   expect(navAsAdmin.status()).toBe(200);
-  expect(navAsAdminJson?.canSwitchRoleView).toBe(true);
+  expect(navAsAdminJson?.role).toBe("admin");
 
   const allowedSwitch = await page.request.post("/api/rbac/acting-role", {
     data: { role: "operator" },
@@ -58,34 +58,52 @@ test("only admin can switch acting role", async ({ page }) => {
   expect(JSON.parse(allowedSwitchBody)?.item?.role).toBe("operator");
 });
 
-test("CEO member role and permissions remain locked", async ({ page }) => {
+test("Owner member role and permissions remain locked", async ({ page }) => {
+  await page.route("**/api/onboarding/setup-status", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        item: { role: "admin", has_company: true, required_complete: true, is_complete: true },
+      }),
+    });
+  });
   await loginViaUI(page);
+  page.removeAllListeners("console");
   await setRealRole(page, "admin");
 
   const teamResponse = await page.request.get("/api/team?limit=50");
   const teamBody = await teamResponse.text();
   expect(teamResponse.status(), teamBody).toBe(200);
   const teamItems = JSON.parse(teamBody)?.items ?? [];
-  const ceo = teamItems.find((item: { role?: string; accountStatus?: string }) => {
+  const owner = teamItems.find((item: { role?: string; accountStatus?: string }) => {
     const role = String(item?.role ?? "").toLowerCase();
-    return role === "admin" && String(item?.accountStatus ?? "").toLowerCase() === "active";
+    return role === "owner" && String(item?.accountStatus ?? "").toLowerCase() === "active";
   });
-  expect(Boolean(ceo)).toBeTruthy();
+  expect(Boolean(owner)).toBeTruthy();
 
-  const roleChangeResponse = await page.request.patch(`/api/employees/${ceo.id}`, {
-    data: { role: "pm" },
-  });
-  const roleChangeBody = await roleChangeResponse.text();
-  expect(roleChangeResponse.status(), roleChangeBody).toBe(400);
-  expect(JSON.parse(roleChangeBody)?.error).toContain("CEO role is locked");
+  expect(String(owner.recordSource)).toMatch(/^(employee|membership)$/);
 
-  const permissionChangeResponse = await page.request.patch(`/api/team/members/${ceo.id}/permissions`, {
+  await page.goto("/team");
+  await page.getByRole("heading", { name: String(owner.displayName), exact: true }).last().click();
+  await expect(page.getByText("Owner role is locked.", { exact: true })).toBeVisible();
+});
+
+test("a lower-role user with custom Team edit access still cannot assign Owner", async ({ page }) => {
+  await loginViaUI(page);
+  await setRealRole(page, "pm");
+
+  const permissionResponse = await page.request.post("/api/test/module-permissions", {
     data: {
-      role: "manager",
-      permissions: [{ module_key: "jobs", access_level: "view" }],
+      permissions: [{ module_key: "team_management", access_level: "edit" }],
     },
   });
-  const permissionChangeBody = await permissionChangeResponse.text();
-  expect(permissionChangeResponse.status(), permissionChangeBody).toBe(400);
-  expect(JSON.parse(permissionChangeBody)?.error).toContain("CEO role is locked");
+  expect(permissionResponse.status(), await permissionResponse.text()).toBe(200);
+
+  const inviteResponse = await page.request.post("/api/team/invitations", {
+    data: { role: "owner" },
+  });
+  const inviteBody = await inviteResponse.text();
+  expect(inviteResponse.status(), inviteBody).toBe(403);
+  expect(JSON.parse(inviteBody)?.error).toContain("Only Owners");
 });

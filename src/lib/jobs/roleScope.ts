@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { normalizeAppRole, type AppRole } from "@/lib/nav/config";
+import { isMissingLegacyPermissionProfileColumn } from "@/lib/auth/teamRoles";
 import {
   applyPermissionOverrideFromCookie,
   hasModuleAccess,
@@ -23,18 +24,32 @@ export async function resolveMembershipRole(
   companyId: string,
   userId: string
 ): Promise<AppRole | null> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("memberships")
-    .select("role")
+    .select("role, legacy_permission_profile")
     .eq("company_id", companyId)
     .eq("user_id", userId)
     .limit(1);
+
+  if (isMissingLegacyPermissionProfileColumn(error)) {
+    const legacyResult = await supabase
+      .from("memberships")
+      .select("role")
+      .eq("company_id", companyId)
+      .eq("user_id", userId)
+      .limit(1);
+    data = (legacyResult.data ?? []).map((row: { role?: unknown }) => ({
+      ...row,
+      legacy_permission_profile: null,
+    }));
+    error = legacyResult.error;
+  }
 
   if (error) {
     throw new Error(error.message);
   }
 
-  return normalizeAppRole(data?.[0]?.role);
+  return normalizeAppRole(data?.[0]?.role, data?.[0]?.legacy_permission_profile);
 }
 
 async function resolveCurrentUserEmail(supabase: any) {

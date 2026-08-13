@@ -53,10 +53,12 @@ export const validateAttachmentMetadata = ({
   fileName,
   contentType,
   sizeBytes,
+  maxBytes = MAX_ATTACHMENT_BYTES,
 }: {
   fileName: string;
   contentType: string;
   sizeBytes: number;
+  maxBytes?: number;
 }) => {
   const safeFileName = sanitizeAttachmentFileName(fileName);
   const extension = safeFileName.split(".").pop()?.toLowerCase() ?? "";
@@ -78,7 +80,7 @@ export const validateAttachmentMetadata = ({
     return { ok: false as const, error: "Invalid file size" };
   }
 
-  if (sizeBytes > MAX_ATTACHMENT_BYTES) {
+  if (sizeBytes > maxBytes) {
     return { ok: false as const, error: "File is too large" };
   }
 

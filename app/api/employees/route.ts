@@ -4,6 +4,13 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
+import {
+  canAssignTeamRole,
+  canonicalizeRoleWrite,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -121,7 +128,10 @@ const mapEmployee = (row: any) => {
   return {
     id,
     name: row.name ?? row.full_name ?? "",
-    role: String(row.role ?? "operator").trim().toLowerCase(),
+    role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
+    jobTitle: String(row.job_title ?? ""),
+    accessProfile:
+      normalizeLegacyPermissionProfile(row.role, row.legacy_permission_profile) ?? "operator",
     user_id: row.user_id ?? null,
     phone: row.phone ?? "",
     email: row.email ?? "",
@@ -237,6 +247,10 @@ export async function POST(request: Request) {
 
     const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
+    const roleWrite = canonicalizeRoleWrite(payload.role ?? "team_member");
+    if (!canAssignTeamRole(actorRole, roleWrite.role)) {
+      return NextResponse.json({ error: "Only Owners can assign the Owner role." }, { status: 403 });
+    }
     if (payload.hourlyRate !== undefined && payload.hourlyRate > 0 && actorRole !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -246,7 +260,7 @@ export async function POST(request: Request) {
       created_by: userId,
       name: payload.name,
       full_name: payload.name,
-      role: payload.role,
+      ...roleWrite,
       phone: payload.phone ?? "",
       email: payload.email ?? "",
       hourly_rate: payload.hourlyRate ?? 0,
@@ -280,9 +294,15 @@ export async function POST(request: Request) {
     }
 
     if (result.error?.message?.toLowerCase().includes("role")) {
-      const withoutRole = { ...basePayload };
-      delete (withoutRole as Record<string, unknown>).role;
-      result = await insertWithColumnFallback(supabase, withoutRole);
+      const legacyRolePayload = {
+        ...basePayload,
+        role: legacyCompatibleRoleValue(
+          payload.role ?? "team_member",
+          "employees"
+        ),
+      };
+      delete (legacyRolePayload as Record<string, unknown>).legacy_permission_profile;
+      result = await insertWithColumnFallback(supabase, legacyRolePayload);
     }
 
     if (result.error?.message?.toLowerCase().includes("created_by")) {

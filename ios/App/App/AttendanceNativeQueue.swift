@@ -189,6 +189,34 @@ enum AttendanceNativeQueue {
         }
     }
 
+    /// Preserve a server-rejected record for diagnostics without letting it
+    /// block later valid enter/exit events forever. This matches the shared JS
+    /// queue's permanent-failure behavior; quarantined records are retained and
+    /// pruned only by the existing retention policy.
+    static func markQuarantined(eventId: String, reason: String) {
+        ioQueue.sync {
+            var payload = readUnlocked()
+            var events = payload["events"] as? [[String: Any]] ?? []
+            let now = ISO8601DateFormatter.attendance.string(from: Date())
+            for index in events.indices where events[index]["eventId"] as? String == eventId {
+                events[index]["attempts"] = (events[index]["attempts"] as? Int ?? 0) + 1
+                events[index]["lastAttemptAt"] = now
+                events[index]["lastError"] = reason
+                events[index]["state"] = "quarantined"
+            }
+            var meta = payload["meta"] as? [String: Any] ?? [:]
+            meta["lastFailureAt"] = now
+            meta["lastFailureReason"] = reason
+            payload["events"] = events
+            payload["meta"] = meta
+            writeUnlocked(payload)
+            UserDefaults.standard.set(
+                events.filter { ($0["state"] as? String ?? "pending") == "pending" }.count,
+                forKey: "gw_pending_queue_count"
+            )
+        }
+    }
+
     /// Number of events still waiting. Read by getHealth().
     static func pendingCount() -> Int {
         ioQueue.sync {

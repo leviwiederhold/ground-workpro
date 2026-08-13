@@ -6,11 +6,30 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole } from "@/lib/nav/config";
 import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import {
+  isMissingLegacyPermissionProfileColumn,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+  type LegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
   status: z.enum(["all", "active", "inactive"]).optional().default("all"),
-  role: z.enum(["all", "admin", "pm", "foreman", "mechanic", "operator", "fieldstaff"]).optional().default("all"),
+  role: z.enum([
+    "all",
+    "owner",
+    "administrator",
+    "manager",
+    "crew_lead",
+    "team_member",
+    "admin",
+    "pm",
+    "foreman",
+    "mechanic",
+    "operator",
+    "fieldstaff",
+  ]).optional().default("all"),
   limit: z.coerce.number().int().min(1).max(100).optional().default(25),
 });
 
@@ -25,12 +44,7 @@ const mapEmployeeStatus = (value: unknown): "active" | "inactive" => {
 };
 
 const mapRoleForOutput = (rawRole: unknown): string => {
-  const raw = String(rawRole ?? "").trim();
-  if (!raw) return "operator";
-  if (/fieldstaff|field_staff|field staff/i.test(raw)) return "fieldstaff";
-  const normalized = normalizeAppRole(raw);
-  if (normalized) return normalized;
-  return raw.toLowerCase();
+  return normalizeCanonicalTeamRole(rawRole) ?? "team_member";
 };
 
 const parseCertifications = (value: unknown): Array<{ name: string; expires: string }> => {
@@ -125,6 +139,11 @@ export async function GET(request: Request) {
         id: employeeId,
         displayName: String(row.name ?? row.full_name ?? ""),
         role: normalizedRole,
+        jobTitle: String(row.job_title ?? ""),
+        accessProfile: normalizeLegacyPermissionProfile(
+          row.role,
+          row.legacy_permission_profile
+        ) ?? "operator",
         status: mapEmployeeStatus(row.status),
         userId: linkedUserId,
         accountStatus: linkedUserId ? "active" : "invited",
@@ -136,6 +155,7 @@ export async function GET(request: Request) {
         avatarUrl: "",
         clockedInAt: row.clocked_in_at ? String(row.clocked_in_at) : null,
         certifications: parseCertifications(row.certifications),
+        recordSource: "employee",
       };
     });
 
@@ -155,35 +175,34 @@ export async function GET(request: Request) {
     }
 
     const employeeIds = items.map((item) => item.id);
-    if (employeeIds.length === 0) {
-      return NextResponse.json({ items: [] });
-    }
 
     const adminDb = getSupabaseAdmin() ?? supabase;
 
-    const pendingInviteResult = await adminDb
-      .from("pending_invitations")
-      .select("employee_id, email, role, accepted_at, accepted_user_id, expires_at")
-      .eq("company_id", companyId)
-      .in("employee_id", employeeIds)
-      .order("created_at", { ascending: false });
     let inviteStatusRows: Array<Record<string, unknown>> = [];
-    if (!pendingInviteResult.error) {
-      inviteStatusRows = (pendingInviteResult.data ?? []) as Array<Record<string, unknown>>;
-    } else if (!isMissingSchemaError(pendingInviteResult.error.message)) {
-      return NextResponse.json({ error: pendingInviteResult.error.message }, { status: 400 });
-    }
+    if (employeeIds.length > 0) {
+      const pendingInviteResult = await adminDb
+        .from("pending_invitations")
+        .select("employee_id, email, role, accepted_at, accepted_user_id, expires_at")
+        .eq("company_id", companyId)
+        .in("employee_id", employeeIds)
+        .order("created_at", { ascending: false });
+      if (!pendingInviteResult.error) {
+        inviteStatusRows = (pendingInviteResult.data ?? []) as Array<Record<string, unknown>>;
+      } else if (!isMissingSchemaError(pendingInviteResult.error.message)) {
+        return NextResponse.json({ error: pendingInviteResult.error.message }, { status: 400 });
+      }
 
-    const inviteStatusResult = await adminDb
-      .from("invite_tokens")
-      .select("employee_id, email, role, used_at, expires_at")
-      .eq("company_id", companyId)
-      .in("employee_id", employeeIds)
-      .order("created_at", { ascending: false });
-    if (!inviteStatusResult.error) {
-      inviteStatusRows.push(...((inviteStatusResult.data ?? []) as Array<Record<string, unknown>>));
-    } else if (!isMissingSchemaError(inviteStatusResult.error.message)) {
-      return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
+      const inviteStatusResult = await adminDb
+        .from("invite_tokens")
+        .select("employee_id, email, role, used_at, expires_at")
+        .eq("company_id", companyId)
+        .in("employee_id", employeeIds)
+        .order("created_at", { ascending: false });
+      if (!inviteStatusResult.error) {
+        inviteStatusRows.push(...((inviteStatusResult.data ?? []) as Array<Record<string, unknown>>));
+      } else if (!isMissingSchemaError(inviteStatusResult.error.message)) {
+        return NextResponse.json({ error: inviteStatusResult.error.message }, { status: 400 });
+      }
     }
     const pendingInviteEmployeeIds = new Set<string>();
     const acceptedInviteEmployeeIds = new Set<string>();
@@ -257,25 +276,45 @@ export async function GET(request: Request) {
 
     const companyMemberEmails = new Set<string>();
     const companyUserIdByEmail = new Map<string, string>();
+    const memberEmailByUserId = new Map<string, string>();
     const membershipRoleByUserId = new Map<string, string>();
+    const membershipProfileByUserId = new Map<string, LegacyPermissionProfile>();
     const profileDisplayNameByUserId = new Map<string, string>();
     const profileAvatarByUserId = new Map<string, string>();
-    const membershipsResult = await adminDb
+    const preferredMembershipsResult = await adminDb
       .from("memberships")
-      .select("user_id, role")
+      .select("user_id, role, legacy_permission_profile")
       .eq("company_id", companyId);
-    if (!membershipsResult.error) {
+    let membershipRows = preferredMembershipsResult.data;
+    let membershipsError = preferredMembershipsResult.error;
+    if (isMissingLegacyPermissionProfileColumn(membershipsError)) {
+      const legacyMembershipsResult = await adminDb
+        .from("memberships")
+        .select("user_id, role")
+        .eq("company_id", companyId);
+      membershipRows = (legacyMembershipsResult.data ?? []).map((row) => ({
+        ...row,
+        legacy_permission_profile: null,
+      }));
+      membershipsError = legacyMembershipsResult.error;
+    }
+    if (!membershipsError) {
       for (const [email, acceptedUserId] of acceptedInviteUserIdByEmail) {
         companyUserIdByEmail.set(email, acceptedUserId);
       }
-      for (const row of (membershipsResult.data ?? []) as Array<Record<string, unknown>>) {
+      for (const row of (membershipRows ?? []) as Array<Record<string, unknown>>) {
         const membershipUserId = normalizeId(row.user_id);
         if (!membershipUserId) continue;
         const membershipRole = mapRoleForOutput(row.role);
         if (membershipRole) membershipRoleByUserId.set(membershipUserId, membershipRole);
+        const membershipProfile = normalizeLegacyPermissionProfile(
+          row.role,
+          row.legacy_permission_profile
+        );
+        if (membershipProfile) membershipProfileByUserId.set(membershipUserId, membershipProfile);
       }
       const memberUserIds = Array.from(
-        new Set((membershipsResult.data ?? []).map((row: Record<string, unknown>) => normalizeId(row.user_id)).filter(Boolean))
+        new Set((membershipRows ?? []).map((row: Record<string, unknown>) => normalizeId(row.user_id)).filter(Boolean))
       );
       if (memberUserIds.length > 0) {
         const acceptedInvitesByUserResult = await adminDb
@@ -332,7 +371,10 @@ export async function GET(request: Request) {
               const authUserId = String(authUser.id ?? "").trim();
               if (!authUserId || !memberUserIds.includes(authUserId)) continue;
               const authEmail = String(authUser.email ?? "").trim().toLowerCase();
-              if (authEmail) authEmailByUserId.set(authUserId, authEmail);
+              if (authEmail) {
+                authEmailByUserId.set(authUserId, authEmail);
+                memberEmailByUserId.set(authUserId, authEmail);
+              }
             }
           }
         }
@@ -351,24 +393,65 @@ export async function GET(request: Request) {
           }
         }
       }
+
+      // A company membership is the authoritative access record. Some owner or
+      // admin accounts predate employee rows, but they must still appear in the
+      // Team roster as active members instead of becoming invisible.
+      const representedUserIds = new Set(
+        items.map((item) => String(item.userId ?? "").trim()).filter(Boolean)
+      );
+      for (const item of items) {
+        const mappedUserId = companyUserIdByEmail.get(String(item.email ?? "").trim().toLowerCase());
+        if (mappedUserId) representedUserIds.add(mappedUserId);
+      }
+      for (const row of (membershipRows ?? []) as Array<Record<string, unknown>>) {
+        const membershipUserId = normalizeId(row.user_id);
+        if (!membershipUserId || representedUserIds.has(membershipUserId)) continue;
+        const membershipRole = mapRoleForOutput(row.role);
+        const email = memberEmailByUserId.get(membershipUserId) ?? "";
+        items.push({
+          id: `membership:${membershipUserId}`,
+          displayName:
+            profileDisplayNameByUserId.get(membershipUserId) || email || "Active Team Member",
+          role: membershipRole,
+          jobTitle: "",
+          accessProfile:
+            normalizeLegacyPermissionProfile(row.role, row.legacy_permission_profile) ?? "operator",
+          status: "inactive",
+          userId: membershipUserId,
+          accountStatus: "active",
+          assignedToday: null,
+          hoursThisWeek: 0,
+          pay: { visible: false },
+          email,
+          phone: "",
+          avatarUrl: profileAvatarByUserId.get(membershipUserId) ?? "",
+          clockedInAt: null,
+          certifications: [],
+          recordSource: "membership",
+        });
+      }
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const assignmentResult = await supabase
-      .from("schedule_assignments")
-      .select("employee_id, job_id, created_at")
-      .eq("company_id", companyId)
-      .eq("date", today)
-      .in("employee_id", employeeIds)
-      .order("created_at", { ascending: true });
-    let assignmentRows = assignmentResult.data;
+    let assignmentRows: Array<Record<string, unknown>> | null = [];
     let scheduleAssignmentsMissing = false;
-    if (assignmentResult.error) {
-      if (isMissingSchemaError(assignmentResult.error.message)) {
-        assignmentRows = [];
-        scheduleAssignmentsMissing = true;
-      } else {
-        return NextResponse.json({ error: assignmentResult.error.message }, { status: 400 });
+    if (employeeIds.length > 0) {
+      const assignmentResult = await supabase
+        .from("schedule_assignments")
+        .select("employee_id, job_id, created_at")
+        .eq("company_id", companyId)
+        .eq("date", today)
+        .in("employee_id", employeeIds)
+        .order("created_at", { ascending: true });
+      assignmentRows = assignmentResult.data as Array<Record<string, unknown>> | null;
+      if (assignmentResult.error) {
+        if (isMissingSchemaError(assignmentResult.error.message)) {
+          assignmentRows = [];
+          scheduleAssignmentsMissing = true;
+        } else {
+          return NextResponse.json({ error: assignmentResult.error.message }, { status: 400 });
+        }
       }
     }
 
@@ -379,7 +462,7 @@ export async function GET(request: Request) {
       assignmentByEmployeeId.set(employeeId, { jobId: normalizeId(row.job_id) });
     }
 
-    if (scheduleAssignmentsMissing) {
+    if (scheduleAssignmentsMissing && employeeIds.length > 0) {
       const jobEmployeesResult = await supabase
         .from("job_employees")
         .select("employee_id, job_id, created_at")
@@ -442,8 +525,11 @@ export async function GET(request: Request) {
       if (membershipRole) {
         item.role = membershipRole;
       }
+      if (linkedUserId && membershipProfileByUserId.has(linkedUserId)) {
+        item.accessProfile = membershipProfileByUserId.get(linkedUserId) ?? item.accessProfile;
+      }
       if (fieldStaffEmployeeIds.has(item.id) || fieldStaffEmails.has(employeeEmail) || (linkedUserId && fieldStaffUserIds.has(linkedUserId))) {
-        item.role = "fieldstaff";
+        item.role = "team_member";
       }
       if (linkedUserId && !item.userId) {
         item.userId = linkedUserId;
@@ -495,6 +581,8 @@ export async function GET(request: Request) {
         id: item.id,
         displayName: item.displayName,
         role: item.role,
+        jobTitle: item.jobTitle,
+        accessProfile: item.accessProfile,
         status: item.status,
         userId: item.userId,
         accountStatus: item.accountStatus,
@@ -506,6 +594,7 @@ export async function GET(request: Request) {
         avatarUrl: item.avatarUrl,
         clockedInAt: item.clockedInAt,
         certifications: item.certifications,
+        recordSource: item.recordSource ?? "employee",
       })),
     });
   } catch (error) {

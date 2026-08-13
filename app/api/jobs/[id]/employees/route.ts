@@ -7,6 +7,10 @@ import { runJobAssignmentSideEffects } from "@/lib/jobs/assignmentSideEffects";
 import { assignEmployeeToJob } from "@/lib/jobs/assignmentService";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import {
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
 const assignEmployeeSchema = z.object({
   employee_id: z.union([z.number(), z.string()]),
@@ -38,7 +42,10 @@ const parseCertifications = (value: unknown) => {
 const mapEmployee = (row: any) => ({
   id: row.id,
   name: row.name ?? row.full_name ?? "",
-  role: row.role ?? "Laborer",
+  role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
+  jobTitle: String(row.job_title ?? ""),
+  accessProfile:
+    normalizeLegacyPermissionProfile(row.role, row.legacy_permission_profile) ?? "operator",
   assigned_role: row.assigned_role ?? null,
   phone: row.phone ?? "",
   email: row.email ?? "",

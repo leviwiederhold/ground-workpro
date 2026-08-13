@@ -5,29 +5,15 @@ import {
   isCeoMembershipRole,
   listCompanyMembershipRoles,
 } from "@/lib/auth/ceoGuard";
+import {
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  legacyCompatibleRoleValue,
+  normalizeCanonicalTeamRole,
+  normalizeLegacyPermissionProfile,
+} from "@/lib/auth/teamRoles";
 
-const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
-
-const normalizeMembershipRole = (value: unknown) => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (!raw) return "operator";
-  if (raw.includes("admin") || raw.includes("executive") || raw.includes("ceo")) return COMPANY_OWNER_MEMBERSHIP_ROLE;
-  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
-  if (raw.includes("foreman")) return "foreman";
-  if (raw.includes("mechanic")) return "mechanic";
-  return "operator";
-};
-
-const normalizeEmployeeRole = (value: unknown) => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (!raw) return "operator";
-  if (raw.includes("admin") || raw.includes("executive") || raw.includes("ceo")) return "admin";
-  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
-  if (raw.includes("foreman")) return "foreman";
-  if (raw.includes("mechanic")) return "mechanic";
-  if (raw.includes("fieldstaff") || raw.includes("field_staff") || raw.includes("field staff")) return "fieldstaff";
-  return "operator";
-};
+const COMPANY_OWNER_MEMBERSHIP_ROLE = "owner";
 
 async function resolveAcceptedInviteContext(
   client: NonNullable<ReturnType<typeof getSupabaseAdmin>> | Awaited<ReturnType<typeof supabaseServer>>,
@@ -36,7 +22,7 @@ async function resolveAcceptedInviteContext(
 ) {
   let pendingInvite = await client
     .from("pending_invitations")
-    .select("company_id, employee_id, role, accepted_at")
+    .select("*")
     .eq("accepted_user_id", userId)
     .not("accepted_at", "is", null)
     .order("accepted_at", { ascending: false })
@@ -46,7 +32,7 @@ async function resolveAcceptedInviteContext(
   if (pendingInvite.error && /accepted_at|accepted_user_id|created_at|Could not find the '.*' column/i.test(pendingInvite.error.message || "")) {
     pendingInvite = await client
       .from("pending_invitations")
-      .select("company_id, employee_id, role")
+      .select("*")
       .ilike("email", email)
       .not("accepted_at", "is", null)
       .order("id", { ascending: false })
@@ -58,13 +44,14 @@ async function resolveAcceptedInviteContext(
     return {
       companyId: String(pendingInvite.data.company_id),
       employeeId: String(pendingInvite.data.employee_id ?? "").trim() || null,
-      role: normalizeEmployeeRole(pendingInvite.data.role),
+      role: pendingInvite.data.role,
+      legacyPermissionProfile: pendingInvite.data.legacy_permission_profile,
     };
   }
 
   const legacyInvite = await client
     .from("invite_tokens")
-    .select("company_id, employee_id, role, used_at")
+    .select("*")
     .ilike("email", email)
     .not("used_at", "is", null)
     .order("used_at", { ascending: false })
@@ -75,7 +62,8 @@ async function resolveAcceptedInviteContext(
     return {
       companyId: String(legacyInvite.data.company_id),
       employeeId: String(legacyInvite.data.employee_id ?? "").trim() || null,
-      role: normalizeEmployeeRole(legacyInvite.data.role),
+      role: legacyInvite.data.role,
+      legacyPermissionProfile: legacyInvite.data.legacy_permission_profile,
     };
   }
 
@@ -146,14 +134,14 @@ export async function getCompanyId() {
       let inviteEmployee:
         | {
             error: { message?: string } | null;
-            data: { id?: string | null; company_id?: string | null; role?: string | null; user_id?: string | null } | null;
+            data: { id?: string | null; company_id?: string | null; role?: string | null; legacy_permission_profile?: string | null; user_id?: string | null } | null;
           }
         = { error: null, data: null };
 
       if (acceptedInvite?.employeeId) {
         const employeeByAcceptedInvite = await client
           .from("employees")
-          .select("id, company_id, role, user_id")
+          .select("*")
           .eq("company_id", acceptedInvite.companyId)
           .eq("id", acceptedInvite.employeeId)
           .maybeSingle();
@@ -166,7 +154,7 @@ export async function getCompanyId() {
       if (!inviteEmployee.data) {
         let employeeRows = await client
           .from("employees")
-          .select("id, company_id, role, user_id, email")
+          .select("*")
           .ilike("email", email)
           .order("created_at", { ascending: false })
           .limit(20);
@@ -174,7 +162,7 @@ export async function getCompanyId() {
         if (employeeRows.error && /created_at/i.test(employeeRows.error.message || "")) {
           employeeRows = await client
             .from("employees")
-            .select("id, company_id, role, user_id, email")
+            .select("*")
             .ilike("email", email)
             .order("id", { ascending: false })
             .limit(20);
@@ -185,6 +173,7 @@ export async function getCompanyId() {
             id?: string | null;
             company_id?: string | null;
             role?: string | null;
+            legacy_permission_profile?: string | null;
             user_id?: string | null;
           }>;
           const prioritizedRow =
@@ -202,8 +191,15 @@ export async function getCompanyId() {
 
       if (!inviteEmployee.error && inviteEmployee.data?.company_id) {
         try {
-          const membershipRole = normalizeMembershipRole(acceptedInvite?.role ?? inviteEmployee.data.role);
-          const employeeRole = normalizeEmployeeRole(acceptedInvite?.role ?? inviteEmployee.data.role);
+          const sourceRole = acceptedInvite?.role ?? inviteEmployee.data.role;
+          const sourcePermissionProfile =
+            acceptedInvite?.legacyPermissionProfile ?? inviteEmployee.data.legacy_permission_profile;
+          const roleWrite = {
+            role: normalizeCanonicalTeamRole(sourceRole) ?? "team_member",
+            legacy_permission_profile:
+              normalizeLegacyPermissionProfile(sourceRole, sourcePermissionProfile) ??
+              canonicalizeRoleWrite(sourceRole).legacy_permission_profile,
+          };
 
           const existingCompanyMemberships = await listCompanyMembershipRoles(
             client,
@@ -212,19 +208,32 @@ export async function getCompanyId() {
           const hasCeoMembership = existingCompanyMemberships.some((row) =>
             isCeoMembershipRole(row.role)
           );
-          const safeMembershipRole = hasCeoMembership
-            ? membershipRole
-            : COMPANY_OWNER_MEMBERSHIP_ROLE;
-          const safeEmployeeRole = safeMembershipRole === COMPANY_OWNER_MEMBERSHIP_ROLE ? "admin" : employeeRole;
+          const safeRoleWrite = hasCeoMembership
+            ? roleWrite
+            : canonicalizeRoleWrite(COMPANY_OWNER_MEMBERSHIP_ROLE);
 
-          const membershipInsert = await client.from("memberships").upsert(
+          let membershipInsert = await client.from("memberships").upsert(
             {
               company_id: inviteEmployee.data.company_id,
               user_id: userData.user.id,
-              role: safeMembershipRole,
+              ...safeRoleWrite,
             },
             { onConflict: "company_id,user_id" }
           );
+
+          if (isMissingLegacyPermissionProfileColumn(membershipInsert.error)) {
+            membershipInsert = await client.from("memberships").upsert(
+              {
+                company_id: inviteEmployee.data.company_id,
+                user_id: userData.user.id,
+                role: legacyCompatibleRoleValue(
+                  safeRoleWrite.legacy_permission_profile,
+                  "memberships"
+                ),
+              },
+              { onConflict: "company_id,user_id" }
+            );
+          }
 
           if (
             membershipInsert.error &&
@@ -233,11 +242,25 @@ export async function getCompanyId() {
             throw new TenantResolverError(membershipInsert.error.message || "Failed to create membership", 400);
           }
 
-          const employeeUpdate = await client
+          let employeeUpdate = await client
             .from("employees")
-            .update({ user_id: userData.user.id, role: safeEmployeeRole })
+            .update({ user_id: userData.user.id, ...safeRoleWrite })
             .eq("id", inviteEmployee.data.id)
             .eq("company_id", inviteEmployee.data.company_id);
+
+          if (isMissingLegacyPermissionProfileColumn(employeeUpdate.error)) {
+            employeeUpdate = await client
+              .from("employees")
+              .update({
+                user_id: userData.user.id,
+                role: legacyCompatibleRoleValue(
+                  safeRoleWrite.legacy_permission_profile,
+                  "employees"
+                ),
+              })
+              .eq("id", inviteEmployee.data.id)
+              .eq("company_id", inviteEmployee.data.company_id);
+          }
 
           if (
             employeeUpdate.error &&
@@ -245,7 +268,7 @@ export async function getCompanyId() {
           ) {
             await client
               .from("employees")
-              .update({ role: safeEmployeeRole })
+              .update(safeRoleWrite)
               .eq("id", inviteEmployee.data.id)
               .eq("company_id", inviteEmployee.data.company_id);
           }

@@ -1,71 +1,54 @@
-# Device attendance credentials (background-event authentication)
+# Device attendance credentials
 
-Lets the native app submit attendance events while backgrounded/closed — with no
-WebView cookies — using a restricted, device-scoped bearer credential.
+Native attendance uses a device-scoped bearer credential because a headless iOS
+Core Location launch has no WebView, session cookie, or signed-in JavaScript
+runtime.
 
-## Properties
+## Credential model
 
-- **Restricted:** scope is `attendance:events` only. The credential carries **no
-  user password** and is **not** a general Supabase token — it authenticates
-  attendance event submission and nothing else.
-- **Bound:** to the authenticated `(company, user, device)`. Events for any other
-  employee, company, job, or device are rejected (identity is taken from the
-  credential; the job must be assigned to that employee in that company).
-- **Hashed at rest:** only `sha256(token)` is stored. The plaintext is returned
-  by the mint endpoint exactly once, for storage in the OS secure store.
-- **Lifecycle:** expires (default 30d), rotates (mint revokes the device's prior
-  active credential), can be revoked, and is cleaned up on logout.
+- The access token is scoped to attendance APIs, bound to one
+  `(company, user, device)` record, SHA-256 hashed at rest, and valid for 30
+  days.
+- A separate refresh-only token is SHA-256 hashed at rest, stored in the iOS
+  Keychain with `AfterFirstUnlockThisDeviceOnly`, and valid for 365 days. It can
+  only rotate that row's attendance access token; it is not a Supabase token and
+  cannot create a user session.
+- Native iOS refreshes the access token three days before expiry and retries one
+  failed request after a `401`. This runs without Capacitor or the WebView.
+- Revoking the device row invalidates both tokens immediately. Logout revokes
+  credentials and clears the Keychain. A revoked or refresh-expired device must
+  be re-enrolled from an authenticated session; native code never self-enrolls.
+- Existing builds have only the legacy access token. On the first native wake
+  after installing this release, Swift uses that still-valid attendance bearer
+  for a one-time, compare-and-set refresh upgrade. No WebView or sign-in is
+  needed. If the old 30-day token expired before the updated app ever received
+  a native wake, an authenticated re-enrollment is the recovery path.
+
+The stable refresh secret survives a lost refresh response. Only the access
+token is rotated, so a network interruption between the database update and the
+phone's Keychain write cannot permanently strand the device.
 
 ## Endpoints
 
-- `POST /api/attendance/device-credential` — session-authenticated. Body
-  `{ deviceId, platform? }`. Mints/rotates and returns `{ token, expiresAt }`
-  once.
-- `DELETE /api/attendance/device-credential` — session-authenticated. Revokes
-  this device's credential (or all of the user's when `deviceId` is omitted).
-- Logout (`POST /api/logout`) revokes **all** of the user's device credentials
-  before tearing down the session.
+- `POST /api/attendance/device-credential` is session-authenticated and returns
+  the access and refresh pair once.
+- `POST /api/attendance/device-credential/refresh` accepts the refresh bearer
+  and returns a new access token. It also accepts a still-valid legacy access
+  bearer only while that credential has no refresh secret, allowing
+  a headless one-time upgrade without replacing an established refresh token.
+- `GET /api/attendance/monitoring-plan` accepts either a normal session or the
+  device access bearer so native iOS can reconcile assignments headlessly.
+- `POST /api/jobsite-time/events` accepts either a session or the device access
+  bearer. Device requests get per-credential rate limiting, timestamp bounds,
+  assignment/schedule checks, and replay-safe ingest auditing.
+- `DELETE /api/attendance/device-credential` and logout revoke credentials.
 
-## Event authentication (`POST /api/jobsite-time/events`)
+Plaintext secrets never go into WebView storage, Capacitor Preferences, native
+diagnostics, or attendance audit rows.
 
-The route resolves identity from a bearer credential first, else the session
-cookie. On the credential path it additionally enforces:
+## Deployment order
 
-- **per-credential rate limiting**,
-- **timestamp validation** (reject stale > 1h or future-skewed > 5m),
-- **idempotency + audit**: an `attendance_event_audit` row keyed by a unique
-  `credentialId|jobId|zone|transition|minute` key dedupes duplicate native
-  deliveries and records who/what/when/outcome,
-- the existing **assignment validation** (job must be assigned to the
-  credential's employee) and **verified-coordinates** requirement.
-
-A malformed/expired bearer returns `401` (it does not silently fall through to
-the cookie path).
-
-## Native secure storage (required; reference only in this PR)
-
-The plaintext token MUST live in the **iOS Keychain** / **Android Keystore**, not
-in WebView storage or Capacitor `Preferences`. The web layer hands the minted
-token to a native secure-store plugin:
-
-```
-interface SecureAttendanceStore {
-  setToken(opts: { token: string; expiresAt: string }): Promise<void>;
-  clear(): Promise<void>;
-}
-```
-
-The geofence plugin reads the token from the secure store when POSTing a
-background event (`Authorization: Bearer <token>`). Implementing that native
-secure store (Keychain/Keystore) and wiring it is part of finishing PR 9; it is
-not verified here.
-
-## Verification checklist (device)
-
-- [ ] Enroll a device → token stored in Keychain/Keystore, never in JS storage.
-- [ ] Background event authenticates with the credential (no cookies).
-- [ ] Event for an unassigned job / another employee is rejected.
-- [ ] Duplicate native delivery of the same transition dedupes (idempotency).
-- [ ] Stale / future-dated event is rejected.
-- [ ] Rotation revokes the prior credential; the old token stops working.
-- [ ] Logout revokes the credential; the device can no longer submit events.
+Deploy `20260810_01_native_attendance_durability.sql` before the server routes.
+It adds the refresh hash/expiry fields and replay response fields. Deploy the
+server next, then distribute the iOS build. Reversing the first two steps can
+make enrollment fail because the server would write columns that do not exist.

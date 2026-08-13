@@ -3,7 +3,7 @@
 // @ts-nocheck
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabase/client';
 import { MobileSheet } from '@/app/components/ui/MobileSheet';
 import {
@@ -16,12 +16,18 @@ import {
   MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES,
   MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   MAX_VIDEO_ATTACHMENT_BYTES,
+  MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB,
   VIDEO_ATTACHMENT_EXTENSIONS,
   inferVideoAttachmentContentType,
   isVideoAttachmentContentType,
   validateVideoAttachmentPolicy,
 } from '@/lib/messages/attachmentPolicy';
 import { readVideoDurationSeconds, uploadAttachmentWithProgress } from '@/lib/messages/videoClient';
+import {
+  countNewMessages,
+  isNearMessageBottom,
+  scrollTopAfterHistoryPrepend,
+} from '@/lib/messages/scroll';
 
 const hasRecordId = (value) => {
   const id = value?.id;
@@ -32,6 +38,14 @@ const hasUserId = (value) => {
   const userId = value?.userId;
   return userId !== null && userId !== undefined && String(userId).trim() !== '';
 };
+
+const teamRoleLabel = (value) => ({
+  owner: 'Owner',
+  administrator: 'Administrator',
+  manager: 'Manager',
+  crew_lead: 'Crew Lead',
+  team_member: 'Team Member',
+})[String(value || '').trim().toLowerCase()] || String(value || 'Team Member');
 
 export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const { Button, Icon } = ui;
@@ -64,9 +78,15 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [selectedAddMembers, setSelectedAddMembers] = useState([]);
   const [myUserId, setMyUserId] = useState('');
   const [newIncomingCount, setNewIncomingCount] = useState(0);
+  const [newMessagesBelow, setNewMessagesBelow] = useState(0);
+  const [messagesPage, setMessagesPage] = useState(1);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [olderMessagesLoading, setOlderMessagesLoading] = useState(false);
   const [pendingDirectContact, setPendingDirectContact] = useState(null);
   const [forcedDirectLabels, setForcedDirectLabels] = useState({});
   const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [viewportReady, setViewportReady] = useState(false);
+  const [mobileViewportStyle, setMobileViewportStyle] = useState({});
   // Company-wide chat naming
   const [viewerIsAdmin, setViewerIsAdmin] = useState(false);
   const [companyName, setCompanyName] = useState('');
@@ -77,10 +97,19 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   const [pendingAttachments, setPendingAttachments] = useState([]);
   const [attachmentPreparing, setAttachmentPreparing] = useState(false);
   const messagesEndRef = useRef(null);
+  const messagesScrollRef = useRef(null);
   const fileInputRef = useRef(null);
   const previousUnreadRef = useRef(0);
   const channelsRef = useRef([]);
   const resolvedDirectChannelIdsRef = useRef(new Set());
+  const activeChannelIdRef = useRef('');
+  const messagesRef = useRef([]);
+  const messagesPageRef = useRef(1);
+  const pendingScrollActionRef = useRef('');
+  const prependScrollSnapshotRef = useRef(null);
+  const uploadAbortControllersRef = useRef(new Map());
+  const pendingAttachmentsRef = useRef([]);
+  const attachmentContextRef = useRef({ channelId: '', contactId: '' });
   const safeEmployees = useMemo(
     () => (Array.isArray(employees) ? employees.filter(hasRecordId) : []),
     [employees]
@@ -90,14 +119,70 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     channelsRef.current = channels;
   }, [channels]);
 
-  // Clear any composed attachments when switching threads so files are never
-  // sent to the wrong conversation; revoke their object URLs to avoid leaks.
   useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    messagesPageRef.current = messagesPage;
+  }, [messagesPage]);
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments;
+  }, [pendingAttachments]);
+
+  // Clear any composed attachments when switching threads so files are never
+  // sent to the wrong conversation. Completed-but-unlinked objects are deleted;
+  // active TUS uploads are terminated so partial chunks do not linger.
+  useEffect(() => {
+    const previousContext = attachmentContextRef.current;
+    const nextContext = {
+      channelId: String(activeChannel?.id || ''),
+      contactId: String(pendingDirectContact?.userId || ''),
+    };
+    attachmentContextRef.current = nextContext;
+    if (
+      previousContext.channelId === nextContext.channelId &&
+      previousContext.contactId === nextContext.contactId
+    ) return;
+
     setPendingAttachments((prev) => {
-      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      const paths = prev.map((item) => String(item.upload?.path || '')).filter(Boolean);
+      prev.forEach((item) => {
+        uploadAbortControllersRef.current.get(item.id)?.abort();
+        uploadAbortControllersRef.current.delete(item.id);
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+      });
+      if (previousContext.channelId && paths.length > 0) {
+        void fetch(`/api/messages/threads/${previousContext.channelId}/attachments/sign`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths }),
+          keepalive: true,
+        }).catch(() => null);
+      }
       return [];
     });
   }, [activeChannel?.id, pendingDirectContact?.userId]);
+
+  useEffect(() => {
+    const discardAbandonedUploads = () => {
+      const channelId = attachmentContextRef.current.channelId;
+      const paths = pendingAttachmentsRef.current
+        .map((item) => String(item.upload?.path || ''))
+        .filter(Boolean);
+      uploadAbortControllersRef.current.forEach((controller) => controller.abort());
+      if (!channelId || paths.length === 0) return;
+      void fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths }),
+        keepalive: true,
+      }).catch(() => null);
+    };
+    window.addEventListener('pagehide', discardAbandonedUploads);
+    return () => window.removeEventListener('pagehide', discardAbandonedUploads);
+  }, []);
 
   useEffect(() => {
     if (!Array.isArray(availableUsersSeed) || availableUsersSeed.length === 0) return;
@@ -107,13 +192,36 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const media = window.matchMedia('(max-width: 767px)');
-    const update = () => setIsMobileViewport(media.matches);
+    const update = () => {
+      const mobile = media.matches;
+      setIsMobileViewport(mobile);
+      setViewportReady(true);
+      if (!mobile) {
+        setMobileViewportStyle({});
+        return;
+      }
+      const viewport = window.visualViewport;
+      const header = document.querySelector('[data-testid="dashboard-header"]');
+      const headerBottom = Math.max(0, Math.round(header?.getBoundingClientRect?.().bottom || 0));
+      const viewportBottom = Math.round((viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight));
+      setMobileViewportStyle({
+        '--messages-mobile-top': `${headerBottom}px`,
+        '--messages-mobile-height': `${Math.max(280, viewportBottom - headerBottom)}px`,
+      });
+    };
     update();
     media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
+    return () => {
+      media.removeEventListener('change', update);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
+    };
   }, []);
 
   const activeChannelId = String(activeChannel?.id || '');
+  activeChannelIdRef.current = activeChannelId;
 
   const normalized = (value) => String(value || '').trim().toLowerCase();
   const initialsForName = useCallback((value) => {
@@ -182,7 +290,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         email: employee?.email,
         displayName: matchedUser?.displayName,
       });
-      const preferredRole = matchedUser?.role || employee?.role || "";
+      const preferredRole =
+        matchedUser?.role ||
+        employee?.jobTitle ||
+        employee?.job_title ||
+        teamRoleLabel(employee?.role);
       options.push({
         key: explicitUserId ? `user:${explicitUserId}` : `employee:${employee.id}`,
         label: String(preferredLabel),
@@ -321,15 +433,70 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     await fetch(`/api/messages/threads/${channelId}/read`, { method: 'POST' }).catch(() => null);
   }, []);
 
-  const loadMessages = useCallback(async (channelId) => {
+  const loadMessages = useCallback(async (channelId, options = {}) => {
+    const mode = options.mode || 'initial';
+    const requestedPage = Number(options.page || 1);
     try {
-      setMessagesLoading(true);
+      if (mode === 'older') setOlderMessagesLoading(true);
+      if (mode === 'initial') setMessagesLoading(true);
       setMessagesError('');
-      const response = await fetch(`/api/messages/threads/${channelId}/messages`, { cache: 'no-store' });
+      const response = await fetch(
+        `/api/messages/threads/${channelId}/messages?page=${requestedPage}&pageSize=50`,
+        { cache: 'no-store' }
+      );
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Failed to load messages');
-      setMessages(Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : []);
-      await markThreadRead(channelId);
+      if (String(channelId) !== activeChannelIdRef.current) return;
+
+      const pageItems = Array.isArray(payload?.items) ? payload.items.filter(hasRecordId) : [];
+      const totalPages = Number(payload?.totalPages || 0);
+      const loadedPage = mode === 'refresh' ? messagesPageRef.current : requestedPage;
+      setHasOlderMessages(loadedPage < totalPages);
+      if (mode !== 'refresh') setMessagesPage(requestedPage);
+
+      if (mode === 'older') {
+        const scrollNode = messagesScrollRef.current;
+        prependScrollSnapshotRef.current = scrollNode
+          ? { previousScrollTop: scrollNode.scrollTop, previousScrollHeight: scrollNode.scrollHeight }
+          : null;
+        pendingScrollActionRef.current = 'prepend';
+        setMessages((previous) => {
+          const ids = new Set(previous.map((item) => String(item.id)));
+          return [...pageItems.filter((item) => !ids.has(String(item.id))), ...previous];
+        });
+      } else if (mode === 'refresh') {
+        const previous = messagesRef.current;
+        const previousIds = new Set(previous.map((item) => String(item.id)));
+        const merged = [
+          ...previous,
+          ...pageItems.filter((item) => !previousIds.has(String(item.id))),
+        ].sort((left, right) => {
+          const timeDifference = new Date(left.created_at).getTime() - new Date(right.created_at).getTime();
+          return timeDifference || String(left.id).localeCompare(String(right.id));
+        });
+        const addedCount = countNewMessages(previous, merged);
+        if (addedCount > 0) {
+          const scrollNode = messagesScrollRef.current;
+          if (!scrollNode || isNearMessageBottom(scrollNode)) {
+            pendingScrollActionRef.current = 'receive';
+            setNewMessagesBelow(0);
+          } else {
+            setNewMessagesBelow((count) => count + addedCount);
+          }
+        }
+        setMessages(merged);
+      } else {
+        pendingScrollActionRef.current = 'initial';
+        setNewMessagesBelow(0);
+        setMessages(pageItems);
+      }
+      if (mode !== 'refresh' || isNearMessageBottom(messagesScrollRef.current || {
+        scrollTop: 0,
+        scrollHeight: 0,
+        clientHeight: 0,
+      })) {
+        await markThreadRead(channelId);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to load messages';
       if (String(errorMessage).toLowerCase().includes('channel not found')) {
@@ -341,10 +508,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         setMessagesError('');
         return;
       }
-      setMessages([]);
+      if (mode === 'initial') setMessages([]);
       setMessagesError(errorMessage);
     } finally {
-      setMessagesLoading(false);
+      if (mode === 'older') setOlderMessagesLoading(false);
+      if (mode === 'initial') setMessagesLoading(false);
     }
   }, [markThreadRead]);
 
@@ -462,12 +630,17 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     window.history.replaceState({}, '', '/messages');
   }, [channels]);
 
-  // Default conversation: open the permanent Companywide chat when Messaging
-  // first loads and no notification target or user selection exists (once).
+  // Desktop retains the permanent Companywide default. Mobile opens on the
+  // conversation list unless a push notification targeted an exact thread.
   useEffect(() => {
+    if (!viewportReady) return;
     if (!didResolvePushThreadRef.current && channels.length > 0) return;
     if (didDefaultSelectRef.current) return;
     if (activeChannel) {
+      didDefaultSelectRef.current = true;
+      return;
+    }
+    if (isMobileViewport) {
       didDefaultSelectRef.current = true;
       return;
     }
@@ -476,7 +649,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       didDefaultSelectRef.current = true;
       setActiveChannel(companywide);
     }
-  }, [channels, activeChannel]);
+  }, [channels, activeChannel, isMobileViewport, viewportReady]);
 
   useEffect(() => {
     try {
@@ -581,7 +754,9 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     const refreshFromPush = (event) => {
       const threadId = String(event?.detail?.threadId || '');
       void loadChannels(true);
-      if (threadId && threadId === activeChannelId) void loadMessages(threadId);
+      if (threadId && threadId === activeChannelId) {
+        void loadMessages(threadId, { mode: 'refresh', page: 1 });
+      }
     };
     window.addEventListener(MESSAGE_PUSH_RECEIVED_EVENT, refreshFromPush);
     return () => window.removeEventListener(MESSAGE_PUSH_RECEIVED_EVENT, refreshFromPush);
@@ -598,7 +773,12 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       return;
     }
     setNewIncomingCount(0);
-    loadMessages(activeChannelId);
+    setMessages([]);
+    setMessagesPage(1);
+    setHasOlderMessages(false);
+    setNewMessagesBelow(0);
+    pendingScrollActionRef.current = 'initial';
+    loadMessages(activeChannelId, { mode: 'initial', page: 1 });
   }, [activeChannelId, invalidChannelIds, loadMessages]);
 
   useEffect(() => {
@@ -606,9 +786,57 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     loadMembers(activeChannelId);
   }, [showMembers, activeChannelId, loadMembers]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
+  useLayoutEffect(() => {
+    const scrollNode = messagesScrollRef.current;
+    const action = pendingScrollActionRef.current;
+    if (!scrollNode || !action) return;
+
+    if (action === 'prepend') {
+      const snapshot = prependScrollSnapshotRef.current;
+      if (snapshot) {
+        scrollNode.scrollTop = scrollTopAfterHistoryPrepend({
+          ...snapshot,
+          nextScrollHeight: scrollNode.scrollHeight,
+        });
+      }
+      prependScrollSnapshotRef.current = null;
+    } else {
+      const scrollToBottom = () => {
+        if (action === 'initial') {
+          scrollNode.scrollTop = scrollNode.scrollHeight;
+        } else {
+          scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: 'smooth' });
+        }
+      };
+      scrollToBottom();
+      // Run once after paint as well. Mobile font/layout settlement can increase
+      // scrollHeight after the layout effect, which otherwise leaves first open
+      // at the top even though the latest page was fetched.
+      window.requestAnimationFrame(scrollToBottom);
+    }
+    pendingScrollActionRef.current = '';
+  }, [messages, activeChannelId]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const scrollNode = messagesScrollRef.current;
+    if (scrollNode && isNearMessageBottom(scrollNode)) setNewMessagesBelow(0);
+  }, []);
+
+  const jumpToLatestMessage = useCallback(() => {
+    const scrollNode = messagesScrollRef.current;
+    if (!scrollNode) return;
+    scrollNode.scrollTo({ top: scrollNode.scrollHeight, behavior: 'smooth' });
+    setNewMessagesBelow(0);
+    if (activeChannelIdRef.current) void markThreadRead(activeChannelIdRef.current);
+  }, [markThreadRead]);
+
+  const loadOlderMessages = useCallback(() => {
+    if (!activeChannelIdRef.current || olderMessagesLoading || !hasOlderMessages) return;
+    void loadMessages(activeChannelIdRef.current, {
+      mode: 'older',
+      page: messagesPageRef.current + 1,
+    });
+  }, [hasOlderMessages, loadMessages, olderMessagesLoading]);
 
   const filteredChannels = channels
     .filter((channel) =>
@@ -721,7 +949,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         let contentType = file.type || 'application/octet-stream';
         if (isVideo) {
           if (file.size > MAX_VIDEO_ATTACHMENT_BYTES) {
-            setSendError(`"${file.name}": Video is larger than 25 MB.`);
+            setSendError(`"${file.name}": Video is larger than ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB} MiB.`);
             continue;
           }
           try {
@@ -746,10 +974,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             fileName: file.name,
             contentType: file.type || 'application/octet-stream',
             sizeBytes: file.size,
+            maxBytes: MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
           });
           if (!validation.ok) {
             const sizeMessage = file.size > MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES
-              ? 'File is larger than 10 MB'
+              ? `File is larger than ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB} MiB`
               : validation.error;
             setSendError(`"${file.name}": ${sizeMessage}.`);
             continue;
@@ -757,7 +986,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           contentType = validation.contentType;
         }
         if (nextTotalBytes + file.size > MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES) {
-          setSendError('Attachments exceed the 50 MB total message limit.');
+          setSendError(`Attachments exceed the ${MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB * MAX_ATTACHMENTS} MiB total message limit.`);
           continue;
         }
         prepared.push({
@@ -808,16 +1037,31 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   };
 
   const removePendingAttachment = (id) => {
+    const target = pendingAttachmentsRef.current.find((item) => item.id === id);
+    uploadAbortControllersRef.current.get(id)?.abort();
+    uploadAbortControllersRef.current.delete(id);
+    const cleanupChannelId = activeChannelIdRef.current || attachmentContextRef.current.channelId;
+    if (target?.upload?.path && cleanupChannelId) {
+      void fetch(`/api/messages/threads/${cleanupChannelId}/attachments/sign`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: [target.upload.path] }),
+        keepalive: true,
+      }).catch(() => null);
+    }
     setPendingAttachments((prev) => {
-      const target = prev.find((a) => a.id === id);
-      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      const pending = prev.find((a) => a.id === id);
+      if (pending?.previewUrl) URL.revokeObjectURL(pending.previewUrl);
       return prev.filter((a) => a.id !== id);
     });
   };
 
   const clearPendingAttachments = () => {
     setPendingAttachments((prev) => {
-      prev.forEach((a) => a.previewUrl && URL.revokeObjectURL(a.previewUrl));
+      prev.forEach((a) => {
+        uploadAbortControllersRef.current.delete(a.id);
+        if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      });
       return [];
     });
   };
@@ -860,11 +1104,22 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                     <div className="h-full bg-brand-500" style={{ width: `${att.progress || 0}%` }} />
                   </div>
                 )}
+                {att.status === 'error' && (
+                  <button
+                    type="button"
+                    onClick={(event) => handleSendMessage(event)}
+                    disabled={sendLoading}
+                    className="mt-1 text-[10px] font-semibold text-brand-600 underline underline-offset-2 disabled:opacity-50 dark:text-brand-400"
+                    data-testid={`messages-attachment-retry-${att.id}`}
+                  >
+                    Retry upload
+                  </button>
+                )}
               </div>
               <button
                 type="button"
                 onClick={() => removePendingAttachment(att.id)}
-                disabled={sendLoading || attachmentPreparing}
+                disabled={attachmentPreparing}
                 className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-zinc-700"
                 aria-label={`Remove ${att.file.name}`}
               >
@@ -914,7 +1169,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               <div
                 key={att.id}
                 className={`group relative overflow-hidden rounded-lg border border-black/5 dark:border-white/10 ${
-                  images.length === 1 ? 'max-w-[16rem]' : 'aspect-square'
+                  images.length === 1 ? 'max-w-full sm:max-w-[16rem]' : 'aspect-square'
                 }`}
               >
                 <a href={att.download_url} target="_blank" rel="noopener noreferrer" className="block">
@@ -945,7 +1200,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         {videos.map((att) => (
           <div
             key={att.id}
-            className="max-w-[20rem] overflow-hidden rounded-lg border border-black/10 bg-black dark:border-white/10"
+            className="max-w-full overflow-hidden rounded-lg border border-black/10 bg-black dark:border-white/10 sm:max-w-[20rem]"
             data-testid={`messages-video-${att.id}`}
           >
             <video
@@ -976,7 +1231,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             download={att.file_name || true}
             target="_blank"
             rel="noopener noreferrer"
-            className={`flex max-w-[18rem] items-center gap-3 rounded-lg border p-2.5 no-underline ${
+            className={`flex max-w-full items-center gap-3 rounded-lg border p-2.5 no-underline sm:max-w-[18rem] ${
               isMine
                 ? 'border-white/20 bg-white/10 hover:bg-white/20'
                 : 'border-gray-200 bg-gray-50 hover:bg-gray-100 dark:border-zinc-700 dark:bg-[#0c0c0c] dark:hover:bg-[#151515]'
@@ -1002,11 +1257,17 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
     const trimmedText = messageText.trim();
-    if ((!trimmedText && pendingAttachments.length === 0) || attachmentPreparing) return;
+    const attachmentsSnapshot = pendingAttachments;
+    if (sendLoading || (!trimmedText && attachmentsSnapshot.length === 0) || attachmentPreparing) return;
+    let channelId = activeChannel?.id ? String(activeChannel.id) : '';
+    let signedPaths = [];
+    // Clear only the message being sent. The textarea remains enabled while a
+    // large upload runs, so the user can compose the next message without the
+    // completed send wiping that newer draft.
+    setMessageText('');
     try {
       setSendLoading(true);
       setSendError('');
-      let channelId = activeChannel?.id ? String(activeChannel.id) : '';
       if (!channelId && pendingDirectContact?.userId) {
         const createResponse = await fetch('/api/messages/direct/start', {
           method: 'POST',
@@ -1021,6 +1282,10 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
           throw new Error(createPayload?.error || 'Failed to create direct chat');
         }
         channelId = String(createPayload.item.id);
+        attachmentContextRef.current = {
+          ...attachmentContextRef.current,
+          channelId,
+        };
       }
       if (!channelId) return;
 
@@ -1029,13 +1294,13 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       // (which caps request bodies well below the attachment limits). We then send the
       // message with only the resulting object metadata.
       const attachmentPayload = [];
-      if (pendingAttachments.length > 0) {
+      if (attachmentsSnapshot.length > 0) {
         setPendingAttachments((prev) => prev.map((att) => ({ ...att, status: 'uploading', progress: 0 })));
         const signRes = await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            files: pendingAttachments.map((att) => ({
+            files: attachmentsSnapshot.map((att) => ({
               file_name: att.file.name,
               content_type: att.content_type,
               file_size: att.file.size,
@@ -1047,25 +1312,31 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         if (!signRes.ok || !Array.isArray(signPayload?.uploads)) {
           throw new Error(signPayload?.error || 'Failed to prepare upload');
         }
-        const supabase = supabaseBrowser();
-        const sessionResult = await supabase.auth.getSession();
-        const storageHeaders = {
-          apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
-          authorization: sessionResult.data.session?.access_token
-            ? `Bearer ${sessionResult.data.session.access_token}`
-            : '',
-        };
+        signedPaths = signPayload.uploads.map((upload) => String(upload.path || '')).filter(Boolean);
+        setPendingAttachments((prev) => prev.map((att, index) => ({
+          ...att,
+          upload: signPayload.uploads[index] || null,
+        })));
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+        if (!supabaseUrl) throw new Error('Message attachment storage is not configured');
+        const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+        const storageHeaders = anonKey ? { apikey: anonKey } : {};
         for (let i = 0; i < signPayload.uploads.length; i += 1) {
           const up = signPayload.uploads[i];
-          const file = pendingAttachments[i].file;
-          const attachmentId = pendingAttachments[i].id;
+          const file = attachmentsSnapshot[i].file;
+          const attachmentId = attachmentsSnapshot[i].id;
+          const controller = new AbortController();
+          uploadAbortControllersRef.current.set(attachmentId, controller);
           try {
             await uploadAttachmentWithProgress({
-              signedUrl: up.signed_url,
+              supabaseUrl,
+              bucket: up.bucket,
+              path: up.path,
+              token: up.token,
               file,
               contentType: up.content_type,
               headers: storageHeaders,
-              allowedOrigin: process.env.NEXT_PUBLIC_SUPABASE_URL,
+              signal: controller.signal,
               onProgress: (progress) => {
                 setPendingAttachments((prev) => prev.map((att) => (
                   att.id === attachmentId ? { ...att, status: 'uploading', progress } : att
@@ -1082,9 +1353,17 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
               method: 'DELETE',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ paths: signPayload.uploads.map((upload) => upload.path) }),
+              body: JSON.stringify({ paths: signedPaths }),
             }).catch(() => null);
+            setPendingAttachments((prev) => prev.map((att) => (
+              att.id === attachmentId
+                ? { ...att, status: 'error', upload: null }
+                : { ...att, status: 'ready', progress: 0, upload: null }
+            )));
+            signedPaths = [];
             throw new Error(`"${file.name}": ${error instanceof Error ? error.message : 'Upload failed'}`);
+          } finally {
+            uploadAbortControllersRef.current.delete(attachmentId);
           }
           attachmentPayload.push({
             path: up.path,
@@ -1102,24 +1381,43 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
         body: JSON.stringify({ body: trimmedText, attachments: attachmentPayload }),
       });
       const payload = await response.json().catch(() => null);
-      // On failure we intentionally keep messageText + pendingAttachments so the
-      // composed message is never silently lost.
-      if (!response.ok || !payload?.item) throw new Error(payload?.error || 'Failed to send message');
+      if (!response.ok || !payload?.item) {
+        if (signedPaths.length > 0) {
+          await fetch(`/api/messages/threads/${channelId}/attachments/sign`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paths: signedPaths }),
+          }).catch(() => null);
+          signedPaths = [];
+        }
+        setPendingAttachments((prev) => prev.map((att) => ({
+          ...att,
+          status: 'ready',
+          progress: 0,
+          upload: null,
+        })));
+        throw new Error(payload?.error || 'Failed to send message');
+      }
       const sentBody = trimmedText;
-      const attachmentCount = pendingAttachments.length;
-      setMessageText('');
+      const attachmentCount = attachmentsSnapshot.length;
       clearPendingAttachments();
       const pendingLabel = String(pendingDirectContact?.label || 'Team Member');
       const pendingUserId = String(pendingDirectContact?.userId || '');
-      setMessages((prev) => [
-        ...prev,
-        {
-          ...payload.item,
-          attachments: Array.isArray(payload.item.attachments) ? payload.item.attachments : [],
-          sender_display_name: 'You',
-          sender_avatar_url: '',
-        },
-      ]);
+      pendingScrollActionRef.current = 'send';
+      setNewMessagesBelow(0);
+      setMessages((prev) => (
+        prev.some((item) => String(item.id) === String(payload.item.id))
+          ? prev
+          : [
+              ...prev,
+              {
+                ...payload.item,
+                attachments: Array.isArray(payload.item.attachments) ? payload.item.attachments : [],
+                sender_display_name: 'You',
+                sender_avatar_url: '',
+              },
+            ]
+      ));
       setChannels((prev) => {
         const existing = prev.find((channel) => String(channel.id) === String(channelId));
         const nextChannel = {
@@ -1172,6 +1470,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       setPendingAttachments((prev) => prev.map((att) => (
         att.status === 'error' ? att : { ...att, status: 'ready', progress: 0 }
       )));
+      setMessageText((current) => current.trim() ? current : messageText);
       setSendError(error instanceof Error ? error.message : 'Failed to send message');
     } finally {
       setSendLoading(false);
@@ -1272,7 +1571,11 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
   };
 
   return (
-    <div className="flex h-[calc(100dvh-var(--mobile-header-total-height)-var(--mobile-safe-bottom)-1.5rem)] min-h-0 w-full max-w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.08)] dark:border-zinc-800 dark:bg-[#050505] dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)] md:h-[calc(100dvh-170px)] md:min-h-[700px]" data-testid="messages-root">
+    <div
+      className="fixed inset-x-0 top-[var(--messages-mobile-top,var(--mobile-header-total-height))] z-10 flex h-[var(--messages-mobile-height,calc(100dvh-var(--mobile-header-total-height)))] min-h-0 w-full max-w-full overflow-hidden border-t border-gray-200 bg-white shadow-none dark:border-zinc-800 dark:bg-[#050505] md:relative md:inset-auto md:z-auto md:h-[calc(100dvh-170px)] md:min-h-[700px] md:rounded-xl md:border md:shadow-[0_10px_30px_rgba(0,0,0,0.08)] md:dark:shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
+      style={mobileViewportStyle}
+      data-testid="messages-root"
+    >
       {/* ONE stable hidden file input — mounted at the root of MessagesView, NOT
           inside a conditional composer, so it survives thread switches and the
           picker's async selection always fires onChange on the same element. */}
@@ -1337,18 +1640,19 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
       </div>
 
       {activeChannel ? (
-        <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#050505]" data-testid="messages-thread">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+        <div className="relative flex min-w-0 flex-1 flex-col bg-white dark:bg-[#050505]" data-testid="messages-thread">
+          <div className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4" data-testid="messages-thread-header">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <button
                 type="button"
-                className="shrink-0 rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
+                className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-brand-600 dark:text-brand-400 md:hidden"
                 onClick={() => {
                   setActiveChannel(null);
                   setPendingDirectContact(null);
                 }}
+                data-testid="messages-back"
               >
-                Back
+                <Icon name="chevron-left" /> Back
               </button>
               {isDirectChannel(activeChannel) && (
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-xs font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
@@ -1414,7 +1718,25 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
             )}
           </div>
 
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6">
+          <div
+            ref={messagesScrollRef}
+            onScroll={handleMessagesScroll}
+            className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6"
+            data-testid="messages-scroll-region"
+          >
+            {hasOlderMessages && !messagesLoading && (
+              <div className="flex justify-center pb-1">
+                <button
+                  type="button"
+                  onClick={loadOlderMessages}
+                  disabled={olderMessagesLoading}
+                  className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-sm disabled:opacity-50 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-300"
+                  data-testid="messages-load-older"
+                >
+                  {olderMessagesLoading ? 'Loading…' : 'Load earlier messages'}
+                </button>
+              </div>
+            )}
             {messagesLoading ? <div className="text-sm text-gray-500 dark:text-zinc-400">Loading messages...</div> : messagesError ? <div className="text-sm text-red-500 dark:text-red-300">{messagesError}</div> : messages.length === 0 ? <div className="text-sm text-gray-500 dark:text-zinc-400">No messages yet.</div> : messages.map((msg, index) => {
               const isMine = myUserId && String(msg.sender_user_id || '') === String(myUserId);
               const dayKey = getMessageDayKey(msg.created_at);
@@ -1430,7 +1752,7 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
                     </div>
                   )}
                   <div className={`flex ${isMine ? 'justify-end' : 'justify-start'}`} data-testid={`messages-message-${msg.id}`}>
-                    <div className={`flex max-w-[min(82%,36rem)] min-w-0 ${isMine ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
+                    <div className={`flex max-w-[88%] min-w-0 md:max-w-[min(82%,36rem)] ${isMine ? 'flex-row-reverse' : 'flex-row'} items-end gap-2`}>
                       {isGroupChannel(activeChannel) && !isMine && (
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-[10px] font-semibold text-gray-700 dark:bg-zinc-800 dark:text-zinc-200">
                           {msg.sender_avatar_url ? (
@@ -1519,33 +1841,47 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               </div>
             )}
             <div ref={messagesEndRef} />
+            {newMessagesBelow > 0 && (
+              <div className="pointer-events-none sticky bottom-2 z-10 flex justify-center">
+                <button
+                  type="button"
+                  onClick={jumpToLatestMessage}
+                  className="pointer-events-auto inline-flex min-h-9 items-center gap-2 rounded-full bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-lg"
+                  data-testid="messages-jump-to-bottom"
+                >
+                  <Icon name="arrow-down" />
+                  {newMessagesBelow} new message{newMessagesBelow === 1 ? '' : 's'}
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+          <div className="z-10 shrink-0 border-t border-gray-200 bg-white px-3 pb-[calc(0.75rem+var(--mobile-safe-bottom))] pt-2.5 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4" data-testid="messages-composer">
             {renderComposerAttachments()}
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               {renderAttachButton()}
               <div className="relative min-w-0 flex-1">
-                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={isDirectChannel(activeChannel) ? `Message ${getChannelDisplayName(activeChannel)}` : activeChannel.is_companywide ? (companyName ? `Send a message to everyone in ${companyName}` : 'Message your team') : `Message #${activeChannel.name}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Send message" className="min-h-11 w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
               <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading || attachmentPreparing} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
             {sendError && <p className="mt-2 text-xs text-red-500 dark:text-red-300">{sendError}</p>}
-            <p className="mt-2 text-xs text-gray-500 dark:text-zinc-500">Press Enter to send, Shift + Enter for new line</p>
+            <p className="mt-2 hidden text-xs text-gray-500 dark:text-zinc-500 sm:block">Press Enter to send, Shift + Enter for new line</p>
           </div>
         </div>
       ) : pendingDirectContact ? (
-        <div className="flex min-w-0 flex-1 flex-col bg-white dark:bg-[#050505]" data-testid="messages-thread">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+        <div className="relative flex min-w-0 flex-1 flex-col bg-white dark:bg-[#050505]" data-testid="messages-thread">
+          <div className="z-10 flex shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-3 py-2.5 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4" data-testid="messages-thread-header">
             <div className="flex min-w-0 flex-1 items-center gap-3">
               <button
                 type="button"
-                className="shrink-0 rounded-lg border border-gray-300 px-2 py-1 text-xs text-gray-700 dark:border-zinc-700 dark:text-zinc-200 md:hidden"
+                className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-brand-600 dark:text-brand-400 md:hidden"
                 onClick={() => setPendingDirectContact(null)}
+                data-testid="messages-back"
               >
-                Back
+                <Icon name="chevron-left" /> Back
               </button>
               <div className="min-w-0 flex-1">
               <h3 className="truncate font-semibold text-gray-900 dark:text-zinc-100">Message {pendingDirectContact.label}</h3>
@@ -1553,22 +1889,22 @@ export function MessagesView({ employees = [], availableUsersSeed = [], ui }) {
               </div>
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain bg-gray-50/40 p-3 dark:bg-[#050505] sm:p-6">
             <div className="text-sm text-gray-500 dark:text-zinc-400">Send the first message to start this chat.</div>
           </div>
-          <div className="shrink-0 border-t border-gray-200 bg-white px-3 py-3 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4">
+          <div className="z-10 shrink-0 border-t border-gray-200 bg-white px-3 pb-[calc(0.75rem+var(--mobile-safe-bottom))] pt-2.5 dark:border-zinc-800 dark:bg-[#090909] sm:px-6 sm:py-4" data-testid="messages-composer">
             {renderComposerAttachments()}
             <div className="flex min-w-0 items-center gap-2 sm:gap-3">
               {renderAttachButton()}
               <div className="relative min-w-0 flex-1">
-                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder={`Message ${pendingDirectContact.label}`} className="w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
+                <textarea value={messageText} onChange={(e) => setMessageText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Send message" className="min-h-11 w-full resize-none rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-900 placeholder:text-gray-500 focus:ring-2 focus:ring-brand-500 dark:border-zinc-800 dark:bg-[#111111] dark:text-zinc-100 dark:placeholder:text-zinc-500" rows="1" data-testid="messages-input" />
               </div>
               <button type="button" onClick={(e) => handleSendMessage(e)} disabled={(!messageText.trim() && pendingAttachments.length === 0) || sendLoading || attachmentPreparing} className="shrink-0 p-2.5 bg-blue-500 text-white rounded-xl hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed" data-testid="messages-send">
                 <Icon name={sendLoading ? 'spinner' : 'paper-plane'} className={sendLoading ? 'animate-spin' : ''} />
               </button>
             </div>
             {sendError && <p className="mt-2 text-xs text-red-500 dark:text-red-300">{sendError}</p>}
-            <p className="mt-2 text-xs text-gray-500 dark:text-zinc-500">Press Enter to send, Shift + Enter for new line</p>
+            <p className="mt-2 hidden text-xs text-gray-500 dark:text-zinc-500 sm:block">Press Enter to send, Shift + Enter for new line</p>
           </div>
         </div>
       ) : (

@@ -3,6 +3,12 @@ import { z } from "zod";
 import { randomBytes } from "crypto";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
+import {
+  canAssignTeamRole,
+  canonicalizeRoleWrite,
+  isMissingLegacyPermissionProfileColumn,
+  legacyCompatibleRoleValue,
+} from "@/lib/auth/teamRoles";
 
 const bodySchema = z.object({
   employeeId: z.string().uuid(),
@@ -10,20 +16,11 @@ const bodySchema = z.object({
   role: z.string().optional(),
 });
 
-const normalizeRole = (value: unknown): "admin" | "pm" | "foreman" | "mechanic" | "operator" => {
-  const raw = String(value ?? "").trim().toLowerCase();
-  if (raw.includes("admin") || raw.includes("executive") || raw.includes("ceo")) return "admin";
-  if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
-  if (raw.includes("foreman")) return "foreman";
-  if (raw.includes("mechanic")) return "mechanic";
-  if (raw.includes("laborer") || raw.includes("labourer") || raw.includes("field")) return "operator";
-  return "operator";
-};
-
 export async function POST(request: Request) {
   try {
+    let actorRole: "admin" | "pm";
     try {
-      await requireRole(["admin", "pm"]);
+      actorRole = (await requireRole(["admin", "pm"])).role as "admin" | "pm";
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -60,34 +57,64 @@ export async function POST(request: Request) {
     }
 
     const email = String(payload.email).trim().toLowerCase();
-    const role = normalizeRole(payload.role ?? employeeRow.data.role ?? "operator");
+    const roleWrite = canonicalizeRoleWrite(payload.role ?? employeeRow.data.role ?? "team_member");
+    if (!canAssignTeamRole(actorRole, roleWrite.role)) {
+      return NextResponse.json({ error: "Only Owners can invite another Owner." }, { status: 403 });
+    }
 
-    const employeeUpdate = await supabase
+    let employeeUpdate = await supabase
       .from("employees")
-      .update({ email, role })
+      .update({ email, ...roleWrite })
       .eq("company_id", companyId)
       .eq("id", payload.employeeId);
+    if (isMissingLegacyPermissionProfileColumn(employeeUpdate.error)) {
+      employeeUpdate = await supabase
+        .from("employees")
+        .update({
+          email,
+          role: legacyCompatibleRoleValue(
+            payload.role ?? employeeRow.data.role,
+            "employees"
+          ),
+        })
+        .eq("company_id", companyId)
+        .eq("id", payload.employeeId);
+    }
     if (employeeUpdate.error) {
       return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
     }
 
     const token = randomBytes(24).toString("base64url");
 
-    const insertResult = await supabase.from("invite_tokens").insert({
+    let insertResult = await supabase.from("invite_tokens").insert({
       token,
       company_id: companyId,
       employee_id: payload.employeeId,
       email,
-      role,
+      role: roleWrite.role,
+      legacy_permission_profile: roleWrite.legacy_permission_profile,
       created_by: userId,
     });
+    if (isMissingLegacyPermissionProfileColumn(insertResult.error)) {
+      insertResult = await supabase.from("invite_tokens").insert({
+        token,
+        company_id: companyId,
+        employee_id: payload.employeeId,
+        email,
+        role: legacyCompatibleRoleValue(
+          payload.role ?? employeeRow.data.role,
+          "invite_tokens"
+        ),
+        created_by: userId,
+      });
+    }
     if (insertResult.error) {
       return NextResponse.json({ error: insertResult.error.message }, { status: 400 });
     }
 
     const origin = request.headers.get("origin") || "";
     const url = `${origin}/signup?invite=1&token=${encodeURIComponent(token)}`;
-    return NextResponse.json({ item: { token, url, role, email } });
+    return NextResponse.json({ item: { token, url, role: roleWrite.role, email } });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

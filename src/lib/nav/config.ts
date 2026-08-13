@@ -1,5 +1,10 @@
+import {
+  normalizeLegacyPermissionProfile,
+  type CanonicalTeamRole,
+} from "../auth/teamRoles.ts";
+
 export type AppRole = "admin" | "pm" | "foreman" | "mechanic" | "operator";
-export type DisplayAppRole = AppRole | "fieldstaff";
+export type DisplayAppRole = CanonicalTeamRole;
 
 export type NavItem = {
   key: string;
@@ -110,17 +115,8 @@ export function toNavItems(role: AppRole): NavItem[] {
   return NAV_ITEMS.filter((item) => allowed.has(item.key));
 }
 
-export function normalizeAppRole(rawRole: unknown): AppRole | null {
-  const normalized = String(rawRole ?? "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z]/g, "");
-
-  if (!normalized) return null;
-  if (normalized.includes("admin") || normalized.includes("executive") || normalized.includes("ceo")) return "admin";
-  if (normalized === "pm" || normalized.includes("operations") || normalized.includes("projectmanager")) return "pm";
-  if (normalized.includes("foreman")) return "foreman";
-  if (normalized.includes("mechanic")) return "mechanic";
-  if (normalized.includes("operator") || normalized.includes("field")) return "operator";
-  return null;
+export function normalizeAppRole(rawRole: unknown, legacyPermissionProfile?: unknown): AppRole | null {
+  const profile = normalizeLegacyPermissionProfile(rawRole, legacyPermissionProfile);
+  if (profile === "fieldstaff") return "operator";
+  return profile;
 }

@@ -93,6 +93,7 @@ function toOtherOpenCard(row: any): OtherOpenCard {
 }
 
 export async function POST(request: Request) {
+  let inFlightAudit: { db: any; id: string } | null = null;
   try {
     // ── Authenticate ────────────────────────────────────────────────────────
     // Attendance tables are SELECT-only for authenticated users, so every write
@@ -181,6 +182,7 @@ export async function POST(request: Request) {
         occurredAt,
       });
       const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+      let recoveredAuditId: string | null = null;
       const audit = await db
         .from("attendance_event_audit")
         .insert({
@@ -193,18 +195,91 @@ export async function POST(request: Request) {
           transition: input.transition,
           occurred_at: occurredAt,
           idempotency_key: idempotencyKey,
-          result: "accepted",
+          result: "processing",
+          response_status: 0,
           ip,
         })
         .select("id")
         .maybeSingle();
       if (audit.error) {
         if (/duplicate key|unique/i.test(audit.error.message || "")) {
-          return NextResponse.json({ ok: true, ignored: true, reason: "duplicate" });
+          const previous = await db
+            .from("attendance_event_audit")
+            .select("id, result, response_status, response_reason, created_at")
+            .eq("idempotency_key", idempotencyKey)
+            .maybeSingle();
+          if (previous.error || !previous.data) {
+            return NextResponse.json({ error: "Could not verify duplicate attendance event" }, { status: 503 });
+          }
+          const priorStatus = Number(previous.data.response_status ?? 200);
+          const priorReason = String(previous.data.response_reason ?? "duplicate");
+          if (previous.data.result === "processing") {
+            const claimAgeMs = Date.now() - Date.parse(String(previous.data.created_at ?? ""));
+            if (!Number.isFinite(claimAgeMs) || claimAgeMs < 2 * 60 * 1000) {
+              // The first request has not committed its attendance effects yet.
+              // Keep the native record queued rather than falsely acknowledging
+              // and deleting it.
+              return NextResponse.json(
+                { error: "Attendance event is still processing", reason: priorReason },
+                { status: 409 },
+              );
+            }
+            // A process can be killed after claiming the event. Take over a
+            // stale claim with a compare-and-swap so concurrent retries cannot
+            // both apply the same attendance transition.
+            const reclaimed = await db
+              .from("attendance_event_audit")
+              .update({
+                created_at: new Date().toISOString(),
+                response_reason: "recovered_stale_claim",
+              })
+              .eq("id", previous.data.id)
+              .eq("result", "processing")
+              .eq("created_at", previous.data.created_at)
+              .select("id")
+              .maybeSingle();
+            if (reclaimed.error || !reclaimed.data) {
+              return NextResponse.json(
+                { error: "Attendance event is being recovered" },
+                { status: 409 },
+              );
+            }
+            recoveredAuditId = String(reclaimed.data.id ?? "");
+          }
+          if (!recoveredAuditId && priorStatus >= 400) {
+            return NextResponse.json({ error: priorReason }, { status: priorStatus });
+          }
+          if (!recoveredAuditId) {
+            return NextResponse.json({ ok: true, ignored: true, reason: priorReason });
+          }
+        } else {
+          return NextResponse.json({ error: audit.error.message }, { status: 400 });
         }
-        return NextResponse.json({ error: audit.error.message }, { status: 400 });
       }
+      const auditId = recoveredAuditId ?? String(audit.data?.id ?? "");
+      inFlightAudit = auditId ? { db, id: auditId } : null;
     }
+
+    const finishAudit = async (
+      result: "accepted" | "ignored" | "rejected",
+      responseStatus: number,
+      responseReason: string | null,
+    ) => {
+      if (!inFlightAudit) return;
+      const current = inFlightAudit;
+      const completed = await current.db
+        .from("attendance_event_audit")
+        .update({
+          result,
+          response_status: responseStatus,
+          response_reason: responseReason,
+        })
+        .eq("id", current.id);
+      if (completed.error) {
+        throw new Error(`Could not finalize attendance ingest audit: ${completed.error.message}`);
+      }
+      inFlightAudit = null;
+    };
 
     // ── Load what the decision needs ────────────────────────────────────────
     const settingsRow = await db.from("companies").select(SETTINGS_COLUMNS).eq("id", companyId).maybeSingle();
@@ -237,8 +312,14 @@ export async function POST(request: Request) {
       .eq("company_id", companyId)
       .eq("id", jobId)
       .maybeSingle();
-    if (jobResult.error) return NextResponse.json({ error: jobResult.error.message }, { status: 400 });
-    if (!jobResult.data) return NextResponse.json({ error: "Job not found in your company" }, { status: 404 });
+    if (jobResult.error) {
+      await finishAudit("rejected", 400, jobResult.error.message);
+      return NextResponse.json({ error: jobResult.error.message }, { status: 400 });
+    }
+    if (!jobResult.data) {
+      await finishAudit("rejected", 404, "Job not found in your company");
+      return NextResponse.json({ error: "Job not found in your company" }, { status: 404 });
+    }
 
     // The verified-address requirement only gates AUTOMATIC tracking — manual
     // clock-in/out must keep working as a fallback even at a job whose address
@@ -246,6 +327,7 @@ export async function POST(request: Request) {
     const hasVerifiedCoords =
       Boolean(jobResult.data.address_verified) && jobResult.data.lat !== null && jobResult.data.lng !== null;
     if (!hasVerifiedCoords && source === "jobsite_auto") {
+      await finishAudit("rejected", 422, "Address needs verification");
       return NextResponse.json(
         { error: "Address needs verification", code: "address_unverified" },
         { status: 422 }
@@ -262,6 +344,7 @@ export async function POST(request: Request) {
       .maybeSingle();
     const employeeId = employeeResult.data?.id ? String(employeeResult.data.id) : null;
     if (!employeeId) {
+      await finishAudit("rejected", 403, "No employee record for this user in the company");
       return NextResponse.json({ error: "No employee record for this user in the company" }, { status: 403 });
     }
 
@@ -278,8 +361,10 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (!assignmentResult.data) {
       if (source === "jobsite_auto") {
+        await finishAudit("ignored", 200, "not_assigned");
         return NextResponse.json({ ignored: true, reason: "not_assigned" });
       }
+      await finishAudit("rejected", 403, "Employee is not assigned to this job");
       return NextResponse.json({ error: "Employee is not assigned to this job" }, { status: 403 });
     }
 
@@ -287,6 +372,7 @@ export async function POST(request: Request) {
     // timecard by itself, so skip the (company-wide) pending-attendance sweep
     // for it entirely.
     if (input.zone === "wake") {
+      await finishAudit("accepted", 200, "wake");
       return NextResponse.json({ ok: true, zone: "wake" });
     }
 
@@ -347,6 +433,7 @@ export async function POST(request: Request) {
       hasSchedule,
       earlyArrivalWindowMinutes: workSchedule?.earlyArrivalWindowMinutes,
       lateGraceMinutes: workSchedule?.lateGraceMinutes,
+      trustedRegionTransition: viaToken,
     });
 
     // Today's record for this employee+job (one session per work day, though a
@@ -416,16 +503,30 @@ export async function POST(request: Request) {
     );
     // ── Respond ─────────────────────────────────────────────────────────────
     if (decision.response.kind === "error") {
+      await finishAudit("rejected", decision.response.status, decision.response.message);
       return NextResponse.json(
         { error: decision.response.message },
         { status: decision.response.status }
       );
     }
     if (decision.response.kind === "ignored") {
+      await finishAudit("ignored", 200, decision.response.reason);
       return NextResponse.json({ item: null, ignored: true, reason: decision.response.reason });
     }
+    await finishAudit("accepted", 200, null);
     return NextResponse.json({ item: applied.timecard ? mapTimecard(applied.timecard) : null });
   } catch (error) {
+    // Release only an unfinished ingest claim so the durable native queue can
+    // retry. Completed outcomes remain immutable replay instructions.
+    if (inFlightAudit) {
+      const current = inFlightAudit;
+      inFlightAudit = null;
+      await current.db
+        .from("attendance_event_audit")
+        .delete()
+        .eq("id", current.id)
+        .eq("result", "processing");
+    }
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

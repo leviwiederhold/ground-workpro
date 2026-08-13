@@ -4,18 +4,28 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  MAX_MESSAGE_ATTACHMENT_BYTES,
   MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES,
+  MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES,
   MAX_VIDEO_ATTACHMENT_BYTES,
+  MAX_VIDEO_DURATION_SECONDS,
+  MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB,
   validateMessageAttachmentTotalSize,
   validateVideoAttachmentPolicy,
   inferVideoAttachmentContentType,
 } from "../../src/lib/messages/attachmentPolicy.ts";
-import { uploadAttachmentWithProgress } from "../../src/lib/messages/videoClient.ts";
+import {
+  MESSAGE_UPLOAD_RETRY_DELAYS_MS,
+  SUPABASE_TUS_CHUNK_BYTES,
+  buildSupabaseResumableEndpoint,
+  uploadAttachmentWithProgress,
+} from "../../src/lib/messages/videoClient.ts";
 import { buildMessagePushContent } from "../../src/lib/push/domain.ts";
 import { validateAttachmentMetadata } from "../../src/lib/attachments/security.ts";
 import {
   attachmentsForMessages,
   persistMessageAttachments,
+  validateMessageFileMeta,
   type MessageAttachmentInput,
 } from "../../src/lib/messages/attachments.ts";
 
@@ -38,17 +48,6 @@ function validationError(result: { ok: true } | { ok: false; error: string }): s
   assert.equal(result.ok, false);
   return (result as { ok: false; error: string }).error;
 }
-
-type MockUploadRequest = {
-  upload: { onprogress?: (event: ProgressEvent) => void };
-  status: number;
-  onload?: () => void;
-  onerror?: () => void;
-  onabort?: () => void;
-  open: (method: string, url: string, async?: boolean) => void;
-  setRequestHeader: (name: string, value: string) => void;
-  send: (file: unknown) => void;
-};
 
 function attachmentDbFixture(
   objects: Record<string, { size: number; contentType: string }>
@@ -104,6 +103,11 @@ function attachmentDbFixture(
 }
 
 test("short MP4, MOV, M4V, and WebM videos pass the message policy", () => {
+  assert.equal(MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB, 45);
+  assert.equal(MAX_MESSAGE_ATTACHMENT_BYTES, 45 * 1024 * 1024);
+  assert.equal(MAX_VIDEO_ATTACHMENT_BYTES, MAX_MESSAGE_ATTACHMENT_BYTES);
+  assert.equal(MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES, MAX_MESSAGE_ATTACHMENT_BYTES);
+  assert.equal(MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES, 450 * 1024 * 1024);
   assert.equal(validateVideoAttachmentPolicy(video()).ok, true);
   assert.equal(
     validateVideoAttachmentPolicy(video({ fileName: "site.mov", contentType: "video/quicktime" })).ok,
@@ -131,11 +135,11 @@ test("unsupported, mismatched, oversized, and over-duration videos fail cleanly"
   );
   assert.match(
     validationError(validateVideoAttachmentPolicy(video({ sizeBytes: MAX_VIDEO_ATTACHMENT_BYTES + 1 }))),
-    /larger than 25 MB/i
+    /larger than 45 MiB/i
   );
   assert.match(
-    validationError(validateVideoAttachmentPolicy(video({ durationSeconds: 60.01 }))),
-    /longer than 60 seconds/i
+    validationError(validateVideoAttachmentPolicy(video({ durationSeconds: MAX_VIDEO_DURATION_SECONDS + 0.01 }))),
+    /longer than 10 minutes/i
   );
 });
 
@@ -153,7 +157,39 @@ test("mixed image and video attachments share a bounded total message size", () 
       { file_size: MAX_MESSAGE_ATTACHMENT_TOTAL_BYTES },
       { file_size: 1 },
     ])),
-    /50 MB/i
+    /450 MiB/i
+  );
+});
+
+test("the temporary Free-plan boundary accepts just under 45 MiB and rejects one byte over", () => {
+  const justUnderLimit = MAX_MESSAGE_ATTACHMENT_BYTES - 1;
+  assert.equal(
+    validateVideoAttachmentPolicy(video({ sizeBytes: 40 * 1024 * 1024 })).ok,
+    true
+  );
+  assert.equal(
+    validateVideoAttachmentPolicy(video({ sizeBytes: justUnderLimit })).ok,
+    true
+  );
+  assert.equal(
+    validateMessageFileMeta({
+      file_name: "project-manual.pdf",
+      content_type: "application/pdf",
+      file_size: justUnderLimit,
+    }).ok,
+    true
+  );
+  assert.match(
+    validationError(validateMessageFileMeta({
+      file_name: "project-manual.pdf",
+      content_type: "application/pdf",
+      file_size: MAX_STANDARD_MESSAGE_ATTACHMENT_BYTES + 1,
+    })),
+    /larger than 45 MiB/i
+  );
+  assert.match(
+    validationError(validateVideoAttachmentPolicy(video({ sizeBytes: MAX_VIDEO_ATTACHMENT_BYTES + 1 }))),
+    /larger than 45 MiB/i
   );
 });
 
@@ -280,73 +316,84 @@ test("foreign-company and incomplete uploads are rejected without a message atta
   assert.equal(incomplete.storedRows().length, 0);
 });
 
-test("signed upload reports progress and resolves only after provider success", async () => {
+test("signed TUS upload uses direct Storage, fixed chunks, progress, and resumable retry", async () => {
   const progress: number[] = [];
-  const headers = new Map<string, string>();
-  const request: MockUploadRequest = {
-    upload: {},
-    status: 0,
-    open(method: string, url: string) {
-      assert.equal(method, "PUT");
-      assert.match(url, /\/storage\/v1\/object\/upload\/sign\//);
-    },
-    setRequestHeader(name: string, value: string) {
-      headers.set(name, value);
-    },
-    send(file: unknown) {
-      assert.ok(file);
-      request.upload.onprogress?.({ lengthComputable: true, loaded: 4, total: 10 } as ProgressEvent);
-      request.status = 200;
-      request.onload?.();
-    },
+  type TestTusOptions = {
+    endpoint?: string | null;
+    chunkSize?: number;
+    retryDelays?: number[] | null;
+    headers?: Record<string, string>;
+    metadata?: Record<string, string>;
+    onProgress?: (uploaded: number, total: number) => void;
+    onSuccess?: () => void;
   };
+  let options: TestTusOptions = {};
+  let resumed = false;
 
   await uploadAttachmentWithProgress({
-    signedUrl: "https://example.supabase.co/storage/v1/object/upload/sign/message-attachments/video?token=signed",
-    file: { name: "walkthrough.mp4" } as File,
+    supabaseUrl: "https://example.supabase.co",
+    bucket: "message-attachments",
+    path: "company/messages/video.mp4",
+    token: "short-lived-signed-token",
+    file: { name: "walkthrough.mp4", size: 10, lastModified: 123 } as File,
     contentType: "video/mp4",
-    headers: { authorization: "Bearer test-session", apikey: "public-anon-key" },
-    allowedOrigin: "https://example.supabase.co",
+    headers: { apikey: "public-anon-key" },
     onProgress: (value) => progress.push(value),
-    createRequest: () => request as unknown as XMLHttpRequest,
+    createUpload: (_file, uploadOptions) => {
+      options = uploadOptions as unknown as TestTusOptions;
+      return {
+        abort: async () => undefined,
+        findPreviousUploads: async () => [{
+          size: 10,
+          metadata: {},
+          creationTime: "now",
+          urlStorageKey: "resume-key",
+          uploadUrl: "https://resume.example/upload",
+          parallelUploadUrls: null,
+        }],
+        resumeFromPreviousUpload: () => { resumed = true; },
+        start: () => {
+          options.onProgress?.(4, 10);
+          options.onSuccess?.();
+        },
+      };
+    },
   });
 
   assert.deepEqual(progress, [40, 100]);
-  assert.equal(headers.get("content-type"), "video/mp4");
-  assert.equal(headers.get("x-upsert"), "false");
-  assert.equal(headers.get("authorization"), "Bearer test-session");
-  assert.equal(headers.get("apikey"), "public-anon-key");
+  assert.equal(resumed, true);
+  assert.equal(options.endpoint, "https://example.storage.supabase.co/storage/v1/upload/resumable/sign");
+  assert.equal(options.chunkSize, SUPABASE_TUS_CHUNK_BYTES);
+  assert.deepEqual(options.retryDelays, MESSAGE_UPLOAD_RETRY_DELAYS_MS);
+  assert.equal(options.headers?.["x-signature"], "short-lived-signed-token");
+  assert.equal(options.headers?.["x-upsert"], "false");
+  assert.equal(options.headers?.apikey, "public-anon-key");
+  assert.equal(options.metadata?.bucketName, "message-attachments");
+  assert.equal(options.metadata?.objectName, "company/messages/video.mp4");
 });
 
-test("upload failures reject before a message can be created", async () => {
-  const request: MockUploadRequest = {
-    upload: {},
-    status: 413,
-    open() {},
-    setRequestHeader() {},
-    send() {
-      request.onload?.();
-    },
-  };
+test("upload failures terminate partial data and reject before a message can be created", async () => {
+  let terminated = false;
   await assert.rejects(
     uploadAttachmentWithProgress({
-      signedUrl: "https://example.supabase.co/storage/v1/object/upload/sign/message-attachments/video?token=signed",
-      file: { name: "too-large.mp4" } as File,
+      supabaseUrl: "https://example.supabase.co",
+      bucket: "message-attachments",
+      path: "company/messages/video.mp4",
+      token: "signed-token",
+      file: { name: "too-large.mp4", size: 10, lastModified: 123 } as File,
       contentType: "video/mp4",
-      createRequest: () => request as unknown as XMLHttpRequest,
+      createUpload: (_file, options) => ({
+        abort: async (shouldTerminate) => { terminated = Boolean(shouldTerminate); },
+        findPreviousUploads: async () => [],
+        resumeFromPreviousUpload: () => undefined,
+        start: () => options.onError?.(new Error("mobile network unavailable")),
+      }),
     }),
-    /Upload failed \(413\)/
+    /mobile network unavailable/
   );
-  await assert.rejects(
-    uploadAttachmentWithProgress({
-      signedUrl: "https://attacker.example/upload",
-      file: { name: "walkthrough.mp4" } as File,
-      contentType: "video/mp4",
-      allowedOrigin: "https://example.supabase.co",
-      createRequest: () => request as unknown as XMLHttpRequest,
-    }),
-    /does not match the configured storage service/
-  );
+  assert.equal(terminated, true);
+  assert.equal(buildSupabaseResumableEndpoint("http://localhost:54321"), "http://localhost:54321/storage/v1/upload/resumable/sign");
+  assert.throws(() => buildSupabaseResumableEndpoint("http://attacker.example"), /HTTPS/);
 });
 
 test("video message push previews contain no media URL or storage metadata", () => {
@@ -374,17 +421,29 @@ test("UI and API retain private, participant-scoped attachment behavior", () => 
     "utf8"
   );
   const attachmentDomain = readFileSync(join(repoRoot, "src/lib/messages/attachments.ts"), "utf8");
+  const uploadClient = readFileSync(join(repoRoot, "src/lib/messages/videoClient.ts"), "utf8");
   const pushWorker = readFileSync(join(repoRoot, "src/lib/push/worker.ts"), "utf8");
+  const storageMigration = readFileSync(
+    join(repoRoot, "supabase/migrations/20260811_02_message_attachment_storage_limits.sql"),
+    "utf8"
+  );
+  const attachmentDocs = readFileSync(join(repoRoot, "docs/message-video-attachments.md"), "utf8");
 
   assert.match(view, /accept="[^"]*video\/mp4[^"]*video\/quicktime[^"]*video\/webm/);
   assert.match(view, /<video[\s\S]*controls[\s\S]*playsInline[\s\S]*preload="metadata"/);
   assert.match(view, /uploadAttachmentWithProgress/);
   assert.match(view, /role="progressbar"/);
+  assert.match(view, /messages-attachment-retry-/);
+  assert.match(view, /keepalive: true/);
   assert.match(view, /#t=0\.001/);
   assert.match(view, /max-w-\[20rem\]/);
   assert.ok(view.indexOf("await uploadAttachmentWithProgress") < view.indexOf("/send`"));
   assert.match(signRoute, /getThreadIfParticipant/);
   assert.match(signRoute, /if \(!participant \|\| !thread\) return forbidden\(\)/);
+  assert.ok(
+    signRoute.indexOf("validateMessageFileMeta(file)") < signRoute.indexOf("createSignedUploadUrl(path)"),
+    "Groundwork validates the 45 MiB limit before asking Supabase to create a signed TUS upload"
+  );
   assert.match(signRoute, /export async function DELETE/);
   assert.match(signRoute, /isCompanyScopedMessagePath\(companyId, path\)/);
   assert.match(signRoute, /from\("message_attachments"\)[\s\S]*in\("storage_path", parsed\.data\.paths\)/);
@@ -394,6 +453,15 @@ test("UI and API retain private, participant-scoped attachment behavior", () => 
   assert.match(attachmentDomain, /createSignedUrl/);
   assert.doesNotMatch(attachmentDomain, /getPublicUrl/);
   assert.match(attachmentDomain, /actualSize !== Number\(attachment\.file_size\)/);
+  assert.match(uploadClient, /chunkSize: SUPABASE_TUS_CHUNK_BYTES/);
+  assert.match(uploadClient, /"x-signature": input\.token/);
+  assert.match(uploadClient, /upload\.abort\(true\)/);
+  assert.doesNotMatch(view, /250 MB|100 MB|500 MB/);
+  assert.match(storageMigration, /public = false/);
+  assert.match(storageMigration, /file_size_limit = 47185920/);
+  assert.doesNotMatch(storageMigration, /262144000/);
+  assert.match(attachmentDocs, /MESSAGE_ATTACHMENT_SIZE_LIMIT_MIB/);
+  assert.doesNotMatch(attachmentDocs, /250 MB|250 MiB/);
   assert.match(pushWorker, /from\("message_attachments"\)[\s\S]{0,100}select\("id", \{ count: "exact", head: true \}\)/);
   assert.doesNotMatch(pushWorker, /select\([^\n]*(storage_path|download_url|signedDownloadUrl)/);
 });

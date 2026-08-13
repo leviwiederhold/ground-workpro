@@ -176,3 +176,26 @@ test("late/early status is not computed without configured work hours", () => {
   });
   assert.equal(withConfig.arrivalStatus, "late");
 });
+
+test("a credential-authenticated native region callback does not turn null coordinates into (0, 0)", () => {
+  const result = evaluateJobsiteEvent({
+    transition: "enter",
+    occurredAt: "2026-08-10T11:47:20.292Z",
+    jobLat: 39.3239,
+    jobLng: -84.3608,
+    pointLat: null,
+    pointLng: null,
+    accuracyMeters: null,
+    radiusFeet: 5280,
+    scheduledStart: "2026-08-10T11:00:00.000Z",
+    scheduledEnd: "2026-08-10T19:30:00.000Z",
+    hasSchedule: true,
+    earlyArrivalWindowMinutes: 120,
+    lateGraceMinutes: 10,
+    trustedRegionTransition: true,
+  });
+  assert.equal(result.reject, false);
+  assert.equal(result.needsReview, false);
+  assert.equal(result.distanceMeters, null);
+  assert.equal(result.arrivalStatus, "late");
+});

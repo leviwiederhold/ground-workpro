@@ -1,4 +1,5 @@
 import type { ModuleAccessLevel, ModulePermissionMap } from "@/lib/permissions/types";
+import { isOwnerTeamRole } from "@/lib/auth/teamRoles";
 
 export const SENSITIVE_PERMISSION_WARNING_COPY =
   "Warning: This page may contain sensitive financial or compensation-related information, including revenue, costs, profitability, billing, or employee pay-related details. Be sure this employee should have access before continuing.";
@@ -53,7 +54,7 @@ export function getSensitiveInvitePermissionGrants(params: {
       label: SENSITIVE_PERMISSION_MODULES.billing,
       accessLevel: billingLevel,
     });
-  } else if (String(params.role || "").toLowerCase() === "ceo") {
+  } else if (isOwnerTeamRole(params.role)) {
     grants.push({
       key: "billing",
       label: SENSITIVE_PERMISSION_MODULES.billing,

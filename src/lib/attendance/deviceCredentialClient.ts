@@ -16,14 +16,28 @@ const ENROLL_FETCH_TIMEOUT_MS = 15_000;
 const STATUS_FETCH_TIMEOUT_MS = 8_000;
 
 interface SecureAttendanceStorePlugin {
-  setToken(opts: { token: string; expiresAt: string }): Promise<void>;
-  getToken(): Promise<{ hasToken?: boolean; expiresAt?: string }>;
+  setToken(opts: {
+    token: string;
+    expiresAt: string;
+    refreshToken?: string;
+    refreshExpiresAt?: string;
+    deviceId?: string;
+  }): Promise<void>;
+  getToken(): Promise<{
+    hasToken?: boolean;
+    expiresAt?: string;
+    hasRefreshToken?: boolean;
+    refreshExpiresAt?: string;
+  }>;
   clear(): Promise<void>;
 }
 
 export type DeviceCredentialPayload = {
   token: string;
   expiresAt: string;
+  refreshToken: string;
+  refreshExpiresAt: string;
+  deviceId: string;
 };
 
 function secureStore(): SecureAttendanceStorePlugin | null {
@@ -53,10 +67,16 @@ export async function requestDeviceCredential(
   }
 
   const payload = await res.json();
-  if (!payload?.token || !payload?.expiresAt) {
+  if (!payload?.token || !payload?.expiresAt || !payload?.refreshToken || !payload?.refreshExpiresAt) {
     throw new Error("credential endpoint returned an invalid payload");
   }
-  return { token: String(payload.token), expiresAt: String(payload.expiresAt) };
+  return {
+    token: String(payload.token),
+    expiresAt: String(payload.expiresAt),
+    refreshToken: String(payload.refreshToken),
+    refreshExpiresAt: String(payload.refreshExpiresAt),
+    deviceId: getStableDeviceId(),
+  };
 }
 
 /**
@@ -164,6 +184,7 @@ export async function ensureDeviceCredential(
       const expiresAt = Date.parse(String(current?.expiresAt ?? ""));
       const usableForAtLeastOneDay =
         current?.hasToken === true &&
+        current?.hasRefreshToken === true &&
         Number.isFinite(expiresAt) &&
         expiresAt - now > 24 * 60 * 60 * 1000;
       if (usableForAtLeastOneDay) {

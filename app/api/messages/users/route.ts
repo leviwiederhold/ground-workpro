@@ -3,6 +3,7 @@ import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { canonicalTeamRoleLabel } from "@/lib/auth/teamRoles";
+import { chunkValues } from "@/lib/db/chunk";
 
 function toRoleLabel(role: unknown) {
   return canonicalTeamRoleLabel(role);
@@ -71,64 +72,81 @@ export async function GET() {
       )
     );
 
-    let profiles: {
-      data: Array<{ id?: string; full_name?: string; display_name?: string; avatar_url?: string }> | null;
-      error: { message?: string } | null;
-    } = userIds.length
-      ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
-      : { data: [], error: null };
-
-    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, avatar_url").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string; avatar_url?: string }) => ({
-          id: row.id,
-          full_name: row.full_name,
-          avatar_url: row.avatar_url,
-        })),
-        error: fallbackProfiles.error,
-      };
+    // Chunk every `.in(userIds)` lookup: a single filter carrying a large
+    // company's whole membership population overflows the PostgREST request URL
+    // and comes back as a Bad Request (the failure this route reproduced). See
+    // chunkValues — chunks partition userIds exactly, so accumulating rows never
+    // duplicates or drops a user at a chunk boundary.
+    type ProfileRow = { id?: string; full_name?: string; display_name?: string; avatar_url?: string };
+    const profileRows: ProfileRow[] = [];
+    for (const userIdChunk of chunkValues(userIds)) {
+      const preferredProfiles = await db
+        .from("profiles")
+        .select("id, full_name, display_name, avatar_url")
+        .in("id", userIdChunk);
+      let chunkProfileRows = (preferredProfiles.data ?? []) as ProfileRow[];
+      let profilesError = preferredProfiles.error;
+      if (profilesError && /display_name|Could not find the 'display_name' column/i.test(profilesError.message || "")) {
+        const fallbackProfiles = await db
+          .from("profiles")
+          .select("id, full_name, avatar_url")
+          .in("id", userIdChunk);
+        chunkProfileRows = (fallbackProfiles.data ?? []).map((row) => ({
+          ...row,
+          display_name: undefined,
+        }));
+        profilesError = fallbackProfiles.error;
+      }
+      if (profilesError && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesError.message || "")) {
+        const fallbackProfiles = await db
+          .from("profiles")
+          .select("id, full_name, display_name")
+          .in("id", userIdChunk);
+        chunkProfileRows = (fallbackProfiles.data ?? []).map((row) => ({
+          ...row,
+          avatar_url: undefined,
+        }));
+        profilesError = fallbackProfiles.error;
+      }
+      if (profilesError) return serverError();
+      profileRows.push(...chunkProfileRows);
     }
 
-    if (profiles.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, display_name").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map(
-          (row: { id?: string; full_name?: string; display_name?: string }) => ({
-            id: row.id,
-            full_name: row.full_name,
-            display_name: row.display_name,
-          })
-        ),
-        error: fallbackProfiles.error,
-      };
-    }
-
-    if (profiles.error) return serverError();
-
-    let employees: {
-      data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; role?: string | null; status?: string | null }> | null;
-      error: { message?: string } | null;
-    } = userIds.length
-      ? await db
-          .from("employees")
-          .select("user_id, name, full_name, email, role, status")
-          .eq("company_id", companyId)
-          .in("user_id", userIds)
-      : { data: [], error: null };
-    if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
-      employees = await db
+    type EmployeeRow = {
+      user_id: string;
+      name?: string;
+      full_name?: string;
+      email?: string;
+      role?: string | null;
+      status?: string | null;
+    };
+    // Employees lookup is best-effort; a failed chunk contributes nothing and we
+    // fall back to profiles-only names for those users.
+    const employeeRows: EmployeeRow[] = [];
+    for (const userIdChunk of chunkValues(userIds)) {
+      const preferredEmployees = await db
         .from("employees")
-        .select("user_id, full_name, status")
+        .select("user_id, name, full_name, email, role, status")
         .eq("company_id", companyId)
-        .in("user_id", userIds);
+        .in("user_id", userIdChunk);
+      let chunkEmployeeRows = (preferredEmployees.data ?? []) as EmployeeRow[];
+      let employeesError = preferredEmployees.error;
+      if (employeesError && /column employees\.name does not exist|Could not find the 'name' column/i.test(employeesError.message || "")) {
+        const fallbackEmployees = await db
+          .from("employees")
+          .select("user_id, full_name, status")
+          .eq("company_id", companyId)
+          .in("user_id", userIdChunk);
+        chunkEmployeeRows = (fallbackEmployees.data ?? []).map((row) => ({
+          ...row,
+          name: undefined,
+          email: undefined,
+          role: undefined,
+        })) as EmployeeRow[];
+        employeesError = fallbackEmployees.error;
+      }
+      if (!employeesError) employeeRows.push(...chunkEmployeeRows);
     }
-    // Employees lookup is best-effort; if it fails, fall back to profiles-only names.
-    const employeeRows = employees.error ? [] : employees.data ?? [];
     const inactiveUserIds = new Set(
       employeeRows
         .filter((row) => ["inactive", "deleted", "archived"].includes(String(row.status ?? "").trim().toLowerCase()))
@@ -139,7 +157,7 @@ export async function GET() {
     const nameById = new Map<string, string>();
     const avatarById = new Map<string, string>();
     const roleOverrideById = new Map<string, string>();
-    for (const profile of profiles.data ?? []) {
+    for (const profile of profileRows) {
       const profileId = String(profile.id ?? "").trim();
       if (!profileId) continue;
       const profileName = pickDisplayName({
@@ -170,19 +188,21 @@ export async function GET() {
     }
 
     if (userIds.length > 0) {
-      const acceptedInvitesResult = await db
-        .from("pending_invitations")
-        .select("accepted_user_id, role")
-        .eq("company_id", companyId)
-        .not("accepted_at", "is", null)
-        .in("accepted_user_id", userIds);
-      if (!acceptedInvitesResult.error) {
-        for (const row of acceptedInvitesResult.data ?? []) {
-          const acceptedUserId = String(row.accepted_user_id ?? "").trim();
-          const inviteRole = String(row.role ?? "").trim().toLowerCase();
-          if (!acceptedUserId) continue;
-          if (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff")) {
-            roleOverrideById.set(acceptedUserId, "fieldstaff");
+      for (const userIdChunk of chunkValues(userIds)) {
+        const acceptedInvitesResult = await db
+          .from("pending_invitations")
+          .select("accepted_user_id, role")
+          .eq("company_id", companyId)
+          .not("accepted_at", "is", null)
+          .in("accepted_user_id", userIdChunk);
+        if (!acceptedInvitesResult.error) {
+          for (const row of acceptedInvitesResult.data ?? []) {
+            const acceptedUserId = String(row.accepted_user_id ?? "").trim();
+            const inviteRole = String(row.role ?? "").trim().toLowerCase();
+            if (!acceptedUserId) continue;
+            if (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff")) {
+              roleOverrideById.set(acceptedUserId, "fieldstaff");
+            }
           }
         }
       }

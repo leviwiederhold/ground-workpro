@@ -425,6 +425,10 @@ html[data-theme="dark"] body {
   color: #f3f4f6 !important;
 }
 
+html[data-theme="dark"] .mobile-app-shell {
+  background: #050505;
+}
+
 html[data-theme="dark"] .bg-white,
 html[data-theme="dark"] .bg-white\/95,
 html[data-theme="dark"] .bg-white\/90 {

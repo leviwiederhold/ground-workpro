@@ -7,6 +7,7 @@ import {
   applyAppearancePreference,
   FORCE_PUBLIC_THEME_SESSION_KEY,
   hasStoredAuthSessionCookie,
+  hasStoredAuthSessionLocalStorage,
   isPublicThemePath,
   loadStoredAppearancePreference,
   normalizeAppearancePreference,
@@ -18,6 +19,7 @@ export function ThemeInitializer() {
 
   useEffect(() => {
     let cancelled = false;
+    let authenticatedThemeEnabled = pathname !== "/";
     const isPublicPath = isPublicThemePath(pathname);
     const readForcePublicTheme = () => {
       if (typeof window === "undefined") return false;
@@ -81,29 +83,59 @@ export function ThemeInitializer() {
       return;
     }
 
-    if (pathname === "/" && (forcePublicTheme || !hasStoredAuthSessionCookie(typeof document !== "undefined" ? document.cookie : ""))) {
+    const authStorageHint =
+      hasStoredAuthSessionCookie(typeof document !== "undefined" ? document.cookie : "") ||
+      hasStoredAuthSessionLocalStorage(typeof window !== "undefined" ? window.localStorage : null);
+    const activateAuthenticatedTheme = () => {
+      if (cancelled) return;
+      clearForcePublicTheme();
+      authenticatedThemeEnabled = true;
+      applyStored();
+      void syncFromAccountSettings();
+    };
+
+    if (pathname !== "/" || (authStorageHint && !forcePublicTheme)) {
+      activateAuthenticatedTheme();
+    } else {
       applyAppearancePreference("light");
-      return;
     }
-
-    clearForcePublicTheme();
-
-    applyStored();
-    void syncFromAccountSettings();
 
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const onSystemChanged = () => {
+      if (!authenticatedThemeEnabled) return;
       const current = loadStoredAppearancePreference();
       if (current === "system") applyAppearancePreference("system");
     };
     const onAppearanceChange = () => {
+      if (!authenticatedThemeEnabled) return;
       applyAppearancePreference(loadStoredAppearancePreference());
     };
+
+    const supabase = supabaseBrowser();
+    if (pathname === "/") {
+      void supabase.auth.getSession().then(({ data }) => {
+        if (cancelled) return;
+        if (data.session) activateAuthenticatedTheme();
+        else {
+          authenticatedThemeEnabled = false;
+          applyAppearancePreference("light");
+        }
+      });
+    }
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled || pathname !== "/") return;
+      if (session) activateAuthenticatedTheme();
+      else {
+        authenticatedThemeEnabled = false;
+        applyAppearancePreference("light");
+      }
+    });
 
     media.addEventListener("change", onSystemChanged);
     window.addEventListener("appearance:change", onAppearanceChange);
     return () => {
       cancelled = true;
+      authListener.subscription.unsubscribe();
       media.removeEventListener("change", onSystemChanged);
       window.removeEventListener("appearance:change", onAppearanceChange);
     };

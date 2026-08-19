@@ -24,7 +24,6 @@ const KPI_ICON_BY_KEY = {
 
 const ACTION_ICON_BY_KEY = {
   add_event: 'calendar-plus',
-  time_clock: 'clock',
   check_in: 'clipboard-check',
   daily_report: 'file-lines',
   work_order: 'screwdriver-wrench',
@@ -39,7 +38,6 @@ const ACTION_ICON_BY_KEY = {
 
 const QUICK_ACTION_MODAL_BY_KEY = {
   add_event: { type: 'calendar-event', data: null },
-  time_clock: { type: 'time-clock', data: null },
   check_in: { type: 'equipment-checkin', data: null },
   daily_report: { type: 'daily-report', data: null },
   work_order: { type: 'work-order', data: null },
@@ -48,7 +46,6 @@ const QUICK_ACTION_MODAL_BY_KEY = {
 
 const QUICK_ACTION_MODAL_BY_HREF = {
   'calendar-event': QUICK_ACTION_MODAL_BY_KEY.add_event,
-  'time-clock': QUICK_ACTION_MODAL_BY_KEY.time_clock,
   'equipment-checkin': QUICK_ACTION_MODAL_BY_KEY.check_in,
   'daily-report': QUICK_ACTION_MODAL_BY_KEY.daily_report,
   'work-order': QUICK_ACTION_MODAL_BY_KEY.work_order,
@@ -104,7 +101,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   const effectiveRole = dashboardSummary?.role ?? currentRole;
   const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
-  const canUseTimeClock = ['admin', 'ceo', 'executive', 'owner'].includes(normalizedEffectiveRole);
 
   const completedCount = useMemo(
     () => onboardingItems.filter((item) => item.completed).length,
@@ -275,11 +271,9 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   const goToChecklistItem = (item) => {
     const href = String(item?.href || '').trim();
-    if (href === 'time-clock' && !canUseTimeClock) return;
     if (href) {
       const modalMap = {
         'daily-report': { type: 'daily-report' },
-        'time-clock': { type: 'time-clock' },
         'equipment-checkin': { type: 'equipment-checkin' },
         'calendar-event': { type: 'calendar-event' },
         'work-order': { type: 'work-order' },
@@ -339,12 +333,6 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   const runQuickAction = (action) => {
     if (!action) return;
-    if (
-      !canUseTimeClock &&
-      (action.key === 'time_clock' || action.href === 'time-clock')
-    ) {
-      return;
-    }
 
     const byKey = QUICK_ACTION_MODAL_BY_KEY[action.key];
     const byHref = QUICK_ACTION_MODAL_BY_HREF[action.href];
@@ -383,17 +371,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   ).filter((kpi) => kpi.visible !== false);
   const primaryItems = dashboardSummary?.sections?.primary?.items ?? [];
   const activeJobsSection = dashboardSummary?.sections?.activeJobs ?? primaryItems.find((item) => item.type === 'active_jobs')?.meta;
-  const rawQuickActionsSection = dashboardSummary?.sections?.quickActions ?? primaryItems.find((item) => item.type === 'quick_actions')?.meta;
-  const quickActionsSection = rawQuickActionsSection
-    ? {
-        ...rawQuickActionsSection,
-        items: (rawQuickActionsSection.items ?? []).filter(
-          (action) =>
-            canUseTimeClock ||
-            (action.key !== 'time_clock' && action.href !== 'time-clock'),
-        ),
-      }
-    : null;
+  const quickActionsSection = dashboardSummary?.sections?.quickActions ?? primaryItems.find((item) => item.type === 'quick_actions')?.meta;
   const gettingStartedSection = dashboardSummary?.sections?.gettingStarted ?? primaryItems.find((item) => item.type === 'getting_started')?.meta;
   const alertsSection = dashboardSummary?.sections?.alerts;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
@@ -413,14 +391,20 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   if (summaryLoading && !dashboardSummary) {
     return (
-      <div className="space-y-6">
-        <SkeletonBlock lines={4} />
+      <div
+        className="min-h-full space-y-6 bg-gray-50 text-gray-900 transition-colors dark:bg-[#050505] dark:text-zinc-100"
+        data-testid="dashboard-view"
+      >
+        <SkeletonBlock lines={4} testId="dashboard-loading" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div
+      className="min-h-full space-y-6 bg-gray-50 text-gray-900 transition-colors dark:bg-[#050505] dark:text-zinc-100"
+      data-testid="dashboard-view"
+    >
       {summaryError && <InlineError>{summaryError}</InlineError>}
 
       <StatGrid desktopColsClass="md:grid-cols-2 lg:grid-cols-4" testId="stats-grid">

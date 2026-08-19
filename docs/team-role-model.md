@@ -32,11 +32,11 @@ Their shipped default authorization behavior was:
 | Legacy profile | Default behavior |
 | --- | --- |
 | `admin` / `ceo` | Full edit access to every module; billing, integrations, settings, attendance administration, and Owner-only guards. |
-| `pm` / `manager` | Broad operations access; jobs/maintenance/daily reports/safety/messages/inventory/vendors/documents/training edit; fleet and team view; finance/reports view in current source; no integrations. |
-| `foreman` | Jobs/fleet/maintenance/documents/training view; daily reports/safety/messages edit; no finance/reports/team management. |
-| `mechanic` | Fleet/maintenance/inventory/messages edit and safety/training view. This is specialized, not a clean hierarchy tier. |
-| `operator` | Fleet/documents view and daily reports/safety/messages edit. |
-| `fieldstaff` | Daily reports/safety edit, messages/documents view, and no fleet. |
+| `pm` / `manager` | Broad operations access; jobs/maintenance/daily reports/safety/messages/inventory/vendors/documents/training edit; equipment and team view; finance/reports view in current source; no integrations. |
+| `foreman` | Jobs/equipment/maintenance/documents/training view; daily reports/safety/messages edit; no finance/reports/team management. |
+| `mechanic` | Equipment/maintenance/inventory/messages edit and safety/training view. This is specialized, not a clean hierarchy tier. |
+| `operator` | Equipment/documents view and daily reports/safety/messages edit. |
+| `fieldstaff` | Daily reports/safety edit, messages/documents view, and no equipment access. |
 
 Authorization is enforced through the effective internal permission profile,
 module-permission rows, route/API guards, middleware, job/equipment scoping, and

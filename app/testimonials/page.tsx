@@ -10,7 +10,7 @@ const testimonials = [
   {
     name: "Sarah Williams",
     role: "Manager, Williams Grading",
-    quote: "This feels built for excavation teams. Job costing and fleet visibility changed how we run projects.",
+    quote: "This feels built for excavation teams. Job costing and equipment visibility changed how we run projects.",
     initials: "SW",
   },
   {

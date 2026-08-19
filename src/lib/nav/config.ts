@@ -19,7 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { key: "jobs", label: "Jobs", href: "/jobs", iconKey: "briefcase" },
   { key: "team", label: "Team", href: "/team", iconKey: "people-group" },
   { key: "jobsite_time", label: "Attendance", href: "/jobsite-time", iconKey: "clock" },
-  { key: "fleet", label: "Fleet", href: "/fleet", iconKey: "truck-field" },
+  { key: "fleet", label: "Equipment", href: "/fleet", iconKey: "truck-field" },
   { key: "messages", label: "Messages", href: "/messages", iconKey: "comments" },
   { key: "maintenance", label: "Maintenance", href: "/maintenance", iconKey: "toolbox" },
   { key: "inventory", label: "Inventory", href: "/inventory", iconKey: "warehouse" },

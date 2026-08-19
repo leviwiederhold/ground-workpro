@@ -29,11 +29,11 @@ function FeatureIcon({ icon }: { icon: string }) {
 const features = [
   {
     title: "Unified Dashboard",
-    desc: "See jobs, fleet, team, safety, and costs from one central workspace.",
+    desc: "See jobs, equipment, team, safety, and costs from one central workspace.",
     icon: "dashboard",
   },
   {
-    title: "Fleet Management",
+    title: "Equipment Management",
     desc: "Track equipment status, assignments, maintenance, and utilization in real time.",
     icon: "truck-field",
   },

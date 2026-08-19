@@ -12,7 +12,7 @@ const plan = {
   period: "/month per active member",
   bullets: [
     "All core modules included",
-    "Jobs, Fleet, Scheduling, Safety, Finance",
+    "Jobs, Equipment, Scheduling, Safety, Finance",
     "Team messaging & daily reports",
     "Mobile app access",
     "7-Day free trial — card required",

@@ -60,32 +60,19 @@ test("employee navigation and deep links cannot expose the management view", () 
   assert.match(source, /Access Restricted/);
 });
 
-test("generic clock controls are restricted to the CEO/owner/admin role", () => {
+test("normal product UI has no manual clock-in or clock-out entry point", () => {
   const source = withoutComments(page());
-  assert.match(source, /canUseTimeClock=\{isCeoRole\}/);
-  assert.match(source, /isOpen=\{isCeoRole && showModal\.type === 'time-clock'\}/);
-  assert.match(source, /if \(item\.action === 'time-clock'\) return canUseTimeClock;/);
-  assert.match(source, /currentRole === 'executive' && \(/);
-
   const dashboard = withoutComments(read("app/components/views/DashboardView.tsx"));
-  assert.match(dashboard, /canUseTimeClock/);
-  assert.match(dashboard, /action\.key !== 'time_clock'/);
-  assert.match(dashboard, /action\.href !== 'time-clock'/);
-
   const dashboardApi = read("app/api/dashboard/summary/route.ts");
-  const nonAdmin = dashboardApi.slice(
-    dashboardApi.lastIndexOf('if (role === "pm")'),
-  );
-  assert.ok(!nonAdmin.includes('label: "Time Clock"'));
-  assert.ok(!nonAdmin.includes('label: "Crew On-Site"'));
-
   const liveDashboardApi = read("app/api/dashboard/route.ts");
-  const nonAdminActions = liveDashboardApi.slice(
-    liveDashboardApi.indexOf('if (role === "pm")'),
-    liveDashboardApi.indexOf("export async function GET"),
-  );
-  assert.ok(!/Clock In|Clock Out|Time Clock/.test(nonAdminActions));
-  assert.ok(!nonAdminActions.includes('label: "Crew On-Site"'));
+  const attendanceSettings = read("app/components/views/JobsiteTimeSettingsCard.tsx");
+
+  for (const uiSource of [source, dashboard, dashboardApi, liveDashboardApi, attendanceSettings]) {
+    assert.ok(!/TimeClockModal|Time Clock|time_clock|time-clock|manual clock-in fallback/i.test(uiSource));
+  }
+
+  assert.ok(!source.includes("/api/time-clock/clock-in"));
+  assert.ok(!source.includes("/api/time-clock/clock-out"));
 });
 
 test("employee-rendered location UI contains only neutral setup language", () => {

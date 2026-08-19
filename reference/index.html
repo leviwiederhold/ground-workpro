@@ -469,7 +469,7 @@
         { id: 'messages', icon: 'comments', label: 'Messages', count: 3 },
         { id: 'schedule', icon: 'calendar-week', label: 'Schedule' },
         { id: 'jobs', icon: 'briefcase', label: 'Jobs', count: jobs.filter(j => j.status === 'active').length },
-        { id: 'fleet', icon: 'truck-field', label: 'Fleet', count: equipment.length },
+        { id: 'fleet', icon: 'truck-field', label: 'Equipment', count: equipment.length },
         { id: 'team', icon: 'people-group', label: 'Team', count: employees.length },
         { id: 'inventory', icon: 'warehouse', label: 'Inventory', count: inventory.filter(i => i.qtyOnHand <= i.reorderPoint).length },
         { id: 'maintenance', icon: 'toolbox', label: 'Maintenance', count: workOrders.filter(w => w.status !== 'completed').length },
@@ -809,7 +809,7 @@
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <StatCard icon="briefcase" label="Active Jobs" value={activeJobs.length} subValue={`${formatCurrency(totalRevenue)} total contract value`} color="brand" />
-            <StatCard icon="truck-monster" label="Fleet Utilization" value={`${utilizationRate}%`} subValue={`${activeEquipment.length} of ${equipment.length} active`} trend={5} color="green" />
+            <StatCard icon="truck-monster" label="Equipment Utilization" value={`${utilizationRate}%`} subValue={`${activeEquipment.length} of ${equipment.length} active`} trend={5} color="green" />
             <StatCard icon="users" label="Crew On-Site" value={clockedInEmployees.length} subValue={`of ${employees.length} total employees`} color="blue" />
             <StatCard icon="dollar-sign" label="Month Revenue" value={formatCurrency(847500)} subValue="vs. budget: +12%" trend={12} color="green" />
           </div>
@@ -1369,11 +1369,11 @@
         <div className="space-y-6">
           {/* Stats */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <StatCard icon="truck-monster" label="Total Fleet" value={stats.total} color="brand" />
+            <StatCard icon="truck-monster" label="Total Equipment" value={stats.total} color="brand" />
             <StatCard icon="circle-check" label="Active" value={stats.active} color="green" />
             <StatCard icon="clock" label="Idle" value={stats.idle} color="yellow" />
             <StatCard icon="wrench" label="In Maintenance" value={stats.maintenance} color="red" />
-            <StatCard icon="dollar-sign" label="Fleet Value" value={formatCurrency(stats.totalValue)} color="blue" />
+            <StatCard icon="dollar-sign" label="Equipment Value" value={formatCurrency(stats.totalValue)} color="blue" />
           </div>
 
           {/* Filters & Actions */}
@@ -2069,7 +2069,7 @@
                   </div>
                 </Card>
                 <Card className="p-4">
-                  <h3 className="font-semibold text-gray-900 mb-4">Fleet Utilization</h3>
+                  <h3 className="font-semibold text-gray-900 mb-4">Equipment Utilization</h3>
                   <div className="h-64">
                     <canvas ref={pieChartRef}></canvas>
                   </div>
@@ -3143,7 +3143,7 @@
       const [channels] = useState([
         { id: 'ch-1', type: 'channel', name: 'general', icon: 'hashtag', description: 'Company-wide announcements', members: 12, unread: 2 },
         { id: 'ch-2', type: 'channel', name: 'field-crew', icon: 'helmet-safety', description: 'Field team coordination', members: 8, unread: 0 },
-        { id: 'ch-3', type: 'channel', name: 'equipment-updates', icon: 'truck-field', description: 'Fleet status and issues', members: 6, unread: 1 },
+        { id: 'ch-3', type: 'channel', name: 'equipment-updates', icon: 'truck-field', description: 'Equipment status and issues', members: 6, unread: 1 },
         { id: 'ch-4', type: 'channel', name: 'safety-alerts', icon: 'shield-halved', description: 'Safety notifications', members: 12, unread: 0, important: true },
         { id: 'ch-5', type: 'channel', name: 'project-highway42', icon: 'road', description: 'Highway 42 Expansion team', members: 5, unread: 0 },
       ]);
@@ -3594,11 +3594,11 @@
         { id: 'square', name: 'Square', category: 'financial', icon: 'square', description: 'Point-of-sale and payment processing' },
         { id: 'expensify', name: 'Expensify', category: 'financial', icon: 'receipt', description: 'Receipt capture and expense report automation' },
 
-        // Fleet & GPS
+        // Equipment & GPS
         { id: 'samsara', name: 'Samsara', category: 'fleet', icon: 'satellite-dish', description: 'Real-time GPS tracking, telematics, and driver safety', popular: true },
-        { id: 'verizon-connect', name: 'Verizon Connect', category: 'fleet', icon: 'location-crosshairs', description: 'Fleet tracking and workforce management' },
-        { id: 'geotab', name: 'Geotab', category: 'fleet', icon: 'map-pin', description: 'Telematics and fleet optimization platform' },
-        { id: 'fleetio', name: 'Fleetio', category: 'fleet', icon: 'truck', description: 'Fleet maintenance and fuel management' },
+        { id: 'verizon-connect', name: 'Verizon Connect', category: 'fleet', icon: 'location-crosshairs', description: 'Equipment tracking and workforce management' },
+        { id: 'geotab', name: 'Geotab', category: 'fleet', icon: 'map-pin', description: 'Telematics and equipment optimization platform' },
+        { id: 'fleetio', name: 'Fleetio', category: 'fleet', icon: 'truck', description: 'Equipment maintenance and fuel management' },
 
         // Time & Payroll
         { id: 'clockshark', name: 'ClockShark', category: 'time', icon: 'clock', description: 'GPS time tracking built for field crews', popular: true },
@@ -3631,7 +3631,7 @@
         { id: 'dtn', name: 'DTN', category: 'weather', icon: 'cloud-bolt', description: 'Agriculture and construction-grade weather data' },
 
         // Fuel & Purchasing
-        { id: 'wex', name: 'WEX', category: 'fuel', icon: 'gas-pump', description: 'Fleet fuel cards and spend management' },
+        { id: 'wex', name: 'WEX', category: 'fuel', icon: 'gas-pump', description: 'Equipment fuel cards and spend management' },
         { id: 'fleetcor', name: 'Fleetcor', category: 'fuel', icon: 'credit-card', description: 'Fuel cards and workforce payments' },
         { id: 'grainger', name: 'Grainger', category: 'fuel', icon: 'screwdriver-wrench', description: 'Industrial supplies and parts ordering' },
 
@@ -3649,7 +3649,7 @@
       const categories = [
         { id: 'all', label: 'All Integrations', icon: 'grid-2' },
         { id: 'financial', label: 'Financial', icon: 'landmark' },
-        { id: 'fleet', label: 'Fleet & GPS', icon: 'satellite-dish' },
+        { id: 'fleet', label: 'Equipment & GPS', icon: 'satellite-dish' },
         { id: 'time', label: 'Time & Payroll', icon: 'clock' },
         { id: 'project', label: 'Project Management', icon: 'helmet-safety' },
         { id: 'communication', label: 'Communication', icon: 'comment-sms' },
@@ -4132,7 +4132,7 @@
                     { id: 1, title: 'Highway 42 Project Time-lapse', type: 'Project Video', duration: '2:34', date: '2026-01-28', status: 'Ready', thumbnail: 'road' },
                     { id: 2, title: 'Aerial Site Survey - Commercial Park', type: 'Drone Footage', duration: '4:12', date: '2026-01-15', status: 'Ready', thumbnail: 'building' },
                     { id: 3, title: 'Smith Residence Testimonial', type: 'Testimonial', duration: '1:45', date: '2026-01-20', status: 'Ready', thumbnail: 'user' },
-                    { id: 4, title: 'Equipment Fleet Overview', type: 'Company Video', duration: '3:22', date: '2025-12-10', status: 'Ready', thumbnail: 'truck' },
+                    { id: 4, title: 'Equipment Overview', type: 'Company Video', duration: '3:22', date: '2025-12-10', status: 'Ready', thumbnail: 'truck' },
                     { id: 5, title: 'Downtown Excavation Progress', type: 'Project Video', duration: '0:00', date: '2026-02-05', status: 'In Production', thumbnail: 'hard-hat' },
                     { id: 6, title: 'Safety Training Recap', type: 'Internal', duration: '5:30', date: '2025-11-20', status: 'Ready', thumbnail: 'shield' },
                   ].map(video => (
@@ -4710,7 +4710,7 @@
 
       const features = [
         { icon: 'grid-2', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
-        { icon: 'truck-field', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
+        { icon: 'truck-field', title: 'Equipment Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
         { icon: 'calendar-week', title: 'Smart Scheduling', desc: 'Drag-and-drop crew and equipment scheduling with conflict detection.' },
         { icon: 'comments', title: 'Team Messaging', desc: 'Built-in communication with channels, DMs, and file sharing.' },
         { icon: 'money-check-dollar', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
@@ -4866,7 +4866,7 @@
                           </div>
                           <span className="text-white font-dozer text-sm tracking-wide">GROUNDWORK</span>
                         </div>
-                        {['Dashboard', 'Messages', 'Schedule', 'Jobs', 'Fleet', 'Team'].map((item, i) => (
+                        {['Dashboard', 'Messages', 'Schedule', 'Jobs', 'Equipment', 'Team'].map((item, i) => (
                           <div key={i} className={`flex items-center gap-2 px-2 py-2 rounded text-xs mb-1 ${i === 0 ? 'bg-brand-500 text-white' : 'text-gray-400'}`}>
                             <Icon name={['grid-2', 'comments', 'calendar-week', 'briefcase', 'truck-field', 'people-group'][i]} />
                             <span>{item}</span>
@@ -4892,7 +4892,7 @@
                         <div className="grid grid-cols-4 gap-3 mb-4">
                           {[
                             { label: 'Active Jobs', value: '8', icon: 'briefcase', color: 'brand' },
-                            { label: 'Fleet Utilization', value: '87%', icon: 'truck-field', color: 'green' },
+                            { label: 'Equipment Utilization', value: '87%', icon: 'truck-field', color: 'green' },
                             { label: 'Crew On-Site', value: '24', icon: 'users', color: 'blue' },
                             { label: 'Month Revenue', value: '$847K', icon: 'dollar-sign', color: 'green' },
                           ].map((stat, i) => (
@@ -4987,7 +4987,7 @@
             <div className="max-w-7xl mx-auto">
               <div className="text-center mb-12">
                 <h2 className="text-3xl font-bold text-gray-900 mb-4">Built for the Field</h2>
-                <p className="text-lg text-gray-600">From excavators to dozers, track every piece of equipment in your fleet.</p>
+                <p className="text-lg text-gray-600">From excavators to dozers, track every piece of equipment in one place.</p>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 {[

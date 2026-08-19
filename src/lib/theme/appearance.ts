@@ -23,6 +23,22 @@ export function hasStoredAuthSessionCookie(cookieValue: string | null | undefine
   return /(?:^|;\s*)sb-[^=;]+-auth-token=/.test(raw);
 }
 
+export function hasStoredAuthSessionLocalStorage(
+  storage: Pick<Storage, "key" | "length"> | null | undefined
+): boolean {
+  if (!storage) return false;
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      if (/^sb-[^-]+-auth-token$/.test(String(storage.key(index) ?? ""))) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 export function resolveTheme(preference: AppearancePreference): "light" | "dark" {
   if (preference === "light" || preference === "dark") return preference;
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return "light";

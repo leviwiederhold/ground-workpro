@@ -6,6 +6,7 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole } from "@/lib/nav/config";
 import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { chunkValues } from "@/lib/db/chunk";
 import {
   isMissingLegacyPermissionProfileColumn,
   normalizeCanonicalTeamRole,
@@ -317,50 +318,63 @@ export async function GET(request: Request) {
         new Set((membershipRows ?? []).map((row: Record<string, unknown>) => normalizeId(row.user_id)).filter(Boolean))
       );
       if (memberUserIds.length > 0) {
-        const acceptedInvitesByUserResult = await adminDb
-          .from("pending_invitations")
-          .select("accepted_user_id, role")
-          .eq("company_id", companyId)
-          .not("accepted_at", "is", null)
-          .in("accepted_user_id", memberUserIds);
-        if (!acceptedInvitesByUserResult.error) {
-          for (const row of (acceptedInvitesByUserResult.data ?? []) as Array<Record<string, unknown>>) {
-            const acceptedUserId = String(row.accepted_user_id ?? "").trim();
-            const inviteRole = String(row.role ?? "").trim().toLowerCase();
-            if (
-              acceptedUserId &&
-              (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff"))
-            ) {
-              fieldStaffUserIds.add(acceptedUserId);
+        for (const memberUserIdChunk of chunkValues(memberUserIds)) {
+          const acceptedInvitesByUserResult = await adminDb
+            .from("pending_invitations")
+            .select("accepted_user_id, role")
+            .eq("company_id", companyId)
+            .not("accepted_at", "is", null)
+            .in("accepted_user_id", memberUserIdChunk);
+          if (!acceptedInvitesByUserResult.error) {
+            for (const row of (acceptedInvitesByUserResult.data ?? []) as Array<Record<string, unknown>>) {
+              const acceptedUserId = String(row.accepted_user_id ?? "").trim();
+              const inviteRole = String(row.role ?? "").trim().toLowerCase();
+              if (
+                acceptedUserId &&
+                (inviteRole.includes("fieldstaff") || inviteRole.includes("field_staff") || inviteRole.includes("field staff"))
+              ) {
+                fieldStaffUserIds.add(acceptedUserId);
+              }
             }
           }
         }
       }
       if (memberUserIds.length > 0) {
-        const profilesResult = await adminDb
-          .from("profiles")
-          .select("id, full_name, display_name, avatar_url")
-          .in("id", memberUserIds);
-        let profileRows: Array<Record<string, unknown>> = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
-        if (profilesResult.error && /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")) {
-          const fallbackProfilesWithAvatar = await adminDb
+        const profileRows: Array<Record<string, unknown>> = [];
+        for (const memberUserIdChunk of chunkValues(memberUserIds)) {
+          const profilesResult = await adminDb
             .from("profiles")
-            .select("id, full_name, avatar_url")
-            .in("id", memberUserIds);
-          profileRows = (fallbackProfilesWithAvatar.data ?? []) as Array<Record<string, unknown>>;
-          if (fallbackProfilesWithAvatar.error && /avatar_url|Could not find the 'avatar_url' column/i.test(fallbackProfilesWithAvatar.error.message || "")) {
-            const fallbackProfiles = await adminDb
+            .select("id, full_name, display_name, avatar_url")
+            .in("id", memberUserIdChunk);
+          let chunkProfileRows: Array<Record<string, unknown>> = (profilesResult.data ?? []) as Array<Record<string, unknown>>;
+          let profilesError = profilesResult.error;
+          if (profilesError && /display_name|Could not find the 'display_name' column/i.test(profilesError.message || "")) {
+            const fallbackProfilesWithAvatar = await adminDb
               .from("profiles")
-              .select("id, full_name")
-              .in("id", memberUserIds);
-            profileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
+              .select("id, full_name, avatar_url")
+              .in("id", memberUserIdChunk);
+            chunkProfileRows = (fallbackProfilesWithAvatar.data ?? []) as Array<Record<string, unknown>>;
+            profilesError = fallbackProfilesWithAvatar.error;
+            if (profilesError && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesError.message || "")) {
+              const fallbackProfiles = await adminDb
+                .from("profiles")
+                .select("id, full_name")
+                .in("id", memberUserIdChunk);
+              chunkProfileRows = (fallbackProfiles.data ?? []) as Array<Record<string, unknown>>;
+              profilesError = fallbackProfiles.error;
+            }
+          } else if (profilesError && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesError.message || "")) {
+            const fallbackProfilesWithDisplay = await adminDb
+              .from("profiles")
+              .select("id, full_name, display_name")
+              .in("id", memberUserIdChunk);
+            chunkProfileRows = (fallbackProfilesWithDisplay.data ?? []) as Array<Record<string, unknown>>;
+            profilesError = fallbackProfilesWithDisplay.error;
           }
-        } else if (profilesResult.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
-          const fallbackProfilesWithDisplay = await adminDb
-            .from("profiles")
-            .select("id, full_name, display_name")
-            .in("id", memberUserIds);
-          profileRows = (fallbackProfilesWithDisplay.data ?? []) as Array<Record<string, unknown>>;
+          if (profilesError) {
+            return NextResponse.json({ error: profilesError.message }, { status: 400 });
+          }
+          profileRows.push(...chunkProfileRows);
         }
         const authEmailByUserId = new Map<string, string>();
         const admin = getSupabaseAdmin();

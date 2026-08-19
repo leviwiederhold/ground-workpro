@@ -83,7 +83,6 @@ const normalizeEmail = (email: string | null | undefined) => String(email ?? "")
 function getQuickActionsForRole(role: AppRole) {
   if (role === "admin") {
     return [
-      { key: "time_clock", label: "Time Clock", href: "time-clock" },
       { key: "add_event", label: "Add Event", href: "calendar-event" },
       { key: "daily_report", label: "Daily Report", href: "daily-report" },
       { key: "work_order", label: "Work Order", href: "work-order" },
@@ -475,7 +474,7 @@ export async function GET(request: Request) {
     if (role === "admin") {
       kpis.push(
         { key: "active_jobs", label: "Active Jobs", value: String(activeJobsCount), href: "/jobs" },
-        { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" },
+        { key: "fleet_utilization", label: "Equipment Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" },
         { key: "crew_on_site", label: "Crew On-Site", value: String(employeesOnSite), href: "/team" },
         { key: "month_revenue", label: "Month Revenue", value: formatCurrency(monthRevenue), href: "/finance" }
       );
@@ -726,7 +725,7 @@ export async function GET(request: Request) {
 
       kpis.push(
         { key: "active_jobs", label: "Active Jobs", value: String(activeJobsCount), href: "/jobs" },
-        { key: "fleet_utilization", label: "Fleet Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" }
+        { key: "fleet_utilization", label: "Equipment Utilization", value: `${fleetUtilizationPct}%`, href: "/fleet" }
       );
       alerts.push({ type: "pm_alerts", message: `Maintenance Due Soon: ${maintenanceDueSoonCount}`, href: "/maintenance", severity: "warn" });
       alerts.push(...recentActivityAlerts);

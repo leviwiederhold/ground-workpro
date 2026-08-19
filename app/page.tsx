@@ -588,7 +588,7 @@ const MobileAppShell = ({
 
       return (
         <div className="w-full">
-          <div className={`w-full bg-gray-200 rounded-full ${sizes[size]}`}>
+          <div className={`w-full bg-gray-200 rounded-full dark:bg-zinc-800 ${sizes[size]}`}>
             <div className={`${colors[barColor]} ${sizes[size]} rounded-full transition-all duration-300`} style={{ width: `${percentage}%` }}></div>
           </div>
           {showLabel && <span className="text-xs text-gray-500 mt-1">{Math.round(percentage)}%</span>}
@@ -1223,7 +1223,7 @@ const MobileAppShell = ({
           jobs: { key: 'jobs', label: 'Jobs', iconKey: 'briefcase' },
           team: { key: 'team', label: 'Team', iconKey: 'people-group' },
           jobsite_time: { key: 'jobsite_time', label: 'Attendance', iconKey: 'clock' },
-          fleet: { key: 'fleet', label: 'Fleet', iconKey: 'truck-field' },
+          fleet: { key: 'fleet', label: 'Equipment', iconKey: 'truck-field' },
           messages: { key: 'messages', label: 'Messages', iconKey: 'comments' },
           maintenance: { key: 'maintenance', label: 'Maintenance', iconKey: 'toolbox' },
           inventory: { key: 'inventory', label: 'Inventory', iconKey: 'warehouse' },
@@ -2714,7 +2714,6 @@ const MobileAppShell = ({
             onClose={() => setShowModal({ type: null })}
             setShowModal={setShowModal}
             canFinalSafetySignOff={canRoleGiveFinalSafetySignOff(currentRole)}
-            canUseTimeClock={isCeoRole}
           />
           <CalendarEventModal
             isOpen={showModal.type === 'calendar-event'}
@@ -2724,7 +2723,6 @@ const MobileAppShell = ({
             initialData={showModal.data}
             onCreated={() => setCalendarRefreshVersion((prev) => prev + 1)}
           />
-          <TimeClockModal isOpen={isCeoRole && showModal.type === 'time-clock'} onClose={() => setShowModal({ type: null })} />
           <EquipmentCheckInModal isOpen={showModal.type === 'equipment-checkin'} onClose={() => setShowModal({ type: null })} equipment={equipment} setEquipment={setEquipment} employees={employees} jobs={jobs} />
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} companyMembers={companyMembers} setWorkOrders={setWorkOrders} data={showModal.data} />
@@ -3174,12 +3172,12 @@ const MobileAppShell = ({
           const response = await fetch(`/api/fleet/equipment?status=${encodeURIComponent(statusParam)}`, { cache: 'no-store' });
           const payload = await response.json();
           if (!response.ok || !Array.isArray(payload?.items)) {
-            throw new Error(payload?.error || 'Failed to load fleet status');
+            throw new Error(payload?.error || 'Failed to load equipment status');
           }
           setFleetItems(payload.items);
         } catch (error) {
           setFleetItems([]);
-          setFleetItemsError(error instanceof Error ? error.message : 'Failed to load fleet status');
+          setFleetItemsError(error instanceof Error ? error.message : 'Failed to load equipment status');
         } finally {
           setFleetItemsLoading(false);
         }
@@ -3425,11 +3423,11 @@ const MobileAppShell = ({
         <div className="space-y-6">
           {/* Stats */}
           <StatGrid desktopColsClass="md:grid-cols-5" testId="stats-grid">
-            <StatCard icon="truck-monster" label="Total Fleet" value={stats.total} color="brand" />
+            <StatCard icon="truck-monster" label="Total Equipment" value={stats.total} color="brand" />
             <StatCard icon="circle-check" label="Active" value={stats.active} color="green" />
             <StatCard icon="clock" label="Idle" value={stats.idle} color="yellow" />
             <StatCard icon="wrench" label="In Maintenance" value={stats.maintenance} color="red" />
-            <StatCard icon="dollar-sign" label="Fleet Value" value={formatCurrency(stats.totalValue)} color="blue" />
+            <StatCard icon="dollar-sign" label="Equipment Value" value={formatCurrency(stats.totalValue)} color="blue" />
           </StatGrid>
 
           {/* Filters & Actions */}
@@ -3862,7 +3860,7 @@ const MobileAppShell = ({
       const [showNativeAdminModal, setShowNativeAdminModal] = useState(false);
       const permissionModules = [
         { key: 'jobs', label: 'Jobs' },
-        { key: 'fleet', label: 'Fleet' },
+        { key: 'fleet', label: 'Equipment' },
         { key: 'maintenance', label: 'Maintenance' },
         { key: 'daily_reports', label: 'Daily Reports' },
         { key: 'safety', label: 'Safety' },
@@ -4088,7 +4086,6 @@ const MobileAppShell = ({
       // open Team view on focus/visibility and while it remains visible so an
       // accepted member replaces the Pending row without a manual reload.
       useEffect(() => {
-        if (currentView !== 'team') return;
         const refreshInviteState = () => {
           if (document.visibilityState !== 'visible') return;
           void Promise.all([loadTeamItems(), loadPendingInvites()]);
@@ -4101,7 +4098,7 @@ const MobileAppShell = ({
           document.removeEventListener('visibilitychange', refreshInviteState);
           window.clearInterval(interval);
         };
-      }, [currentView, loadPendingInvites, loadTeamItems]);
+      }, [loadPendingInvites, loadTeamItems]);
 
       useEffect(() => {
         if (!selectedEmployeeId) return;
@@ -4676,11 +4673,6 @@ const MobileAppShell = ({
               </div>
             </div>
             <div className="flex flex-col sm:flex-row gap-2">
-              {currentRole === 'executive' && (
-                <Button variant="secondary" className="w-full sm:w-auto whitespace-nowrap" onClick={() => setShowModal({ type: 'time-clock' })}>
-                  <Icon name="clock" className="mr-2" /> Time Clock
-                </Button>
-              )}
               {/* Native iOS: team/seat management remains on the web dashboard. */}
               {!iosAppRuntime && (
                 <Button variant="brand" className="w-full sm:w-auto whitespace-nowrap" onClick={handleCreateEmployee} disabled={!canManageTeamProfiles}>
@@ -6561,7 +6553,7 @@ const MobileAppShell = ({
                 <Card className="rounded-3xl border border-gray-200 bg-gradient-to-br from-white to-gray-50 p-5 shadow-sm dark:border-zinc-800 dark:bg-gradient-to-br dark:from-[#0b0b0d] dark:to-[#111215] dark:shadow-black/30">
                   <div className="mb-4 flex items-start justify-between gap-4">
                     <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Fleet Utilization</h3>
+                      <h3 className="font-semibold text-gray-900 dark:text-zinc-100">Equipment Utilization</h3>
                       <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">Live equipment mix across active, idle, and maintenance states.</p>
                     </div>
                     <div className="rounded-2xl bg-green-50 px-3 py-2 text-right text-green-700 dark:border dark:border-green-900/60 dark:bg-green-950/40 dark:text-green-200">
@@ -6973,7 +6965,7 @@ const MobileAppShell = ({
             <Card className="p-4">
               <h3 className="font-semibold text-gray-900 mb-4">Equipment Summary</h3>
               {filteredEquipment.length === 0 ? (
-                <p className="mb-4 text-sm text-gray-500">No fleet vehicles match the current report filters.</p>
+                <p className="mb-4 text-sm text-gray-500">No equipment matches the current report filters.</p>
               ) : null}
               <Table
                 columns={[
@@ -11594,7 +11586,7 @@ const MobileAppShell = ({
                     { id: 1, title: 'Highway 42 Project Time-lapse', type: 'Project Video', duration: '2:34', date: '2026-01-28', status: 'Ready', thumbnail: 'road' },
                     { id: 2, title: 'Aerial Site Survey - Commercial Park', type: 'Drone Footage', duration: '4:12', date: '2026-01-15', status: 'Ready', thumbnail: 'building' },
                     { id: 3, title: 'Smith Residence Testimonial', type: 'Testimonial', duration: '1:45', date: '2026-01-20', status: 'Ready', thumbnail: 'user' },
-                    { id: 4, title: 'Equipment Fleet Overview', type: 'Company Video', duration: '3:22', date: '2025-12-10', status: 'Ready', thumbnail: 'truck' },
+                    { id: 4, title: 'Equipment Overview', type: 'Company Video', duration: '3:22', date: '2025-12-10', status: 'Ready', thumbnail: 'truck' },
                     { id: 5, title: 'Downtown Excavation Progress', type: 'Project Video', duration: '0:00', date: '2026-02-05', status: 'In Production', thumbnail: 'hard-hat' },
                     { id: 6, title: 'Safety Training Recap', type: 'Internal', duration: '5:30', date: '2025-11-20', status: 'Ready', thumbnail: 'shield' },
                   ].map(video => (
@@ -11740,19 +11732,17 @@ const MobileAppShell = ({
     // MODALS
     // ============================================
 
-    const QuickActionsModal = ({ isOpen, onClose, setShowModal, canFinalSafetySignOff, canUseTimeClock }) => (
+    const QuickActionsModal = ({ isOpen, onClose, setShowModal, canFinalSafetySignOff }) => (
       <Modal isOpen={isOpen} onClose={onClose} title="Quick Actions" size="sm">
         <div className="grid grid-cols-2 gap-3">
           {[
             { icon: 'calendar-plus', label: 'Add Event', action: 'calendar-event', color: 'indigo' },
-            { icon: 'clock', label: 'Time Clock', action: 'time-clock', color: 'blue' },
             { icon: 'clipboard-check', label: 'Equipment Check-In', action: 'equipment-checkin', color: 'green' },
             { icon: 'file-lines', label: 'Daily Report', action: 'daily-report', color: 'brand' },
             { icon: 'wrench', label: 'Work Order', action: 'work-order', color: 'yellow' },
             { icon: 'shield-halved', label: 'Safety Sign-Off', action: 'safety', color: 'red' },
           ].filter((item) => {
             if (item.action === 'safety') return canFinalSafetySignOff;
-            if (item.action === 'time-clock') return canUseTimeClock;
             return true;
           }).map(item => (
             <button
@@ -12249,123 +12239,6 @@ const MobileAppShell = ({
               {!isReadOnly && (
                 <Button variant="brand" onClick={handleSubmit} disabled={saving || deleting || !title.trim()}>{saving ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Event')}</Button>
               )}
-            </div>
-          </div>
-        </Modal>
-      );
-    };
-
-    const TimeClockModal = ({ isOpen, onClose }) => {
-      const [loading, setLoading] = useState(false);
-      const [actionLoading, setActionLoading] = useState(false);
-      const [error, setError] = useState('');
-      const [status, setStatus] = useState('clocked_out');
-      const [activeShiftStartAt, setActiveShiftStartAt] = useState(null);
-      const [todayHours, setTodayHours] = useState(0);
-      const [weekHours, setWeekHours] = useState(0);
-
-      const loadStatus = useCallback(async () => {
-        setLoading(true);
-        setError('');
-        try {
-          const response = await fetch('/api/time-clock', { cache: 'no-store' });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(payload?.error || 'Failed to load time clock status');
-          }
-          setStatus(String(payload?.item?.status || 'clocked_out'));
-          setActiveShiftStartAt(payload?.item?.activeShiftStartAt || null);
-          setTodayHours(Number(payload?.item?.todayHours || 0));
-          setWeekHours(Number(payload?.item?.weekHours || 0));
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : 'Failed to load time clock status');
-        } finally {
-          setLoading(false);
-        }
-      }, []);
-
-      useEffect(() => {
-        if (!isOpen) return;
-        loadStatus();
-      }, [isOpen, loadStatus]);
-
-      const handleClockIn = async () => {
-        setActionLoading(true);
-        setError('');
-        try {
-          const response = await fetch('/api/time-clock/clock-in', { method: 'POST' });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(payload?.error || 'Unable to clock in');
-          }
-          await loadStatus();
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : 'Unable to clock in');
-        } finally {
-          setActionLoading(false);
-        }
-      };
-
-      const handleClockOut = async () => {
-        setActionLoading(true);
-        setError('');
-        try {
-          const response = await fetch('/api/time-clock/clock-out', { method: 'POST' });
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(payload?.error || 'Unable to clock out');
-          }
-          await loadStatus();
-        } catch (nextError) {
-          setError(nextError instanceof Error ? nextError.message : 'Unable to clock out');
-        } finally {
-          setActionLoading(false);
-        }
-      };
-
-      const statusLabel = status === 'clocked_in' ? 'Clocked In' : 'Clocked Out';
-      const statusColor =
-        status === 'clocked_in'
-          ? 'text-green-700 bg-green-50 border-green-200'
-          : 'text-gray-700 bg-gray-50 border-gray-200';
-      const activeStartLabel = activeShiftStartAt
-        ? new Date(activeShiftStartAt).toLocaleString()
-        : 'Not clocked in';
-
-      return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Time Clock" size="md">
-          <div className="space-y-4">
-            <div className={`p-3 rounded-lg border ${statusColor}`}>
-              <p className="text-sm font-medium">{statusLabel}</p>
-              <p className="text-xs mt-1">Active shift start: {activeStartLabel}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="border border-gray-200 rounded-lg p-3">
-                <p className="text-xs text-gray-500">Today's Hours</p>
-                <p className="text-2xl font-semibold text-gray-900">{Number(todayHours).toFixed(2)}</p>
-              </div>
-              <div className="border border-gray-200 rounded-lg p-3">
-                <p className="text-xs text-gray-500">This Week's Hours</p>
-                <p className="text-2xl font-semibold text-gray-900">{Number(weekHours).toFixed(2)}</p>
-              </div>
-            </div>
-
-            {loading && <p className="text-sm text-gray-500">Loading time clock status...</p>}
-            {error && <p className="text-sm text-red-600">{error}</p>}
-
-            {/* No permission gating here: location is a prerequisite for
-                entering the app at all (see LocationRequiredGate), so by the
-                time these controls render it has already been granted. */}
-            <div className="flex justify-end gap-3">
-                <Button variant="secondary" onClick={onClose} disabled={actionLoading}>Close</Button>
-                <Button variant="secondary" onClick={loadStatus} disabled={loading || actionLoading}>Refresh</Button>
-                <Button variant="brand" onClick={handleClockIn} disabled={loading || actionLoading || status === 'clocked_in'}>
-                  {actionLoading && status !== 'clocked_in' ? 'Working...' : 'Clock In'}
-                </Button>
-              <Button variant="danger" onClick={handleClockOut} disabled={loading || actionLoading || status !== 'clocked_in'}>
-                {actionLoading && status === 'clocked_in' ? 'Working...' : 'Clock Out'}
-              </Button>
             </div>
           </div>
         </Modal>
@@ -12966,7 +12839,7 @@ const MobileAppShell = ({
       };
 
       const fieldVisualCards = [
-        { title: 'Live Fleet', subtitle: 'Track heavy equipment from yard to jobsite.', icon: 'truck-field' },
+        { title: 'Live Equipment', subtitle: 'Track heavy equipment from yard to jobsite.', icon: 'truck-field' },
         { title: 'Crew Coordination', subtitle: 'Keep office and field aligned in one view.', icon: 'helmet-safety' },
         { title: 'Job Costing', subtitle: 'Watch margin drift before it becomes a problem.', icon: 'chart-line' },
       ];
@@ -13055,7 +12928,7 @@ const MobileAppShell = ({
 
       const features = [
         { glyph: 'dashboard', title: 'Unified Dashboard', desc: 'Real-time overview of all operations, jobs, and equipment in one place.' },
-        { glyph: 'fleet', title: 'Fleet Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
+        { glyph: 'fleet', title: 'Equipment Management', desc: 'Track equipment location, hours, maintenance schedules, and utilization.' },
         { glyph: 'schedule', title: 'Smart Scheduling', desc: 'Drag-and-drop crew and equipment scheduling with conflict detection.' },
         { glyph: 'messaging', title: 'Team Messaging', desc: 'Built-in communication with channels, DMs, and file sharing.' },
         { glyph: 'costing', title: 'Job Costing', desc: 'Track costs, budgets, and profitability for every project in real-time.' },
@@ -13339,7 +13212,7 @@ const MobileAppShell = ({
                           <span className="text-white font-dozer text-sm tracking-wide">GROUNDWORK</span>
                         </div>
                         <div className="grid grid-cols-3 gap-2 sm:block">
-                        {['Dashboard', 'Messages', 'Schedule', 'Jobs', 'Fleet', 'Team'].map((item, i) => (
+                        {['Dashboard', 'Messages', 'Schedule', 'Jobs', 'Equipment', 'Team'].map((item, i) => (
                           <div key={i} className={`mb-1 flex items-center gap-2 rounded px-2 py-2 text-xs ${i === 0 ? 'bg-brand-500 text-white' : 'text-gray-400'} sm:mb-1`}>
                             <Icon name={['grid-2', 'comments', 'calendar-week', 'briefcase', 'truck-field', 'people-group'][i]} />
                             <span>{item}</span>
@@ -13366,7 +13239,7 @@ const MobileAppShell = ({
                         <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                           {[
                             { label: 'Active Jobs', value: '8', icon: 'briefcase', color: 'brand' },
-                            { label: 'Fleet Utilization', value: '87%', icon: 'truck-field', color: 'green' },
+                            { label: 'Equipment Utilization', value: '87%', icon: 'truck-field', color: 'green' },
                             { label: 'Crew On-Site', value: '24', icon: 'users', color: 'blue' },
                             { label: 'Month Revenue', value: '$847K', icon: 'dollar-sign', color: 'green' },
                           ].map((stat, i) => (
@@ -13461,7 +13334,7 @@ const MobileAppShell = ({
             <div className="max-w-7xl mx-auto">
               <div className="text-center mb-12">
                 <h2 className="text-3xl font-bold text-gray-900 mb-4">Built for the Field</h2>
-                <p className="text-lg text-gray-600">From excavators to dozers, track every piece of equipment in your fleet.</p>
+                <p className="text-lg text-gray-600">From excavators to dozers, track every piece of equipment in one place.</p>
               </div>
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
                 {[

@@ -63,7 +63,7 @@ test('mechanic dashboard shows open work orders and weather', async ({ page }) =
   await expect(page.getByText('Weather - Cincinnati')).toBeVisible();
 });
 
-test('only admins get the time clock quick action', async ({ page }) => {
+test('no role gets a manual time clock quick action', async ({ page }) => {
   await loginViaUI(page);
 
   for (const role of ['admin', 'pm', 'foreman', 'mechanic', 'operator'] as Role[]) {
@@ -74,11 +74,7 @@ test('only admins get the time clock quick action', async ({ page }) => {
     const primaryItems = JSON.parse(body)?.item?.sections?.primary?.items ?? [];
     const quickActions = primaryItems.find((item: { type?: string }) => item.type === 'quick_actions')?.meta?.items ?? [];
     const keys = quickActions.map((action: { key?: string }) => String(action.key ?? ''));
-    if (role === 'admin') {
-      expect(keys).toContain('time_clock');
-    } else {
-      expect(keys).not.toContain('time_clock');
-    }
+    expect(keys).not.toContain('time_clock');
     expect(keys.length).toBeGreaterThan(1);
   }
 });

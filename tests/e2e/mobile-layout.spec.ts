@@ -102,7 +102,7 @@ test('mobile layout has 2-column stat cards and no horizontal page overflow', as
   await page.goto('/');
 
   await goToNav(page, 'fleet');
-  await expectPageTitle(page, 'Fleet');
+  await expectPageTitle(page, 'Equipment');
   await expectTwoColumnStats(page);
   await expectNoHorizontalScroll(page);
 

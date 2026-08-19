@@ -113,7 +113,6 @@ export function JobsiteTimeSettingsCard({
         </Row>
 
         <Toggle label="Require manager approval before hours count" k="requireApproval" />
-        <Toggle label="Manual clock-in fallback enabled" k="manualFallbackEnabled" />
       </div>
     </div>
   );

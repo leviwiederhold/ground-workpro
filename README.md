@@ -6,7 +6,7 @@ The all-in-one management platform for excavation and grading contractors.
 
 - **Dashboard** - Real-time overview of operations, jobs, and equipment
 - **Team Messaging** - Built-in Slack-like communication with channels and DMs
-- **Fleet Management** - Track equipment location, hours, and maintenance
+- **Equipment Management** - Track equipment location, hours, and maintenance
 - **Smart Scheduling** - Drag-and-drop crew and equipment scheduling
 - **Job Costing** - Track costs, budgets, and profitability in real-time
 - **Safety & Compliance** - Digital sign-offs, incident tracking, certifications

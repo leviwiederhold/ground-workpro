@@ -20,7 +20,7 @@ test('prod live sweep', async ({ page }) => {
 
   await loginViaUI(page);
 
-  const navs = ['Dashboard','Schedule','Jobs','Team','Fleet','Messages','Maintenance','Inventory','Safety','Reports','Bids','Vendors','Documents','Training','Finance','Settings'];
+  const navs = ['Dashboard','Schedule','Jobs','Team','Equipment','Messages','Maintenance','Inventory','Safety','Reports','Bids','Vendors','Documents','Training','Finance','Settings'];
   for (const nav of navs) {
     const button = page.getByRole('button', { name: nav }).first();
     if (await button.isVisible().catch(() => false)) {

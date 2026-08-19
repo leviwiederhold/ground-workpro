@@ -5,6 +5,7 @@ import {
   startOfUtcWeek,
   type TimeEntryRow,
 } from "@/lib/time-clock/hours";
+import { chunkValues } from "@/lib/db/chunk";
 
 type TimeEntrySummary = {
   todayHoursByUserId: Map<string, number>;
@@ -32,23 +33,25 @@ export async function getTimeEntrySummaryByUser(params: {
   const queryStart = new Date(weekStart.getTime() - 24 * 60 * 60 * 1000).toISOString();
   const weekStartIso = weekStart.toISOString();
 
-  const result = await params.supabase
-    .from("time_entries")
-    .select("user_id, clock_in_at, clock_out_at")
-    .eq("company_id", params.companyId)
-    .in("user_id", uniqueUserIds)
-    .or(`clock_out_at.gte.${weekStartIso},clock_out_at.is.null,clock_in_at.gte.${queryStart}`)
-    .order("clock_in_at", { ascending: false });
-
-  if (result.error) {
-    return emptySummary;
-  }
-
-  const rows = (result.data ?? []) as Array<{
+  const rows: Array<{
     user_id: string;
     clock_in_at: string;
     clock_out_at: string | null;
-  }>;
+  }> = [];
+  for (const userIdChunk of chunkValues(uniqueUserIds)) {
+    const result = await params.supabase
+      .from("time_entries")
+      .select("user_id, clock_in_at, clock_out_at")
+      .eq("company_id", params.companyId)
+      .in("user_id", userIdChunk)
+      .or(`clock_out_at.gte.${weekStartIso},clock_out_at.is.null,clock_in_at.gte.${queryStart}`)
+      .order("clock_in_at", { ascending: false });
+
+    if (result.error) {
+      return emptySummary;
+    }
+    rows.push(...((result.data ?? []) as typeof rows));
+  }
 
   const entriesByUserId = new Map<string, TimeEntryRow[]>();
   for (const row of rows) {

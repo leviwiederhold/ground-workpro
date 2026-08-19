@@ -32,12 +32,12 @@ const features = [
   {
     icon: '<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><rect x="6" y="7" width="5" height="4" rx="1"/><rect x="13" y="7" width="5" height="4" rx="1"/><rect x="6" y="13" width="5" height="4" rx="1"/><path d="M13 15h5"/><path d="M15.5 13v4"/></svg>',
     title: 'Your command center',
-    desc: 'Jobs, fleet, crew, safety, and costs — all from one dashboard built for dirt work.',
+    desc: 'Jobs, equipment, crew, safety, and costs — all from one dashboard built for dirt work.',
     bg: 'linear-gradient(135deg, #f97316, #ea580c)',
   },
   {
     icon: '<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17V8a2 2 0 0 1 2-2h9v11"/><path d="M14 10h3.5l3.5 4v3h-3"/><path d="M14 17H9"/><circle cx="6.5" cy="17" r="2"/><circle cx="18" cy="17" r="2"/><path d="M6 10h4"/></svg>',
-    title: 'Fleet management',
+    title: 'Equipment management',
     desc: 'Track every machine from yard to jobsite. Maintenance, assignments, and utilization in real time.',
     bg: 'linear-gradient(135deg, #f59e0b, #ea580c)',
   },

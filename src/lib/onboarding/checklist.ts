@@ -138,7 +138,7 @@ const ONBOARDING_CHECKLIST_ITEMS_BY_ROLE: OnboardingChecklistRoleItemDef[] = [
   {
     key: "add_first_equipment",
     label: "Add first equipment",
-    description: "Create your first fleet asset.",
+    description: "Create your first equipment asset.",
     view: "fleet",
     href: "/fleet",
     scope: "company",

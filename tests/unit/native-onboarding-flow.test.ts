@@ -20,7 +20,7 @@ test("all six original feature slides survive, in order, with original copy", ()
 
   const expected = [
     "Your command center",
-    "Fleet management",
+    "Equipment management",
     "Smart scheduling",
     "Team messaging",
     "Job costing",

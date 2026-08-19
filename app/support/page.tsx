@@ -38,7 +38,7 @@ export default function SupportPage() {
             <ul className="space-y-3 text-zinc-300">
               <li>• Account login and access issues</li>
               <li>• Employee invite problems</li>
-              <li>• Fleet and equipment tracking support</li>
+              <li>• Equipment tracking support</li>
               <li>• Calendar and scheduling help</li>
               <li>• Subscription and billing questions</li>
               <li>• Bug reports and app feedback</li>

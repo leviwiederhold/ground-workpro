@@ -76,6 +76,8 @@ export async function GET(request: NextRequest) {
 
   const invite = request.nextUrl.searchParams.get("invite") === "1";
   const token = request.nextUrl.searchParams.get("token");
+  const join = request.nextUrl.searchParams.get("join") === "1";
+  const joinCode = request.nextUrl.searchParams.get("code");
   if (invite && token) {
     const acceptResponse = await fetch(new URL("/api/invite/accept", request.nextUrl.origin), {
       method: "POST",
@@ -100,10 +102,37 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  if (join && joinCode) {
+    const acceptResponse = await fetch(new URL("/api/join/accept", request.nextUrl.origin), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: buildCookieHeader(request, authCookiesToSet),
+      },
+      body: JSON.stringify({ code: joinCode }),
+      cache: "no-store",
+    }).catch(() => null);
+
+    if (!acceptResponse?.ok) {
+      const signupUrl = buildRedirectUrl(request, "/signup");
+      signupUrl.searchParams.set("join", "1");
+      signupUrl.searchParams.set("code", joinCode);
+      signupUrl.searchParams.set("error", "join_accept_failed");
+      const response = NextResponse.redirect(signupUrl);
+      authCookiesToSet.forEach(({ name, value, options }) => {
+        response.cookies.set(name, value, options);
+      });
+      return response;
+    }
+  }
+
   const redirectUrl = buildRedirectUrl(request, "/");
   if (invite && token) {
     redirectUrl.searchParams.set("invite", "1");
     redirectUrl.searchParams.set("token", token);
+  }
+  if (join && joinCode) {
+    redirectUrl.searchParams.set("join", "1");
   }
 
   const response = NextResponse.redirect(redirectUrl);

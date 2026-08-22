@@ -8,13 +8,17 @@ async function setRole(page: Page, role: 'admin' | 'pm' | 'foreman' | 'mechanic'
 }
 
 async function signupFromInvite(browser: Browser, inviteUrl: string, email: string, password: string) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    storageState: { cookies: [], origins: [] },
+  });
   const page = await context.newPage();
   await page.goto(inviteUrl);
+  await page.locator('input[autocomplete="given-name"]').fill('Field');
+  await page.locator('input[autocomplete="family-name"]').fill('Staff');
   await page.locator('input[type="email"]').fill(email);
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole('button', { name: 'Create account' }).click();
-  await page.waitForURL(/\/($|setup|profile)/, { timeout: 30_000 });
+  await page.waitForURL(/\/(web-access-restricted|$|setup|profile)/, { timeout: 30_000 });
   return { context, page };
 }
 
@@ -47,6 +51,9 @@ test('field staff invite is accepted, removed from pending, and keeps field staf
   expect(inviteUrl).toContain('/signup?invite=1&token=');
 
   const { context, page: invitedPage } = await signupFromInvite(browser, inviteUrl, email, password);
+
+  await expect(invitedPage).toHaveURL(/\/web-access-restricted/);
+  await expect(invitedPage.getByRole('heading', { name: 'Use the Groundwork Pro mobile app' })).toBeVisible();
 
   const navResponse = await invitedPage.request.get('/api/nav');
   const navBody = await navResponse.text();

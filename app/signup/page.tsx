@@ -31,7 +31,9 @@ export default function SignupPage() {
   const [loading, setLoading] = useState(false);
   const [nativeRuntime, setNativeRuntime] = useState(false);
   const [inviteMode, setInviteMode] = useState(false);
+  const [joinMode, setJoinMode] = useState(false);
   const [inviteInfo, setInviteInfo] = useState<{ companyName: string; role: string; jobTitle: string } | null>(null);
+  const [joinInfo, setJoinInfo] = useState<{ companyName: string; expiresAt: string } | null>(null);
   const [inviteBlock, setInviteBlock] = useState<{ title: string; message: string } | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [trialMode, setTrialMode] = useState(false);
@@ -45,7 +47,9 @@ export default function SignupPage() {
     setLoginHref(window.location.search ? `/login${window.location.search}` : "/login");
     setNativeRuntime(isNativeAppRuntime());
     const hasInvite = params.get("invite") === "1";
+    const hasJoinCode = params.get("join") === "1" && Boolean(params.get("code"));
     setInviteMode(hasInvite);
+    setJoinMode(hasJoinCode);
     const inviteTokenForInfo = params.get("token") || "";
     if (hasInvite && inviteTokenForInfo) {
       // Show the employee what workspace / role / title they are joining.
@@ -94,9 +98,39 @@ export default function SignupPage() {
           });
         });
     }
+    const employeeJoinCode = params.get("code") || "";
+    if (hasJoinCode) {
+      fetch("/api/join/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: employeeJoinCode }),
+      })
+        .then(async (res) => ({ ok: res.ok, payload: await res.json().catch(() => ({})) }))
+        .then(({ ok, payload }) => {
+          if (!active) return;
+          if (!ok || !payload?.item?.valid) {
+            setInviteBlock({
+              title: "Company code unavailable",
+              message: payload?.error || "This company code is invalid or expired. Ask your company owner for a new code.",
+            });
+            return;
+          }
+          setJoinInfo({
+            companyName: String(payload.item.company_name ?? "").trim(),
+            expiresAt: String(payload.item.expires_at ?? ""),
+          });
+        })
+        .catch(() => {
+          if (!active) return;
+          setInviteBlock({
+            title: "Company code unavailable",
+            message: "We couldn't validate this company code. Ask your company owner for a new code.",
+          });
+        });
+    }
     const hasCheckoutSuccess = params.get("checkout") === "success";
     setCheckoutSuccess(hasCheckoutSuccess);
-    const shouldStartTrial = !hasInvite && !hasCheckoutSuccess;
+    const shouldStartTrial = !hasInvite && !hasJoinCode && !hasCheckoutSuccess;
     setTrialMode(shouldStartTrial);
 
     supabase.auth.getSession().then(({ data }) => {
@@ -119,6 +153,19 @@ export default function SignupPage() {
         // (that reuses this session as the "employee"). The validate check above
         // surfaces an owner/member block screen; otherwise the invitee can sign
         // out and accept with their own account.
+        return;
+      }
+      if (hasJoinCode) {
+        ensureTenantContext()
+          .then(() => {
+            if (!active) return;
+            router.replace("/");
+            router.refresh();
+          })
+          .catch((joinError) => {
+            if (!active) return;
+            setError(joinError instanceof Error ? joinError.message : "Failed to join company");
+          });
         return;
       }
       if (shouldStartTrial) {
@@ -149,6 +196,8 @@ export default function SignupPage() {
     const inviteEmail = params.get("email") || undefined;
     const inviteEmployeeId = params.get("employeeId") || undefined;
     const inviteToken = params.get("token") || undefined;
+    const join = params.get("join") === "1";
+    const joinCode = params.get("code") || undefined;
     const stripeSessionId = params.get("session_id") || undefined;
 
     if (invite) {
@@ -161,6 +210,20 @@ export default function SignupPage() {
       if (!accept.ok) {
         const payload = await accept.json().catch(() => ({}));
         throw new Error(payload?.error || "Failed to accept invite");
+      }
+      return;
+    }
+
+    if (join && joinCode) {
+      const fullName = `${firstName.trim()} ${lastName.trim()}`.trim();
+      const accept = await fetch("/api/join/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: joinCode, full_name: fullName || undefined }),
+      });
+      if (!accept.ok) {
+        const payload = await accept.json().catch(() => ({}));
+        throw new Error(payload?.error || "Failed to join company");
       }
       return;
     }
@@ -218,9 +281,10 @@ export default function SignupPage() {
     const supabase = supabaseBrowser();
     const params = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
     const inviteMode = params?.get("invite") === "1";
+    const joinMode = params?.get("join") === "1" && Boolean(params?.get("code"));
     const checkoutComplete = params?.get("checkout") === "success";
-    const ownerSignupRequiresCheckout = !inviteMode && !checkoutComplete;
-    if (nativeRuntime && !inviteMode) {
+    const ownerSignupRequiresCheckout = !inviteMode && !joinMode && !checkoutComplete;
+    if (nativeRuntime && !inviteMode && !joinMode) {
       setError("Already part of a company? Sign in or contact your company administrator.");
       setLoading(false);
       return;
@@ -231,7 +295,7 @@ export default function SignupPage() {
       return;
     }
     // Invited employees must supply their own name (admin no longer enters it).
-    if (inviteMode && (!firstName.trim() || !lastName.trim())) {
+    if ((inviteMode || joinMode) && (!firstName.trim() || !lastName.trim())) {
       setError("Please enter your first and last name.");
       setLoading(false);
       return;
@@ -244,7 +308,7 @@ export default function SignupPage() {
         const message = signUpError instanceof Error ? signUpError.message : "Failed to create account";
         const normalized = message.toLowerCase();
         if (normalized.includes("already") || normalized.includes("exists") || normalized.includes("registered")) {
-          if (inviteMode) {
+          if (inviteMode || joinMode) {
             const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
             if (!signInError) {
               await supabase.auth.getSession();
@@ -253,7 +317,7 @@ export default function SignupPage() {
               router.refresh();
               return;
             }
-            setError("This invite email already has an account. Sign in with the existing password to accept the invite.");
+            setError("This email already has an account. Sign in with the existing password to join the company.");
             return;
           }
           if (ownerSignupRequiresCheckout) {
@@ -288,7 +352,7 @@ export default function SignupPage() {
       }
 
       if (signUpResult.existingAccount || signUpResult.identityCount === 0) {
-        if (inviteMode) {
+        if (inviteMode || joinMode) {
           const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
           if (!signInError) {
             await supabase.auth.getSession();
@@ -297,7 +361,7 @@ export default function SignupPage() {
             router.refresh();
             return;
           }
-          setError("This invite email already has an account. Sign in with the existing password to accept the invite.");
+          setError("This email already has an account. Sign in with the existing password to join the company.");
           return;
         }
         if (ownerSignupRequiresCheckout) {
@@ -335,7 +399,7 @@ export default function SignupPage() {
           await supabase.auth.getSession();
         }
         await ensureTenantContext();
-        if (checkoutComplete && !inviteMode) {
+        if (checkoutComplete && !inviteMode && !joinMode) {
           router.replace("/");
           router.refresh();
           return;
@@ -356,7 +420,7 @@ export default function SignupPage() {
     }
   }
 
-  if (inviteMode && inviteBlock) {
+  if ((inviteMode || joinMode) && inviteBlock) {
     return (
       <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
         <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6 text-center">
@@ -394,13 +458,15 @@ export default function SignupPage() {
     <main className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
       <div className="w-full max-w-md bg-white border border-gray-200 rounded-xl shadow-sm p-6">
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-          {nativeRuntime && !inviteMode ? "Already part of a company?" : "Create your account"}
+          {nativeRuntime && !inviteMode && !joinMode ? "Already part of a company?" : "Create your account"}
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          {nativeRuntime && !inviteMode
+          {nativeRuntime && !inviteMode && !joinMode
             ? "Sign in with your company account. If you need access, contact your company administrator."
             : nativeRuntime
-              ? "Create your account from your company invitation."
+              ? joinMode
+                ? "Create your employee account to join your company."
+                : "Create your account from your company invitation."
               : checkoutSuccess
                 ? "Your trial has started. Create your account to finish setup."
               : trialMode
@@ -408,7 +474,14 @@ export default function SignupPage() {
                 : "Create your account to get started."}
         </p>
 
-        {inviteMode && inviteInfo ? (
+        {joinMode && joinInfo ? (
+          <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
+            <p className="font-medium">
+              You&apos;re joining{joinInfo.companyName ? ` ${joinInfo.companyName}` : " the company"}
+            </p>
+            <p className="mt-1 text-brand-800">Employee · Mobile app access</p>
+          </div>
+        ) : inviteMode && inviteInfo ? (
           <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
             <p className="font-medium">
               You&apos;re joining{inviteInfo.companyName ? ` ${inviteInfo.companyName}` : " the workspace"}
@@ -419,11 +492,11 @@ export default function SignupPage() {
                 .join(" · ") || "Create your account to join the team."}
             </p>
           </div>
-        ) : checkoutSuccess && !inviteMode && !nativeRuntime ? (
+        ) : checkoutSuccess && !inviteMode && !joinMode && !nativeRuntime ? (
           <div className="mb-5 rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
             Your trial is ready. Create your account to enter Groundwork Pro.
           </div>
-        ) : trialMode && !inviteMode && !nativeRuntime ? (
+        ) : trialMode && !inviteMode && !joinMode && !nativeRuntime ? (
           <div className="mb-5 rounded-lg border border-brand-200 bg-brand-50 p-4 text-sm text-brand-800">
             Create your Groundwork Pro account to start your free trial.
           </div>
@@ -438,19 +511,19 @@ export default function SignupPage() {
               Log In
             </Link>
             <div className="rounded-lg border border-brand-500 bg-brand-500 px-4 py-3 text-center text-sm font-medium text-white">
-              {inviteMode ? "Join Invite" : "Company Access"}
+              {joinMode ? "Join Company" : inviteMode ? "Join Invite" : "Company Access"}
             </div>
           </div>
         ) : null}
 
-        {nativeRuntime && !inviteMode ? (
+        {nativeRuntime && !inviteMode && !joinMode ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
             <p className="font-medium">Contact your company administrator</p>
             <p className="mt-1">New company signup is available on the Groundwork Pro website. The iOS app supports existing users and invited team members.</p>
           </div>
         ) : (
         <form onSubmit={onSubmit} className="space-y-4">
-          {inviteMode && (
+          {(inviteMode || joinMode) && (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">First name</label>
@@ -509,9 +582,9 @@ export default function SignupPage() {
           >
             {loading
               ? "Creating account..."
-              : checkoutSuccess && !inviteMode
+              : checkoutSuccess && !inviteMode && !joinMode
                 ? "Create account and finish setup"
-                : trialMode && !inviteMode
+                : trialMode && !inviteMode && !joinMode
                   ? "Create account and start trial"
                   : "Create account"}
           </button>

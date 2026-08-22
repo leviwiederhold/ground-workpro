@@ -28,6 +28,7 @@ const permissionOverrideSchema = z.object({
 const patchSchema = z.object({
   role: invitationRoleSchema.optional(),
   permissions: z.array(permissionOverrideSchema),
+  mark_reviewed: z.boolean().optional().default(false),
 });
 
 const toValidationError = (issues: z.ZodIssue[]) => ({
@@ -123,7 +124,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { userId: actorUserId } = await requireModuleAccess("team_management", "edit");
+    const { userId: actorUserId, role: actorRole } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);
@@ -187,6 +188,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       role: parsedBody.data.role ?? toTemplateRole(String(employeeResult.data.role ?? "operator")),
       permissions: parsedBody.data.permissions,
     });
+    const currentTemplateRole = toTemplateRole(String(employeeResult.data.role ?? "operator"));
+    const roleChanged = Boolean(parsedBody.data.role && normalized.role !== currentTemplateRole);
+    const shouldMarkReviewed = parsedBody.data.mark_reviewed || roleChanged;
+    if ((roleChanged || shouldMarkReviewed) && actorRole !== "admin") {
+      return NextResponse.json(
+        { error: "Only an owner or co-owner can review or change a member's role" },
+        { status: 403 }
+      );
+    }
 
     const targetEmployeeRole = normalizeAppRole(String(employeeResult.data.role ?? ""));
     const targetMembershipRole = normalizeAppRole(String(membershipResult.data?.role ?? ""));
@@ -223,6 +233,50 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     if (insertResult.error) {
       return NextResponse.json({ error: insertResult.error.message }, { status: 400 });
+    }
+
+    if (roleChanged) {
+      const membershipRole =
+        normalized.role === "ceo"
+          ? "admin"
+          : normalized.role === "manager"
+            ? "pm"
+            : normalized.role === "fieldstaff"
+              ? "operator"
+              : normalized.role;
+      const writeDb = getSupabaseAdmin() ?? supabase;
+      const membershipUpdate = await writeDb
+        .from("memberships")
+        .update({ role: membershipRole })
+        .eq("company_id", companyId)
+        .eq("user_id", targetUserId);
+      if (membershipUpdate.error) {
+        return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
+      }
+    }
+
+    if (roleChanged || shouldMarkReviewed) {
+      const writeDb = getSupabaseAdmin() ?? supabase;
+      const employeeUpdatePayload: Record<string, unknown> = {};
+      if (roleChanged) {
+        employeeUpdatePayload.role =
+          normalized.role === "ceo"
+            ? "admin"
+            : normalized.role === "manager"
+              ? "pm"
+              : normalized.role;
+      }
+      if (shouldMarkReviewed) {
+        employeeUpdatePayload.role_reviewed_at = new Date().toISOString();
+      }
+      const employeeUpdate = await writeDb
+        .from("employees")
+        .update(employeeUpdatePayload)
+        .eq("company_id", companyId)
+        .eq("id", parsedParams.data.id);
+      if (employeeUpdate.error) {
+        return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
+      }
     }
 
     return NextResponse.json({

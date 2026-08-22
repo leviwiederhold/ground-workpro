@@ -11,7 +11,9 @@ const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 const normalizeMembershipRole = (value: unknown) => {
   const raw = String(value ?? "").trim().toLowerCase();
   if (!raw) return "operator";
-  if (raw.includes("ceo") || raw.includes("admin") || raw.includes("executive")) return COMPANY_OWNER_MEMBERSHIP_ROLE;
+  if (raw.includes("ceo") || raw.includes("admin") || raw.includes("executive") || raw.includes("owner")) {
+    return COMPANY_OWNER_MEMBERSHIP_ROLE;
+  }
   if (raw === "pm" || raw.includes("operations") || raw.includes("projectmanager") || raw.includes("manager")) return "pm";
   if (raw.includes("foreman")) return "foreman";
   if (raw.includes("mechanic")) return "mechanic";

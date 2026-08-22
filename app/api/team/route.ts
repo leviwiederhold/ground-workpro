@@ -6,6 +6,9 @@ import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { normalizeAppRole } from "@/lib/nav/config";
 import { getTimeEntrySummaryByUser } from "@/lib/time-clock/summary";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { isEmployeeRoleReviewPending } from "@/lib/team/roleReview";
+import { resolveStoredInvitationRole } from "@/lib/permissions/access";
+import type { ModulePermissionRow } from "@/lib/permissions/types";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
@@ -125,6 +128,7 @@ export async function GET(request: Request) {
         id: employeeId,
         displayName: String(row.name ?? row.full_name ?? ""),
         role: normalizedRole,
+        storedRole: normalizedRole,
         status: mapEmployeeStatus(row.status),
         userId: linkedUserId,
         accountStatus: linkedUserId ? "active" : "invited",
@@ -136,6 +140,11 @@ export async function GET(request: Request) {
         avatarUrl: "",
         clockedInAt: row.clocked_in_at ? String(row.clocked_in_at) : null,
         certifications: parseCertifications(row.certifications),
+        joinedViaCompanyCodeAt: row.joined_via_company_code_at
+          ? String(row.joined_via_company_code_at)
+          : null,
+        roleReviewedAt: row.role_reviewed_at ? String(row.role_reviewed_at) : null,
+        roleReviewPending: false,
       };
     });
 
@@ -298,6 +307,46 @@ export async function GET(request: Request) {
         }
       }
       if (memberUserIds.length > 0) {
+        const memberPermissionRows: Array<Record<string, unknown>> = [];
+        let memberPermissionsFailed = false;
+        // Large established companies can exceed PostgREST URL limits when all
+        // membership IDs are placed in one `in` filter.
+        for (let offset = 0; offset < memberUserIds.length; offset += 100) {
+          const memberPermissionsResult = await adminDb
+            .from("module_permissions")
+            .select("user_id, module_key, access_level")
+            .eq("company_id", companyId)
+            .in("user_id", memberUserIds.slice(offset, offset + 100));
+          if (memberPermissionsResult.error) {
+            memberPermissionsFailed = true;
+            break;
+          }
+          memberPermissionRows.push(
+            ...((memberPermissionsResult.data ?? []) as Array<Record<string, unknown>>)
+          );
+        }
+        if (!memberPermissionsFailed) {
+          const permissionsByUserId = new Map<string, ModulePermissionRow[]>();
+          for (const row of memberPermissionRows) {
+            const permissionUserId = String(row.user_id ?? "").trim();
+            const moduleKey = String(row.module_key ?? "") as ModulePermissionRow["module_key"];
+            const accessLevel = String(row.access_level ?? "") as ModulePermissionRow["access_level"];
+            if (!permissionUserId || !moduleKey || !accessLevel) continue;
+            const current = permissionsByUserId.get(permissionUserId) ?? [];
+            current.push({ module_key: moduleKey, access_level: accessLevel });
+            permissionsByUserId.set(permissionUserId, current);
+          }
+          for (const [permissionUserId, permissions] of permissionsByUserId) {
+            if (
+              membershipRoleByUserId.get(permissionUserId) === "operator" &&
+              resolveStoredInvitationRole("team_member", permissions) === "fieldstaff"
+            ) {
+              fieldStaffUserIds.add(permissionUserId);
+            }
+          }
+        }
+      }
+      if (memberUserIds.length > 0) {
         const profilesResult = await adminDb
           .from("profiles")
           .select("id, full_name, display_name, avatar_url")
@@ -442,7 +491,12 @@ export async function GET(request: Request) {
       if (membershipRole) {
         item.role = membershipRole;
       }
-      if (fieldStaffEmployeeIds.has(item.id) || fieldStaffEmails.has(employeeEmail) || (linkedUserId && fieldStaffUserIds.has(linkedUserId))) {
+      if (
+        item.storedRole === "fieldstaff" ||
+        fieldStaffEmployeeIds.has(item.id) ||
+        fieldStaffEmails.has(employeeEmail) ||
+        (linkedUserId && fieldStaffUserIds.has(linkedUserId))
+      ) {
         item.role = "fieldstaff";
       }
       if (linkedUserId && !item.userId) {
@@ -484,6 +538,11 @@ export async function GET(request: Request) {
         item.clockedInAt = activeShiftStart;
         item.status = "active";
       }
+      item.roleReviewPending = isEmployeeRoleReviewPending({
+        joinedViaCompanyCodeAt: item.joinedViaCompanyCodeAt,
+        roleReviewedAt: item.roleReviewedAt,
+        currentRole: item.role,
+      });
     }
 
     if (queryInput.status !== "all") {
@@ -506,6 +565,9 @@ export async function GET(request: Request) {
         avatarUrl: item.avatarUrl,
         clockedInAt: item.clockedInAt,
         certifications: item.certifications,
+        joinedViaCompanyCode: Boolean(item.joinedViaCompanyCodeAt),
+        joinedAt: item.joinedViaCompanyCodeAt,
+        roleReviewPending: item.roleReviewPending,
       })),
     });
   } catch (error) {

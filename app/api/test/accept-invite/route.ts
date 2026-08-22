@@ -135,7 +135,8 @@ export async function POST(request: Request) {
   if (invitation.expires_at && new Date(invitation.expires_at).getTime() < Date.now()) {
     return NextResponse.json({ error: "Invite expired" }, { status: 410 });
   }
-  if (String(invitation.email ?? "").trim().toLowerCase() !== email) {
+  const invitationEmail = String(invitation.email ?? "").trim().toLowerCase();
+  if (invitationEmail && invitationEmail !== email) {
     return NextResponse.json({ error: "Invite email does not match" }, { status: 403 });
   }
 

@@ -9,6 +9,7 @@ import {
   TEST_MODULE_ACCESS_COOKIE,
 } from "@/lib/permissions/runtime";
 import type { ModulePermissionKey } from "@/lib/permissions/types";
+import { resolveStoredInvitationRole } from "@/lib/permissions/access";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +150,12 @@ export async function GET() {
           displayRole = "fieldstaff";
         }
       }
+    }
+    if (
+      displayRole === "operator" &&
+      resolveStoredInvitationRole("team_member", modulePermissions) === "fieldstaff"
+    ) {
+      displayRole = "fieldstaff";
     }
 
     return NextResponse.json({

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServer } from "@/lib/supabase/server";
+import { resolveStoredInvitationRole } from "@/lib/permissions/access";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invite expired" }, { status: 410 });
   }
 
+  const invitationPermissions = pendingData?.id
+    ? await client
+        .from("module_permissions")
+        .select("module_key, access_level")
+        .eq("company_id", invitation.company_id)
+        .eq("invitation_id", pendingData.id)
+    : { data: [], error: null };
+  if (invitationPermissions.error) {
+    return NextResponse.json({ error: invitationPermissions.error.message }, { status: 400 });
+  }
+  const resolvedRole = resolveStoredInvitationRole(
+    invitation.role,
+    invitationPermissions.data ?? []
+  );
+
   // Resolve the workspace name so the acceptance screen can show what the
   // employee is joining.
   let companyName = "";
@@ -125,7 +141,7 @@ export async function POST(request: Request) {
       valid: true,
       token,
       email: invitation.email ?? "",
-      role: invitation.role ?? "",
+      role: resolvedRole,
       job_title: invitation.job_title ?? "",
       company_id: invitation.company_id,
       company_name: companyName,

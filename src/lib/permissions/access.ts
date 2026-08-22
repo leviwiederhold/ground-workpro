@@ -10,7 +10,7 @@ import {
   type ModulePermissionKey,
   type ModulePermissionMap,
   type ModulePermissionRow,
-} from "./types";
+} from "./types.ts";
 
 const accessRank: Record<ModuleAccessLevel, number> = {
   none: 0,
@@ -157,6 +157,58 @@ export function getDefaultPermissionsByRole(role: InvitationRole | AppRole): Mod
       ? (role as InvitationRole)
       : roleToTemplateRole[role as AppRole] ?? "fieldstaff";
   return { ...templateDefaults[templateRole] };
+}
+
+type StoredPermissionInput = Partial<ModulePermissionMap> | ModulePermissionRow[];
+
+function toStoredPermissionMap(input: StoredPermissionInput | undefined): Partial<ModulePermissionMap> {
+  if (!input) return {};
+  if (!Array.isArray(input)) return input;
+  return Object.fromEntries(
+    input.map((row) => [row.module_key, row.access_level])
+  ) as Partial<ModulePermissionMap>;
+}
+
+/**
+ * The live database canonicalizes both Operator and Field Staff to
+ * `team_member`. Preserve the existing UI role distinction by comparing the
+ * already-persisted permission profile; memberships remain on the canonical
+ * role model and no parallel authorization role is introduced.
+ */
+export function resolveStoredInvitationRole(
+  rawRole: unknown,
+  permissions?: StoredPermissionInput
+): InvitationRole {
+  const normalized = String(rawRole ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z]/g, "");
+
+  if (normalized.includes("owner") || normalized.includes("admin") || normalized.includes("executive") || normalized.includes("ceo")) {
+    return "ceo";
+  }
+  if (normalized === "pm" || normalized === "manager" || normalized.includes("operations") || normalized.includes("projectmanager")) {
+    return "manager";
+  }
+  if (normalized.includes("foreman") || normalized.includes("crewlead")) return "foreman";
+  if (normalized.includes("mechanic")) return "mechanic";
+  if (normalized.includes("fieldstaff")) return "fieldstaff";
+
+  const permissionMap = toStoredPermissionMap(permissions);
+  const operatorDefaults = getDefaultPermissionsByRole("operator");
+  const fieldStaffDefaults = getDefaultPermissionsByRole("fieldstaff");
+  let operatorDistance = 0;
+  let fieldStaffDistance = 0;
+  let compared = 0;
+  for (const key of modulePermissionKeys) {
+    const value = permissionMap[key];
+    if (!value) continue;
+    compared += 1;
+    if (value !== operatorDefaults[key]) operatorDistance += 1;
+    if (value !== fieldStaffDefaults[key]) fieldStaffDistance += 1;
+  }
+
+  return compared > 0 && fieldStaffDistance < operatorDistance ? "fieldstaff" : "operator";
 }
 
 export function normalizePermissionPayload(input: unknown): {

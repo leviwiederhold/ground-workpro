@@ -7,6 +7,7 @@ import { isCeoMembershipRole } from "@/lib/auth/ceoGuard";
 import {
   getDefaultPermissionsByRole,
   normalizePermissionPayload,
+  resolveStoredInvitationRole,
 } from "@/lib/permissions/access";
 import {
   invitationRoleSchema,
@@ -144,13 +145,14 @@ export async function GET(request: Request) {
     const items = rows.map((row) => {
       const defaultPermissions = getDefaultPermissionsByRole(row.role);
       const permissions = permissionMap.get(row.id) ?? defaultPermissions;
+      const resolvedRole = resolveStoredInvitationRole(row.role, permissions);
       return {
         id: row.id,
         full_name: row.full_name ?? "",
         email: row.email ?? "",
         job_title: row.job_title ?? "",
-        role: row.role,
-        app_role: invitationRoleToAppRole(row.role),
+        role: resolvedRole,
+        app_role: invitationRoleToAppRole(resolvedRole),
         status: "pending",
         invite_url: origin ? `${origin}/signup?invite=1&token=${encodeURIComponent(row.invite_token)}` : "",
         invite_token: row.invite_token,
@@ -255,8 +257,8 @@ export async function POST(request: Request) {
         full_name: invitation.full_name ?? "",
         email: invitation.email ?? "",
         job_title: invitation.job_title ?? jobTitle ?? "",
-        role: invitation.role,
-        app_role: invitationRoleToAppRole(invitation.role),
+        role: parsed.data.role,
+        app_role: invitationRoleToAppRole(parsed.data.role),
         status: "pending",
         invite_url: inviteUrl,
         invite_token: inviteToken,

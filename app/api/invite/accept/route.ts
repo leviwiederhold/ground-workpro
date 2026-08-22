@@ -10,6 +10,7 @@ import {
 import { upsertProfileColumns } from "@/lib/user/profileRecord";
 import { sanitizeProfileFullName } from "@/lib/user/profileFields";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
+import { resolveStoredInvitationRole } from "@/lib/permissions/access";
 
 const COMPANY_OWNER_MEMBERSHIP_ROLE = "admin";
 
@@ -281,7 +282,26 @@ export async function POST(request: Request) {
       }
     }
 
-    const resolvedRole = normalizeRole(invitationData.role);
+    const invitationPermissions = invitationData.pending_id
+      ? await client
+          .from("module_permissions")
+          .select("module_key, access_level")
+          .eq("company_id", invitationData.company_id)
+          .eq("invitation_id", invitationData.pending_id)
+      : { data: [], error: null };
+    if (invitationPermissions.error) {
+      return NextResponse.json({ error: invitationPermissions.error.message }, { status: 400 });
+    }
+    const storedInvitationRole = resolveStoredInvitationRole(
+      invitationData.role,
+      invitationPermissions.data ?? []
+    );
+    const resolvedRole =
+      storedInvitationRole === "manager"
+        ? "pm"
+        : storedInvitationRole === "ceo"
+          ? "ceo"
+          : storedInvitationRole;
     const existingCompanyMemberships = await listCompanyMembershipRoles(
       client,
       String(invitationData.company_id)
@@ -459,23 +479,14 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: pendingUse.error.message }, { status: 400 });
       }
 
-      const invitePermissions = await client
-        .from("module_permissions")
-        .select("module_key, access_level")
-        .eq("company_id", invitationData.company_id)
-        .eq("invitation_id", invitationData.pending_id);
-      if (invitePermissions.error) {
-        return NextResponse.json({ error: invitePermissions.error.message }, { status: 400 });
-      }
-
-      if ((invitePermissions.data ?? []).length > 0) {
+      if ((invitationPermissions.data ?? []).length > 0) {
         await client
           .from("module_permissions")
           .delete()
           .eq("company_id", invitationData.company_id)
           .eq("user_id", userId);
         const userPermissionInsert = await client.from("module_permissions").insert(
-          (invitePermissions.data ?? []).map((row) => ({
+          (invitationPermissions.data ?? []).map((row) => ({
             company_id: invitationData.company_id,
             user_id: userId,
             module_key: row.module_key,

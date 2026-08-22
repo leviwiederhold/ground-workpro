@@ -2,6 +2,16 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { forbidden, notFound, serverError } from "@/lib/http/errors";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
+const USER_ID_BATCH_SIZE = 100;
+
+function batchUserIds(userIds: string[]) {
+  const batches: string[][] = [];
+  for (let index = 0; index < userIds.length; index += USER_ID_BATCH_SIZE) {
+    batches.push(userIds.slice(index, index + USER_ID_BATCH_SIZE));
+  }
+  return batches;
+}
+
 function toRoleLabel(role: unknown) {
   const normalized = String(role ?? "").trim().toLowerCase();
   if (normalized === "ceo") return "CEO";
@@ -85,61 +95,66 @@ export async function GET(request: Request) {
       )
     );
 
-    let profiles: {
+    const profiles: {
       data: Array<{ id?: string; full_name?: string; display_name?: string; avatar_url?: string }> | null;
       error: { message?: string } | null;
-    } = userIds.length
-      ? await db.from("profiles").select("id, full_name, display_name, avatar_url").in("id", userIds)
-      : { data: [], error: null };
+    } = { data: [], error: null };
 
-    if (profiles.error && /display_name|Could not find the 'display_name' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, avatar_url").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map((row: { id?: string; full_name?: string; avatar_url?: string }) => ({
-          id: row.id,
-          full_name: row.full_name,
-          avatar_url: row.avatar_url,
-        })),
-        error: fallbackProfiles.error,
-      };
-    }
+    for (const userIdBatch of batchUserIds(userIds)) {
+      let profileBatch: {
+        data: Array<{ id?: string; full_name?: string; display_name?: string; avatar_url?: string }> | null;
+        error: { message?: string } | null;
+      } = await db
+        .from("profiles")
+        .select("id, full_name, display_name, avatar_url")
+        .in("id", userIdBatch);
 
-    if (profiles.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profiles.error.message || "")) {
-      const fallbackProfiles = userIds.length
-        ? await db.from("profiles").select("id, full_name, display_name").in("id", userIds)
-        : { data: [], error: null };
-      profiles = {
-        data: (fallbackProfiles.data ?? []).map(
-          (row: { id?: string; full_name?: string; display_name?: string }) => ({
-            id: row.id,
-            full_name: row.full_name,
-            display_name: row.display_name,
-          })
-        ),
-        error: fallbackProfiles.error,
-      };
+      if (profileBatch.error && /display_name|Could not find the 'display_name' column/i.test(profileBatch.error.message || "")) {
+        profileBatch = await db
+          .from("profiles")
+          .select("id, full_name, avatar_url")
+          .in("id", userIdBatch);
+      }
+      if (profileBatch.error && /avatar_url|Could not find the 'avatar_url' column/i.test(profileBatch.error.message || "")) {
+        profileBatch = await db
+          .from("profiles")
+          .select("id, full_name")
+          .in("id", userIdBatch);
+      }
+      if (profileBatch.error) {
+        profiles.error = profileBatch.error;
+        break;
+      }
+      profiles.data?.push(...(profileBatch.data ?? []));
     }
 
     if (profiles.error) return serverError();
 
-    let employees: {
+    const employees: {
       data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; role?: string | null; status?: string | null }> | null;
       error: { message?: string } | null;
-    } = userIds.length
-      ? await db
+    } = { data: [], error: null };
+    for (const userIdBatch of batchUserIds(userIds)) {
+      let employeeBatch: {
+        data: Array<{ user_id: string; name?: string; full_name?: string; email?: string; role?: string | null; status?: string | null }> | null;
+        error: { message?: string } | null;
+      } = await db
           .from("employees")
           .select("user_id, name, full_name, email, role, status")
           .eq("company_id", companyId)
-          .in("user_id", userIds)
-      : { data: [], error: null };
-    if (employees.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employees.error.message || "")) {
-      employees = await db
-        .from("employees")
-        .select("user_id, full_name, status")
-        .eq("company_id", companyId)
-        .in("user_id", userIds);
+          .in("user_id", userIdBatch);
+      if (employeeBatch.error && /column employees\.name does not exist|Could not find the 'name' column/i.test(employeeBatch.error.message || "")) {
+        employeeBatch = await db
+          .from("employees")
+          .select("user_id, full_name, email, role, status")
+          .eq("company_id", companyId)
+          .in("user_id", userIdBatch);
+      }
+      if (employeeBatch.error) {
+        employees.error = employeeBatch.error;
+        break;
+      }
+      employees.data?.push(...(employeeBatch.data ?? []));
     }
     const employeeRows = employees.error ? [] : employees.data ?? [];
     const inactiveUserIds = new Set(

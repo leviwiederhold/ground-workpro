@@ -5,7 +5,12 @@ type SupabaseClientLike = Awaited<ReturnType<typeof getCompanyId>>["supabase"];
 
 export function isCeoMembershipRole(value: unknown): boolean {
   const raw = String(value ?? "").trim().toLowerCase();
-  return raw.includes("admin") || raw.includes("executive") || raw.includes("ceo");
+  return (
+    raw.includes("admin") ||
+    raw.includes("executive") ||
+    raw.includes("ceo") ||
+    raw.includes("owner")
+  );
 }
 
 export async function listCompanyMembershipRoles(

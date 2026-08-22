@@ -117,10 +117,24 @@ export function normalizeAppRole(rawRole: unknown): AppRole | null {
     .replace(/[^a-z]/g, "");
 
   if (!normalized) return null;
-  if (normalized.includes("admin") || normalized.includes("executive") || normalized.includes("ceo")) return "admin";
-  if (normalized === "pm" || normalized.includes("operations") || normalized.includes("projectmanager")) return "pm";
-  if (normalized.includes("foreman")) return "foreman";
+  if (
+    normalized.includes("admin") ||
+    normalized.includes("executive") ||
+    normalized.includes("ceo") ||
+    normalized.includes("owner")
+  ) return "admin";
+  if (
+    normalized === "pm" ||
+    normalized === "manager" ||
+    normalized.includes("operations") ||
+    normalized.includes("projectmanager")
+  ) return "pm";
+  if (normalized.includes("foreman") || normalized.includes("crewlead")) return "foreman";
   if (normalized.includes("mechanic")) return "mechanic";
-  if (normalized.includes("operator") || normalized.includes("field")) return "operator";
+  if (
+    normalized.includes("operator") ||
+    normalized.includes("field") ||
+    normalized === "teammember"
+  ) return "operator";
   return null;
 }

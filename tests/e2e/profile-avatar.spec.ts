@@ -8,9 +8,16 @@ async function setRole(page: Page, role: 'admin' | 'pm' | 'foreman' | 'mechanic'
 }
 
 async function signupFromInvite(browser: Browser, inviteUrl: string, email: string, password: string) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    storageState: { cookies: [], origins: [] },
+  });
   const page = await context.newPage();
+  // Employee profile/setup routes are mobile-app surfaces now. Enter through
+  // the native route so the server carries the native session marker forward.
+  await page.goto('/native?gw_native=1');
   await page.goto(inviteUrl);
+  await page.locator('input[autocomplete="given-name"]').fill('Avatar');
+  await page.locator('input[autocomplete="family-name"]').fill('User');
   await page.locator('input[type="email"]').fill(email);
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole('button', { name: 'Create account' }).click();

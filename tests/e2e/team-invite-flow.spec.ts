@@ -35,6 +35,9 @@ test("team invite flow requires role+permissions before link and supports pendin
   const pending = (listJson?.items ?? []).find((item: { id: string }) => String(item.id) === invitationId);
   expect(pending).toBeTruthy();
   expect(String(pending.role)).toBe("crew_lead");
+  // New invite links are intentionally not email-bound; legacy invitations
+  // with an email remain supported by the acceptance endpoint.
+  expect(String(pending.email ?? "")).toBe("");
   const pendingPermissions = new Map(
     ((pending?.permissions ?? []) as Array<{ module_key: string; access_level: string }>).map((row) => [row.module_key, row.access_level])
   );

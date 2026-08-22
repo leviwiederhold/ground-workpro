@@ -36,6 +36,7 @@ const permissionOverrideSchema = z.object({
 const patchSchema = z.object({
   role: compatibleInvitationRoleSchema.optional(),
   permissions: z.array(permissionOverrideSchema),
+  mark_reviewed: z.boolean().optional().default(false),
 });
 
 const toValidationError = (issues: z.ZodIssue[]) => ({
@@ -201,6 +202,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       role: parsedBody.data.role ?? toTemplateRole(String(employeeResult.data.role ?? "operator")),
       permissions: parsedBody.data.permissions,
     });
+    const currentTemplateRole = toTemplateRole(String(employeeResult.data.role ?? "operator"));
+    const roleChanged = Boolean(parsedBody.data.role && normalized.role !== currentTemplateRole);
+    const shouldMarkReviewed = parsedBody.data.mark_reviewed || roleChanged;
+    if ((roleChanged || shouldMarkReviewed) && actorRole !== "admin") {
+      return NextResponse.json(
+        { error: "Only an owner or co-owner can review or change a member's role" },
+        { status: 403 }
+      );
+    }
 
     const targetEmployeeRole = normalizeAppRole(
       String(employeeResult.data.role ?? ""),
@@ -227,13 +237,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     if (parsedBody.data.role) {
       const roleWrite = canonicalizeRoleWrite(parsedBody.data.role);
-      let membershipUpdate = await supabase
+      const roleDb = getSupabaseAdmin() ?? supabase;
+      let membershipUpdate = await roleDb
         .from("memberships")
         .update(roleWrite)
         .eq("company_id", companyId)
         .eq("user_id", targetUserId);
       if (isMissingLegacyPermissionProfileColumn(membershipUpdate.error)) {
-        membershipUpdate = await supabase
+        membershipUpdate = await roleDb
           .from("memberships")
           .update({
             role: legacyCompatibleRoleValue(parsedBody.data.role, "memberships"),
@@ -245,13 +256,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
       }
 
-      let employeeUpdate = await supabase
+      let employeeUpdate = await roleDb
         .from("employees")
         .update(roleWrite)
         .eq("company_id", companyId)
         .eq("id", parsedParams.data.id);
       if (isMissingLegacyPermissionProfileColumn(employeeUpdate.error)) {
-        employeeUpdate = await supabase
+        employeeUpdate = await roleDb
           .from("employees")
           .update({
             role: legacyCompatibleRoleValue(parsedBody.data.role, "employees"),
@@ -282,6 +293,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     if (insertResult.error) {
       return NextResponse.json({ error: insertResult.error.message }, { status: 400 });
+    }
+
+    if (roleChanged || shouldMarkReviewed) {
+      const writeDb = getSupabaseAdmin() ?? supabase;
+      const employeeUpdatePayload: Record<string, unknown> = {};
+      if (shouldMarkReviewed) {
+        employeeUpdatePayload.role_reviewed_at = new Date().toISOString();
+      }
+      const employeeUpdate = await writeDb
+        .from("employees")
+        .update(employeeUpdatePayload)
+        .eq("company_id", companyId)
+        .eq("id", parsedParams.data.id);
+      if (employeeUpdate.error) {
+        return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
+      }
     }
 
     return NextResponse.json({

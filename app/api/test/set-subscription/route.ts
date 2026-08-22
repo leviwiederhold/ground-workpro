@@ -69,7 +69,9 @@ export async function POST(request: Request) {
     const fallbackUserId = getUserIdFromSupabaseCookie(request);
     try {
       const tenant = await getCompanyId();
-      supabase = tenant.supabase;
+      // This E2E-only route must perform the requested mutation even when the
+      // target environment's company UPDATE policy uses canonical owner roles.
+      supabase = admin ?? tenant.supabase;
       companyId = tenant.companyId;
     } catch (error) {
       if (!admin) throw error;

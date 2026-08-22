@@ -53,6 +53,7 @@ export default function LoginPage() {
   const [trialMode, setTrialMode] = useState(false);
   const [checkoutSuccess, setCheckoutSuccess] = useState(false);
   const [passwordReset, setPasswordReset] = useState(false);
+  const [joinMode, setJoinMode] = useState(false);
   const [signupHref, setSignupHref] = useState("/signup");
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
 
@@ -87,9 +88,11 @@ export default function LoginPage() {
     setSignupHref(filteredSearch ? `/signup?${filteredSearch}` : "/signup");
     const shouldStartTrial = params.get("trial") === "1";
     const hasCheckoutSuccess = params.get("checkout") === "success";
+    const hasJoinCode = params.get("join") === "1" && Boolean(params.get("code"));
     setTrialMode(shouldStartTrial);
     setCheckoutSuccess(hasCheckoutSuccess);
     setPasswordReset(params.get("reset") === "1");
+    setJoinMode(hasJoinCode);
     const isNative = isNativeAppRuntime();
     setNativeRuntime(isNative);
 
@@ -107,7 +110,7 @@ export default function LoginPage() {
       if (isNative) {
         // Invited employees may not have a membership row yet — accept the
         // invite BEFORE the workspace check so the gate never blocks them.
-        if (params.get("invite") === "1") {
+        if (params.get("invite") === "1" || hasJoinCode) {
           try {
             await ensureTenantContext();
             if (!active) return;
@@ -127,6 +130,20 @@ export default function LoginPage() {
         }
         router.replace("/");
         router.refresh();
+        return;
+      }
+
+      if (hasJoinCode) {
+        ensureTenantContext()
+          .then(() => {
+            if (!active) return;
+            router.replace("/");
+            router.refresh();
+          })
+          .catch((joinError) => {
+            if (!active) return;
+            setError(joinError instanceof Error ? joinError.message : "Failed to join company");
+          });
         return;
       }
 
@@ -155,6 +172,8 @@ export default function LoginPage() {
     const inviteEmail = params.get("email") || undefined;
     const inviteEmployeeId = params.get("employeeId") || undefined;
     const inviteToken = params.get("token") || undefined;
+    const join = params.get("join") === "1";
+    const joinCode = params.get("code") || undefined;
     const stripeSessionId = params.get("session_id") || undefined;
 
     if (invite) {
@@ -166,6 +185,19 @@ export default function LoginPage() {
       if (!accept.ok) {
         const payload = await accept.json().catch(() => ({}));
         throw new Error(payload?.error || "Failed to accept invite");
+      }
+      return;
+    }
+
+    if (join && joinCode) {
+      const accept = await fetch("/api/join/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: joinCode }),
+      });
+      if (!accept.ok) {
+        const payload = await accept.json().catch(() => ({}));
+        throw new Error(payload?.error || "Failed to join company");
       }
       return;
     }
@@ -235,7 +267,7 @@ export default function LoginPage() {
         const params = new URLSearchParams(window.location.search);
         // Invited employees may not have a membership row yet — accept the
         // invite BEFORE the workspace check so the gate never blocks them.
-        if (params.get("invite") === "1") {
+        if (params.get("invite") === "1" || params.get("join") === "1") {
           await ensureTenantContext();
           router.replace("/");
           router.refresh();
@@ -297,10 +329,12 @@ export default function LoginPage() {
           </div>
         )}
         <h1 className="text-2xl font-semibold text-gray-900 mb-1">
-          {nativeRuntime ? "Welcome to Groundwork Pro" : checkoutSuccess ? "Sign in to continue" : "Login"}
+          {joinMode ? "Sign in to join your company" : nativeRuntime ? "Welcome to Groundwork Pro" : checkoutSuccess ? "Sign in to continue" : "Login"}
         </h1>
         <p className="text-sm text-gray-500 mb-6">
-          {nativeRuntime
+          {joinMode
+            ? "Use your existing account. Your role will be assigned as Employee."
+            : nativeRuntime
             ? "Choose how you want to continue."
             : trialMode
               ? "Sign in to start your free trial."
@@ -395,22 +429,31 @@ export default function LoginPage() {
         ) : null}
 
         {nativeRuntime ? null : (
-          <p className="text-sm text-gray-500 mt-5 text-center">
-            Need an account?{" "}
-            <Link
-              href={signupHref}
-              className="text-brand-600 hover:text-brand-700 font-medium"
-            >
-              Sign up
-            </Link>
-          </p>
+          <>
+            <p className="text-sm text-gray-500 mt-5 text-center">
+              Need an account?{" "}
+              <Link
+                href={signupHref}
+                className="text-brand-600 hover:text-brand-700 font-medium"
+              >
+                Sign up
+              </Link>
+            </p>
+            {!joinMode ? (
+              <p className="mt-3 text-center text-sm">
+                <Link href="/join" className="font-medium text-brand-600 hover:text-brand-700">
+                  Join your company with a code
+                </Link>
+              </p>
+            ) : null}
+          </>
         )}
 
         {nativeRuntime ? (
           <>
             <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
               <p className="font-medium text-gray-800">Already part of a company? Sign in</p>
-              <p className="mt-1">Need access? Contact your company administrator for an invitation.</p>
+              <p className="mt-1">Need access? Join with your company code or contact your company administrator.</p>
             </div>
             <div className="mt-4 text-center">
               <p className="text-xs text-gray-400 mb-1">Need a company workspace?</p>

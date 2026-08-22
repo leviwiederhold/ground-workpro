@@ -55,7 +55,7 @@ const compactRole = (value: unknown) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-const ownerAliases = new Set(["owner", "admin", "executive", "ceo", "coceo"]);
+const ownerAliases = new Set(["owner", "admin", "executive", "ceo", "coceo", "coowner"]);
 const administratorAliases = new Set(["administrator"]);
 const managerAliases = new Set([
   "manager",
@@ -132,7 +132,7 @@ export function normalizeLegacyPermissionProfile(
   if (raw === "pm" || raw === "operations" || raw === "operationsmanager" || raw === "projectmanager") {
     return "pm";
   }
-  if (raw === "admin" || raw === "executive" || raw === "ceo" || raw === "coceo") {
+  if (raw === "admin" || raw === "executive" || raw === "ceo" || raw === "coceo" || raw === "coowner") {
     return "admin";
   }
   return defaultPermissionProfileForRole(role);

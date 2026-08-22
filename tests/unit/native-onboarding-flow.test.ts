@@ -54,7 +54,7 @@ test("the original entry choices are preserved and not collapsed into one card",
 
   // Company / join-team / existing-account are three distinct actions.
   assert.match(source, /Already part of a company\?/);
-  assert.match(source, /I&apos;m joining a team/);
+  assert.match(source, /I&apos;m an employee/);
   assert.match(source, /Already have an account\? Sign In/);
 
   assert.match(source, /onClick=\{\(\) => goTo\("company-access"\)\}/, "company path must remain");
@@ -62,18 +62,19 @@ test("the original entry choices are preserved and not collapsed into one card",
   assert.match(source, /onClick=\{goToLogin\}/, "existing-account path must remain");
 });
 
-test("back buttons and the join-invite path are unchanged", () => {
+test("back buttons remain and the employee path uses the shared company code", () => {
   const source = gate();
   const backButtons = source.match(/className="back-btn"/g) ?? [];
   assert.ok(backButtons.length >= 3, `expected the original back buttons, found ${backButtons.length}`);
 
-  // Join-team still validates the code then hands off to the web signup flow.
-  assert.match(source, /\/api\/invite\/validate/, "invite validation must be unchanged");
+  // Join-team validates the temporary company code then hands off to signup.
+  assert.match(source, /\/api\/join\/validate/, "company code must be validated before signup");
   assert.match(
     source,
-    /window\.location\.href = `\/signup\?invite=1&token=\$\{encodeURIComponent\(token\)\}`/,
-    "join-team must still route to the existing signup invite flow",
+    /window\.location\.href = `\/signup\?join=1&code=\$\{encodeURIComponent\(code\)\}`/,
+    "join-team must route to the company-code signup flow",
   );
+  assert.match(source, /Individual invite links continue to work/, "legacy individual invites remain available");
 });
 
 test("company signup is still directed to the web, not reinvented natively", () => {

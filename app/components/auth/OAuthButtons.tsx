@@ -29,6 +29,11 @@ export default function OAuthButtons({ label = "or continue with" }: Props) {
         redirectUrl.searchParams.set("invite", "1");
         redirectUrl.searchParams.set("token", inviteToken);
       }
+      const joinCode = currentParams.get("code");
+      if (currentParams.get("join") === "1" && joinCode) {
+        redirectUrl.searchParams.set("join", "1");
+        redirectUrl.searchParams.set("code", joinCode);
+      }
       const redirectTo = redirectUrl.toString();
       const { error: oauthError } = await supabaseBrowser().auth.signInWithOAuth({
         provider,

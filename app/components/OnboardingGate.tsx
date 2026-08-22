@@ -67,15 +67,8 @@ const features = [
   },
 ];
 
-function extractInviteToken(value: string) {
-  const input = value.trim();
-  if (!input) return "";
-  try {
-    const url = new URL(input);
-    return url.searchParams.get("token") || input;
-  } catch {
-    return input;
-  }
+function normalizeCompanyCode(value: string) {
+  return value.toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 6);
 }
 
 export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: OnboardingGateProps) {
@@ -133,30 +126,30 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
   };
 
   const continueWithInvite = async () => {
-    const token = extractInviteToken(inviteValue);
-    if (!token) return;
+    const code = normalizeCompanyCode(inviteValue);
+    if (code.length !== 6) return;
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/invite/validate", {
+      const response = await fetch("/api/join/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ code }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.item?.valid) {
-        throw new Error(payload?.error || "Invalid invite code");
+        throw new Error(payload?.error || "Invalid company code");
       }
-      window.location.href = `/signup?invite=1&token=${encodeURIComponent(token)}`;
+      window.location.href = `/signup?join=1&code=${encodeURIComponent(code)}`;
     } catch (inviteError) {
-      setError(inviteError instanceof Error ? inviteError.message : "Invalid invite code");
+      setError(inviteError instanceof Error ? inviteError.message : "Invalid company code");
     } finally {
       setLoading(false);
     }
   };
 
   const feature = features[slide];
-  const isInviteReady = inviteValue.trim().length > 0;
+  const isInviteReady = normalizeCompanyCode(inviteValue).length === 6;
 
   return (
     <div className="gw-onboarding">
@@ -197,7 +190,7 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
               </button>
               <button className="role-card employee" onClick={() => goTo("employee-invite")}>
                 <div className="role-icon employee"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 2L3 7v5c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V7l-9-5z"/><path d="M12 11v4"/><circle cx="12" cy="8" r="1"/></svg></div>
-                <div><div className="role-title">I&apos;m joining a team</div><div className="role-desc">Join your company&apos;s workspace with an invitation from a team administrator.</div></div>
+                <div><div className="role-title">I&apos;m an employee</div><div className="role-desc">Join your company&apos;s workspace with the code from your employer.</div></div>
               </button>
               <button className="secondary-link" onClick={goToLogin} data-testid="onboarding-existing-login">
                 Already have an account? Sign In
@@ -215,7 +208,7 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
             <div className="invite-desc">Sign in with your existing company account. If your company uses Groundwork Pro and you do not have access, contact your company administrator.</div>
             <div style={{ width: "100%" }}>
               <button className="primary-btn" onClick={goToLogin}>Sign in</button>
-              <button className="secondary-link" onClick={() => goTo("employee-invite")}>I have an invitation</button>
+              <button className="secondary-link" onClick={() => goTo("employee-invite")}>I have a company code</button>
             </div>
             <div className="info-box" style={{ width: "100%", marginTop: 24 }}>
               <div className="info-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
@@ -255,18 +248,18 @@ export function OnboardingGate({ onLogin, onRequestLogin, initialScreen }: Onboa
           <button className="back-btn" onClick={() => goTo("role")}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>Back</button>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
             <div className="invite-icon"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="1.8" strokeLinecap="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div>
-            <div className="invite-title">Join your team</div>
-            <div className="invite-desc">A team administrator needs to invite you before you can access the company workspace. Enter your invite code or link below.</div>
+            <div className="invite-title">Join your company</div>
+            <div className="invite-desc">Enter the 6-character employee join code from your company owner.</div>
             <div style={{ width: "100%" }}>
-              <label className="form-label">Invite code or link</label>
-              <input className="form-input blue" placeholder="Paste your invite code or link" value={inviteValue} onChange={(event) => setInviteValue(event.target.value)} />
-              <button className={`primary-btn${isInviteReady ? "" : " btn-disabled"}`} style={{ background: "#0ea5e9" }} disabled={!isInviteReady || loading} onClick={continueWithInvite}>Continue with invite</button>
+              <label className="form-label">Company code</label>
+              <input className="form-input blue" autoCapitalize="characters" autoComplete="one-time-code" maxLength={6} placeholder="ABC123" value={inviteValue} onChange={(event) => setInviteValue(normalizeCompanyCode(event.target.value))} data-testid="onboarding-company-code" />
+              <button className={`primary-btn${isInviteReady ? "" : " btn-disabled"}`} style={{ background: "#0ea5e9" }} disabled={!isInviteReady || loading} onClick={continueWithInvite}>{loading ? "Checking code…" : "Join company"}</button>
               {error && <div className="form-error">{error}</div>}
             </div>
             <div className="divider"><div className="divider-line" /><div className="divider-text">or</div><div className="divider-line" /></div>
             <div className="info-box" style={{ width: "100%" }}>
               <div className="info-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div>
-              <div><div className="info-title">Don&apos;t have an invite?</div><div className="info-desc">Ask a team administrator to send you one from their Groundwork Pro dashboard under <strong style={{ color: "#aaa" }}>Team → Invite Team Member</strong>.</div></div>
+              <div><div className="info-title">Don&apos;t have a code?</div><div className="info-desc">Ask your company owner or co-owner to generate one under <strong style={{ color: "#aaa" }}>Team → Employee Join Code</strong>. Individual invite links continue to work when opened directly.</div></div>
             </div>
             <button className="secondary-link" onClick={goToLogin}>
               Already have an account? Sign In

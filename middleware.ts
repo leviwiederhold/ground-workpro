@@ -13,12 +13,61 @@ import {
 } from "@/lib/permissions/runtime";
 import type { ModuleAccessLevel, ModulePermissionKey } from "@/lib/permissions/types";
 import { isMissingLegacyPermissionProfileColumn } from "@/lib/auth/teamRoles";
+import { getWebAppAccessDecision } from "@/lib/auth/webAccess";
 
 const shouldLogRequests = process.env.REQUEST_LOGGING_ENABLED !== "false";
 const REQUEST_ID_HEADER = "x-request-id";
 const REQUEST_START_HEADER = "x-request-start";
 const MIDDLEWARE_AUTH_TIMEOUT_MS = 1500;
 const MIDDLEWARE_DB_TIMEOUT_MS = 1500;
+const NATIVE_APP_SESSION_COOKIE = "gw_native_app_session";
+const ALL_APP_ROLES: AppRole[] = ["admin", "pm", "foreman", "mechanic", "operator"];
+
+const NORMAL_WEB_APP_PREFIXES = [
+  "/dashboard",
+  "/messages",
+  "/schedule",
+  "/jobs",
+  "/fleet",
+  "/team",
+  "/jobsite-time",
+  "/inventory",
+  "/maintenance",
+  "/training",
+  "/safety",
+  "/bids",
+  "/vendors",
+  "/reports",
+  "/costing",
+  "/finance",
+  "/documents",
+  "/settings",
+  "/profile",
+  "/notifications",
+  "/setup",
+];
+
+function isNormalWebAppPath(pathname: string) {
+  if (pathname === "/") return true;
+  return NORMAL_WEB_APP_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
+function isNativeAppRequest(request: NextRequest) {
+  return (
+    request.nextUrl.pathname === "/native" ||
+    request.nextUrl.pathname.startsWith("/native/") ||
+    request.cookies.get(NATIVE_APP_SESSION_COOKIE)?.value === "1"
+  );
+}
+
+function hasE2ERoleSimulation(request: NextRequest) {
+  return (
+    (process.env.NODE_ENV !== "production" || process.env.E2E === "true") &&
+    Boolean(request.cookies.get("e2e_role")?.value)
+  );
+}
 
 class MiddlewareTimeoutError extends Error {
   constructor(label: string) {
@@ -140,8 +189,33 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
     request: { headers: requestHeaders },
   });
 
+  // The shipped Capacitor app enters through /native. Persist that explicit
+  // route distinction as an HttpOnly session marker so its later / dashboard
+  // navigation remains a mobile-app request on the server.
+  if (
+    request.nextUrl.pathname === "/native" ||
+    request.nextUrl.pathname.startsWith("/native/")
+  ) {
+    response.cookies.set(NATIVE_APP_SESSION_COOKIE, "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+    });
+  }
+
   const isApi = request.nextUrl.pathname.startsWith("/api/");
-  const guardedPageRoles = !isApi ? findGuardedRoles(request.nextUrl.pathname) : null;
+  const baseGuardedPageRoles = !isApi ? findGuardedRoles(request.nextUrl.pathname) : null;
+  const requiresOwnerWebAccess =
+    !isApi &&
+    isNormalWebAppPath(request.nextUrl.pathname) &&
+    !isNativeAppRequest(request) &&
+    !hasE2ERoleSimulation(request);
+  // Root has no legacy route guard, but owner-only web access still needs the
+  // auth/membership resolution below. ALL_APP_ROLES is only the trigger; the
+  // real owner decision is enforced separately against the real membership.
+  const guardedPageRoles =
+    baseGuardedPageRoles ?? (requiresOwnerWebAccess ? ALL_APP_ROLES : null);
   const guardedApi =
     isApi && !shouldBypassApiModuleGuard(request.nextUrl.pathname, request.method)
       ? resolveApiGuardedModule(request)
@@ -224,12 +298,19 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           ? request.cookies.get("e2e_role")?.value
           : null;
       let resolvedRole = normalizeAppRole(cookieRole);
+      let realRole: AppRole | null = null;
       let companyId: string | null = null;
       const userId: string | null = authData?.user?.id ?? null;
       let permissions: Awaited<ReturnType<typeof resolveUserModulePermissions>> | null = null;
 
       if (!resolvedRole) {
         if (!userId) {
+          // `/` doubles as the public marketing/onboarding page. Restrict it
+          // only once a session exists; signed-out visitors still see the
+          // normal public experience.
+          if (requiresOwnerWebAccess && request.nextUrl.pathname === "/") {
+            return response;
+          }
           if (!isApi) return NextResponse.redirect(new URL("/login", request.url));
           return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
@@ -274,7 +355,7 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         }
 
         companyId = String(memberships?.[0]?.company_id ?? "");
-        const realRole = normalizeAppRole(
+        realRole = normalizeAppRole(
           memberships?.[0]?.role,
           memberships?.[0]?.legacy_permission_profile
         );
@@ -297,6 +378,16 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
           MIDDLEWARE_DB_TIMEOUT_MS
         );
         companyId = String(memberships?.[0]?.company_id ?? "");
+        const realRoleResult = await withMiddlewareTimeout(
+          "middleware real role lookup",
+          companyLookupClient
+            .from("memberships")
+            .select("role")
+            .eq("user_id", userId)
+            .limit(1),
+          MIDDLEWARE_DB_TIMEOUT_MS
+        );
+        realRole = normalizeAppRole(realRoleResult.data?.[0]?.role);
       }
 
       if (!resolvedRole || !userId || !companyId) {
@@ -313,6 +404,14 @@ export async function middleware(request: NextRequest, event: NextFetchEvent) {
         }
         if (!isApi) return NextResponse.redirect(new URL("/", request.url));
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+
+      if (
+        requiresOwnerWebAccess &&
+        getWebAppAccessDecision({ role: realRole ?? resolvedRole, isNativeApp: false }) ===
+          "mobile-app-only"
+      ) {
+        return NextResponse.redirect(new URL("/web-access-restricted", request.url));
       }
 
       if (guardedPageRoles && !guardedPageRoles.includes(resolvedRole)) {

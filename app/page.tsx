@@ -21,6 +21,7 @@ import { isIosNativeAppRuntime, isNativeAppRuntime } from '@/lib/runtime/isNativ
 import { openGroundworkWebsite } from '@/lib/runtime/openWebsite';
 import { resolveSignOutRoute } from '@/lib/auth/loginFlow';
 import { recoveryRedirectUrl } from '@/lib/auth/passwordReset';
+import { getTeamRolePresentation } from '@/lib/team/roleReview';
 import MobileAppDownloadPrompt from '@/app/components/MobileAppDownloadPrompt';
 import ExcavatorLoader from '@/components/loading/ExcavatorLoader';
 import { OnboardingGate } from '@/app/components/OnboardingGate';
@@ -3857,6 +3858,15 @@ const MobileAppShell = ({
       const [teamReassignLoading, setTeamReassignLoading] = useState(false);
       const [teamReassignError, setTeamReassignError] = useState('');
       const [inviteFeedback, setInviteFeedback] = useState('');
+      const [employeeJoinCode, setEmployeeJoinCode] = useState(null);
+      const [employeeJoinCodeLoading, setEmployeeJoinCodeLoading] = useState(false);
+      const [employeeJoinCodeError, setEmployeeJoinCodeError] = useState('');
+      const [employeeJoinCodeFeedback, setEmployeeJoinCodeFeedback] = useState('');
+      const [showRoleReviewModal, setShowRoleReviewModal] = useState(false);
+      const [roleReviewDrafts, setRoleReviewDrafts] = useState({});
+      const roleReviewDraftsRef = useRef({});
+      const [roleReviewSavingId, setRoleReviewSavingId] = useState('');
+      const [roleReviewFeedback, setRoleReviewFeedback] = useState('');
       const [showNativeAdminModal, setShowNativeAdminModal] = useState(false);
       const permissionModules = [
         { key: 'jobs', label: 'Jobs' },
@@ -3944,6 +3954,9 @@ const MobileAppShell = ({
         avatarUrl: employee.avatarUrl || '',
         clockedInAt: employee.clockedInAt || null,
         recordSource: 'employee',
+        joinedViaCompanyCode: Boolean(employee.joinedViaCompanyCodeAt),
+        joinedAt: employee.joinedViaCompanyCodeAt || null,
+        roleReviewPending: Boolean(employee.roleReviewPending),
       }), [currentRole, jobs]);
 
       const filteredEmployees = teamItems.filter(emp => {
@@ -3965,6 +3978,15 @@ const MobileAppShell = ({
       const canManageTeamProfiles = String(moduleAccess?.team_management || 'none') === 'edit';
       const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
       const canInviteOwner = isOwnerLevelUiRole(currentRole);
+      const pendingRoleReviewEmployees = canInviteOwner
+        ? teamItems
+            .filter((employee) => employee.roleReviewPending)
+            .sort((left, right) => {
+              const rightJoinedAt = Date.parse(String(right.joinedAt || '')) || 0;
+              const leftJoinedAt = Date.parse(String(left.joinedAt || '')) || 0;
+              return rightJoinedAt - leftJoinedAt;
+            })
+        : [];
 
       const stats = {
         total: teamItems.length,
@@ -4022,6 +4044,9 @@ const MobileAppShell = ({
             avatarUrl: item.avatarUrl || '',
             clockedInAt: item.clockedInAt,
             recordSource: item.recordSource || 'employee',
+            joinedViaCompanyCode: Boolean(item.joinedViaCompanyCode),
+            joinedAt: item.joinedAt || null,
+            roleReviewPending: Boolean(item.roleReviewPending),
           }));
           setTeamItems(mappedItems);
         } catch (error) {
@@ -4048,6 +4073,22 @@ const MobileAppShell = ({
           setPendingInviteLoading(false);
         }
       }, []);
+
+      const loadEmployeeJoinCode = useCallback(async () => {
+        if (!canInviteOwner) return;
+        setEmployeeJoinCodeLoading(true);
+        setEmployeeJoinCodeError('');
+        try {
+          const response = await fetch('/api/team/join-code', { cache: 'no-store' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload?.error || 'Failed to load employee join code');
+          setEmployeeJoinCode(payload?.item || null);
+        } catch (error) {
+          setEmployeeJoinCodeError(error instanceof Error ? error.message : 'Failed to load employee join code');
+        } finally {
+          setEmployeeJoinCodeLoading(false);
+        }
+      }, [canInviteOwner]);
 
       const refreshEmployees = useCallback(async () => {
         try {
@@ -4076,6 +4117,10 @@ const MobileAppShell = ({
       useEffect(() => {
         loadPendingInvites();
       }, [loadPendingInvites]);
+
+      useEffect(() => {
+        loadEmployeeJoinCode();
+      }, [loadEmployeeJoinCode]);
 
       useEffect(() => {
         if (!showInviteModal) return;
@@ -4338,6 +4383,114 @@ const MobileAppShell = ({
         document.body.removeChild(tempInput);
       };
 
+      const handleGenerateEmployeeJoinCode = async () => {
+        setEmployeeJoinCodeLoading(true);
+        setEmployeeJoinCodeError('');
+        setEmployeeJoinCodeFeedback('');
+        try {
+          const response = await fetch('/api/team/join-code', { method: 'POST' });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok || !payload?.item?.code) {
+            throw new Error(payload?.error || 'Failed to generate employee join code');
+          }
+          setEmployeeJoinCode(payload.item);
+          setEmployeeJoinCodeFeedback('New code generated. The previous code no longer works.');
+        } catch (error) {
+          setEmployeeJoinCodeError(error instanceof Error ? error.message : 'Failed to generate employee join code');
+        } finally {
+          setEmployeeJoinCodeLoading(false);
+        }
+      };
+
+      const handleCopyEmployeeJoinCode = async () => {
+        setEmployeeJoinCodeFeedback('');
+        try {
+          await copyText(String(employeeJoinCode?.code || ''));
+          setEmployeeJoinCodeFeedback('Code copied.');
+        } catch {
+          setEmployeeJoinCodeError('Failed to copy code.');
+        }
+      };
+
+      const formatEmployeeJoinCodeExpiration = (value) => {
+        const date = new Date(value);
+        if (!Number.isFinite(date.getTime())) return 'Unknown';
+        return date
+          .toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          })
+          .replace(', ', ' at ');
+      };
+
+      const openRoleReview = () => {
+        const drafts = Object.fromEntries(
+          pendingRoleReviewEmployees.map((employee) => [
+            String(employee.id),
+            appRoleToInviteRole(employee.role),
+          ])
+        );
+        roleReviewDraftsRef.current = drafts;
+        setRoleReviewDrafts(drafts);
+        setRoleReviewFeedback('');
+        setShowRoleReviewModal(true);
+      };
+
+      const handleSaveRoleReview = async (employee) => {
+        const employeeId = String(employee.id);
+        const nextRole = roleReviewDraftsRef.current[employeeId] || appRoleToInviteRole(employee.role);
+        const currentRole = appRoleToInviteRole(employee.role);
+        setRoleReviewSavingId(employeeId);
+        setRoleReviewFeedback('');
+        try {
+          let nextPermissions;
+          if (nextRole === currentRole) {
+            const currentResponse = await fetch(`/api/team/members/${employeeId}/permissions`, {
+              cache: 'no-store',
+            });
+            const currentPayload = await currentResponse.json().catch(() => ({}));
+            if (!currentResponse.ok || !Array.isArray(currentPayload?.item?.permissions)) {
+              throw new Error(currentPayload?.error || 'Failed to load current employee access');
+            }
+            nextPermissions = currentPayload.item.permissions;
+          } else {
+            nextPermissions = permissionModules.map((module) => ({
+              module_key: module.key,
+              access_level: roleTemplateDefaults[nextRole]?.[module.key] || 'none',
+            }));
+          }
+          const response = await fetch(`/api/team/members/${employeeId}/permissions`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: nextRole,
+              permissions: nextPermissions,
+              mark_reviewed: true,
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(payload?.error || 'Failed to review employee role');
+
+          setTeamItems((current) => current.map((item) =>
+            String(item.id) === employeeId
+              ? { ...item, role: nextRole, roleReviewPending: false }
+              : item
+          ));
+          setRoleReviewFeedback(
+            nextRole === 'team_member'
+              ? `${employee.name} will remain an Employee.`
+              : `${employee.name} is now ${getTeamRolePresentation(nextRole).label}.`
+          );
+          await Promise.all([loadTeamItems(), refreshEmployees()]);
+        } catch (error) {
+          setRoleReviewFeedback(error instanceof Error ? error.message : 'Failed to review employee role');
+        } finally {
+          setRoleReviewSavingId('');
+        }
+      };
+
       const handleCopyInviteLink = async () => {
         setInviteFeedback('');
         try {
@@ -4582,6 +4735,8 @@ const MobileAppShell = ({
           if (!response.ok) throw new Error(payload?.error || 'Failed to update member permissions');
           setInviteFeedback('Permissions updated.');
           setShowInviteModal(false);
+          await refreshEmployees();
+          await loadTeamItems();
         } catch (error) {
           setInviteFeedback(error instanceof Error ? error.message : 'Failed to update member permissions');
         } finally {
@@ -4643,6 +4798,70 @@ const MobileAppShell = ({
 
       return (
         <div className="space-y-6">
+          {canInviteOwner && (
+            <Card className="p-5" data-testid="employee-join-code-card">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-gray-500">Employee Join Code</p>
+                  {employeeJoinCodeLoading && !employeeJoinCode ? (
+                    <p className="mt-2 text-sm text-gray-500">Loading code…</p>
+                  ) : employeeJoinCode ? (
+                    <>
+                      <p className="mt-2 font-mono text-3xl font-bold tracking-[0.22em] text-gray-900" data-testid="employee-join-code-value">
+                        {employeeJoinCode.code}
+                      </p>
+                      <p className="mt-2 text-sm text-gray-600">
+                        <span className="font-medium text-gray-800">Expires:</span>{' '}
+                        <span data-testid="employee-join-code-expiration">
+                          {formatEmployeeJoinCodeExpiration(employeeJoinCode.expires_at)}
+                        </span>
+                        {employeeJoinCode.expired ? <span className="ml-2 font-medium text-red-600">Expired</span> : null}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="mt-2 text-sm text-gray-600">Generate a reusable code for employees to join during the next 24 hours.</p>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {employeeJoinCode ? (
+                    <Button variant="secondary" size="sm" onClick={handleCopyEmployeeJoinCode} disabled={employeeJoinCodeLoading || employeeJoinCode.expired}>
+                      <Icon name="copy" className="mr-1" /> Copy Code
+                    </Button>
+                  ) : null}
+                  <Button variant="brand" size="sm" onClick={handleGenerateEmployeeJoinCode} disabled={employeeJoinCodeLoading} data-testid="employee-join-code-generate">
+                    <Icon name="rotate" className="mr-1" />
+                    {employeeJoinCodeLoading ? 'Generating…' : employeeJoinCode ? 'Generate New Code' : 'Generate Code'}
+                  </Button>
+                </div>
+              </div>
+              {employeeJoinCodeFeedback ? <p className="mt-3 text-xs text-green-700" role="status">{employeeJoinCodeFeedback}</p> : null}
+              {employeeJoinCodeError ? <div className="mt-3"><InlineError>{employeeJoinCodeError}</InlineError></div> : null}
+            </Card>
+          )}
+
+          {canInviteOwner && pendingRoleReviewEmployees.length > 0 && (
+            <Card className="border border-brand-200 bg-brand-50/70 p-5" data-testid="employee-role-review-card">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm ring-1 ring-brand-100">
+                    <Icon name="user-check" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">
+                      {pendingRoleReviewEmployees.length} employee role{pendingRoleReviewEmployees.length === 1 ? '' : 's'} to review
+                    </p>
+                    <p className="mt-1 text-sm text-gray-600">
+                      They joined with the company code and received safe Employee access. They can use the mobile app now; role review is optional.
+                    </p>
+                  </div>
+                </div>
+                <Button variant="brand" size="sm" className="shrink-0" onClick={openRoleReview} data-testid="employee-role-review-open">
+                  Review Roles
+                </Button>
+              </div>
+            </Card>
+          )}
+
           {/* Stats */}
           <StatGrid desktopColsClass="md:grid-cols-4" testId="stats-grid">
             <StatCard icon="users" label="Team Members" value={stats.total} color="brand" />
@@ -4753,6 +4972,7 @@ const MobileAppShell = ({
               ) : filteredEmployees.map(emp => {
                 const job = jobs.find(j => j.id === emp.jobId);
                 const expiringSoon = (emp.certifications || []).filter(c => getDaysUntil(c.expires) < 60);
+                const rolePresentation = getTeamRolePresentation(emp.role);
 
                 return (
                   <Card
@@ -4775,9 +4995,17 @@ const MobileAppShell = ({
                           emp.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
                         )}
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
                           <h4 className="font-medium text-gray-900">{emp.name}</h4>
+                          <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
+                            {rolePresentation.label}
+                          </span>
+                          {emp.roleReviewPending && (
+                            <span className="inline-flex rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-800">
+                              Review role
+                            </span>
+                          )}
                           {emp.status === 'active' && emp.clockedInAt && (
                             <span className="text-xs text-green-600 flex items-center gap-1">
                               <span className="w-2 h-2 bg-green-500 rounded-full pulse-dot"></span>
@@ -4787,6 +5015,7 @@ const MobileAppShell = ({
                         </div>
                         <p className="text-sm text-gray-500">{emp.jobTitle || teamRoleLabel(emp.role)}</p>
                         {emp.jobTitle && <p className="text-xs text-gray-500">{teamRoleLabel(emp.role)}</p>}
+                        <p className="mt-1 text-sm text-gray-600">{rolePresentation.access}</p>
                         <p className="text-xs text-gray-500">
                           Account: {emp.accountStatus === 'active' ? 'Active' : 'Invite pending'}
                         </p>
@@ -4863,6 +5092,7 @@ const MobileAppShell = ({
                   <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>
                   <p className="text-sm text-gray-500">{selectedEmployee.jobTitle || teamRoleLabel(selectedEmployee.role)}</p>
                   {selectedEmployee.jobTitle && <p className="text-xs text-gray-500">{teamRoleLabel(selectedEmployee.role)}</p>}
+                  <p className="text-xs text-gray-500">{getTeamRolePresentation(selectedEmployee.role).access}</p>
                   <Badge className={`mt-2 ${getStatusColor(selectedEmployee.status)}`}>
                     {selectedEmployee.status === 'active' ? 'On Site' : 'Off'}
                   </Badge>
@@ -4894,6 +5124,9 @@ const MobileAppShell = ({
                       <option value="crew_lead">Crew Lead</option>
                       <option value="team_member">Team Member</option>
                     </select>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {getTeamRolePresentation(employeeForm.role).access}
+                    </p>
                     {isSelectedEmployeeOwner && (
                       <p className="text-xs text-amber-700 mt-1">Owner role is locked.</p>
                     )}
@@ -5078,6 +5311,92 @@ const MobileAppShell = ({
                     ? 'Reassigning…'
                     : 'Remove from current job and assign to new job'}
                 </Button>
+              </div>
+            </div>
+          </Modal>
+
+          <Modal
+            isOpen={showRoleReviewModal}
+            onClose={() => setShowRoleReviewModal(false)}
+            title="Review New Employee Roles"
+            subtitle="Employees already have safe mobile access. Change only the people who need a different role."
+            size="md"
+            portal
+            panelClassName="!max-w-3xl"
+          >
+            <div className="space-y-4" data-testid="employee-role-review-modal">
+              {pendingRoleReviewEmployees.length === 0 ? (
+                <div className="rounded-xl border border-green-200 bg-green-50 p-5 text-center">
+                  <p className="font-medium text-green-900">All code-joined employee roles are reviewed.</p>
+                  <p className="mt-1 text-sm text-green-700">No approval was required for them to start using the mobile app.</p>
+                </div>
+              ) : (
+                pendingRoleReviewEmployees.map((employee) => {
+                  const employeeId = String(employee.id);
+                  const draftRole = roleReviewDrafts[employeeId] || appRoleToInviteRole(employee.role);
+                  const draftPresentation = getTeamRolePresentation(draftRole);
+                  const keepingEmployee = draftRole === 'team_member';
+                  return (
+                    <div
+                      key={employeeId}
+                      className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+                      data-testid={`employee-role-review-row-${employeeId}`}
+                    >
+                      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-center">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="truncate font-semibold text-gray-900">{employee.name}</p>
+                            <span className="rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-800">Needs review</span>
+                          </div>
+                          <p className="mt-1 text-xs text-gray-500">
+                            Joined with company code{employee.joinedAt ? ` · ${formatDate(employee.joinedAt)}` : ''}
+                          </p>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor={`role-review-${employeeId}`}>Current role</label>
+                          <select
+                            id={`role-review-${employeeId}`}
+                            value={draftRole}
+                            onChange={(event) => {
+                              const nextDrafts = {
+                                ...roleReviewDraftsRef.current,
+                                [employeeId]: event.target.value,
+                              };
+                              roleReviewDraftsRef.current = nextDrafts;
+                              setRoleReviewDrafts(nextDrafts);
+                            }}
+                            className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
+                            data-testid={`employee-role-review-select-${employeeId}`}
+                          >
+                            <option value="team_member">Employee</option>
+                            <option value="crew_lead">Crew Lead</option>
+                            <option value="manager">Manager</option>
+                            <option value="administrator">Administrator</option>
+                            {canInviteOwner ? <option value="owner">Owner</option> : null}
+                          </select>
+                          <p className="mt-1 text-[11px] text-gray-500">{draftPresentation.access}</p>
+                        </div>
+                        <Button
+                          variant={keepingEmployee ? 'secondary' : 'brand'}
+                          size="sm"
+                          onClick={() => handleSaveRoleReview(employee)}
+                          disabled={roleReviewSavingId === employeeId}
+                          data-testid={`employee-role-review-save-${employeeId}`}
+                        >
+                          {roleReviewSavingId === employeeId
+                            ? 'Saving…'
+                            : keepingEmployee
+                              ? 'Keep Employee'
+                              : 'Change Role'}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {roleReviewFeedback ? <p className="text-sm text-gray-600" role="status">{roleReviewFeedback}</p> : null}
+              <div className="flex justify-end border-t border-gray-200 pt-3">
+                <Button variant="secondary" size="sm" onClick={() => setShowRoleReviewModal(false)}>Done</Button>
               </div>
             </div>
           </Modal>

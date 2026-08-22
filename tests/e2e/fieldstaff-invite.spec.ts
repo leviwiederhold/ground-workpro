@@ -8,7 +8,9 @@ async function setRole(page: Page, role: 'admin' | 'pm' | 'foreman' | 'mechanic'
 }
 
 async function signupFromInvite(browser: Browser, inviteUrl: string, email: string, password: string) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({
+    storageState: { cookies: [], origins: [] },
+  });
   const page = await context.newPage();
   await page.goto(inviteUrl);
   const fillInviteForm = async () => {
@@ -37,7 +39,7 @@ async function signupFromInvite(browser: Browser, inviteUrl: string, email: stri
   }
   await expect
     .poll(() => new URL(page.url()).pathname, { timeout: 30_000 })
-    .toMatch(/^\/(?:$|setup|profile)/);
+    .toMatch(/^\/(?:web-access-restricted|$|setup|profile)/);
   return { context, page };
 }
 
@@ -70,6 +72,9 @@ test('legacy field staff invite is accepted and displayed as Team Member', async
   expect(inviteUrl).toContain('/signup?invite=1&token=');
 
   const { context, page: invitedPage } = await signupFromInvite(browser, inviteUrl, email, password);
+
+  await expect(invitedPage).toHaveURL(/\/web-access-restricted/);
+  await expect(invitedPage.getByRole('heading', { name: 'Use the Groundwork Pro mobile app' })).toBeVisible();
 
   const navResponse = await invitedPage.request.get('/api/nav');
   const navBody = await navResponse.text();

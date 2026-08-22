@@ -13,6 +13,7 @@ import {
   normalizeLegacyPermissionProfile,
   type LegacyPermissionProfile,
 } from "@/lib/auth/teamRoles";
+import { isEmployeeRoleReviewPending } from "@/lib/team/roleReview";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
@@ -157,6 +158,11 @@ export async function GET(request: Request) {
         clockedInAt: row.clocked_in_at ? String(row.clocked_in_at) : null,
         certifications: parseCertifications(row.certifications),
         recordSource: "employee",
+        joinedViaCompanyCodeAt: row.joined_via_company_code_at
+          ? String(row.joined_via_company_code_at)
+          : null,
+        roleReviewedAt: row.role_reviewed_at ? String(row.role_reviewed_at) : null,
+        roleReviewPending: false,
       };
     });
 
@@ -443,6 +449,9 @@ export async function GET(request: Request) {
           clockedInAt: null,
           certifications: [],
           recordSource: "membership",
+          joinedViaCompanyCodeAt: null,
+          roleReviewedAt: null,
+          roleReviewPending: false,
         });
       }
     }
@@ -584,6 +593,11 @@ export async function GET(request: Request) {
         item.clockedInAt = activeShiftStart;
         item.status = "active";
       }
+      item.roleReviewPending = isEmployeeRoleReviewPending({
+        joinedViaCompanyCodeAt: item.joinedViaCompanyCodeAt,
+        roleReviewedAt: item.roleReviewedAt,
+        currentRole: item.role,
+      });
     }
 
     if (queryInput.status !== "all") {
@@ -609,6 +623,9 @@ export async function GET(request: Request) {
         clockedInAt: item.clockedInAt,
         certifications: item.certifications,
         recordSource: item.recordSource ?? "employee",
+        joinedViaCompanyCode: Boolean(item.joinedViaCompanyCodeAt),
+        joinedAt: item.joinedViaCompanyCodeAt,
+        roleReviewPending: item.roleReviewPending,
       })),
     });
   } catch (error) {

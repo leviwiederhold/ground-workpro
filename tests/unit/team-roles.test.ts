@@ -63,7 +63,7 @@ test("Administrator is conservative and does not inherit legacy owner access", (
 });
 
 test("Owner aliases retain full access and owner protections", () => {
-  for (const role of ["owner", "admin", "ceo", "co-ceo", "executive"]) {
+  for (const role of ["owner", "admin", "ceo", "co-ceo", "co-owner", "executive"]) {
     assert.equal(isOwnerTeamRole(role), true);
     assert.equal(isCeoMembershipRole(role), true);
     assert.equal(normalizeAppRole(role), "admin");

@@ -13,14 +13,14 @@ test.describe('native App Store auth compliance', () => {
     await expect(page.getByRole('heading', { name: 'Welcome to Groundwork Pro' })).toBeVisible();
     await expect(page.getByTestId('login-submit')).toBeVisible();
     await expect(page.getByText('Already part of a company? Sign in')).toBeVisible();
-    await expect(page.getByText('Need access? Contact your company administrator for an invitation.')).toBeVisible();
+    await expect(page.getByText('Need access? Join with your company code or contact your company administrator.')).toBeVisible();
     await expect(page.getByTestId('native-auth-update-required')).toContainText(
       'Update required for Apple or Google Sign-In',
     );
     await expect(page.getByRole('link', { name: /sign up/i })).toHaveCount(0);
   });
 
-  test('fresh native iPad onboarding keeps login and invite join but no company signup', async ({ page }) => {
+  test('fresh native iPad onboarding keeps login and company-code join but no company signup', async ({ page }) => {
     await page.request.post('/api/logout');
     await page.context().clearCookies();
     await page.addInitScript(() => {
@@ -33,7 +33,7 @@ test.describe('native App Store auth compliance', () => {
 
     await expect(page.getByRole('button', { name: /Already part of a company/ })).toBeVisible();
     await expect(page.getByText('Sign in with your company account. New company signup is available on the web.')).toBeVisible();
-    await expect(page.getByRole('button', { name: /I'm joining a team/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /I'm an employee/ })).toBeVisible();
     await expect(page.getByTestId('onboarding-existing-login')).toBeVisible();
     await expect(page.getByText('Create your company')).toHaveCount(0);
     await expect(page.getByRole('button', { name: /create account/i })).toHaveCount(0);

@@ -18,14 +18,24 @@ export function NativePushNotifications() {
       const capacitor = (window as unknown as {
         Capacitor?: { isNativePlatform?: () => boolean; getPlatform?: () => string };
       }).Capacitor;
-      if (
-        capacitor?.isNativePlatform?.() !== true ||
-        String(capacitor.getPlatform?.() ?? "").toLowerCase() !== "ios"
-      ) {
+      const platform = String(capacitor?.getPlatform?.() ?? "").toLowerCase();
+      if (capacitor?.isNativePlatform?.() !== true || !["ios", "android"].includes(platform)) {
         return;
       }
 
       const { PushNotifications } = await import("@capacitor/push-notifications");
+      if (platform === "android") {
+        // FCM references this stable channel id. Creating it before registration
+        // avoids Android silently falling back to a generic provider channel.
+        await PushNotifications.createChannel({
+          id: "groundwork_messages",
+          name: "Messages",
+          description: "New Groundwork Pro conversation messages",
+          importance: 4,
+          visibility: 1,
+          vibration: true,
+        });
+      }
       listeners.push(
         await PushNotifications.addListener("registration", (registration) => {
           void persistNativePushToken(String(registration.value ?? "")).catch(() => undefined);

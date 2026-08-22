@@ -287,7 +287,7 @@ async function processJob(db: SupabaseClient, job: PushJob) {
           db,
           job,
           device,
-          status: device.platform === "android" ? "unsupported" : "failed",
+          status: "failed",
           providerStatus: result.status,
           providerId: result.providerId,
           errorCode: result.reason,

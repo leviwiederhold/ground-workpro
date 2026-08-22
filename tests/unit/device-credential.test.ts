@@ -54,6 +54,7 @@ test("refresh verification accepts an active device and rejects expiry or revoca
     user_id: "user-1",
     employee_id: "employee-1",
     device_id: "device-1",
+    platform: "android",
     scope: "attendance:events",
     refresh_expires_at: "2099-01-01T00:00:00.000Z",
     revoked_at: null,
@@ -65,6 +66,9 @@ test("refresh verification accepts an active device and rejects expiry or revoca
     userId: "user-1",
     employeeId: "employee-1",
     deviceId: "device-1",
+    // The enrolled platform propagates through the refresh path (Android must
+    // not round-trip as iOS).
+    platform: "android",
   });
   assert.equal(
     await verifyAttendanceRefreshCredential(
@@ -115,6 +119,7 @@ test("a legacy device can add one refresh secret without rotating its access tok
     userId: "user-1",
     employeeId: "employee-1",
     deviceId: "device-1",
+    platform: null,
   });
   assert.ok(!("error" in result));
   if ("error" in result) return;

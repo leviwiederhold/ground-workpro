@@ -20,6 +20,7 @@ export type AttendanceCredentialContext = {
   userId: string;
   employeeId: string | null;
   deviceId: string;
+  platform: "ios" | "android" | null;
 };
 
 export type MintedCredential = {
@@ -101,7 +102,7 @@ export async function verifyAttendanceRefreshCredential(
   }
   const result = await admin
     .from("device_attendance_credentials")
-    .select("id, company_id, user_id, employee_id, device_id, scope, refresh_expires_at, revoked_at")
+    .select("id, company_id, user_id, employee_id, device_id, platform, scope, refresh_expires_at, revoked_at")
     .eq("refresh_token_hash", refreshTokenHash)
     .maybeSingle();
   const row = result.data;
@@ -113,6 +114,9 @@ export async function verifyAttendanceRefreshCredential(
     userId: String(row.user_id),
     employeeId: row.employee_id ? String(row.employee_id) : null,
     deviceId: String(row.device_id),
+    // The enrolled platform is authoritative; the refresh path must report it
+    // too so an Android credential never round-trips as iOS.
+    platform: row.platform === "ios" || row.platform === "android" ? row.platform : null,
   };
 }
 
@@ -225,7 +229,7 @@ export async function verifyAttendanceCredential(
 
   const result = await admin
     .from("device_attendance_credentials")
-    .select("id, company_id, user_id, employee_id, device_id, scope, expires_at, revoked_at")
+    .select("id, company_id, user_id, employee_id, device_id, platform, scope, expires_at, revoked_at")
     .eq("token_hash", token_hash)
     .maybeSingle();
   const row = result.data;
@@ -247,5 +251,6 @@ export async function verifyAttendanceCredential(
     userId: String(row.user_id),
     employeeId: row.employee_id ? String(row.employee_id) : null,
     deviceId: String(row.device_id),
+    platform: row.platform === "ios" || row.platform === "android" ? row.platform : null,
   };
 }

@@ -184,6 +184,7 @@ export function nativeHealthToPermissionSnapshot(
     NativeGeofenceHealth,
     "authorizationStatus" | "locationServicesEnabled" | "preciseLocation"
   >,
+  platform: "ios" | "android" = "ios",
   capturedAt: string = new Date().toISOString()
 ): LocationPermissionSnapshot {
   const foreground =
@@ -209,7 +210,7 @@ export function nativeHealthToPermissionSnapshot(
     foreground,
     background,
     precise: health.preciseLocation,
-    platform: "ios",
+    platform,
     capturedAt,
   };
 }
@@ -232,7 +233,9 @@ export async function persistNativeAttendanceReadiness(
   setupComplete: boolean,
   regions: { requiredRegionIds: string[]; registeredRegionIds: string[] }
 ): Promise<void> {
-  await persistLocationPermission(nativeHealthToPermissionSnapshot(health), {
+  const detected = detectPlatform();
+  const platform = detected === "android" ? "android" : "ios";
+  await persistLocationPermission(nativeHealthToPermissionSnapshot(health, platform), {
     setupComplete,
     nativeReadiness: {
       supported: health.supported,

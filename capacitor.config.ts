@@ -83,6 +83,10 @@ const config: CapacitorConfig = {
   webDir: "capacitor-shell",
   server: {
     url: liveUrl,
+    // Both native shells start on the existing native onboarding route. iOS
+    // already enforces this in AppDelegate; this makes Android deterministic
+    // without briefly loading the web dashboard first.
+    appStartPath: "/native?gw_native=1",
     cleartext: liveUrl.startsWith("http://"),
     androidScheme: liveUrl.startsWith("http://") ? "http" : "https",
     allowNavigation: [liveUrlHost],

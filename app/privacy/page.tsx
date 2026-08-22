@@ -5,24 +5,39 @@ export default function PrivacyPage() {
         <h1 className="text-4xl font-bold">Privacy Policy</h1>
 
         <p className="text-zinc-400">
-          Groundwork Pro respects your privacy and is committed to protecting your information.
+          Groundwork Pro respects your privacy and uses personal information only to provide, secure, and support the service.
         </p>
 
         <div>
           <h2 className="text-2xl font-semibold mb-2">Information We Collect</h2>
           <p className="text-zinc-400">
-            We may collect account information, company information, uploaded files,
-            equipment data, scheduling information, and other operational data
-            required to provide app functionality.
+            We collect account and company information, messages and uploaded media, equipment and scheduling data,
+            device identifiers and push-notification tokens, and other operational records users choose to enter.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-2">Location and Automatic Attendance</h2>
+          <p className="text-zinc-400">
+            For employees assigned to automatic attendance, Groundwork Pro uses precise location in the background,
+            including when the app is closed or not in use, to record discrete jobsite arrival and departure events.
+            Groundwork Pro does not create a continuous employee location history or employee map.
           </p>
         </div>
 
         <div>
           <h2 className="text-2xl font-semibold mb-2">How We Use Information</h2>
           <p className="text-zinc-400">
-            Information is used to operate Groundwork Pro, improve the platform,
-            support users, and provide core functionality such as scheduling,
-            equipment management, messaging, and document storage.
+            Information is used for app functionality, authentication, customer support, fraud and security prevention,
+            billing, messaging, document storage, scheduling, equipment management, and automatic attendance.
+          </p>
+        </div>
+
+        <div>
+          <h2 className="text-2xl font-semibold mb-2">Service Providers</h2>
+          <p className="text-zinc-400">
+            We use service providers such as Supabase, Vercel, Stripe, Apple, Google, and push-notification providers
+            to host, authenticate, bill, store, and deliver Groundwork Pro. They process data only for those services.
           </p>
         </div>
 
@@ -35,16 +50,26 @@ export default function PrivacyPage() {
         </div>
 
         <div>
+          <h2 className="text-2xl font-semibold mb-2">Retention and Deletion</h2>
+          <p className="text-zinc-400">
+            We retain information while an account or company relationship is active and as needed for security,
+            billing, legal, and business recordkeeping. Users can delete their account in Account Settings or begin a
+            request on the{" "}
+            <a href="/account-deletion" className="text-orange-400">account deletion page</a>.
+          </p>
+        </div>
+
+        <div>
           <h2 className="text-2xl font-semibold mb-2">Contact</h2>
           <p className="text-zinc-400">
             For privacy-related questions, contact:
           </p>
 
           <a
-            href="mailto:le"
+            href="mailto:support@groundworkproapp.com"
             className="text-orange-400"
           >
-            levi.wiederhold@gmail.com
+            support@groundworkproapp.com
           </a>
         </div>
 

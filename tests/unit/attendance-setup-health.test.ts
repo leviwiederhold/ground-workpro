@@ -41,6 +41,7 @@ function employee(over: Partial<EmployeeSetupInput> = {}): EmployeeSetupInput {
       registeredRegionIds: ["shop:arrival"],
       reportedAt: daysAgo(7),
     },
+    latestNativeActivityAt: null,
     automaticAttendanceEnabled: true,
     ...over,
   };
@@ -81,6 +82,55 @@ test("CEO readiness uses the same collapsed region plan as native registration",
   );
   assert.equal(result.configured, true);
   assert.deepEqual(result.problems, []);
+});
+
+test("recent accepted native activity supersedes a missing or stale onboarding report", () => {
+  const withoutReport = evaluateEmployeeSetup(
+    employee({ nativeReadiness: null, latestNativeActivityAt: daysAgo(1) }),
+    NOW,
+  );
+  assert.equal(withoutReport.configured, true);
+  assert.deepEqual(withoutReport.problems, []);
+
+  const staleFailure = evaluateEmployeeSetup(
+    employee({
+      latestNativeActivityAt: daysAgo(1),
+      nativeReadiness: {
+        ...employee().nativeReadiness!,
+        background: "prompt",
+        precise: false,
+        serviceHealthy: false,
+        registeredRegionIds: [],
+        reportedAt: daysAgo(7),
+      },
+    }),
+    NOW,
+  );
+  assert.equal(staleFailure.configured, true);
+});
+
+test("native activity does not mask a newer explicit failure or an expired credential", () => {
+  const newerFailure = evaluateEmployeeSetup(
+    employee({
+      latestNativeActivityAt: daysAgo(2),
+      nativeReadiness: {
+        ...employee().nativeReadiness!,
+        background: "prompt",
+        reportedAt: daysAgo(1),
+      },
+    }),
+    NOW,
+  );
+  assert.ok(newerFailure.problems.includes("background_location_required"));
+
+  const expired = evaluateEmployeeSetup(
+    employee({
+      latestNativeActivityAt: daysAgo(1),
+      credential: { expiresAt: daysAgo(0), revokedAt: null, lastUsedAt: daysAgo(1) },
+    }),
+    NOW,
+  );
+  assert.ok(expired.problems.includes("credential_expired"));
 });
 
 test("app access defines the CEO setup population", () => {

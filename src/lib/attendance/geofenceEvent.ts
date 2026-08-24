@@ -72,7 +72,8 @@ export type GeofenceEventInput = {
   card: GeofenceCard | null;
   otherOpenCards: OtherOpenCard[];
   departureGraceMinutes: number;
-  // Company setting: new sessions open as "pending_review" rather than "active".
+  // Retained for wire compatibility with the legacy company setting. Clean
+  // automatic sessions no longer use it; exceptions carry needs_review.
   requireApproval: boolean;
 };
 
@@ -242,7 +243,10 @@ function decideEnter(input: GeofenceEventInput): GeofenceDecision {
     });
   }
 
-  const openStatus = input.requireApproval ? "pending_review" : "active";
+  // A validated automatic arrival is normal attendance, not a review task.
+  // Manual/fallback attendance needs review because it represents an
+  // employee-entered boundary rather than an observed native transition.
+  const openStatus = input.source === "manual" ? "needs_review" : "active";
   let primary: PrimaryEffect;
 
   if (!card || (card.clockInAt && card.clockOutAt)) {

@@ -11,43 +11,24 @@ export function AutoAttendanceSetupCard({
 }: {
   items: EmployeeSetupHealth[] | null;
 }) {
-  if (items === null) return null;
+  if (items === null || items.length === 0) return null;
   const configuredCount = items.filter((item) => item.configured).length;
 
-  return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">
-          Automatic attendance setup
-        </h3>
-        <span className="text-xs text-gray-500 dark:text-zinc-400">
-          {configuredCount}/{items.length} configured
+  // Actionable failures are rendered by the warning panel. When everything is
+  // working, keep setup as a small reassuring status instead of a large card.
+  if (configuredCount === items.length) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+        <span className="inline-flex items-center gap-2 text-sm font-medium text-emerald-800 dark:text-emerald-200">
+          <i className="fa-solid fa-circle-check" />
+          Automatic attendance active
+        </span>
+        <span className="shrink-0 text-xs text-emerald-700 dark:text-emerald-300">
+          {configuredCount}/{items.length} active
         </span>
       </div>
-      <ul className="mt-3 space-y-1">
-        {items.map((employee) => (
-          <li key={employee.employeeId} className="flex items-center justify-between text-sm">
-            <span className="text-gray-700 dark:text-zinc-300">
-              {employee.name || "Team member"}
-            </span>
-            <span
-              className={`inline-flex items-center gap-1.5 text-xs ${
-                employee.configured ? "text-emerald-600" : "text-gray-400"
-              }`}
-            >
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  employee.configured ? "bg-emerald-500" : "bg-gray-300"
-                }`}
-              />
-              {employee.configured ? "On" : "Not set up"}
-            </span>
-          </li>
-        ))}
-        {items.length === 0 && (
-          <li className="text-xs text-gray-400">No employees with app access yet.</li>
-        )}
-      </ul>
-    </div>
-  );
+    );
+  }
+
+  return null;
 }

@@ -29,7 +29,7 @@ const COMPANY_COLUMNS =
 const CANDIDATE_COLUMNS =
   "id,company_id,job_id,employee_id,user_id,work_date,scheduled_start,scheduled_end," +
   "clock_in_at,clock_out_at,break_start_at,break_end_at,pending_departure_at," +
-  "detected_departure_at,status,monitoring_stopped_at";
+  "detected_departure_at,status,source,monitoring_stopped_at";
 
 // Two days covers overnight shifts plus a scheduler outage.
 const LOOKBACK_DAYS = 2;
@@ -61,6 +61,7 @@ type OpenCardRow = {
   pending_departure_at: string | null;
   detected_departure_at: string | null;
   status: string | null;
+  source: string | null;
   monitoring_stopped_at: string | null;
 };
 
@@ -179,6 +180,13 @@ export async function applyClockOutDecision(
   // A shift closed without a real exit event is a guess at the boundary, not an
   // observation — it must never look like a verified departure.
   if (fallback) update.status = "needs_review";
+  // A clean native session is complete as soon as its validated departure has
+  // survived the grace period. No manager action is required. Manual/fallback
+  // records and anomaly states deliberately retain their review status.
+  if (!fallback && row.source === "jobsite_auto" && row.status !== "needs_review") {
+    update.status = "approved";
+    update.approved_at = now;
+  }
 
   const applied = await db
     .from("jobsite_timecards")

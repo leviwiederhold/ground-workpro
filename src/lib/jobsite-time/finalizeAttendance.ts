@@ -37,13 +37,14 @@ type TimecardRow = {
   detected_arrival_at: string | null;
   detected_departure_at: string | null;
   status: string | null;
+  source: string | null;
   monitoring_stopped_at: string | null;
 };
 
 const SELECT_COLUMNS =
   "id, company_id, job_id, employee_id, user_id, work_date, scheduled_start, scheduled_end, clock_in_at," +
   " clock_out_at, break_start_at, break_end_at, pending_arrival_at, pending_departure_at," +
-  " onsite_before_shift_at, detected_arrival_at, detected_departure_at, status, monitoring_stopped_at";
+  " onsite_before_shift_at, detected_arrival_at, detected_departure_at, status, source, monitoring_stopped_at";
 
 export async function finalizePendingAttendance({
   db,

@@ -72,7 +72,8 @@ export async function GET() {
       .map((e: Record<string, unknown>) => (e.user_id ? String(e.user_id) : null))
       .filter((id: string | null): id is string => Boolean(id));
 
-    const [assignments, credentials, permissionReports] = await Promise.all([
+    const nativeActivitySince = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+    const [assignments, credentials, nativeActivity, permissionReports] = await Promise.all([
       admin
         .from("job_employees")
         .select("employee_id, job_id")
@@ -90,6 +91,18 @@ export async function GET() {
         : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
       userIds.length > 0
         ? admin
+            .from("jobsite_timecard_events")
+            .select("user_id,occurred_at")
+            .eq("company_id", companyId)
+            .in("user_id", userIds)
+            .in("event_source", ["native_geofence", "offline_sync"])
+            .eq("validation_result", "accepted")
+            .gte("occurred_at", nativeActivitySince)
+            .order("occurred_at", { ascending: false })
+            .limit(2000)
+        : Promise.resolve({ data: [] as Array<Record<string, unknown>> }),
+      userIds.length > 0
+        ? admin
             .from("employee_location_permissions")
             .select(
               "user_id,location_services_enabled,background_refresh_enabled,background,precise,native_service_supported,native_service_healthy,native_has_secure_credential,required_region_ids,registered_region_ids,native_readiness_reported_at"
@@ -103,6 +116,7 @@ export async function GET() {
       ["assignments", assignments],
       ["credentials", credentials],
       ["native readiness", permissionReports],
+      ["native activity", nativeActivity],
     ] as const) {
       if ("error" in result && result.error) {
         throw new Error(`${label}: ${result.error.message}`);
@@ -158,6 +172,13 @@ export async function GET() {
     const readinessByUser = new Map<string, Record<string, unknown>>();
     for (const row of (permissionReports.data ?? []) as Array<Record<string, unknown>>) {
       readinessByUser.set(String(row.user_id), row);
+    }
+    const nativeActivityByUser = new Map<string, string>();
+    for (const row of (nativeActivity.data ?? []) as Array<Record<string, unknown>>) {
+      const activityUserId = String(row.user_id);
+      if (!nativeActivityByUser.has(activityUserId) && row.occurred_at) {
+        nativeActivityByUser.set(activityUserId, String(row.occurred_at));
+      }
     }
 
     const inputs: EmployeeSetupInput[] = employees.map((employee: Record<string, unknown>) => {
@@ -226,6 +247,7 @@ export async function GET() {
                 : null,
             }
           : null,
+        latestNativeActivityAt: userId ? (nativeActivityByUser.get(userId) ?? null) : null,
         automaticAttendanceEnabled: settings.automaticAttendanceEnabled,
       };
     });

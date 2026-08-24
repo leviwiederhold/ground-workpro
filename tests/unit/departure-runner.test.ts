@@ -37,6 +37,7 @@ function openCard(over: Row = {}): Row {
     pending_departure_at: EXITED_1400,
     detected_departure_at: EXITED_1400,
     status: "active",
+    source: "jobsite_auto",
     monitoring_stopped_at: null,
     ...over,
   };
@@ -68,6 +69,18 @@ test("a confirmed departure creates exactly one clock-out at the original exit t
   assert.equal(card.total_minutes, 420);
   assert.deepEqual(eventTypes(db), ["auto_clock_out"]);
   assert.equal(card.monitoring_stopped_at, null, "midday clock-out must keep monitoring active");
+  assert.equal(card.status, "approved", "clean automatic sessions finalize without owner review");
+  assert.equal(card.approved_at, "2026-07-21T18:11:00.000Z");
+});
+
+test("manual fallback sessions still need review after departure", async () => {
+  const card = openCard({ source: "manual", status: "needs_review" });
+  const db = makeDb({ jobsite_timecards: [card], companies: [COMPANY], jobsite_timecard_events: [] });
+
+  await runScheduledAttendanceClockOut({ db, now: "2026-07-21T18:11:00.000Z" });
+
+  assert.equal(card.status, "needs_review");
+  assert.equal(card.approved_at, undefined);
 });
 
 test("a repeat pass after the clock-out produces no duplicate", async () => {

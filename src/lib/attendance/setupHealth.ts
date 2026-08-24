@@ -73,6 +73,9 @@ export type EmployeeSetupInput = {
     lastUsedAt: string | null;
   } | null;
   nativeReadiness: NativeReadinessReport | null;
+  // Latest accepted event delivered by the native credential path. This is
+  // operational evidence, not an onboarding flag, and contains no location.
+  latestNativeActivityAt: string | null;
   automaticAttendanceEnabled: boolean;
 };
 
@@ -132,38 +135,50 @@ export function evaluateEmployeeSetup(
   }
 
   const readiness = input.nativeReadiness;
+  const nowMs = Date.parse(now);
+  const activityMs = Date.parse(input.latestNativeActivityAt ?? "");
+  const reportMs = Date.parse(readiness?.reportedAt ?? "");
+  // A recent accepted native event proves that the credential, background
+  // delivery, and registered region actually worked. It may supersede a
+  // missing/stale readiness report, but never a newer explicit failure report.
+  const hasCurrentNativeEvidence =
+    Number.isFinite(activityMs) &&
+    activityMs >= nowMs - 14 * 24 * 60 * 60 * 1000 &&
+    (!Number.isFinite(reportMs) || activityMs >= reportMs);
   if (!readiness?.reportedAt) {
-    problems.push("native_readiness_missing");
-    return result(problems);
+    if (!hasCurrentNativeEvidence) {
+      problems.push("native_readiness_missing");
+      return result(problems);
+    }
   }
-  if (
-    readiness.serviceSupported !== true ||
-    readiness.serviceHealthy !== true ||
-    readiness.locationServicesEnabled !== true ||
-    readiness.backgroundRefreshEnabled !== true
-  ) {
+  if (!hasCurrentNativeEvidence && (
+    readiness?.serviceSupported !== true ||
+    readiness?.serviceHealthy !== true ||
+    readiness?.locationServicesEnabled !== true ||
+    readiness?.backgroundRefreshEnabled !== true
+  )) {
     problems.push("native_service_unhealthy");
   }
-  if (readiness.background !== "granted") {
+  if (!hasCurrentNativeEvidence && readiness?.background !== "granted") {
     problems.push("background_location_required");
   }
-  if (readiness.precise !== true) {
+  if (!hasCurrentNativeEvidence && readiness?.precise !== true) {
     problems.push("precise_location_required");
   }
-  if (readiness.hasSecureCredential !== true && !problems.includes("device_not_enrolled")) {
+  if (!hasCurrentNativeEvidence && readiness?.hasSecureCredential !== true && !problems.includes("device_not_enrolled")) {
     problems.push("device_not_enrolled");
   }
 
   const required = unique(input.requiredRegionIds);
-  const nativeRequired = new Set(unique(readiness.requiredRegionIds));
-  const registered = new Set(unique(readiness.registeredRegionIds));
-  if (
+  const nativeRequired = new Set(unique(readiness?.requiredRegionIds ?? []));
+  const registered = new Set(unique(readiness?.registeredRegionIds ?? []));
+  if (!hasCurrentNativeEvidence && (
     required.length === 0 ||
     !required.every(
       (identifier) =>
         nativeRequired.has(identifier) && registered.has(identifier),
     )
-  ) {
+  )) {
     problems.push("regions_not_registered");
   }
 

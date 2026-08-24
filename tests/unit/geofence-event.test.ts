@@ -59,9 +59,14 @@ test("arriving with no record opens a session awaiting confirmation", () => {
   assert.deepEqual(eventTypes(d), ["entered_geofence"]);
 });
 
-test("a company that requires approval opens the session as pending_review", () => {
+test("a company approval preference does not create review work for a clean automatic session", () => {
   const d = decideGeofenceEvent(input({ requireApproval: true }));
-  assert.equal(d.primary.kind === "open_session" && d.primary.status, "pending_review");
+  assert.equal(d.primary.kind === "open_session" && d.primary.status, "active");
+});
+
+test("manual fallback attendance still requires confirmation", () => {
+  const d = decideGeofenceEvent(input({ source: "manual" }));
+  assert.equal(d.primary.kind === "open_session" && d.primary.status, "needs_review");
 });
 
 test("a questionable arrival opens the session as needs_review", () => {

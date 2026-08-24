@@ -4,12 +4,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ATTENDANCE_STATUS_LABEL, deriveAttendanceStatus, formatAssignedJobSubtitle, getCompanyLocalDateKey, type AttendanceDisplayStatus } from '@/lib/jobsite-time/domain';
 import { deriveCompanyBreakState, type CompanyBreakSchedule } from '@/lib/attendance/companyBreakSchedule';
-import { formatAttendanceDateLabel, shiftAttendanceDateKey, timestampIsOnAttendanceDate } from '@/lib/attendance/dashboardDate';
+import { formatAttendanceDateLabel, shiftAttendanceDateKey } from '@/lib/attendance/dashboardDate';
 import { AttendanceDiagnosticsPanel } from '@/app/components/debug/AttendanceDiagnosticsPanel';
 import { AutoAttendanceSetupCard } from '@/app/components/views/AutoAttendanceSetupCard';
 import { SETUP_PROBLEM_FIX, SETUP_PROBLEM_LABEL, type SetupHealthSummary, type SetupProblem } from '@/lib/attendance/setupHealth';
 import { CORRECTION_TYPES, CORRECTION_TYPE_LABEL, describeCorrection, MIN_REASON_LENGTH, reconstructOriginal, type CorrectionRecord, type CorrectionType } from '@/lib/attendance/corrections';
 import { EVENT_SOURCE_LABEL } from '@/lib/jobsite-time/domain';
+import { buildAttendanceActivity } from '@/lib/attendance/activityFeed';
 
 type Timecard = {
   id: string;
@@ -29,20 +30,6 @@ type Timecard = {
   confidence: string;
   notes: string;
   approvedAt: string | null;
-};
-
-type AttendanceActivityEvent = {
-  id: string;
-  timecardId: string | null;
-  eventType: string;
-  occurredAt: string | null;
-  jobId: string | null;
-  employeeId: string | null;
-  userId: string | null;
-  eventSource: string | null;
-  validationResult: string | null;
-  validationReason: string | null;
-  notes: string;
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -107,7 +94,6 @@ export function JobsiteTimeView({
   jobs?: Array<{ id: string; name?: string; address_verified?: boolean }>;
 }) {
   const [items, setItems] = useState<Timecard[]>([]);
-  const [activity, setActivity] = useState<AttendanceActivityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -131,6 +117,7 @@ export function JobsiteTimeView({
     jobId: '',
   });
   const [showFilters, setShowFilters] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
   const [filters, setFilters] = useState({
     employee: 'all',
     job: 'all',
@@ -210,11 +197,9 @@ export function JobsiteTimeView({
       if (!res.ok) {
         setError(json?.error || 'Failed to load attendance');
         setItems([]);
-        setActivity([]);
         return;
       }
       setItems(json?.items || []);
-      setActivity(json?.activity || []);
       if (json?.attendanceDate?.selectedDate) {
         setSelectedDate(String(json.attendanceDate.selectedDate));
       }
@@ -224,7 +209,6 @@ export function JobsiteTimeView({
     } catch {
       setError('Failed to load attendance');
       setItems([]);
-      setActivity([]);
     } finally {
       setLoading(false);
     }
@@ -371,42 +355,24 @@ export function JobsiteTimeView({
     };
   }, [onSite, roster, notArrived]);
 
-  // The API queries the append-only event trail using the selected company-day
-  // UTC bounds. Keep the same boundary check here as a defense against a bad or
-  // stale response ever leaking an older event into the visible date.
+  // Activity is a business-event projection. Raw native/foreground/
+  // scheduler signals remain available in the detail audit trail.
   const recentActivity = useMemo(() => {
-    const arrivalTypes = new Set(['entered_geofence', 'auto_clock_in', 'scheduled_clock_in', 'clock_in_backfilled']);
-    const departureTypes = new Set(['exited_geofence', 'auto_clock_out', 'fallback_clock_out', 'departure_pending']);
-    const cardsById = new Map(dayItems.map((card) => [card.id, card]));
-    const events: Array<{
-      key: string;
-      t: Timecard | null;
-      label: string;
-      detail: string | null;
-      icon: string;
-      tone: string;
-      at: string;
-    }> = [];
-    for (const event of activity) {
-      if (!timestampIsOnAttendanceDate(event.occurredAt, displayedDate, timezone)) continue;
-      const name = nameByUser.get(String(event.userId || event.employeeId || '')) || 'Team member';
-      const job = (event.jobId && jobById.get(String(event.jobId))?.name) || 'Unassigned';
-      const readableType = event.eventType.replace(/_/g, ' ');
-      const isArrival = arrivalTypes.has(event.eventType);
-      const isDeparture = departureTypes.has(event.eventType);
-      events.push({
-        key: event.id,
-        t: event.timecardId ? (cardsById.get(event.timecardId) ?? null) : null,
-        label: isArrival ? `${name} arrived at ${job}` : isDeparture ? `${name} left ${job}` : `${name} — ${readableType}`,
-        detail: event.validationResult && event.validationResult !== 'accepted' ? event.validationResult : event.eventSource ? (EVENT_SOURCE_LABEL[event.eventSource] ?? event.eventSource) : null,
-        icon: isArrival ? 'fa-arrow-right-to-bracket' : isDeparture ? 'fa-arrow-right-from-bracket' : event.validationResult && event.validationResult !== 'accepted' ? 'fa-triangle-exclamation' : 'fa-clock-rotate-left',
-        tone: isArrival ? 'text-green-500' : isDeparture ? 'text-amber-500' : event.validationResult && event.validationResult !== 'accepted' ? 'text-orange-500' : 'text-blue-500',
-        at: event.occurredAt!,
-      });
-    }
-    events.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-    return events;
-  }, [activity, dayItems, nameByUser, jobById, displayedDate, timezone]);
+    return buildAttendanceActivity(dayItems, displayedDate).map((event) => {
+      const t = event.card as Timecard;
+      const name = nameByUser.get(String(t.userId || t.employeeId || '')) || 'Team member';
+      const job = (t.jobId && jobById.get(String(t.jobId))?.name) || 'Unassigned';
+      const arrival = event.type === 'arrival';
+      return {
+        key: event.key,
+        t,
+        label: `${name} ${arrival ? 'arrived at' : 'left'} ${job}`,
+        icon: arrival ? 'fa-arrow-right-to-bracket' : 'fa-arrow-right-from-bracket',
+        tone: arrival ? 'text-green-500' : 'text-amber-500',
+        at: event.occurredAt,
+      };
+    });
+  }, [dayItems, displayedDate, nameByUser, jobById]);
 
   const needsReview = useMemo(() => dayItems.filter((t) => t.status === 'needs_review' || t.status === 'pending_review'), [dayItems]);
 
@@ -764,36 +730,33 @@ export function JobsiteTimeView({
 
           {/* Selected-date activity */}
           <div className={cardCls}>
-            <div className="border-b border-gray-100 px-4 py-3 dark:border-zinc-800">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{isToday ? 'Today’s Activity' : 'Activity'}</h3>
-            </div>
-            <div className="divide-y divide-gray-100 dark:divide-zinc-800">
+            <button
+              type="button"
+              aria-expanded={activityExpanded}
+              onClick={() => setActivityExpanded((value) => !value)}
+              className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left ${activityExpanded ? 'border-b border-gray-100 dark:border-zinc-800' : ''}`}
+            >
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">
+                {isToday ? "Today's Activity" : 'Activity'} ({recentActivity.length})
+              </h3>
+              <span className="inline-flex items-center gap-2 text-xs font-medium text-brand-600 dark:text-brand-400">
+                {activityExpanded ? 'Hide activity' : 'View activity'}
+                <i className={`fa-solid fa-chevron-${activityExpanded ? 'up' : 'down'}`} />
+              </span>
+            </button>
+            {activityExpanded && <div className="divide-y divide-gray-100 dark:divide-zinc-800">
               {recentActivity.length === 0 ? (
                 <p className="px-4 py-6 text-sm text-gray-500 dark:text-zinc-400">{isToday ? 'No activity recorded yet today.' : 'No activity recorded for this date.'}</p>
-              ) : (
-                recentActivity.map((ev) => {
-                  const content = (
-                    <>
-                      <span className="min-w-0 truncate text-sm text-gray-800 dark:text-zinc-200">
-                        <i className={`fa-solid ${ev.icon} ${ev.tone} mr-1.5`} />
-                        {ev.label}
-                        {ev.detail && <span className="ml-1.5 text-xs text-gray-500 dark:text-zinc-400">· {ev.detail}</span>}
-                      </span>
-                      <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-zinc-400">{fmtTime(ev.at, timezone)}</span>
-                    </>
-                  );
-                  return ev.t ? (
-                    <button key={ev.key} type="button" onClick={() => openDetail(ev.t!)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-[#101010]">
-                      {content}
-                    </button>
-                  ) : (
-                    <div key={ev.key} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                      {content}
-                    </div>
-                  );
-                })
-              )}
-            </div>
+              ) : recentActivity.map((ev) => (
+                <button key={ev.key} type="button" onClick={() => openDetail(ev.t)} className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-[#101010]">
+                  <span className="min-w-0 truncate text-sm text-gray-800 dark:text-zinc-200">
+                    <i className={`fa-solid ${ev.icon} ${ev.tone} mr-1.5`} />
+                    {ev.label}
+                  </span>
+                  <span className="shrink-0 text-xs tabular-nums text-gray-500 dark:text-zinc-400">{fmtTime(ev.at, timezone)}</span>
+                </button>
+              ))}
+            </div>}
           </div>
 
           {/* Every session for the selected date. This is deliberately not a

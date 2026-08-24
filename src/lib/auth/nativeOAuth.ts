@@ -24,6 +24,16 @@ export type NativeSignInResult =
   | { status: "cancelled" }
   | { status: "error"; message: string };
 
+type SocialLoginPlugin = {
+  initialize(options: Record<string, unknown>): Promise<void>;
+  login(options: Record<string, unknown>): Promise<any>;
+};
+
+type SocialLoginLoader = () => Promise<{ SocialLogin: SocialLoginPlugin }>;
+
+let initializedSocialLogin: SocialLoginPlugin | null = null;
+let providerInitializationInFlight: Promise<SocialLoginPlugin> | null = null;
+
 // The app's PRODUCTION iOS bundle identifier.
 //
 // This is the identity of the already-shipped Groundwork Pro app — verified
@@ -262,6 +272,66 @@ export function readGoogleClientConfig(): GoogleClientConfigResult {
   });
 }
 
+export function buildNativeProviderInitializationOptions(): Record<string, unknown> {
+  const google = readGoogleClientConfig();
+  return {
+    // On iOS an empty redirect keeps Sign in with Apple in the native sheet.
+    apple: { clientId: IOS_BUNDLE_ID, redirectUrl: "" },
+    ...(google.ok
+      ? {
+          google: {
+            iOSClientId: google.config.iosClientId,
+            iOSServerClientId: google.config.webClientId,
+            webClientId: google.config.webClientId,
+            mode: "online",
+          },
+        }
+      : {}),
+  };
+}
+
+const loadSocialLogin: SocialLoginLoader = async () =>
+  (await import("@capgo/capacitor-social-login")) as unknown as {
+    SocialLogin: SocialLoginPlugin;
+  };
+
+/**
+ * Initialize every configured native provider together.
+ *
+ * Calls are coalesced while initialization is running and cached afterward.
+ * Login-screen mount and app-resume callers may force a safe reinitialization;
+ * the plugin's initialize operation only replaces provider configuration and
+ * registers no JS listeners.
+ */
+export function initializeNativeAuthProviders({
+  force = false,
+  loader = loadSocialLogin,
+}: {
+  force?: boolean;
+  loader?: SocialLoginLoader;
+} = {}): Promise<SocialLoginPlugin> {
+  if (providerInitializationInFlight) return providerInitializationInFlight;
+  if (initializedSocialLogin && !force) return Promise.resolve(initializedSocialLogin);
+
+  const run = (async () => {
+    const { SocialLogin } = await loader();
+    await SocialLogin.initialize(buildNativeProviderInitializationOptions());
+    initializedSocialLogin = SocialLogin;
+    return SocialLogin;
+  })();
+  providerInitializationInFlight = run;
+  void run.finally(() => {
+    if (providerInitializationInFlight === run) providerInitializationInFlight = null;
+  }).catch(() => {});
+  return run;
+}
+
+/** Test-only reset for the module-scoped idempotency state. */
+export function resetNativeAuthProviderInitializationForTests(): void {
+  initializedSocialLogin = null;
+  providerInitializationInFlight = null;
+}
+
 // Post-authentication routing now lives in src/lib/auth/loginFlow.ts as
 // resolveNativePostAuthDestination(), shared by the native login route. The
 // earlier resolvePostAuthRoute() helper here became unreachable when the
@@ -276,10 +346,7 @@ export async function signInWithAppleNative(supabase: SupabaseClient): Promise<N
     const rawNonce = generateRawNonce();
     const hashedNonce = await sha256Hex(rawNonce);
 
-    const { SocialLogin } = (await import("@capgo/capacitor-social-login")) as any;
-    await SocialLogin.initialize({
-      apple: { clientId: IOS_BUNDLE_ID },
-    });
+    const SocialLogin = await initializeNativeAuthProviders();
 
     const result = await SocialLogin.login({
       provider: "apple",
@@ -319,25 +386,7 @@ export async function signInWithGoogleNative(supabase: SupabaseClient): Promise<
     if (!configResult.ok) {
       return { status: "error", message: configResult.message };
     }
-    const { iosClientId, webClientId } = configResult.config;
-
-    const { SocialLogin } = (await import("@capgo/capacitor-social-login")) as any;
-    await SocialLogin.initialize({
-      google: {
-        // The OAuth client of type iOS. This is the audience (`aud`) of the ID
-        // token Google returns, so it must also be listed in Supabase's Google
-        // "authorized client IDs".
-        iOSClientId: iosClientId,
-        // The Web client, which Supabase itself is configured with. Google
-        // requires the server client ID to be the Web client.
-        iOSServerClientId: webClientId,
-        webClientId,
-        // "online" returns GoogleLoginResponseOnline, which carries `idToken`.
-        // "offline" would return only `serverAuthCode` — no ID token — and the
-        // signInWithIdToken exchange below would have nothing to send.
-        mode: "online",
-      },
-    });
+    const SocialLogin = await initializeNativeAuthProviders();
 
     // Supabase's documented Google ID-token nonce contract, identical in shape to
     // the Apple flow above: generate a cryptographically random RAW nonce, send

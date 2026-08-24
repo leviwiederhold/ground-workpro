@@ -20,6 +20,7 @@ import { NATIVE_ONBOARDING_CSS } from "@/app/components/native/onboardingStyles"
 import {
   signInWithAppleNative,
   signInWithGoogleNative,
+  initializeNativeAuthProviders,
   readPendingInviteFromSearch,
   writePendingInviteState,
   type NativeProvider,
@@ -94,12 +95,52 @@ export default function NativeLoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [providerLoading, setProviderLoading] = useState<NativeProvider | null>(null);
+  const [providersInitializing, setProvidersInitializing] = useState(true);
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
 
   useEffect(() => {
     document.body.classList.add("native-onboarding-open");
     return () => document.body.classList.remove("native-onboarding-open");
+  }, []);
+
+  // Provider capability is independent from Supabase session state. Prepare it
+  // whenever the login screen appears and re-prepare on foreground/resume. The
+  // buttons stay rendered while this runs and are only temporarily disabled.
+  useEffect(() => {
+    let active = true;
+    let runId = 0;
+
+    const prepareProviders = async () => {
+      if (!detectNativeLoginRuntime()) {
+        if (active) setProvidersInitializing(false);
+        return;
+      }
+      const currentRun = ++runId;
+      if (active) setProvidersInitializing(true);
+      try {
+        await initializeNativeAuthProviders({ force: true });
+      } catch {
+        // Keep the methods visible and retry on tap or the next lifecycle event.
+      } finally {
+        if (active && currentRun === runId) setProvidersInitializing(false);
+      }
+    };
+
+    const prepareWhenVisible = () => {
+      if (document.visibilityState === "visible") void prepareProviders();
+    };
+
+    void prepareProviders();
+    window.addEventListener("focus", prepareWhenVisible);
+    window.addEventListener("pageshow", prepareWhenVisible);
+    document.addEventListener("visibilitychange", prepareWhenVisible);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", prepareWhenVisible);
+      window.removeEventListener("pageshow", prepareWhenVisible);
+      document.removeEventListener("visibilitychange", prepareWhenVisible);
+    };
   }, []);
 
   // Capture invite state arriving on this route so it survives a provider sheet.
@@ -205,7 +246,7 @@ export default function NativeLoginPage() {
 
   if (showNoWorkspace) return <NativeNoWorkspaceScreen />;
 
-  const busy = providerLoading !== null || loading;
+  const busy = providerLoading !== null || loading || providersInitializing;
 
   return (
     <div className="gw-onboarding">

@@ -1,11 +1,11 @@
 import type { getCompanyId } from "@/lib/tenant/getCompanyId";
-import { isOwnerTeamRole } from "./teamRoles.ts";
+import { isOwnerLevelTeamRole } from "./teamRoles.ts";
 
 export type MembershipRole = "ceo" | "admin" | "pm" | "foreman" | "mechanic" | "operator";
 type SupabaseClientLike = Awaited<ReturnType<typeof getCompanyId>>["supabase"];
 
 export function isCeoMembershipRole(value: unknown): boolean {
-  return isOwnerTeamRole(value);
+  return isOwnerLevelTeamRole(value);
 }
 
 export async function listCompanyMembershipRoles(

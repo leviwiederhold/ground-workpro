@@ -4,13 +4,12 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import {
-  canAssignTeamRole,
   canonicalizeRoleWrite,
   isMissingLegacyPermissionProfileColumn,
-  isOwnerTeamRole,
   legacyCompatibleRoleValue,
   normalizeCanonicalTeamRole,
 } from "@/lib/auth/teamRoles";
+import { getPrimaryOwnerUserId } from "@/lib/auth/companyOwnership";
 import {
   normalizePermissionPayload,
   getDefaultPermissionsByRole,
@@ -93,7 +92,7 @@ export const dynamic = "force-dynamic";
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const { userId, role } = await requireModuleAccess("team_management", "edit");
+    const { userId } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const parsedParams = paramsSchema.safeParse(await context.params);
@@ -124,14 +123,22 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
     const existingRole = String(existing.data.role ?? "").trim().toLowerCase();
     const nextRole = parsedBody.data.role ?? existingRole;
-    if (
-      (isOwnerTeamRole(nextRole) || isOwnerTeamRole(existingRole)) &&
-      !canAssignTeamRole(role, "owner")
-    ) {
+    const normalizedNextRole = canonicalizeRoleWrite(nextRole).role;
+    const normalizedExistingRole = canonicalizeRoleWrite(existingRole).role;
+    if (normalizedNextRole === "owner" || normalizedExistingRole === "owner") {
       return NextResponse.json(
-        { error: "Only Owners can invite another Owner." },
-        { status: 403 }
+        { error: "Primary ownership cannot be assigned through an invitation." },
+        { status: 400 }
       );
+    }
+    if (normalizedNextRole === "co_owner" || normalizedExistingRole === "co_owner") {
+      const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
+      if (userId !== primaryOwnerUserId) {
+        return NextResponse.json(
+          { error: "Only the primary Owner can manage a Co-Owner invitation." },
+          { status: 403 }
+        );
+      }
     }
 
     const updatePayload: Record<string, unknown> = {};

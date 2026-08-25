@@ -6,6 +6,7 @@ import { z } from "zod";
  */
 export const canonicalTeamRoles = [
   "owner",
+  "co_owner",
   "administrator",
   "manager",
   "crew_lead",
@@ -55,7 +56,8 @@ const compactRole = (value: unknown) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 
-const ownerAliases = new Set(["owner", "admin", "executive", "ceo", "coceo", "coowner"]);
+const ownerAliases = new Set(["owner"]);
+const coOwnerAliases = new Set(["coowner", "admin", "executive", "ceo", "coceo"]);
 const administratorAliases = new Set(["administrator"]);
 const managerAliases = new Set([
   "manager",
@@ -81,6 +83,7 @@ export function normalizeCanonicalTeamRole(value: unknown): CanonicalTeamRole | 
   const normalized = compactRole(value);
   if (!normalized) return null;
   if (ownerAliases.has(normalized)) return "owner";
+  if (coOwnerAliases.has(normalized)) return "co_owner";
   if (administratorAliases.has(normalized)) return "administrator";
   if (managerAliases.has(normalized)) return "manager";
   if (crewLeadAliases.has(normalized)) return "crew_lead";
@@ -92,13 +95,21 @@ export function isOwnerTeamRole(value: unknown): boolean {
   return normalizeCanonicalTeamRole(value) === "owner";
 }
 
+export function isOwnerLevelTeamRole(value: unknown): boolean {
+  const role = normalizeCanonicalTeamRole(value);
+  return role === "owner" || role === "co_owner";
+}
+
 /**
- * Assigning the Owner access role is the only role transition that requires a
- * top-level actor. Non-Owner roles keep the existing module-permission guard.
+ * Primary Owner is never assignable through ordinary role administration.
+ * Co-Owner is assignable only when the caller has been resolved as the actual
+ * primary Owner (callers pass that authoritative company role here).
  */
 export function canAssignTeamRole(actorRole: unknown, requestedRole: unknown): boolean {
-  if (!isOwnerTeamRole(requestedRole)) return true;
-  return normalizeLegacyPermissionProfile(actorRole) === "admin";
+  const requested = normalizeCanonicalTeamRole(requestedRole);
+  if (requested === "owner") return false;
+  if (requested !== "co_owner") return true;
+  return normalizeCanonicalTeamRole(actorRole) === "owner";
 }
 
 export function defaultPermissionProfileForRole(
@@ -106,7 +117,7 @@ export function defaultPermissionProfileForRole(
 ): LegacyPermissionProfile | null {
   const canonical = normalizeCanonicalTeamRole(value);
   if (!canonical) return null;
-  if (canonical === "owner") return "admin";
+  if (canonical === "owner" || canonical === "co_owner") return "admin";
   if (canonical === "administrator" || canonical === "manager") return "pm";
   if (canonical === "crew_lead") return "foreman";
   return "operator";
@@ -184,6 +195,7 @@ export function legacyCompatibleRoleWrite(
 
 export const canonicalTeamRoleLabels: Record<CanonicalTeamRole, string> = {
   owner: "Owner",
+  co_owner: "Co-Owner",
   administrator: "Administrator",
   manager: "Manager",
   crew_lead: "Crew Lead",

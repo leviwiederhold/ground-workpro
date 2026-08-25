@@ -336,14 +336,31 @@ export async function POST(request: Request) {
     await seedPersonalProfile(supabase, user.id, userEmail, userMetadata);
 
     // 2) Create company
-    const { data: company, error: companyError } = await supabase
+    let companyInsert = await supabase
       .from("companies")
       // Do NOT auto-set a default timezone here. A timezone (plus company name)
       // would mark company setup "derived complete" and let a brand-new owner
       // skip /setup. The owner sets the timezone during onboarding instead.
-      .insert({ name: requestedCompanyName || "My First Company", timezone: "" })
+      .insert({
+        name: requestedCompanyName || "My First Company",
+        timezone: "",
+        primary_owner_user_id: user.id,
+      })
       .select()
       .single();
+
+    if (
+      companyInsert.error &&
+      /primary_owner_user_id/i.test(companyInsert.error.message || "")
+    ) {
+      companyInsert = await supabase
+        .from("companies")
+        .insert({ name: requestedCompanyName || "My First Company", timezone: "" })
+        .select()
+        .single();
+    }
+
+    const { data: company, error: companyError } = companyInsert;
 
     if (companyError) {
       return errorResponse(companyError.message, 400);

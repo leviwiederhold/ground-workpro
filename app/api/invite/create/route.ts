@@ -4,11 +4,11 @@ import { randomBytes } from "crypto";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireRole } from "@/lib/auth/requireRole";
 import {
-  canAssignTeamRole,
   canonicalizeRoleWrite,
   isMissingLegacyPermissionProfileColumn,
   legacyCompatibleRoleValue,
 } from "@/lib/auth/teamRoles";
+import { getPrimaryOwnerUserId } from "@/lib/auth/companyOwnership";
 
 const bodySchema = z.object({
   employeeId: z.string().uuid(),
@@ -18,9 +18,10 @@ const bodySchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    let actorRole: "admin" | "pm";
+    let actorUserId = "";
     try {
-      actorRole = (await requireRole(["admin", "pm"])).role as "admin" | "pm";
+      const actor = await requireRole(["admin", "pm"]);
+      actorUserId = actor.userId;
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -58,8 +59,17 @@ export async function POST(request: Request) {
 
     const email = String(payload.email).trim().toLowerCase();
     const roleWrite = canonicalizeRoleWrite(payload.role ?? employeeRow.data.role ?? "team_member");
-    if (!canAssignTeamRole(actorRole, roleWrite.role)) {
-      return NextResponse.json({ error: "Only Owners can invite another Owner." }, { status: 403 });
+    if (roleWrite.role === "owner") {
+      return NextResponse.json(
+        { error: "Primary ownership cannot be assigned through an invitation." },
+        { status: 400 }
+      );
+    }
+    if (roleWrite.role === "co_owner") {
+      const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
+      if (actorUserId !== primaryOwnerUserId) {
+        return NextResponse.json({ error: "Only the primary Owner can invite a Co-Owner." }, { status: 403 });
+      }
     }
 
     let employeeUpdate = await supabase

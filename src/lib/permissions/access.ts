@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { AppRole } from "../nav/config.ts";
 import {
   canonicalizeRoleWrite,
+  isOwnerLevelTeamRole,
   isOwnerTeamRole,
   normalizeCanonicalTeamRole,
   normalizeLegacyPermissionProfile,
@@ -235,7 +236,7 @@ export function normalizePermissionPayload(input: unknown): {
     for (const key of SENSITIVE_MANAGER_ONLY_MODULES) merged[key] = "none";
   }
 
-  if (isOwnerTeamRole(parsed.role)) {
+  if (isOwnerLevelTeamRole(parsed.role)) {
     for (const key of modulePermissionKeys) merged[key] = "edit";
   }
 

@@ -19,9 +19,12 @@ export type TeamRolePresentation = {
 };
 
 export function getTeamRolePresentation(rawRole: unknown): TeamRolePresentation {
-  const role = String(rawRole ?? "").trim().toLowerCase();
-  if (["admin", "ceo", "executive", "owner", "co-owner"].includes(role)) {
-    return { label: "Owner / Co-owner", access: "Full web and mobile access" };
+  const role = String(rawRole ?? "").trim().toLowerCase().replace(/-/g, "_");
+  if (role === "owner") {
+    return { label: "Owner", access: "Company owner · Full web and mobile access" };
+  }
+  if (["co_owner", "admin", "ceo", "executive"].includes(role)) {
+    return { label: "Co-Owner", access: "Full web and mobile access · Owner-level permissions" };
   }
   if (role === "administrator") {
     return { label: "Administrator", access: "Mobile app · Administrator permissions" };

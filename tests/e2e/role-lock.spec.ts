@@ -86,10 +86,10 @@ test("Owner member role and permissions remain locked", async ({ page }) => {
 
   await page.goto("/team");
   await page.getByRole("heading", { name: String(owner.displayName), exact: true }).last().click();
-  await expect(page.getByText("Owner role is locked.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Primary owner role is locked.", { exact: true })).toBeVisible();
 });
 
-test("a lower-role user with custom Team edit access still cannot assign Owner", async ({ page }) => {
+test("normal Team role APIs cannot assign primary Owner", async ({ page }) => {
   await loginViaUI(page);
   await setRealRole(page, "pm");
 
@@ -104,6 +104,6 @@ test("a lower-role user with custom Team edit access still cannot assign Owner",
     data: { role: "owner" },
   });
   const inviteBody = await inviteResponse.text();
-  expect(inviteResponse.status(), inviteBody).toBe(403);
-  expect(JSON.parse(inviteBody)?.error).toContain("Only Owners");
+  expect(inviteResponse.status(), inviteBody).toBe(400);
+  expect(JSON.parse(inviteBody)?.error).toContain("ownership");
 });

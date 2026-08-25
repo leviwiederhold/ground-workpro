@@ -28,16 +28,8 @@ export async function POST(request: Request) {
 
     const { supabase, userId, companyId } = await getCompanyId();
 
-    const membershipUpdate = await supabase
-      .from("memberships")
-      .update({ role: parsed.data.role })
-      .eq("user_id", userId)
-      .select("user_id");
-
-    if (membershipUpdate.error) {
-      return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
-    }
-
+    // E2E role simulation is cookie-only. Never mutate the real membership:
+    // the primary-owner invariant applies in test databases too.
     await supabase
       .from("module_permissions")
       .delete()

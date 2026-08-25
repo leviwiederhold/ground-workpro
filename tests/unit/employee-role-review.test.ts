@@ -85,8 +85,12 @@ test("Team role labels explain both role and access surface", () => {
     access: "Mobile app · Manager permissions",
   });
   assert.deepEqual(getTeamRolePresentation("admin"), {
-    label: "Owner / Co-owner",
-    access: "Full web and mobile access",
+    label: "Co-Owner",
+    access: "Full web and mobile access · Owner-level permissions",
+  });
+  assert.deepEqual(getTeamRolePresentation("owner"), {
+    label: "Owner",
+    access: "Company owner · Full web and mobile access",
   });
 });
 

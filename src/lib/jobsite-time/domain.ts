@@ -652,10 +652,11 @@ export const ATTENDANCE_STATUS_LABEL: Record<AttendanceDisplayStatus, string> = 
 
 const CANONICAL_ATTENDANCE_ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
-  admin: "Owner",
-  executive: "Owner",
-  ceo: "Owner",
-  coceo: "Owner",
+  coowner: "Co-Owner",
+  admin: "Co-Owner",
+  executive: "Co-Owner",
+  ceo: "Co-Owner",
+  coceo: "Co-Owner",
   administrator: "Administrator",
   manager: "Manager",
   pm: "Manager",

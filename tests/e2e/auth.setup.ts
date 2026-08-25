@@ -17,7 +17,9 @@ setup('authenticate', async ({ page }) => {
     await page.goto('/login');
   }
 
-  const bootstrapResponse = await page.request.post('/api/bootstrap');
+  const bootstrapResponse = await page.request.post('/api/bootstrap', {
+    timeout: 30000,
+  });
   const bootstrapStatus = bootstrapResponse.status();
   if (![200, 400, 401, 403].includes(bootstrapStatus)) {
     const bootstrapBody = await bootstrapResponse.text();

@@ -21,8 +21,10 @@ test("legacy pm + assigned job renders canonical role terminology", () => {
 
 test("legacy attendance role values display canonical access-role labels", () => {
   assert.equal(formatAttendanceRoleLabel("pm"), "Manager");
-  assert.equal(formatAttendanceRoleLabel("ceo"), "Owner");
-  assert.equal(formatAttendanceRoleLabel("admin"), "Owner");
+  assert.equal(formatAttendanceRoleLabel("owner"), "Owner");
+  assert.equal(formatAttendanceRoleLabel("co_owner"), "Co-Owner");
+  assert.equal(formatAttendanceRoleLabel("ceo"), "Co-Owner");
+  assert.equal(formatAttendanceRoleLabel("admin"), "Co-Owner");
   assert.equal(formatAttendanceRoleLabel("foreman"), "Crew Lead");
   assert.equal(formatAttendanceRoleLabel("operator"), "Team Member");
   assert.equal(formatAttendanceRoleLabel("project manager"), "Manager");

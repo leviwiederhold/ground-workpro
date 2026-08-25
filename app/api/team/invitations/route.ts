@@ -5,12 +5,12 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { isCeoMembershipRole } from "@/lib/auth/ceoGuard";
 import {
-  canAssignTeamRole,
   canonicalizeRoleWrite,
   isMissingLegacyPermissionProfileColumn,
   legacyCompatibleRoleValue,
   normalizeCanonicalTeamRole,
 } from "@/lib/auth/teamRoles";
+import { getPrimaryOwnerUserId } from "@/lib/auth/companyOwnership";
 import {
   getDefaultPermissionsByRole,
   normalizePermissionPayload,
@@ -220,7 +220,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { userId, role } = await requireModuleAccess("team_management", "edit");
+    const { userId } = await requireModuleAccess("team_management", "edit");
     const { supabase, companyId } = await getCompanyId();
 
     const body = await request.json().catch(() => ({}));
@@ -230,11 +230,20 @@ export async function POST(request: Request) {
     }
 
     const requestedRole = canonicalizeRoleWrite(parsed.data.role);
-    if (!canAssignTeamRole(role, requestedRole.role)) {
+    if (requestedRole.role === "owner") {
       return NextResponse.json(
-        { error: "Only Owners can invite another Owner." },
-        { status: 403 }
+        { error: "Primary ownership cannot be assigned through an invitation." },
+        { status: 400 }
       );
+    }
+    if (requestedRole.role === "co_owner") {
+      const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
+      if (userId !== primaryOwnerUserId) {
+        return NextResponse.json(
+          { error: "Only the primary Owner can invite a Co-Owner." },
+          { status: 403 }
+        );
+      }
     }
 
     const normalized = normalizePermissionPayload({

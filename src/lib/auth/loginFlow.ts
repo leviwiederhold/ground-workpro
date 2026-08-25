@@ -35,11 +35,19 @@ export const NATIVE_LOGIN_ROUTE = "/native/login";
  * Where a sign-out should land.
  *
  * Native sessions return to the native route so the app never drops the user on
- * the website's login screen; the web returns to /login. Based on the current
- * pathname, so it needs no runtime detection.
+ * the website's login screen; the web returns to /login. The resolved runtime
+ * is authoritative because both authenticated clients normally use `/`.
  */
-export function resolveSignOutRoute(pathname: string | null | undefined): string {
-  return String(pathname ?? "").startsWith("/native/") ? NATIVE_LOGIN_ROUTE : WEB_LOGIN_ROUTE;
+export function resolveSignOutRoute(
+  pathname: string | null | undefined,
+  nativeRuntime = false,
+): string {
+  // Authenticated native users normally live at `/`, so pathname alone cannot
+  // distinguish them from web users. Preserve the route fallback for callers
+  // already under /native, but let the resolved runtime be authoritative.
+  return nativeRuntime || String(pathname ?? "").startsWith("/native/")
+    ? NATIVE_LOGIN_ROUTE
+    : WEB_LOGIN_ROUTE;
 }
 
 /** Invite state from the URL, falling back to whatever survived a provider sheet. */

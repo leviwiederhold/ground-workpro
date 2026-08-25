@@ -8,6 +8,8 @@ import {
   readPendingInviteFromSearch,
   readPendingInviteState,
   writePendingInviteState,
+  initializeNativeAuthProviders,
+  resetNativeAuthProviderInitializationForTests,
 } from "../../src/lib/auth/nativeOAuth.ts";
 
 // ── Nonce + ID-token exchange correctness ────────────────────────────────────
@@ -57,6 +59,50 @@ test("isUserCancelledError does NOT swallow real errors", () => {
   assert.equal(isUserCancelledError(null), false);
 });
 
+test("native provider initialization is idempotent and coalesces races", async () => {
+  resetNativeAuthProviderInitializationForTests();
+  let initializeCalls = 0;
+  const plugin = {
+    initialize: async () => {
+      initializeCalls += 1;
+      await Promise.resolve();
+    },
+    login: async () => ({}),
+  };
+  const loader = async () => ({ SocialLogin: plugin });
+
+  const first = initializeNativeAuthProviders({ loader });
+  const raced = initializeNativeAuthProviders({ loader });
+  assert.strictEqual(first, raced, "concurrent lifecycle triggers share one initialization");
+  await Promise.all([first, raced]);
+  assert.equal(initializeCalls, 1);
+
+  await initializeNativeAuthProviders({ loader });
+  assert.equal(initializeCalls, 1, "normal login attempts reuse prepared capability");
+
+  await initializeNativeAuthProviders({ force: true, loader });
+  assert.equal(initializeCalls, 2, "foreground resume may safely refresh configuration");
+  resetNativeAuthProviderInitializationForTests();
+});
+
+test("a failed provider initialization can be retried without restarting the app", async () => {
+  resetNativeAuthProviderInitializationForTests();
+  let initializeCalls = 0;
+  const plugin = {
+    initialize: async () => {
+      initializeCalls += 1;
+      if (initializeCalls === 1) throw new Error("bridge temporarily unavailable");
+    },
+    login: async () => ({}),
+  };
+  const loader = async () => ({ SocialLogin: plugin });
+
+  await assert.rejects(initializeNativeAuthProviders({ loader }), /temporarily unavailable/);
+  await initializeNativeAuthProviders({ loader });
+  assert.equal(initializeCalls, 2);
+  resetNativeAuthProviderInitializationForTests();
+});
+
 // ── Native invite state survives the native provider sheet ──────────────────
 test("readPendingInviteFromSearch captures invite URL parameters", () => {
   assert.deepEqual(
@@ -98,5 +144,4 @@ test("pending invite state round-trips through storage and invalid JSON is clear
 
 // ── Post-auth routing is identical for email/Apple/Google, and invited users
 //    never reach company bootstrap ──────────────────────────────────────────
-
 

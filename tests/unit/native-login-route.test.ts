@@ -137,8 +137,39 @@ test("native sign-out returns to /native/login and web sign-out to /login", () =
   // A path that merely CONTAINS "native" must not count.
   assert.equal(resolveSignOutRoute("/alternative/login"), WEB_LOGIN_ROUTE);
 
-  // The dashboard must actually use the resolver.
-  assert.match(read("app/page.tsx"), /window\.location\.assign\(resolveSignOutRoute\(window\.location\.pathname\)\)/);
+  // Authenticated native users live at `/`; the resolved runtime, not that
+  // shared pathname, must keep every logout/login cycle on the native route.
+  for (let cycle = 0; cycle < 3; cycle += 1) {
+    assert.equal(resolveSignOutRoute("/", true), NATIVE_LOGIN_ROUTE);
+  }
+
+  // The central dashboard logout must pass its already-resolved native state,
+  // and Settings must delegate to that same lifecycle rather than diverging.
+  const root = read("app/page.tsx");
+  assert.match(root, /window\.location\.replace\(resolveSignOutRoute\(window\.location\.pathname, nativeRuntime\)\)/);
+  assert.match(root, /SettingsView[^>]+onLogout=\{onLogout\}/);
+  assert.match(root, /const signOut = async \(\) => \{[\s\S]{0,100}await onLogout\(\)/);
+  assert.match(
+    root,
+    /!nativeRuntime[\s\S]{0,160}window\.location\.replace\(resolveSignOutRoute\(window\.location\.pathname, true\)\)/,
+    "session teardown outside the explicit logout handler must also reach native login",
+  );
+});
+
+test("login mount and app resume reinitialize providers without hiding methods", () => {
+  const page = nativePage();
+  assert.match(page, /initializeNativeAuthProviders\(\{ force: true \}\)/);
+  assert.match(page, /window\.addEventListener\("focus", prepareWhenVisible\)/);
+  assert.match(page, /window\.addEventListener\("pageshow", prepareWhenVisible\)/);
+  assert.match(page, /document\.addEventListener\("visibilitychange", prepareWhenVisible\)/);
+  assert.match(page, /window\.removeEventListener\("focus", prepareWhenVisible\)/);
+  assert.match(page, /document\.removeEventListener\("visibilitychange", prepareWhenVisible\)/);
+
+  const buttonsStart = page.indexOf('data-testid="native-provider-buttons"');
+  const buttonsEnd = page.indexOf('data-testid="native-continue-with-email"');
+  const buttons = page.slice(buttonsStart, buttonsEnd);
+  assert.ok(!buttons.includes("providersInitializing ?"), "initialization must never remove provider buttons");
+  assert.match(page, /providerLoading !== null \|\| loading \|\| providersInitializing/);
 });
 
 // ── Web route is untouched ───────────────────────────────────────────────────

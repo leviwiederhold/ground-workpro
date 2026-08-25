@@ -2302,7 +2302,7 @@ const MobileAppShell = ({
               );
             }
             return <SubscribeView employees={employees} currentRole={currentRole} />;
-          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} navigateToView={navigateToView} settingsDirtyRef={settingsDirtyRef} />;
+          case 'settings': return <SettingsView employees={employees} currentUser={currentUser} currentRole={currentRole} navigateToView={navigateToView} settingsDirtyRef={settingsDirtyRef} onLogout={onLogout} />;
           case 'marketing': return <MarketingView />;
           case 'documents': return <DocumentsView currentRole={currentRole} moduleAccess={moduleAccess} ui={documentsViewUi} jobs={jobs} />;
           default: return <DashboardView jobs={jobs} jobsLoading={jobsLoading} equipment={equipment} employees={employees} workOrders={workOrders} inventory={inventory} currentRole={currentRole} setCurrentView={setCurrentView} setShowModal={setShowModal} ui={dashboardViewUi} />;
@@ -10773,7 +10773,7 @@ const MobileAppShell = ({
     // ============================================
     // SETTINGS VIEW
     // ============================================
-    const SettingsView = ({ employees = [], currentUser, currentRole, navigateToView, settingsDirtyRef }) => {
+    const SettingsView = ({ employees = [], currentUser, currentRole, navigateToView, settingsDirtyRef, onLogout }) => {
       const isIosApp = useMemo(() => isIosNativeAppRuntime(), []);
       const isAdmin = currentRole === 'executive';
 
@@ -11065,11 +11065,7 @@ const MobileAppShell = ({
 
       const signOut = async () => {
         setSigningOut(true);
-        try { await fetch('/api/logout', { method: 'POST' }).catch(() => {}); } catch { /* ignore */ }
-        try { await supabaseBrowser().auth.signOut(); } catch { /* ignore */ }
-        // Native sessions return to the native login route so the app never
-        // drops the user on the website's sign-in screen; web returns to /login.
-        window.location.assign(resolveSignOutRoute(window.location.pathname));
+        await onLogout();
       };
 
       const teamByRole = employees.reduce((acc, emp) => {
@@ -14270,7 +14266,7 @@ const MobileAppShell = ({
         setIsAuthenticated(false);
         setCurrentUser(null);
         setSetupChecked(true);
-        window.location.replace('/');
+        window.location.replace(resolveSignOutRoute(window.location.pathname, nativeRuntime));
       };
 
       useEffect(() => {
@@ -14421,6 +14417,24 @@ const MobileAppShell = ({
         setupChecked,
         setupRefreshing,
       ]);
+
+      // A token can be invalidated by a refresh/401 rather than an explicit
+      // logout click. If that happens while the native app is on the shared `/`
+      // dashboard route, go to the dedicated provider-capable login route. The
+      // old in-place onboarding login is email-only and must never become the
+      // accidental post-session-teardown destination.
+      useEffect(() => {
+        if (
+          oauthCallbackProcessing ||
+          !authResolved ||
+          !nativeRuntimeResolved ||
+          isAuthenticated ||
+          !nativeRuntime
+        ) {
+          return;
+        }
+        window.location.replace(resolveSignOutRoute(window.location.pathname, true));
+      }, [authResolved, isAuthenticated, nativeRuntime, nativeRuntimeResolved, oauthCallbackProcessing]);
 
       if (oauthCallbackProcessing) {
         return (

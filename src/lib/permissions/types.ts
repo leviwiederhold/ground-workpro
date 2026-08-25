@@ -36,6 +36,7 @@ export const legacyInvitationRoles = [
 export const invitationRoles = canonicalTeamRoles;
 export const compatibleInvitationRoles = [
   "owner",
+  "co_owner",
   "administrator",
   "manager",
   "crew_lead",

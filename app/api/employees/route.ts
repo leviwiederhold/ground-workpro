@@ -5,12 +5,15 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
-  canAssignTeamRole,
   canonicalizeRoleWrite,
   legacyCompatibleRoleValue,
-  normalizeCanonicalTeamRole,
   normalizeLegacyPermissionProfile,
 } from "@/lib/auth/teamRoles";
+import {
+  getPrimaryOwnerUserId,
+  isPrimaryOwner,
+  resolveCompanyTeamRole,
+} from "@/lib/auth/companyOwnership";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -121,14 +124,19 @@ const parseCertifications = (value: unknown) => {
   return [];
 };
 
-const mapEmployee = (row: any) => {
+const mapEmployee = (row: any, primaryOwnerUserId = "") => {
   const id = row?.id;
   if (id === null || id === undefined || id === "") return null;
 
   return {
     id,
     name: row.name ?? row.full_name ?? "",
-    role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
+    role: resolveCompanyTeamRole({
+      storedRole: row.role,
+      userId: row.user_id,
+      primaryOwnerUserId,
+    }),
+    isPrimaryOwner: isPrimaryOwner({ userId: row.user_id, primaryOwnerUserId }),
     jobTitle: String(row.job_title ?? ""),
     accessProfile:
       normalizeLegacyPermissionProfile(row.role, row.legacy_permission_profile) ?? "operator",
@@ -208,7 +216,10 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    const employees = (data ?? []).map(mapEmployee).filter(Boolean) as Array<{ id: unknown; jobId: unknown; jobName?: string | null }>;
+    const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
+    const employees = (data ?? [])
+      .map((row) => mapEmployee(row, primaryOwnerUserId))
+      .filter(Boolean) as Array<{ id: unknown; jobId: unknown; jobName?: string | null }>;
     await hydrateAssignedJobs(supabase, companyId, employees);
     return NextResponse.json({ employees, ...getPaginationMeta(count ?? employees.length, page, pageSize) });
   } catch (error) {
@@ -223,9 +234,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     let actorRole = "";
+    let actorUserId = "";
     try {
       const access = await requireModuleAccess("team_management", "edit");
       actorRole = access.role;
+      actorUserId = access.userId;
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -248,8 +261,17 @@ export async function POST(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const payload = parsed.data;
     const roleWrite = canonicalizeRoleWrite(payload.role ?? "team_member");
-    if (!canAssignTeamRole(actorRole, roleWrite.role)) {
-      return NextResponse.json({ error: "Only Owners can assign the Owner role." }, { status: 403 });
+    if (roleWrite.role === "owner") {
+      return NextResponse.json(
+        { error: "Primary ownership can only be changed through the ownership transfer workflow." },
+        { status: 400 }
+      );
+    }
+    if (roleWrite.role === "co_owner") {
+      const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
+      if (actorUserId !== primaryOwnerUserId) {
+        return NextResponse.json({ error: "Only the primary Owner can assign the Co-Owner role." }, { status: 403 });
+      }
     }
     if (payload.hourlyRate !== undefined && payload.hourlyRate > 0 && actorRole !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

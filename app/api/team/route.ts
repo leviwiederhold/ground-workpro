@@ -9,11 +9,15 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { chunkValues } from "@/lib/db/chunk";
 import {
   isMissingLegacyPermissionProfileColumn,
-  normalizeCanonicalTeamRole,
   normalizeLegacyPermissionProfile,
   type LegacyPermissionProfile,
 } from "@/lib/auth/teamRoles";
 import { isEmployeeRoleReviewPending } from "@/lib/team/roleReview";
+import {
+  getPrimaryOwnerUserId,
+  isPrimaryOwner,
+  resolveCompanyTeamRole,
+} from "@/lib/auth/companyOwnership";
 
 const querySchema = z.object({
   q: z.string().trim().optional().default(""),
@@ -21,6 +25,7 @@ const querySchema = z.object({
   role: z.enum([
     "all",
     "owner",
+    "co_owner",
     "administrator",
     "manager",
     "crew_lead",
@@ -43,10 +48,6 @@ const mapEmployeeStatus = (value: unknown): "active" | "inactive" => {
     return "active";
   }
   return "inactive";
-};
-
-const mapRoleForOutput = (rawRole: unknown): string => {
-  return normalizeCanonicalTeamRole(rawRole) ?? "team_member";
 };
 
 const parseCertifications = (value: unknown): Array<{ name: string; expires: string }> => {
@@ -72,13 +73,17 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
+    let viewerUserId = "";
     try {
-      await requireModuleAccess("team_management", "view");
+      const access = await requireModuleAccess("team_management", "view");
+      viewerUserId = access.userId;
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const { supabase, companyId } = await getCompanyId();
+    const adminDb = getSupabaseAdmin() ?? supabase;
+    const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: adminDb, companyId });
     if (!(await getEffectiveRole())) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -130,8 +135,12 @@ export async function GET(request: Request) {
 
     const employeeJobIdById = new Map<string, string>();
     let items = (employeeRows ?? []).map((row: Record<string, unknown>) => {
-      const normalizedRole = mapRoleForOutput(row.role);
       const linkedUserId = row.user_id ? normalizeId(row.user_id) : null;
+      const normalizedRole = resolveCompanyTeamRole({
+        storedRole: row.role,
+        userId: linkedUserId,
+        primaryOwnerUserId,
+      });
       const employeeId = normalizeId(row.id);
       const fallbackJobId = normalizeId(row.job_id);
       if (employeeId && fallbackJobId) {
@@ -182,8 +191,6 @@ export async function GET(request: Request) {
     }
 
     const employeeIds = items.map((item) => item.id);
-
-    const adminDb = getSupabaseAdmin() ?? supabase;
 
     let inviteStatusRows: Array<Record<string, unknown>> = [];
     if (employeeIds.length > 0) {
@@ -284,7 +291,10 @@ export async function GET(request: Request) {
     const companyMemberEmails = new Set<string>();
     const companyUserIdByEmail = new Map<string, string>();
     const memberEmailByUserId = new Map<string, string>();
-    const membershipRoleByUserId = new Map<string, string>();
+    const membershipRoleByUserId = new Map<
+      string,
+      ReturnType<typeof resolveCompanyTeamRole>
+    >();
     const membershipProfileByUserId = new Map<string, LegacyPermissionProfile>();
     const profileDisplayNameByUserId = new Map<string, string>();
     const profileAvatarByUserId = new Map<string, string>();
@@ -312,7 +322,11 @@ export async function GET(request: Request) {
       for (const row of (membershipRows ?? []) as Array<Record<string, unknown>>) {
         const membershipUserId = normalizeId(row.user_id);
         if (!membershipUserId) continue;
-        const membershipRole = mapRoleForOutput(row.role);
+        const membershipRole = resolveCompanyTeamRole({
+          storedRole: row.role,
+          userId: membershipUserId,
+          primaryOwnerUserId,
+        });
         if (membershipRole) membershipRoleByUserId.set(membershipUserId, membershipRole);
         const membershipProfile = normalizeLegacyPermissionProfile(
           row.role,
@@ -427,7 +441,11 @@ export async function GET(request: Request) {
       for (const row of (membershipRows ?? []) as Array<Record<string, unknown>>) {
         const membershipUserId = normalizeId(row.user_id);
         if (!membershipUserId || representedUserIds.has(membershipUserId)) continue;
-        const membershipRole = mapRoleForOutput(row.role);
+        const membershipRole = resolveCompanyTeamRole({
+          storedRole: row.role,
+          userId: membershipUserId,
+          primaryOwnerUserId,
+        });
         const email = memberEmailByUserId.get(membershipUserId) ?? "";
         items.push({
           id: `membership:${membershipUserId}`,
@@ -548,6 +566,11 @@ export async function GET(request: Request) {
       if (membershipRole) {
         item.role = membershipRole;
       }
+      item.role = resolveCompanyTeamRole({
+        storedRole: item.role,
+        userId: linkedUserId,
+        primaryOwnerUserId,
+      });
       if (linkedUserId && membershipProfileByUserId.has(linkedUserId)) {
         item.accessProfile = membershipProfileByUserId.get(linkedUserId) ?? item.accessProfile;
       }
@@ -605,6 +628,10 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
+      viewerIsPrimaryOwner: isPrimaryOwner({
+        userId: viewerUserId,
+        primaryOwnerUserId,
+      }),
       items: items.map((item) => ({
         id: item.id,
         displayName: item.displayName,
@@ -626,6 +653,10 @@ export async function GET(request: Request) {
         joinedViaCompanyCode: Boolean(item.joinedViaCompanyCodeAt),
         joinedAt: item.joinedViaCompanyCodeAt,
         roleReviewPending: item.roleReviewPending,
+        isPrimaryOwner: isPrimaryOwner({
+          userId: item.userId,
+          primaryOwnerUserId,
+        }),
       })),
     });
   } catch (error) {

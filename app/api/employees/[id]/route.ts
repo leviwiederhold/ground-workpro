@@ -12,11 +12,15 @@ import { assignEmployeeToJob } from "@/lib/jobs/assignmentService";
 import {
   canonicalizeRoleWrite,
   isMissingLegacyPermissionProfileColumn,
-  isOwnerTeamRole,
   legacyCompatibleRoleValue,
   normalizeCanonicalTeamRole,
   normalizeLegacyPermissionProfile,
 } from "@/lib/auth/teamRoles";
+import {
+  getPrimaryOwnerUserId,
+  isPrimaryOwner,
+  resolveCompanyTeamRole,
+} from "@/lib/auth/companyOwnership";
 
 const employeeStatusSchema = z.enum(["clocked-in", "off", "active", "inactive"]);
 
@@ -59,6 +63,7 @@ const mapEmployee = (row: any) => {
     id,
     name: row.name ?? row.full_name ?? "",
     role: normalizeCanonicalTeamRole(row.role) ?? "team_member",
+    isPrimaryOwner: false,
     jobTitle: String(row.job_title ?? ""),
     accessProfile:
       normalizeLegacyPermissionProfile(row.role, row.legacy_permission_profile) ?? "operator",
@@ -175,9 +180,41 @@ export async function PATCH(
     }
     const existingEmployee = existingEmployeeResult.data;
     const payload = parsed.data;
+    const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
+    const actorIsPrimaryOwner = actorUserId === primaryOwnerUserId;
+    const targetIsPrimaryOwner = await isCompanyOwnerEmployee({
+      adminClient: getSupabaseAdmin(),
+      db: getSupabaseAdmin() ?? supabase,
+      companyId,
+      employeeUserId: existingEmployee.user_id,
+      employeeEmail: existingEmployee.email,
+    });
 
     if (payload.role !== undefined && actorRole !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const requestedRole = payload.role === undefined ? null : canonicalizeRoleWrite(payload.role).role;
+    if (requestedRole === "owner") {
+      return NextResponse.json(
+        { error: "Primary ownership can only be changed through the ownership transfer workflow." },
+        { status: 400 }
+      );
+    }
+    const currentRole = resolveCompanyTeamRole({
+      storedRole: existingEmployee.role,
+      userId: existingEmployee.user_id,
+      primaryOwnerUserId,
+    });
+    if (
+      payload.role !== undefined &&
+      (requestedRole === "co_owner" || currentRole === "co_owner") &&
+      !actorIsPrimaryOwner
+    ) {
+      return NextResponse.json(
+        { error: "Only the primary Owner can manage a Co-Owner role." },
+        { status: 403 }
+      );
     }
 
     if (payload.hourlyRate !== undefined && actorRole !== "admin") {
@@ -186,19 +223,8 @@ export async function PATCH(
 
     // Owner lock: an Owner's access role cannot be changed through the
     // Employees endpoint, regardless of how the employees row is linked.
-    if (payload.role !== undefined && !isOwnerTeamRole(payload.role)) {
-      const adminClient = getSupabaseAdmin();
-      const isTargetCeo = await isCompanyOwnerEmployee({
-        adminClient,
-        db: adminClient ?? supabase,
-        companyId,
-        employeeRole: existingEmployee.role,
-        employeeUserId: existingEmployee.user_id,
-        employeeEmail: existingEmployee.email,
-      });
-      if (isTargetCeo) {
-        return NextResponse.json({ error: "Owner role is locked and cannot be changed" }, { status: 400 });
-      }
+    if (payload.role !== undefined && targetIsPrimaryOwner) {
+      return NextResponse.json({ error: "Primary owner role is locked" }, { status: 400 });
     }
 
     const requestedJobId =
@@ -464,6 +490,15 @@ export async function PATCH(
     if (!employee) {
       return NextResponse.json({ error: "Employee update returned no row" }, { status: 500 });
     }
+    employee.role = resolveCompanyTeamRole({
+      storedRole: employee.role,
+      userId: updatedEmployee?.user_id,
+      primaryOwnerUserId,
+    });
+    employee.isPrimaryOwner = isPrimaryOwner({
+      userId: updatedEmployee?.user_id,
+      primaryOwnerUserId,
+    });
 
     // Any status change (deactivation OR reactivation) shifts the active seat
     // count, so resync the Stripe subscription quantity in both directions.
@@ -505,7 +540,7 @@ export async function DELETE(
 
     const employeeResult = await supabase
       .from("employees")
-      .select("id, user_id, email")
+      .select("id, user_id, email, role")
       .eq("company_id", companyId)
       .eq("id", employeeId)
       .maybeSingle();
@@ -517,13 +552,25 @@ export async function DELETE(
     }
     const linkedUserId = String(employeeResult.data.user_id ?? "").trim();
 
+    const adminClient = getSupabaseAdmin();
+    const isTargetPrimaryOwner = await isCompanyOwnerEmployee({
+      adminClient,
+      db: adminClient ?? supabase,
+      companyId,
+      employeeUserId: employeeResult.data.user_id,
+      employeeEmail: employeeResult.data.email,
+    });
+    if (isTargetPrimaryOwner) {
+      return NextResponse.json({ error: "Primary owner cannot be deleted" }, { status: 400 });
+    }
+
     // Use the service-role client for the destructive writes. The caller is
     // already authorized (requireModuleAccess team_management:edit), and RLS on
     // the memberships table only lets a user delete their OWN row — so deleting
     // another member's membership via the request-scoped client silently
     // affects 0 rows (no error), leaving an orphaned membership that still
     // counts toward billable seats. Admin client guarantees the row is removed.
-    const admin = getSupabaseAdmin();
+    const admin = adminClient;
     const writeClient = admin ?? supabase;
 
     const { error } = await writeClient

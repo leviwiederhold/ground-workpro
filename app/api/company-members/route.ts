@@ -4,8 +4,11 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import {
   canonicalTeamRoleLabel,
   isMissingLegacyPermissionProfileColumn,
-  normalizeCanonicalTeamRole,
 } from "@/lib/auth/teamRoles";
+import {
+  getPrimaryOwnerUserId,
+  resolveCompanyTeamRole,
+} from "@/lib/auth/companyOwnership";
 
 function toRoleLabel(role: unknown) {
   return canonicalTeamRoleLabel(role);
@@ -48,6 +51,7 @@ export async function GET(request: Request) {
     const { supabase, companyId, userId } = await getCompanyId();
     const admin = getSupabaseAdmin();
     const db = admin ?? supabase;
+    const primaryOwnerUserId = await getPrimaryOwnerUserId({ db, companyId });
     const url = new URL(request.url);
     const excludeSelf = url.searchParams.get("excludeSelf") !== "0";
 
@@ -287,10 +291,15 @@ export async function GET(request: Request) {
         .map((row) => {
         const memberUserId = String(row.user_id ?? "").trim();
         const role = roleOverrideById.get(memberUserId) || String(row.role ?? "").trim().toLowerCase();
+        const companyRole = resolveCompanyTeamRole({
+          storedRole: role,
+          userId: memberUserId,
+          primaryOwnerUserId,
+        });
         return {
           userId: memberUserId,
-          role: normalizeCanonicalTeamRole(role) ?? "team_member",
-          roleLabel: toRoleLabel(role),
+          role: companyRole,
+          roleLabel: toRoleLabel(companyRole),
           accessProfile: String(row.legacy_permission_profile ?? ""),
           displayName: nameById.get(memberUserId) || emailById.get(memberUserId) || "Team Member",
           email: emailById.get(memberUserId) || "",

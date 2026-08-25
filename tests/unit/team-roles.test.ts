@@ -4,11 +4,16 @@ import {
   canAssignTeamRole,
   canonicalizeRoleWrite,
   canonicalTeamRoleLabel,
+  isOwnerLevelTeamRole,
   isOwnerTeamRole,
   legacyCompatibleRoleValue,
   normalizeCanonicalTeamRole,
   normalizeLegacyPermissionProfile,
 } from "../../src/lib/auth/teamRoles.ts";
+import {
+  isPrimaryOwner,
+  resolveCompanyTeamRole,
+} from "../../src/lib/auth/companyOwnership.ts";
 import { normalizeAppRole } from "../../src/lib/nav/config.ts";
 import {
   getDefaultPermissionsByRole,
@@ -17,10 +22,10 @@ import {
 import { isCeoMembershipRole } from "../../src/lib/auth/ceoGuard.ts";
 
 const migrations: Array<[string, string, string]> = [
-  ["admin", "owner", "admin"],
-  ["ceo", "owner", "admin"],
-  ["co_ceo", "owner", "admin"],
-  ["executive", "owner", "admin"],
+  ["admin", "co_owner", "admin"],
+  ["ceo", "co_owner", "admin"],
+  ["co_ceo", "co_owner", "admin"],
+  ["executive", "co_owner", "admin"],
   ["pm", "manager", "pm"],
   ["manager", "manager", "pm"],
   ["foreman", "crew_lead", "foreman"],
@@ -62,31 +67,46 @@ test("Administrator is conservative and does not inherit legacy owner access", (
   assert.equal(getDefaultPermissionsByRole("administrator").integrations, "none");
 });
 
-test("Owner aliases retain full access and owner protections", () => {
+test("Owner and Co-Owner retain full access but only Owner is primary", () => {
+  assert.equal(isOwnerTeamRole("owner"), true);
   for (const role of ["owner", "admin", "ceo", "co-ceo", "co-owner", "executive"]) {
-    assert.equal(isOwnerTeamRole(role), true);
     assert.equal(isCeoMembershipRole(role), true);
+    assert.equal(isOwnerLevelTeamRole(role), true);
     assert.equal(normalizeAppRole(role), "admin");
     assert.ok(Object.values(getDefaultPermissionsByRole(role)).every((level) => level === "edit"));
   }
+  for (const role of ["admin", "ceo", "co-ceo", "co-owner", "executive"]) {
+    assert.equal(isOwnerTeamRole(role), false);
+    assert.equal(normalizeCanonicalTeamRole(role), "co_owner");
+  }
   assert.equal(isOwnerTeamRole("administrator"), false);
   assert.equal(isCeoMembershipRole("administrator"), false);
-  assert.equal(canAssignTeamRole("admin", "owner"), true);
-  assert.equal(canAssignTeamRole("owner", "owner"), true);
+  assert.equal(canAssignTeamRole("admin", "owner"), false);
+  assert.equal(canAssignTeamRole("owner", "owner"), false);
   assert.equal(canAssignTeamRole("pm", "owner"), false);
   assert.equal(canAssignTeamRole("manager", "owner"), false);
+  assert.equal(canAssignTeamRole("owner", "co_owner"), true);
+  assert.equal(canAssignTeamRole("co_owner", "co_owner"), false);
   assert.equal(canAssignTeamRole("pm", "administrator"), true);
 });
 
-test("multiple Owner-role members use the same protected access role", () => {
-  const companyMemberships = ["owner", "owner"];
-  assert.equal(companyMemberships.filter(isOwnerTeamRole).length, 2);
+test("one company marker resolves duplicate legacy Owners to one Owner and one Co-Owner", () => {
+  const primaryOwnerUserId = "user-a";
+  const companyMemberships = [
+    resolveCompanyTeamRole({ storedRole: "owner", userId: "user-a", primaryOwnerUserId }),
+    resolveCompanyTeamRole({ storedRole: "owner", userId: "user-b", primaryOwnerUserId }),
+  ];
+  assert.deepEqual(companyMemberships, ["owner", "co_owner"]);
+  assert.equal(companyMemberships.filter(isOwnerTeamRole).length, 1);
   assert.ok(companyMemberships.every((role) => normalizeAppRole(role) === "admin"));
+  assert.equal(isPrimaryOwner({ userId: "user-a", primaryOwnerUserId }), true);
+  assert.equal(isPrimaryOwner({ userId: "user-b", primaryOwnerUserId }), false);
 });
 
 test("every new invitation role uses one creation and acceptance contract", () => {
   const expectedProfiles = {
     owner: "admin",
+    co_owner: "admin",
     administrator: "pm",
     manager: "pm",
     crew_lead: "foreman",
@@ -114,7 +134,7 @@ test("legacy invite and cached native values remain accepted without escalation"
   assert.equal(normalizeCanonicalTeamRole("field_staff"), "team_member");
   assert.equal(normalizeAppRole("team_member", "mechanic"), "mechanic");
   assert.equal(normalizeAppRole("team_member", "fieldstaff"), "operator");
-  assert.equal(canonicalizeRoleWrite("admin").role, "owner");
+  assert.equal(canonicalizeRoleWrite("admin").role, "co_owner");
   assert.equal(canonicalizeRoleWrite("administrator").role, "administrator");
   assert.equal(legacyCompatibleRoleValue("owner", "memberships"), "admin");
   assert.equal(legacyCompatibleRoleValue("owner", "pending_invitations"), "ceo");
@@ -127,7 +147,7 @@ test("legacy invite and cached native values remain accepted without escalation"
 });
 
 test("normal role labels contain no legacy trade-specific authorization names", () => {
-  assert.equal(canonicalTeamRoleLabel("ceo"), "Owner");
+  assert.equal(canonicalTeamRoleLabel("ceo"), "Co-Owner");
   assert.equal(canonicalTeamRoleLabel("foreman"), "Crew Lead");
   assert.equal(canonicalTeamRoleLabel("mechanic"), "Team Member");
   assert.equal(canonicalTeamRoleLabel("operator"), "Team Member");

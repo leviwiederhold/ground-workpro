@@ -16,15 +16,17 @@ import {
   compatibleInvitationRoleSchema,
   type ModulePermissionMap,
 } from "@/lib/permissions/types";
-import { normalizeAppRole } from "@/lib/nav/config";
 import {
-  canAssignTeamRole,
   canonicalizeRoleWrite,
   isMissingLegacyPermissionProfileColumn,
-  isOwnerTeamRole,
   legacyCompatibleRoleValue,
   normalizeCanonicalTeamRole,
 } from "@/lib/auth/teamRoles";
+import {
+  getPrimaryOwnerUserId,
+  isPrimaryOwner,
+  resolveCompanyTeamRole,
+} from "@/lib/auth/companyOwnership";
 
 const paramsSchema = z.object({ id: z.string().uuid() });
 
@@ -90,6 +92,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     );
 
     const userId = String(employeeResult.data.user_id ?? "").trim();
+    const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: supabase, companyId });
     if (userId) {
       const permissionResult = await supabase
         .from("module_permissions")
@@ -111,7 +114,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       item: {
         employee_id: parsedParams.data.id,
         user_id: userId || null,
-        role: normalizeCanonicalTeamRole(employeeResult.data.role) ?? fallbackRole,
+        role: resolveCompanyTeamRole({
+          storedRole: employeeResult.data.role,
+          userId,
+          primaryOwnerUserId,
+        }) ?? fallbackRole,
+        isPrimaryOwner: isPrimaryOwner({ userId, primaryOwnerUserId }),
         permissions: permissionsToRows(permissionMap),
       },
     });
@@ -156,31 +164,29 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ error: "Team member not found" }, { status: 404 });
     }
 
-    if (
-      parsedBody.data.role &&
-      !canAssignTeamRole(actorRole, parsedBody.data.role)
-    ) {
+    const requestedRole = parsedBody.data.role
+      ? canonicalizeRoleWrite(parsedBody.data.role).role
+      : null;
+    if (requestedRole === "owner") {
       return NextResponse.json(
-        { error: "Only Owners can assign the Owner role." },
-        { status: 403 }
+        { error: "Primary ownership can only be changed through the ownership transfer workflow." },
+        { status: 400 }
       );
     }
 
-    // Owner lock takes precedence over the unlinked-account guard: the
-    // owner's role cannot be changed even if their employees row isn't linked.
-    if (parsedBody.data.role && !isOwnerTeamRole(parsedBody.data.role)) {
-      const adminClient = getSupabaseAdmin();
-      const isOwner = await isCompanyOwnerEmployee({
-        adminClient,
-        db: adminClient ?? supabase,
-        companyId,
-        employeeRole: employeeResult.data.role,
-        employeeUserId: employeeResult.data.user_id,
-        employeeEmail: (employeeResult.data as { email?: unknown }).email,
-      });
-      if (isOwner) {
-        return NextResponse.json({ error: "Owner role is locked and cannot be changed" }, { status: 400 });
-      }
+    const adminClient = getSupabaseAdmin();
+    const roleDb = adminClient ?? supabase;
+    const primaryOwnerUserId = await getPrimaryOwnerUserId({ db: roleDb, companyId });
+    const actorIsPrimaryOwner = actorUserId === primaryOwnerUserId;
+    const targetIsPrimaryOwner = await isCompanyOwnerEmployee({
+      adminClient,
+      db: roleDb,
+      companyId,
+      employeeUserId: employeeResult.data.user_id,
+      employeeEmail: (employeeResult.data as { email?: unknown }).email,
+    });
+    if (parsedBody.data.role && targetIsPrimaryOwner) {
+      return NextResponse.json({ error: "Primary owner role is locked" }, { status: 400 });
     }
 
     const targetUserId = String(employeeResult.data.user_id ?? "").trim();
@@ -198,11 +204,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return NextResponse.json({ error: membershipResult.error.message }, { status: 400 });
     }
 
+    const currentCompanyRole = resolveCompanyTeamRole({
+      storedRole: membershipResult.data?.role ?? employeeResult.data.role,
+      userId: targetUserId,
+      primaryOwnerUserId,
+    });
+    if (
+      parsedBody.data.role &&
+      (requestedRole === "co_owner" || currentCompanyRole === "co_owner") &&
+      !actorIsPrimaryOwner
+    ) {
+      return NextResponse.json(
+        { error: "Only the primary Owner can manage a Co-Owner role." },
+        { status: 403 }
+      );
+    }
+
     const normalized = normalizePermissionPayload({
       role: parsedBody.data.role ?? toTemplateRole(String(employeeResult.data.role ?? "operator")),
       permissions: parsedBody.data.permissions,
     });
-    const currentTemplateRole = toTemplateRole(String(employeeResult.data.role ?? "operator"));
+    const currentTemplateRole = currentCompanyRole;
     const roleChanged = Boolean(parsedBody.data.role && normalized.role !== currentTemplateRole);
     const shouldMarkReviewed = parsedBody.data.mark_reviewed || roleChanged;
     if ((roleChanged || shouldMarkReviewed) && actorRole !== "admin") {
@@ -212,18 +234,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       );
     }
 
-    const targetEmployeeRole = normalizeAppRole(
-      String(employeeResult.data.role ?? ""),
-      employeeResult.data.legacy_permission_profile
-    );
-    const targetMembershipRole = normalizeAppRole(
-      String(membershipResult.data?.role ?? ""),
-      membershipResult.data?.legacy_permission_profile
-    );
-    const isTargetCeo = targetEmployeeRole === "admin" || targetMembershipRole === "admin";
-
     assertCeoAccessLocked({
-      isTargetCeo,
+      isTargetCeo: targetIsPrimaryOwner,
       requestedRole: normalized.role,
       nextPermissions: normalized.permissions,
     });
@@ -237,7 +249,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     if (parsedBody.data.role) {
       const roleWrite = canonicalizeRoleWrite(parsedBody.data.role);
-      const roleDb = getSupabaseAdmin() ?? supabase;
       let membershipUpdate = await roleDb
         .from("memberships")
         .update(roleWrite)
@@ -322,6 +333,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof Error && /Owner|ownership/i.test(error.message)) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
     return NextResponse.json({ error: error instanceof Error ? error.message : "Internal server error" }, { status: 500 });
   }

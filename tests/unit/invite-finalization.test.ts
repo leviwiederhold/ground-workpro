@@ -30,10 +30,10 @@ test("new invitee proceeds without an existing membership", () => {
 
 test("legacy invite roles preserve their post-migration permission profiles", () => {
   const cases = [
-    ["ceo", "owner", "admin"],
-    ["Co-CEO", "owner", "admin"],
-    ["admin", "owner", "admin"],
-    ["executive", "owner", "admin"],
+    ["ceo", "co_owner", "admin"],
+    ["Co-CEO", "co_owner", "admin"],
+    ["admin", "co_owner", "admin"],
+    ["executive", "co_owner", "admin"],
     ["PM", "manager", "pm"],
     ["project manager", "manager", "pm"],
     ["foreman", "crew_lead", "foreman"],
@@ -49,6 +49,7 @@ test("legacy invite roles preserve their post-migration permission profiles", ()
 test("canonical invite roles use their deliberate conservative profiles", () => {
   const cases = [
     ["owner", "owner", "admin"],
+    ["co_owner", "co_owner", "admin"],
     ["administrator", "administrator", "pm"],
     ["manager", "manager", "pm"],
     ["crew_lead", "crew_lead", "foreman"],
@@ -82,7 +83,7 @@ test("membership created after the invite with exact role and profile resumes fi
       acceptedAt: null,
       acceptedUserId: null,
       membership: {
-        role: "owner",
+        role: "co_owner",
         permissionProfile: "admin",
         createdAt: "2026-08-11T12:00:01.000Z",
       },
@@ -295,8 +296,8 @@ test("final state requires exactly one membership and employee with the authoriz
     verifyInviteFinalizationRows({
       inviteRole: "ceo",
       invitePermissionProfile: "admin",
-      memberships: [{ role: "owner", legacy_permission_profile: "admin" }],
-      employees: [{ role: "owner", legacy_permission_profile: "admin" }],
+      memberships: [{ role: "co_owner", legacy_permission_profile: "admin" }],
+      employees: [{ role: "co_owner", legacy_permission_profile: "admin" }],
     }),
     { ok: true }
   );

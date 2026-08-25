@@ -71,7 +71,8 @@ const canRoleGiveFinalSafetySignOff = (role) =>
 
 const canonicalTeamRole = (value) => {
   const role = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (['owner', 'admin', 'executive', 'ceo', 'coceo'].includes(role)) return 'owner';
+  if (role === 'owner') return 'owner';
+  if (['coowner', 'admin', 'executive', 'ceo', 'coceo'].includes(role)) return 'co_owner';
   if (role === 'administrator') return 'administrator';
   if (['manager', 'pm', 'operations', 'operationsmanager', 'projectmanager'].includes(role)) return 'manager';
   if (['crewlead', 'foreman'].includes(role)) return 'crew_lead';
@@ -80,6 +81,7 @@ const canonicalTeamRole = (value) => {
 
 const teamRoleLabel = (value) => ({
   owner: 'Owner',
+  co_owner: 'Co-Owner',
   administrator: 'Administrator',
   manager: 'Manager',
   crew_lead: 'Crew Lead',
@@ -1010,6 +1012,7 @@ const MobileAppShell = ({
       const [feedbackStatus, setFeedbackStatus] = useState({ type: 'idle', message: '' });
       const roleBadgeLabel = ({
         owner: 'Owner',
+        co_owner: 'Co-Owner',
         administrator: 'Administrator',
         manager: 'Manager',
         crew_lead: 'Crew Lead',
@@ -1207,7 +1210,7 @@ const MobileAppShell = ({
       });
 
       const mapServerRoleToUiRole = useCallback((role) => {
-        if (['owner', 'administrator', 'manager', 'crew_lead', 'team_member'].includes(role)) return role;
+        if (['owner', 'co_owner', 'administrator', 'manager', 'crew_lead', 'team_member'].includes(role)) return role;
         if (role === 'admin') return 'executive';
         if (role === 'pm') return 'operations';
         if (role === 'foreman') return 'foreman';
@@ -3837,6 +3840,7 @@ const MobileAppShell = ({
       const [employeeActionLoading, setEmployeeActionLoading] = useState(false);
       const [employeeActionError, setEmployeeActionError] = useState('');
       const [teamItems, setTeamItems] = useState([]);
+      const [viewerIsPrimaryOwner, setViewerIsPrimaryOwner] = useState(false);
       const [teamLoading, setTeamLoading] = useState(false);
       const [teamError, setTeamError] = useState('');
       const [showAssignModal, setShowAssignModal] = useState(false);
@@ -3887,7 +3891,7 @@ const MobileAppShell = ({
       // Finance and Reports are Manager-or-above only. Below Manager they are
       // hidden in the invite form and force-stripped from the payload (server
       // enforces too).
-      const MANAGER_LEVEL_INVITE_ROLES = ['owner', 'administrator', 'manager'];
+      const MANAGER_LEVEL_INVITE_ROLES = ['owner', 'co_owner', 'administrator', 'manager'];
       const SENSITIVE_MANAGER_ONLY_KEYS = ['finance', 'reports'];
       const isManagerLevelInviteRole = (role) =>
         MANAGER_LEVEL_INVITE_ROLES.includes(String(role || '').toLowerCase());
@@ -3897,6 +3901,7 @@ const MobileAppShell = ({
         !SENSITIVE_MANAGER_ONLY_KEYS.includes(moduleKey) || isManagerLevelInviteRole(role);
       const roleTemplateDefaults = {
         owner: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
+        co_owner: { jobs: 'edit', fleet: 'edit', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'edit', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'edit', team_management: 'edit' },
         administrator: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'view', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'view', team_management: 'view' },
         manager: { jobs: 'edit', fleet: 'view', maintenance: 'edit', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'edit', reports: 'view', vendors: 'edit', documents: 'edit', training: 'edit', finance: 'view', team_management: 'view' },
         crew_lead: { jobs: 'view', fleet: 'view', maintenance: 'view', daily_reports: 'edit', safety: 'edit', messages: 'edit', inventory: 'none', reports: 'none', vendors: 'none', documents: 'view', training: 'view', finance: 'none', team_management: 'none' },
@@ -3904,7 +3909,8 @@ const MobileAppShell = ({
       };
       const appRoleToInviteRole = (role) => {
         const normalized = String(role || '').toLowerCase();
-        if (normalized === 'admin' || normalized === 'executive' || normalized === 'ceo' || normalized === 'owner') return 'owner';
+        if (normalized === 'owner') return 'owner';
+        if (normalized === 'admin' || normalized === 'executive' || normalized === 'ceo' || normalized === 'co_owner') return 'co_owner';
         if (normalized === 'administrator') return 'administrator';
         if (normalized === 'pm' || normalized === 'operations' || normalized === 'manager') return 'manager';
         if (normalized === 'foreman' || normalized === 'crew_lead') return 'crew_lead';
@@ -3957,6 +3963,7 @@ const MobileAppShell = ({
         joinedViaCompanyCode: Boolean(employee.joinedViaCompanyCodeAt),
         joinedAt: employee.joinedViaCompanyCodeAt || null,
         roleReviewPending: Boolean(employee.roleReviewPending),
+        isPrimaryOwner: Boolean(employee.isPrimaryOwner),
       }), [currentRole, jobs]);
 
       const filteredEmployees = teamItems.filter(emp => {
@@ -3969,15 +3976,14 @@ const MobileAppShell = ({
       const selectedEmployee = teamItems.find(e => String(e.id) === String(selectedEmployeeId));
       const selectedEmployeeRecord = employees.find((employee) => String(employee.id) === String(selectedEmployeeId));
       const normalizeRoleLabel = (value) => String(value || '').trim().toLowerCase();
-      const isSelectedEmployeeOwner = canonicalTeamRole(
-        selectedEmployeeRecord?.role || selectedEmployee?.role
-      ) === 'owner';
+      const isSelectedEmployeeOwner = Boolean(selectedEmployee?.isPrimaryOwner);
       const isSelectedMembershipOnly = selectedEmployee?.recordSource === 'membership';
       const employeeJob = selectedEmployee?.assignedToday ? { name: selectedEmployee.assignedToday.jobName } : null;
       const canAssignFromTeam = ['executive', 'operations', 'foreman'].includes(currentRole);
       const canManageTeamProfiles = String(moduleAccess?.team_management || 'none') === 'edit';
       const canEditPay = ['executive', 'admin'].includes(String(currentRole || '').toLowerCase());
       const canInviteOwner = isOwnerLevelUiRole(currentRole);
+      const canManageCoOwners = viewerIsPrimaryOwner;
       const pendingRoleReviewEmployees = canInviteOwner
         ? teamItems
             .filter((employee) => employee.roleReviewPending)
@@ -4047,10 +4053,13 @@ const MobileAppShell = ({
             joinedViaCompanyCode: Boolean(item.joinedViaCompanyCode),
             joinedAt: item.joinedAt || null,
             roleReviewPending: Boolean(item.roleReviewPending),
+            isPrimaryOwner: Boolean(item.isPrimaryOwner),
           }));
           setTeamItems(mappedItems);
+          setViewerIsPrimaryOwner(Boolean(payload.viewerIsPrimaryOwner));
         } catch (error) {
           setTeamItems([]);
+          setViewerIsPrimaryOwner(false);
           setTeamError(error instanceof Error ? error.message : 'Failed to load team');
         } finally {
           setTeamLoading(false);
@@ -4717,7 +4726,7 @@ const MobileAppShell = ({
       const handleSaveMemberPermissions = async () => {
         if (!selectedEmployee?.id) return;
         if (permissionModalMode === 'member-edit' && inviteForm.role === 'owner') {
-          setInviteFeedback('Owner role and permissions are locked at full access.');
+          setInviteFeedback('Primary owner role is locked.');
           return;
         }
         setInviteSaveLoading(true);
@@ -4919,7 +4928,7 @@ const MobileAppShell = ({
                   <div className="space-y-3">
                     {pendingInvites.map((invite) => {
                       const roleLabels = {
-                        owner: 'Owner', administrator: 'Administrator', manager: 'Manager',
+                        owner: 'Owner', co_owner: 'Co-Owner', administrator: 'Administrator', manager: 'Manager',
                         crew_lead: 'Crew Lead', team_member: 'Team Member',
                       };
                       const roleLabel = roleLabels[canonicalTeamRole(invite.role)] || 'Team Member';
@@ -5116,9 +5125,15 @@ const MobileAppShell = ({
                       value={employeeForm.role}
                       onChange={(e) => setEmployeeForm((prev) => ({ ...prev, role: e.target.value }))}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                      disabled={!canManageTeamProfiles || isSelectedEmployeeOwner || isSelectedMembershipOnly}
+                      disabled={
+                        !canManageTeamProfiles ||
+                        isSelectedEmployeeOwner ||
+                        isSelectedMembershipOnly ||
+                        (canonicalTeamRole(selectedEmployee?.role) === 'co_owner' && !canManageCoOwners)
+                      }
                     >
-                      {(canInviteOwner || isSelectedEmployeeOwner) && <option value="owner">Owner</option>}
+                      {isSelectedEmployeeOwner && <option value="owner">Owner</option>}
+                      {(canManageCoOwners || canonicalTeamRole(selectedEmployee?.role) === 'co_owner') && <option value="co_owner">Co-Owner</option>}
                       <option value="administrator">Administrator</option>
                       <option value="manager">Manager</option>
                       <option value="crew_lead">Crew Lead</option>
@@ -5128,7 +5143,7 @@ const MobileAppShell = ({
                       {getTeamRolePresentation(employeeForm.role).access}
                     </p>
                     {isSelectedEmployeeOwner && (
-                      <p className="text-xs text-amber-700 mt-1">Owner role is locked.</p>
+                      <p className="text-xs text-amber-700 mt-1">Primary owner role is locked.</p>
                     )}
                     {isSelectedMembershipOnly && (
                       <p className="text-xs text-gray-500 mt-1">This access record is not linked to an employee profile.</p>
@@ -5450,15 +5465,21 @@ const MobileAppShell = ({
                 <select
                   className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-[#090909] dark:text-zinc-100"
                   value={inviteForm.role}
-                  disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'owner'}
+                  disabled={permissionModalMode === 'member-edit' && (
+                    inviteForm.role === 'owner' ||
+                    (inviteForm.role === 'co_owner' && !canManageCoOwners)
+                  )}
                   onChange={(event) => {
                     const nextRole = event.target.value;
                     setInviteForm((prev) => ({ ...prev, role: nextRole }));
                     setPermissionForm({ ...roleTemplateDefaults[nextRole] });
                   }}
                 >
-                  {(canInviteOwner || (permissionModalMode === 'member-edit' && inviteForm.role === 'owner')) && (
+                  {permissionModalMode === 'member-edit' && inviteForm.role === 'owner' && (
                     <option value="owner">Owner</option>
+                  )}
+                  {(canManageCoOwners || (permissionModalMode === 'member-edit' && inviteForm.role === 'co_owner')) && (
+                    <option value="co_owner">Co-Owner</option>
                   )}
                   <option value="administrator">Administrator</option>
                   <option value="manager">Manager</option>
@@ -5488,7 +5509,10 @@ const MobileAppShell = ({
                       <select
                         className="w-full rounded-xl border border-gray-300 bg-gray-50 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-[#050505] dark:text-zinc-100"
                         value={permissionForm[module.key] || 'none'}
-                        disabled={permissionModalMode === 'member-edit' && inviteForm.role === 'owner'}
+                        disabled={permissionModalMode === 'member-edit' && (
+                          inviteForm.role === 'owner' ||
+                          (inviteForm.role === 'co_owner' && !canManageCoOwners)
+                        )}
                         onChange={(event) =>
                           setPermissionForm((prev) => ({
                             ...prev,
@@ -5516,7 +5540,7 @@ const MobileAppShell = ({
               </div>
 
               {permissionModalMode === 'member-edit' && inviteForm.role === 'owner' && (
-                <p className="text-xs text-amber-700">Owner role and permissions are locked at full access.</p>
+                <p className="text-xs text-amber-700">Primary owner role is locked.</p>
               )}
 
               {inviteFeedback && <p className="text-xs text-gray-600 dark:text-zinc-300">{inviteFeedback}</p>}
@@ -11246,8 +11270,8 @@ const MobileAppShell = ({
                 <Icon name="arrow-right" className="mr-2" /> Open Team
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              {['owner', 'administrator', 'manager', 'crew_lead', 'team_member'].map((role) => (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {['owner', 'co_owner', 'administrator', 'manager', 'crew_lead', 'team_member'].map((role) => (
                 <div key={role} className="min-w-0 rounded-lg border border-gray-200 p-3">
                   <p className="text-xs uppercase text-gray-500">{teamRoleLabel(role)}</p>
                   <p className="text-xl font-semibold text-gray-900">{Number(teamByRole[role] || 0)}</p>
@@ -13009,7 +13033,7 @@ const MobileAppShell = ({
       const handleSubmit = async () => {
         setSubmitError('');
         if (!canFinalSafetySignOff) {
-          setSubmitError('Only Manager, Administrator, or Owner roles can submit final safety sign-off.');
+          setSubmitError('Only Manager, Administrator, Co-Owner, or Owner roles can submit final safety sign-off.');
           return;
         }
         if (!form.topic) {
@@ -13036,7 +13060,7 @@ const MobileAppShell = ({
           <div className="space-y-4">
             {!canFinalSafetySignOff && (
               <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-                Only Manager, Administrator, or Owner roles can submit final safety sign-off.
+                Only Manager, Administrator, Co-Owner, or Owner roles can submit final safety sign-off.
               </div>
             )}
             <div>

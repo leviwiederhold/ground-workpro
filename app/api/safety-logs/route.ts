@@ -277,7 +277,7 @@ export async function POST(request: Request) {
         .from("memberships")
         .select("user_id, role")
         .eq("company_id", companyId)
-        .in("role", ["owner", "administrator", "manager", "admin", "pm"]);
+        .in("role", ["owner", "co_owner", "administrator", "manager", "admin", "pm"]);
       if (!membersResult.error) {
         const recipientIds = (membersResult.data ?? [])
           .map((row) => String(row.user_id ?? ""))

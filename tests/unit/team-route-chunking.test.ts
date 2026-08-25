@@ -33,7 +33,8 @@ test("Team weekly-hours lookup is also bounded for membership-only users", () =>
 
 test("Team keeps canonical roles, job titles, membership-only rows, and the response contract", () => {
   const source = read("app/api/team/route.ts");
-  assert.match(source, /normalizeCanonicalTeamRole/);
+  assert.match(source, /resolveCompanyTeamRole/);
+  assert.match(source, /primaryOwnerUserId/);
   assert.match(source, /id: `membership:\$\{membershipUserId\}`/);
   assert.match(source, /recordSource: "membership"/);
   assert.match(source, /jobTitle: item\.jobTitle/);

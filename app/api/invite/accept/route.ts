@@ -831,6 +831,22 @@ export async function POST(request: Request) {
         .delete()
         .eq("company_id", disposableBootstrapMembership.companyId)
         .eq("user_id", userId);
+
+      // The placeholder company no longer has a member after the successful
+      // move. Remove it so every surviving company continues to have exactly
+      // one primary Owner. This path uses the trusted server client and is not
+      // a general ownership-transfer API.
+      const disposableCompanyDelete = await client
+        .from("companies")
+        .delete()
+        .eq("id", disposableBootstrapMembership.companyId)
+        .eq("primary_owner_user_id", userId);
+      if (disposableCompanyDelete.error) {
+        console.error(
+          "[invite/accept] disposable bootstrap cleanup failed:",
+          disposableCompanyDelete.error.message
+        );
+      }
     }
 
     // Sync Stripe subscription quantity — seat count increased by 1.

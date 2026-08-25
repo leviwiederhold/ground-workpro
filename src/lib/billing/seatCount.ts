@@ -23,7 +23,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/admin";
  * Always returns at least 1 (a valid company always has its owner).
  */
 const INACTIVE_EMPLOYEE_STATUSES = ["inactive", "deleted", "archived", "removed"];
-const OWNER_MEMBERSHIP_ROLES = ["admin", "ceo", "executive", "owner"];
+const OWNER_MEMBERSHIP_ROLES = ["admin", "ceo", "executive", "owner", "co_owner"];
 
 export async function getActiveBillableSeatCount(companyId: string): Promise<number> {
   const admin = getSupabaseAdmin();

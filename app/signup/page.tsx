@@ -11,14 +11,15 @@ import { isStrongPassword, STRONG_PASSWORD_MESSAGE } from "@/lib/auth/passwordPo
 
 const ROLE_LABELS: Record<string, string> = {
   owner: "Owner",
+  co_owner: "Co-Owner",
   administrator: "Administrator",
   manager: "Manager",
   crew_lead: "Crew Lead",
   team_member: "Team Member",
   // Released links and cached validation responses are displayed with current
   // terminology even when they still contain a legacy value.
-  ceo: "Owner",
-  admin: "Owner",
+  ceo: "Co-Owner",
+  admin: "Co-Owner",
   pm: "Manager",
   foreman: "Crew Lead",
   mechanic: "Team Member",

@@ -61,6 +61,8 @@ test("migration backfills one marker, converts duplicate Owners, and protects th
   assert.match(migration, /Primary owner role is locked/);
   assert.match(migration, /before delete on public\.memberships/);
   assert.match(migration, /Use the dedicated ownership transfer workflow/);
+  assert.match(migration, /first future member becomes the one/);
+  assert.doesNotMatch(migration, /alter column primary_owner_user_id set not null/);
 });
 
 test("every normal role mutation endpoint rejects or gates owner-level assignment", () => {

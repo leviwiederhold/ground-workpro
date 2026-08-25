@@ -51,15 +51,10 @@ set primary_owner_user_id = (
 )
 where c.primary_owner_user_id is null;
 
-do $$
-begin
-  if exists (
-    select 1 from public.companies where primary_owner_user_id is null
-  ) then
-    raise exception 'Cannot establish a primary owner for a company with no membership';
-  end if;
-end
-$$;
+-- Historical bootstrap and E2E cleanup left dormant company rows with no
+-- membership. Preserve those rows rather than deleting data or inventing an
+-- owner. Every active company is backfilled above, and the membership guard
+-- below atomically establishes the owner if a dormant company is reactivated.
 
 -- Remove role checks before introducing the new canonical value.
 do $$
@@ -150,6 +145,9 @@ set search_path = public
 as $$
 begin
   new.primary_owner_user_id := coalesce(new.primary_owner_user_id, auth.uid());
+  if new.primary_owner_user_id is null then
+    raise exception 'A new company requires a primary owner';
+  end if;
   return new;
 end
 $$;
@@ -159,8 +157,6 @@ create trigger companies_default_primary_owner
 before insert on public.companies
 for each row execute function public.default_company_primary_owner();
 
-alter table public.companies
-  alter column primary_owner_user_id set not null;
 alter table public.companies
   drop constraint if exists companies_primary_owner_user_id_fkey;
 alter table public.companies
@@ -311,6 +307,29 @@ begin
   from public.companies
   where id = new.company_id;
 
+  -- A legacy company with no memberships is dormant and intentionally keeps
+  -- a null marker during migration. Its first future member becomes the one
+  -- primary Owner. The conditional update also makes concurrent inserts safe:
+  -- only one user can claim the null marker.
+  if tg_op = 'INSERT' and company_owner is null then
+    update public.companies
+    set primary_owner_user_id = new.user_id
+    where id = new.company_id
+      and primary_owner_user_id is null
+    returning primary_owner_user_id into company_owner;
+
+    if company_owner is null then
+      select primary_owner_user_id into company_owner
+      from public.companies
+      where id = new.company_id;
+    end if;
+
+    if new.user_id = company_owner then
+      new.role := 'owner';
+      new.legacy_permission_profile := 'admin';
+    end if;
+  end if;
+
   if new.role = 'owner' and new.user_id is distinct from company_owner then
     raise exception 'Only the company primary owner may have the Owner role';
   end if;
@@ -338,6 +357,13 @@ set search_path = public
 as $$
 begin
   if new.primary_owner_user_id is distinct from old.primary_owner_user_id then
+    -- Only the nested update from the first-membership trigger may initialize
+    -- a dormant legacy company. Direct ownership changes remain locked.
+    if old.primary_owner_user_id is null
+      and new.primary_owner_user_id is not null
+      and pg_trigger_depth() > 1 then
+      return new;
+    end if;
     raise exception 'Use the dedicated ownership transfer workflow';
   end if;
   return new;

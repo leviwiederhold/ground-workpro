@@ -32,6 +32,7 @@ import {
   WEB_LOGIN_ROUTE,
 } from "@/lib/auth/loginFlow";
 import { detectNativeLoginRuntime } from "@/lib/runtime/detectNativeLoginRuntime";
+import { getCapacitorNativePlatform, type CapacitorNativePlatform } from "@/lib/runtime/isNativePlatform";
 import { useNativeLoginDiagnostics } from "@/app/components/debug/useNativeLoginDiagnostics";
 
 function BackArrow() {
@@ -98,9 +99,11 @@ export default function NativeLoginPage() {
   const [providersInitializing, setProvidersInitializing] = useState(true);
   const [showEmailForm, setShowEmailForm] = useState(false);
   const [showNoWorkspace, setShowNoWorkspace] = useState(false);
+  const [nativePlatform, setNativePlatform] = useState<CapacitorNativePlatform | null>(null);
 
   useEffect(() => {
     document.body.classList.add("native-onboarding-open");
+    setNativePlatform(getCapacitorNativePlatform());
     return () => document.body.classList.remove("native-onboarding-open");
   }, []);
 
@@ -308,19 +311,21 @@ export default function NativeLoginPage() {
               </button>
             </div>
 
-            {/* Provider options — rendered unconditionally on the native route. */}
+            {/* Google/email are cross-platform. Apple is intentionally iOS-only. */}
             <div data-testid="native-provider-buttons">
-              <button
-                type="button"
-                className="provider-btn apple"
-                onClick={() => onProviderSignIn("apple")}
-                disabled={busy}
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M16.36 12.78c.02 2.42 2.12 3.23 2.14 3.24-.02.06-.34 1.16-1.11 2.3-.67.99-1.36 1.97-2.45 1.99-1.07.02-1.41-.63-2.63-.63-1.22 0-1.6.61-2.61.65-1.05.04-1.85-1.07-2.52-2.05-1.38-2-2.43-5.65-1.02-8.11.7-1.22 1.95-2 3.31-2.02 1.03-.02 2.01.7 2.64.7.63 0 1.82-.86 3.07-.74.52.02 1.99.21 2.93 1.59-.08.05-1.75 1.02-1.73 3.08M14.4 4.9c.56-.68.94-1.62.84-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.83-.46 2.39-1.14" />
-                </svg>
-                {providerLoading === "apple" ? "Signing in..." : "Continue with Apple"}
-              </button>
+              {nativePlatform === "ios" ? (
+                <button
+                  type="button"
+                  className="provider-btn apple"
+                  onClick={() => onProviderSignIn("apple")}
+                  disabled={busy}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M16.36 12.78c.02 2.42 2.12 3.23 2.14 3.24-.02.06-.34 1.16-1.11 2.3-.67.99-1.36 1.97-2.45 1.99-1.07.02-1.41-.63-2.63-.63-1.22 0-1.6.61-2.61.65-1.05.04-1.85-1.07-2.52-2.05-1.38-2-2.43-5.65-1.02-8.11.7-1.22 1.95-2 3.31-2.02 1.03-.02 2.01.7 2.64.7.63 0 1.82-.86 3.07-.74.52.02 1.99.21 2.93 1.59-.08.05-1.75 1.02-1.73 3.08M14.4 4.9c.56-.68.94-1.62.84-2.56-.81.03-1.79.54-2.37 1.22-.52.6-.98 1.56-.86 2.48.9.07 1.83-.46 2.39-1.14" />
+                  </svg>
+                  {providerLoading === "apple" ? "Signing in..." : "Continue with Apple"}
+                </button>
+              ) : null}
 
               <button
                 type="button"

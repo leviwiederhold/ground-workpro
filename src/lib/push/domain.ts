@@ -18,6 +18,8 @@ export type ApnsResponseClassification = {
   retryable: boolean;
 };
 
+export type FcmResponseClassification = ApnsResponseClassification;
+
 const INVALID_APNS_TOKEN_REASONS = new Set([
   "BadDeviceToken",
   "DeviceTokenNotForTopic",
@@ -33,6 +35,19 @@ const RETRYABLE_APNS_REASONS = new Set([
   "Shutdown",
   "TooManyProviderTokenUpdates",
   "TooManyRequests",
+]);
+
+const INVALID_FCM_TOKEN_CODES = new Set([
+  "UNREGISTERED",
+  "SENDER_ID_MISMATCH",
+  "INVALID_ARGUMENT",
+]);
+
+const RETRYABLE_FCM_CODES = new Set([
+  "INTERNAL",
+  "INTERNAL_SERVER_ERROR",
+  "RESOURCE_EXHAUSTED",
+  "UNAVAILABLE",
 ]);
 
 export function selectEligiblePushDevices(input: {
@@ -99,6 +114,23 @@ export function classifyApnsResponse(status: number, reason: string | null): Apn
     return { invalidToken: true, retryable: false };
   }
   if (status === 429 || status >= 500 || RETRYABLE_APNS_REASONS.has(normalizedReason)) {
+    return { invalidToken: false, retryable: true };
+  }
+  return { invalidToken: false, retryable: false };
+}
+
+/** Classify only the provider's FcmError code. A generic HTTP 400 is not enough
+ * to revoke a token because it can also describe a malformed server payload. */
+export function classifyFcmResponse(
+  status: number,
+  errorCode: string | null,
+): FcmResponseClassification {
+  const normalizedCode = String(errorCode ?? "").toUpperCase();
+  if (status >= 200 && status < 300) return { invalidToken: false, retryable: false };
+  if (INVALID_FCM_TOKEN_CODES.has(normalizedCode)) {
+    return { invalidToken: true, retryable: false };
+  }
+  if (status === 429 || status >= 500 || RETRYABLE_FCM_CODES.has(normalizedCode)) {
     return { invalidToken: false, retryable: true };
   }
   return { invalidToken: false, retryable: false };

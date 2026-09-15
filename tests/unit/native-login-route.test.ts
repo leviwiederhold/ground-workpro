@@ -37,6 +37,16 @@ test("/native/login renders Apple, Google, and Email buttons in order", () => {
   assert.ok(email > google, "Email must come after Google");
 });
 
+test("Apple login is rendered only for iOS while Google and email remain cross-platform", () => {
+  const page = nativePage();
+  assert.match(page, /nativePlatform === "ios" \? \([\s\S]{0,1200}Continue with Apple/);
+  const googleStart = page.indexOf("Continue with Google");
+  const appleCondition = page.indexOf('nativePlatform === "ios"');
+  assert.ok(appleCondition > 0 && googleStart > appleCondition);
+  const googleBlock = page.slice(googleStart - 900, googleStart + 100);
+  assert.doesNotMatch(googleBlock, /nativePlatform === "ios"/);
+});
+
 test("native provider buttons are NOT gated behind runtime detection", () => {
   const page = nativePage();
 

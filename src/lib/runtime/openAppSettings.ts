@@ -39,8 +39,12 @@ export function openAppLocationSettings(): OpenSettingsOutcome {
 }
 
 /** Platform-appropriate instructions for re-enabling location by hand. */
-export function locationSettingsInstructions(native: boolean): string {
-  return native
-    ? "Location access needs one more step. Open Settings and set Location to Always. Make sure Precise Location is on."
-    : "Open your browser’s site settings for this page (the icon in the address bar) → Location → Allow, then reload.";
+export function locationSettingsInstructions(platform: boolean | "ios" | "android" | "web"): string {
+  if (platform === "android") {
+    return "Open App settings → Permissions → Location → Allow all the time, and turn on precise location. If Android lists Battery usage, allow background activity.";
+  }
+  if (platform === true || platform === "ios") {
+    return "Location access needs one more step. Open Settings and set Location to Always. Make sure Precise Location is on.";
+  }
+  return "Open your browser’s site settings for this page (the icon in the address bar) → Location → Allow, then reload.";
 }

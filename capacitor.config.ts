@@ -63,6 +63,8 @@ if (!resolution.ok) {
 
 const liveUrl = resolution.url;
 const liveUrlHost = new URL(liveUrl).host;
+const isAndroidSync = process.argv.some((argument) => argument.toLowerCase() === "android");
+const nativeAppId = isAndroidSync ? "com.groundworkpro.app" : "com.leviwiederhold.groundworkpro";
 
 if (!resolution.isProduction) {
   // Visible in `cap sync` output so a non-production sync is never a surprise.
@@ -73,16 +75,17 @@ if (!resolution.isProduction) {
 }
 
 const config: CapacitorConfig = {
-  // Must match ios/App/App.xcodeproj PRODUCT_BUNDLE_IDENTIFIER, which is the
-  // identity of the shipped app (verified against Xcode archives). This file
-  // previously said "com.groundworkpro.app" while the Xcode project said
-  // com.leviwiederhold.groundworkpro; the Xcode project is what actually ships,
-  // so this is aligned to it rather than the other way around.
-  appId: "com.leviwiederhold.groundworkpro",
+  // Capacitor has one top-level appId even when the native products have
+  // different permanent identities. Platform-specific sync keeps Android on
+  // com.groundworkpro.app without changing the shipped iOS bundle ID.
+  appId: nativeAppId,
   appName: "Groundwork Pro",
   webDir: "capacitor-shell",
   server: {
     url: liveUrl,
+    // Android has no AppDelegate override like iOS, so make the native entry
+    // route explicit for both shells. iOS already resolves to this same route.
+    appStartPath: "/native?gw_native=1",
     cleartext: liveUrl.startsWith("http://"),
     androidScheme: liveUrl.startsWith("http://") ? "http" : "https",
     allowNavigation: [liveUrlHost],
@@ -99,7 +102,7 @@ const config: CapacitorConfig = {
     },
     SocialLogin: {
       providers: {
-        apple: true,
+        apple: !isAndroidSync,
         google: true,
         facebook: false,
         twitter: false,

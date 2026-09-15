@@ -4,6 +4,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
+  ANDROID_BACKGROUND_LOCATION_DISCLOSURE,
   isAttendanceParticipant,
   isAttendanceSetupComplete,
   LOCATION_CHECK_TIMEOUT_MS,
@@ -694,7 +695,7 @@ test("every failure code has exact visible copy", () => {
   }
   assert.equal(
     LOCATION_GATE_ERROR_COPY.LOCATION_PERMISSION_REQUEST_TIMEOUT,
-    "Timed out requesting iOS location permission.",
+    "Timed out requesting location permission.",
   );
   assert.equal(
     LOCATION_GATE_ERROR_COPY.NATIVE_GEOFENCE_HEALTH_TIMEOUT,
@@ -770,6 +771,23 @@ test("approved header/body copy stays generic", () => {
   }
 });
 
+test("Android shows a Play-compliant prominent disclosure before requesting background location", () => {
+  assert.equal(ANDROID_BACKGROUND_LOCATION_DISCLOSURE.title, "Background location");
+  assert.match(ANDROID_BACKGROUND_LOCATION_DISCLOSURE.body, /collects location data/i);
+  assert.match(ANDROID_BACKGROUND_LOCATION_DISCLOSURE.body, /automatic jobsite arrival and departure/i);
+  assert.match(ANDROID_BACKGROUND_LOCATION_DISCLOSURE.body, /even when the app is closed or not in use/i);
+  assert.match(ANDROID_BACKGROUND_LOCATION_DISCLOSURE.body, /does not create a continuous location history/i);
+
+  const source = code(gate());
+  assert.match(source, /androidDisclosureState === 'required'/);
+  assert.match(source, /android-background-location-disclosure/);
+  assert.match(
+    source,
+    /localStorage\.setItem\('groundwork\.androidBackgroundLocationDisclosure\.v1', '1'\);[\s\S]{0,200}void handlePrimary\(\)/,
+  );
+  assert.match(source, /groundwork\.androidBackgroundLocationDisclosure\.v1/);
+});
+
 test("the body switches to the required message after a denial", () => {
   assert.equal(resolveGateBody(null), LOCATION_GATE_COPY.body);
   assert.equal(resolveGateBody("granted"), LOCATION_GATE_COPY.body);
@@ -811,16 +829,20 @@ test("button labels follow the state machine", () => {
 });
 
 // ── No escape hatches ────────────────────────────────────────────────────────
-test("the gate has no dismissal affordance of any kind", () => {
+test("the platform gates have no dismissal affordance of any kind", () => {
   const source = code(gate());
 
   for (const forbidden of ["Not now", "Not Now", "onDismiss", "onClose", "Escape", "keydown", "aria-label=\"Close\""]) {
     assert.ok(!source.includes(forbidden), `the gate must not contain ${forbidden}`);
   }
 
-  // Exactly one button.
+  // Each mutually-exclusive platform screen has exactly one way forward: the
+  // Play-required Android prominent disclosure and the neutral permission gate.
   const buttons = source.match(/<button/g) ?? [];
-  assert.equal(buttons.length, 1, `expected exactly one action, found ${buttons.length}`);
+  assert.equal(buttons.length, 2, `expected one action per platform screen, found ${buttons.length}`);
+  assert.match(source, /data-testid="android-background-location-disclosure"/);
+  assert.match(source, /onClick=\{handleAndroidDisclosureContinue\}/);
+  assert.match(source, /onClick=\{handlePrimary\}/);
 
   // No backdrop click handler.
   assert.ok(!/onClick=\{\(event\)/.test(source), "no backdrop dismissal handler");
@@ -885,11 +907,13 @@ test("settings can only be opened natively; the web falls back to instructions",
   // Both platforms get usable manual steps.
   assert.match(locationSettingsInstructions(true), /set Location to Always/);
   assert.match(locationSettingsInstructions(true), /Precise Location is on/);
+  assert.match(locationSettingsInstructions("android"), /Allow all the time/);
+  assert.match(locationSettingsInstructions("android"), /background activity/);
   assert.match(locationSettingsInstructions(false), /site settings/);
 
   // The gate always shows instructions as a reliable fallback, even when the
   // WebView accepted the app-settings URL.
-  assert.match(code(gate()), /setShowInstructions\(true\);\s*openAppLocationSettings\(\)/);
+  assert.match(code(gate()), /setShowInstructions\(true\);[\s\S]{0,500}openAppLocationSettings\(\)/);
 });
 
 test("returning from Settings re-checks permission and lets the user in", () => {

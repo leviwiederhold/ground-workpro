@@ -129,7 +129,7 @@ secure store is not working, and background submission will not authenticate.
 
 ```bash
 pnpm ios:sync                                   # back to production
-pnpm exec cap sync android                      # ditto
+pnpm android:sync                              # ditto
 ```
 
 Do not leave a device build pointing at a preview and forget about it.

@@ -11,13 +11,13 @@ interrupted jobs every minute.
 
 The worker re-reads the message, participants, current company memberships, and
 enabled devices. It never accepts recipient IDs, preview copy, or an arbitrary
-payload from a client. APNs responses are recorded per device; invalid tokens
-are revoked and transient failures use bounded exponential retry.
+payload from a client. APNs/FCM responses are recorded per device; invalid
+tokens are revoked and transient failures use bounded exponential retry.
 
-`push_devices.platform` supports `ios` and `android`. iOS uses APNs directly.
-The Android provider remains disabled until the Android release supplies its
-FCM service account and `google-services.json`; the registry and job model do
-not need to change.
+`push_devices.platform` supports `ios` and `android`. iOS uses APNs directly;
+Android uses FCM HTTP v1 through the same provider boundary, durable job table,
+retry worker, delivery-attempt table, registration endpoint, and tap-routing
+payload. There is no second Android notification architecture.
 
 ## Production configuration
 
@@ -29,7 +29,18 @@ these Vercel Production variables:
 - `APNS_PRIVATE_KEY`: the complete `.p8` private key (literal newlines or `\n`
   escapes are accepted).
 - `APNS_BUNDLE_ID`: `com.leviwiederhold.groundworkpro`.
+- `FCM_PROJECT_ID`: Firebase/Google Cloud project ID.
+- `FCM_CLIENT_EMAIL`: service-account email permitted to send FCM messages.
+- `FCM_PRIVATE_KEY`: the complete service-account RSA private key (literal
+  newlines or `\n` escapes are accepted).
 - `PUSH_DISPATCH_SECRET`: a strong random secret used only by the retry worker.
+
+For Android, register Firebase application ID `com.groundworkpro.app`, put the
+downloaded (untracked) file at `android/app/google-services.json`, enable the
+Firebase Cloud Messaging API, and give the Vercel service account only the
+permission needed to send messages. The Capacitor plugin obtains and rotates
+the FCM token; the existing `/api/push/devices` registration stores it in the
+same private table used for iOS.
 
 In Apple Developer Certificates, Identifiers & Profiles:
 

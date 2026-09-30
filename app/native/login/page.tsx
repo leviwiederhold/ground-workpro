@@ -115,7 +115,9 @@ export default function NativeLoginPage() {
     let runId = 0;
 
     const prepareProviders = async () => {
-      if (!detectNativeLoginRuntime()) {
+      // Route/query markers can render this screen in a normal browser. Only a
+      // real Capacitor bridge may initialize the native plugin.
+      if (!getCapacitorNativePlatform()) {
         if (active) setProvidersInitializing(false);
         return;
       }
@@ -188,7 +190,7 @@ export default function NativeLoginPage() {
 
     // Never invoke native plugins in a normal browser. The buttons still render
     // (this is the native route) — they just explain themselves.
-    if (!detectNativeLoginRuntime()) {
+    if (!getCapacitorNativePlatform()) {
       setError("Native sign-in is only available in the Groundwork Pro app.");
       return;
     }

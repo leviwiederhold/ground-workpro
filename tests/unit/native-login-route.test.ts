@@ -241,11 +241,11 @@ test("browser access to /native/login is handled without invoking native plugins
   // Tapping a provider in a browser must bail BEFORE touching the plugin.
   assert.match(
     page,
-    /if \(!detectNativeLoginRuntime\(\)\)[\s\S]{0,300}return;/,
+    /if \(!getCapacitorNativePlatform\(\)\)[\s\S]{0,300}return;/,
     "provider handlers must refuse to run outside the native runtime",
   );
   const handlerStart = page.indexOf("async function onProviderSignIn");
-  const guardIndex = page.indexOf("!detectNativeLoginRuntime()", handlerStart);
+  const guardIndex = page.indexOf("!getCapacitorNativePlatform()", handlerStart);
   const pluginIndex = page.indexOf("signInWithAppleNative", handlerStart);
   assert.ok(guardIndex > 0 && guardIndex < pluginIndex, "the guard must precede any plugin call");
 });

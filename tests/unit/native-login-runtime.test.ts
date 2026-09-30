@@ -183,7 +183,7 @@ test("the detector is no longer used to gate whether native UI renders", () => {
   const nativePage = read("app/native/login/page.tsx");
 
   // It may guard plugin calls...
-  assert.match(nativePage, /if \(!detectNativeLoginRuntime\(\)\)/, "plugin calls must still be guarded");
+  assert.match(nativePage, /if \(!getCapacitorNativePlatform\(\)\)/, "plugin calls must require a live native bridge");
 
   // ...but the buttons themselves must not be behind it.
   const buttonsStart = nativePage.indexOf('data-testid="native-provider-buttons"');

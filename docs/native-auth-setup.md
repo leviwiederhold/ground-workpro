@@ -7,6 +7,17 @@ this flow exists.
 
 The app calls `supabase.auth.signInWithIdToken(...)` with the token the native
 sheet returns. There is no `/auth/callback`, no deep link, and no redirect.
+The native provider SDK handles its own return from the Google/Apple UI; iOS
+forwards URL and universal-link events through Capacitor's application delegate
+proxy. The returned ID token is exchanged directly for the existing Supabase
+session, then the app uses the same invite and workspace routing as password
+sign-in.
+
+On the website, Google and Apple use Supabase's supported browser OAuth flow and
+return through `/auth/callback`. The native SocialLogin plugin must only run in a
+real Capacitor iOS or Android container; its web implementation is a stub and
+reports that the plugin is not implemented. Apple sign-in is shown only on iOS
+in the native app, while Google is available on iOS, Android, and the website.
 
 ## Native application identifiers
 

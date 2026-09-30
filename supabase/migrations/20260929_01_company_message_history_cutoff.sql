@@ -83,6 +83,33 @@ $$;
 revoke all on function public.user_can_view_company_message_at(uuid, uuid, timestamptz) from public, anon;
 grant execute on function public.user_can_view_company_message_at(uuid, uuid, timestamptz) to authenticated, service_role;
 
+-- Keep this migration self-contained: some deployed databases do not have the
+-- helper introduced by the older group-message RLS migration. Retain that
+-- helper's original membership + explicit thread-participant access rule.
+create or replace function public.user_can_access_message_thread(
+  target_company_id uuid,
+  target_thread_id uuid,
+  target_user_id uuid default auth.uid()
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select public.is_company_member(target_company_id)
+    and exists (
+      select 1
+      from public.message_participants p
+      where p.company_id = target_company_id
+        and p.thread_id = target_thread_id
+        and p.user_id = target_user_id
+    );
+$$;
+
+revoke all on function public.user_can_access_message_thread(uuid, uuid, uuid) from public, anon;
+grant execute on function public.user_can_access_message_thread(uuid, uuid, uuid) to authenticated, service_role;
+
 create or replace function public.user_can_access_visible_message_thread(
   target_company_id uuid,
   target_thread_id uuid,

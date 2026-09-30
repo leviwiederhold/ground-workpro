@@ -49,6 +49,10 @@ test("database migration preserves existing memberships and enforces RLS on mess
   assert.match(migration, /target_user_id = auth\.uid\(\)/i);
   assert.match(
     migration,
+    /create or replace function public\.user_can_access_message_thread\(\s*target_company_id uuid,\s*target_thread_id uuid,\s*target_user_id uuid default auth\.uid\(\)\s*\)[\s\S]*?public\.is_company_member\(target_company_id\)[\s\S]*?from public\.message_participants p/i
+  );
+  assert.match(
+    migration,
     /user_can_view_company_message_at\(company_id, auth\.uid\(\), created_at\)/i
   );
   assert.match(migration, /message_attachments_storage_history_select/i);

@@ -5,6 +5,7 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
   getThreadIfParticipant,
+  getCompanyMessageHistoryCutoff,
   listMessagesForThread,
   resolveAvatarUrls,
   resolveDisplayNames,
@@ -36,10 +37,7 @@ function toTenantErrorResponse(error: TenantResolverError) {
   return serverError(error.message);
 }
 
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     try {
       await requireModuleAccess("messages", "view");
@@ -57,8 +55,14 @@ export async function GET(
 
     const threadId = parsedParams.data.id;
     const { supabase, companyId, userId } = await getCompanyId();
+    const historyCutoffAt = await getCompanyMessageHistoryCutoff(supabase, companyId, userId);
 
-    const { thread, participant } = await getThreadIfParticipant(supabase, companyId, threadId, userId);
+    const { thread, participant } = await getThreadIfParticipant(
+      supabase,
+      companyId,
+      threadId,
+      userId
+    );
     if (!participant) {
       const threadResult = await supabase
         .from("message_threads")
@@ -72,7 +76,14 @@ export async function GET(
     }
     if (!thread) return notFound("Thread not found");
 
-    const { items, count } = await listMessagesForThread(supabase, companyId, threadId, from, to);
+    const { items, count } = await listMessagesForThread(
+      supabase,
+      companyId,
+      threadId,
+      from,
+      to,
+      historyCutoffAt
+    );
     const senderUserIds = Array.from(
       new Set(items.map((row) => String(row.sender_user_id ?? "")).filter(Boolean))
     );

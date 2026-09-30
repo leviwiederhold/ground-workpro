@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getMessageHistoryCutoff } from "@/lib/messages/historyAccess";
 
 type ParticipantRow = {
   thread_id: string;
@@ -31,6 +32,24 @@ type MessageRow = {
 
 function getMessagingDb(supabase: SupabaseClient) {
   return getSupabaseAdmin() ?? supabase;
+}
+
+/** Read the database-assigned history boundary; callers must never provide it. */
+export async function getCompanyMessageHistoryCutoff(
+  supabase: SupabaseClient,
+  companyId: string,
+  userId: string
+): Promise<string | null> {
+  const result = await getMessagingDb(supabase)
+    .from("memberships")
+    .select("role, message_history_cutoff_at")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (result.error) throw new Error(result.error.message);
+  if (!result.data) throw new Error("Company membership not found");
+  return getMessageHistoryCutoff(result.data);
 }
 
 const pickDisplayName = ({
@@ -80,7 +99,9 @@ export async function findDirectThread(
   const [dmUserA, dmUserB] = sortDirectPair(userA, userB);
   const result = await getMessagingDb(supabase)
     .from("message_threads")
-    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select(
+      "id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at"
+    )
     .eq("company_id", companyId)
     .eq("kind", "direct")
     .eq("dm_user_a", dmUserA)
@@ -154,7 +175,9 @@ export async function getOrCreateDirectThread(
       updated_at: now,
       last_message_at: null,
     })
-    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select(
+      "id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at"
+    )
     .single();
 
   if (insertResult.error) {
@@ -199,7 +222,9 @@ export async function createGroupThread(
       updated_at: now,
       last_message_at: null,
     })
-    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select(
+      "id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at"
+    )
     .single();
 
   if (insertResult.error || !insertResult.data) {
@@ -234,7 +259,9 @@ export async function getThreadIfParticipant(
 
   const threadResult = await db
     .from("message_threads")
-    .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select(
+      "id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at"
+    )
     .eq("company_id", companyId)
     .eq("id", threadId)
     .limit(1)
@@ -291,7 +318,9 @@ export async function listThreadsByIds(
   const db = getMessagingDb(supabase);
   let result = await db
     .from("message_threads")
-    .select("id, company_id, kind, name, is_companywide, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+    .select(
+      "id, company_id, kind, name, is_companywide, dm_user_a, dm_user_b, created_at, updated_at, last_message_at"
+    )
     .eq("company_id", companyId)
     .in("id", threadIds);
 
@@ -299,7 +328,9 @@ export async function listThreadsByIds(
   if (result.error && /is_companywide/i.test(result.error.message || "")) {
     result = (await db
       .from("message_threads")
-      .select("id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at")
+      .select(
+        "id, company_id, kind, name, dm_user_a, dm_user_b, created_at, updated_at, last_message_at"
+      )
       .eq("company_id", companyId)
       .in("id", threadIds)) as typeof result;
   }
@@ -311,16 +342,18 @@ export async function listThreadsByIds(
 export async function listMessagesByThreadIds(
   supabase: SupabaseClient,
   companyId: string,
-  threadIds: string[]
+  threadIds: string[],
+  historyCutoffAt: string | null = null
 ): Promise<MessageRow[]> {
   if (threadIds.length === 0) return [];
 
-  const result = await getMessagingDb(supabase)
+  let query = getMessagingDb(supabase)
     .from("messages")
     .select("id, thread_id, sender_user_id, body, created_at")
     .eq("company_id", companyId)
-    .in("thread_id", threadIds)
-    .order("created_at", { ascending: false });
+    .in("thread_id", threadIds);
+  if (historyCutoffAt) query = query.gte("created_at", historyCutoffAt);
+  const result = await query.order("created_at", { ascending: false });
 
   if (result.error) throw new Error(result.error.message);
   return (result.data ?? []) as MessageRow[];
@@ -331,20 +364,24 @@ export async function listMessagesForThread(
   companyId: string,
   threadId: string,
   from: number,
-  to: number
+  to: number,
+  historyCutoffAt: string | null = null
 ): Promise<{ items: MessageRow[]; count: number }> {
   const db = getMessagingDb(supabase);
-  const runQuery = (columns: string) =>
-    db
+  const runQuery = (columns: string) => {
+    let query = db
       .from("messages")
       .select(columns, { count: "exact" })
       .eq("company_id", companyId)
-      .eq("thread_id", threadId)
-      // Page from the newest edge so page 1 always opens on the latest
-      // conversation state. Each page is reversed below for chronological UI.
+      .eq("thread_id", threadId);
+    if (historyCutoffAt) query = query.gte("created_at", historyCutoffAt);
+    // Page from the newest edge so page 1 always opens on the latest
+    // conversation state. Each page is reversed below for chronological UI.
+    return query
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(from, to);
+  };
 
   // Prefer selecting edited_at; tolerate environments where the migration that
   // adds it has not been applied yet (fall back to the base columns).
@@ -405,7 +442,9 @@ export async function resolveDisplayNames(
       display_name?: string;
     }>;
   } else if (
-    /display_name|Could not find the 'display_name' column/i.test(profilesResult.error.message || "")
+    /display_name|Could not find the 'display_name' column/i.test(
+      profilesResult.error.message || ""
+    )
   ) {
     const fallbackProfilesResult = await db
       .from("profiles")
@@ -420,11 +459,11 @@ export async function resolveDisplayNames(
   }
 
   for (const row of profileRows) {
-      const resolved = pickDisplayName({
-        fullName: row.full_name,
-        displayName: (row as { display_name?: string }).display_name,
-      });
-      if (resolved) map.set(String(row.id), resolved);
+    const resolved = pickDisplayName({
+      fullName: row.full_name,
+      displayName: (row as { display_name?: string }).display_name,
+    });
+    if (resolved) map.set(String(row.id), resolved);
   }
 
   const employeesPrimaryResult = await db
@@ -433,7 +472,8 @@ export async function resolveDisplayNames(
     .eq("company_id", companyId)
     .in("user_id", unique);
 
-  let employeeRows: Array<{ user_id?: string; name?: string; full_name?: string; email?: string }> = [];
+  let employeeRows: Array<{ user_id?: string; name?: string; full_name?: string; email?: string }> =
+    [];
   if (!employeesPrimaryResult.error) {
     employeeRows = (employeesPrimaryResult.data ?? []) as Array<{
       user_id?: string;
@@ -505,10 +545,7 @@ export async function resolveAvatarUrls(
   const map = new Map<string, string>();
   if (unique.length === 0) return map;
 
-  const profilesResult = await supabase
-    .from("profiles")
-    .select("id, avatar_url")
-    .in("id", unique);
+  const profilesResult = await supabase.from("profiles").select("id, avatar_url").in("id", unique);
 
   if (!profilesResult.error) {
     for (const row of (profilesResult.data ?? []) as Array<{ id?: string; avatar_url?: string }>) {
@@ -519,7 +556,9 @@ export async function resolveAvatarUrls(
     return map;
   }
 
-  if (/avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")) {
+  if (
+    /avatar_url|Could not find the 'avatar_url' column/i.test(profilesResult.error.message || "")
+  ) {
     return map;
   }
 

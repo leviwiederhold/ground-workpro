@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { canViewCompanyMessageAt } from "@/lib/messages/historyAccess";
 import {
   buildMessagePushContent,
   getPushRetryAt,
@@ -54,11 +55,7 @@ export async function enqueueMessagePushJob(input: {
   return data;
 }
 
-async function updateJob(
-  db: SupabaseClient,
-  jobId: string,
-  payload: Record<string, unknown>
-) {
+async function updateJob(db: SupabaseClient, jobId: string, payload: Record<string, unknown>) {
   const { error } = await db
     .from("message_push_jobs")
     .update({ ...payload, updated_at: new Date().toISOString() })
@@ -137,13 +134,16 @@ async function updateDeviceAfterDelivery(input: {
 async function processJob(db: SupabaseClient, job: PushJob) {
   const messageResult = await db
     .from("messages")
-    .select("id, company_id, thread_id, sender_user_id, body")
+    .select("id, company_id, thread_id, sender_user_id, body, created_at")
     .eq("id", job.message_id)
     .eq("company_id", job.company_id)
     .eq("thread_id", job.thread_id)
     .maybeSingle();
   if (messageResult.error) throw new Error(messageResult.error.message);
-  if (!messageResult.data || String(messageResult.data.sender_user_id) !== String(job.sender_user_id)) {
+  if (
+    !messageResult.data ||
+    String(messageResult.data.sender_user_id) !== String(job.sender_user_id)
+  ) {
     await updateJob(db, job.id, {
       status: "failed",
       processed_at: new Date().toISOString(),
@@ -151,6 +151,7 @@ async function processJob(db: SupabaseClient, job: PushJob) {
     });
     return { sent: 0, invalid: 0, failed: 1, skipped: 0 };
   }
+  const messageCreatedAt = String(messageResult.data.created_at ?? "");
 
   const participantsResult = await db
     .from("message_participants")
@@ -168,12 +169,14 @@ async function processJob(db: SupabaseClient, job: PushJob) {
   const membershipsResult = possibleRecipients.length
     ? await db
         .from("memberships")
-        .select("user_id")
+        .select("user_id, role, message_history_cutoff_at")
         .eq("company_id", job.company_id)
         .in("user_id", possibleRecipients)
     : { data: [], error: null };
   if (membershipsResult.error) throw new Error(membershipsResult.error.message);
-  const activeMemberUserIds = (membershipsResult.data ?? []).map((row) => String(row.user_id));
+  const activeMemberUserIds = (membershipsResult.data ?? [])
+    .filter((row) => canViewCompanyMessageAt(row, messageCreatedAt))
+    .map((row) => String(row.user_id));
 
   const devicesResult = activeMemberUserIds.length
     ? await db
@@ -322,23 +325,29 @@ async function processJob(db: SupabaseClient, job: PushJob) {
     await updateJob(db, job.id, {
       status: retryableFailures > 0 ? "failed" : "completed",
       processed_at: new Date().toISOString(),
-      last_error: retryableFailures > 0 ? `${retryableFailures} push delivery attempt(s) failed` : null,
+      last_error:
+        retryableFailures > 0 ? `${retryableFailures} push delivery attempt(s) failed` : null,
     });
   }
 
   return { sent, invalid, failed, skipped };
 }
 
-export async function processPushNotificationJobs(input: {
-  db: SupabaseClient;
-  limit?: number;
-}) {
+export async function processPushNotificationJobs(input: { db: SupabaseClient; limit?: number }) {
   const limit = Math.max(1, Math.min(Number(input.limit ?? 20), 100));
   const claimedResult = await input.db.rpc("claim_message_push_jobs", { p_limit: limit });
   if (claimedResult.error) throw new Error(claimedResult.error.message);
 
   const jobs = (claimedResult.data ?? []) as PushJob[];
-  const totals = { claimed: jobs.length, completed: 0, retried: 0, failed: 0, sent: 0, invalid: 0, skipped: 0 };
+  const totals = {
+    claimed: jobs.length,
+    completed: 0,
+    retried: 0,
+    failed: 0,
+    sent: 0,
+    invalid: 0,
+    skipped: 0,
+  };
 
   for (const job of jobs) {
     try {

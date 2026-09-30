@@ -3,7 +3,8 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { forbidden, notFound, serverError, validationError } from "@/lib/http/errors";
 import { okItem } from "@/lib/http/json";
-import { getThreadIfParticipant } from "@/lib/messages/mvp";
+import { getCompanyMessageHistoryCutoff, getThreadIfParticipant } from "@/lib/messages/mvp";
+import { canViewCompanyMessageAt } from "@/lib/messages/historyAccess";
 import { MESSAGE_ATTACHMENTS_BUCKET } from "@/lib/messages/attachments";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 
@@ -41,6 +42,7 @@ async function loadOwnMessage(
 
   const { supabase, companyId, userId } = await getCompanyId();
   const db = getSupabaseAdmin() ?? supabase;
+  const historyCutoffAt = await getCompanyMessageHistoryCutoff(supabase, companyId, userId);
 
   const { thread, participant } = await getThreadIfParticipant(
     supabase,
@@ -60,6 +62,14 @@ async function loadOwnMessage(
 
   if (messageResult.error) return { error: serverError(messageResult.error.message) };
   if (!messageResult.data) return { error: notFound("Message not found") };
+  if (
+    !canViewCompanyMessageAt(
+      { message_history_cutoff_at: historyCutoffAt },
+      messageResult.data.created_at
+    )
+  ) {
+    return { error: notFound("Message not found") };
+  }
 
   // Sender-only: you can only edit/delete messages you personally sent.
   if (String(messageResult.data.sender_user_id) !== String(userId)) {
@@ -143,7 +153,10 @@ export async function DELETE(
       .map((row: { storage_path?: string }) => String(row.storage_path ?? ""))
       .filter(Boolean);
     if (paths.length > 0) {
-      await ctx.db.storage.from(MESSAGE_ATTACHMENTS_BUCKET).remove(paths).catch(() => null);
+      await ctx.db.storage
+        .from(MESSAGE_ATTACHMENTS_BUCKET)
+        .remove(paths)
+        .catch(() => null);
     }
 
     return okItem({ id: ctx.message.id, deleted: true });

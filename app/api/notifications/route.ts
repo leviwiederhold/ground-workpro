@@ -1,10 +1,12 @@
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { getCompanyId, TenantResolverError } from '@/lib/tenant/getCompanyId';
-import { formatNotification, type NotificationType } from '@/lib/notifications/format';
-import { listFallbackNotifications } from '@/lib/notifications/fallbackStore';
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
+import { formatNotification, type NotificationType } from "@/lib/notifications/format";
+import { listFallbackNotifications } from "@/lib/notifications/fallbackStore";
+import { getCompanyMessageHistoryCutoff } from "@/lib/messages/mvp";
+import { canViewCompanyMessageAt } from "@/lib/messages/historyAccess";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 type NotificationRow = {
   id: string;
@@ -29,21 +31,22 @@ const querySchema = z.object({
 function isMissingNotificationsTable(message: string) {
   const normalized = message.toLowerCase();
   return (
-    normalized.includes('notifications') &&
-    (normalized.includes('does not exist') || normalized.includes('not find'))
+    normalized.includes("notifications") &&
+    (normalized.includes("does not exist") || normalized.includes("not find"))
   );
 }
 
 function isMissingNotificationsColumns(message: string) {
   const normalized = message.toLowerCase();
-  return normalized.includes('column') && (
-    normalized.includes('title') ||
-    normalized.includes('body') ||
-    normalized.includes('link') ||
-    normalized.includes('is_read') ||
-    normalized.includes('actor_user_id') ||
-    normalized.includes('entity_type') ||
-    normalized.includes('entity_id')
+  return (
+    normalized.includes("column") &&
+    (normalized.includes("title") ||
+      normalized.includes("body") ||
+      normalized.includes("link") ||
+      normalized.includes("is_read") ||
+      normalized.includes("actor_user_id") ||
+      normalized.includes("entity_type") ||
+      normalized.includes("entity_id"))
   );
 }
 
@@ -51,16 +54,18 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const parsed = querySchema.safeParse({
-      limit: url.searchParams.get('limit') ?? undefined,
+      limit: url.searchParams.get("limit") ?? undefined,
     });
     if (!parsed.success) {
       return NextResponse.json(
         {
-          error: 'Validation error',
-          details: parsed.error.issues.map((issue: { path: (string | number)[]; message: string }) => ({
-            path: issue.path.join('.'),
-            message: issue.message,
-          })),
+          error: "Validation error",
+          details: parsed.error.issues.map(
+            (issue: { path: (string | number)[]; message: string }) => ({
+              path: issue.path.join("."),
+              message: issue.message,
+            })
+          ),
         },
         { status: 422 }
       );
@@ -68,27 +73,30 @@ export async function GET(request: Request) {
     const limit = parsed.data.limit;
 
     const { supabase, companyId, userId } = await getCompanyId();
+    const historyCutoffAt = await getCompanyMessageHistoryCutoff(supabase, companyId, userId);
 
     const primaryResult = await supabase
-      .from('notifications')
-      .select('id, user_id, type, title, body, link, actor_user_id, entity_type, entity_id, payload, is_read, read_at, created_at')
-      .eq('company_id', companyId)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
+      .from("notifications")
+      .select(
+        "id, user_id, type, title, body, link, actor_user_id, entity_type, entity_id, payload, is_read, read_at, created_at"
+      )
+      .eq("company_id", companyId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
       .limit(limit);
 
     let rows: NotificationRow[] = (primaryResult.data ?? []) as NotificationRow[];
     let resultError: { message: string } | null = primaryResult.error
-      ? { message: String(primaryResult.error.message ?? 'Failed to load notifications') }
+      ? { message: String(primaryResult.error.message ?? "Failed to load notifications") }
       : null;
 
-    if (resultError && isMissingNotificationsColumns(resultError.message || '')) {
+    if (resultError && isMissingNotificationsColumns(resultError.message || "")) {
       const legacy = await supabase
-        .from('notifications')
-        .select('id, user_id, type, payload, read_at, created_at')
-        .eq('company_id', companyId)
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
+        .from("notifications")
+        .select("id, user_id, type, payload, read_at, created_at")
+        .eq("company_id", companyId)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
         .limit(limit);
       if (!legacy.error) {
         rows = (legacy.data ?? []).map((row) => ({
@@ -113,7 +121,12 @@ export async function GET(request: Request) {
           companyWide: false,
           limit,
         });
-        const items = fallbackRows.map((row) => {
+        const visibleFallbackRows = fallbackRows.filter(
+          (row) =>
+            row.type !== "new_message" ||
+            canViewCompanyMessageAt({ message_history_cutoff_at: historyCutoffAt }, row.created_at)
+        );
+        const items = visibleFallbackRows.map((row) => {
           const payload = (row.payload ?? {}) as Record<string, unknown>;
           const display = formatNotification(row.type, payload);
           const isRead = Boolean((row as { is_read?: boolean }).is_read ?? row.read_at);
@@ -125,7 +138,7 @@ export async function GET(request: Request) {
             title: display.title,
             message: display.message,
             body: display.message,
-            link: display.link || String(payload.href ?? ''),
+            link: display.link || String(payload.href ?? ""),
             actor_user_id: null,
             entity_type: null,
             entity_id: null,
@@ -140,38 +153,44 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: resultError.message }, { status: 400 });
     }
 
-    const items = rows.map((row) => {
-      const payload = row.payload ?? {};
-      const display = formatNotification(row.type, payload);
-      const isRead = Boolean(row.is_read ?? row.read_at);
-      const title = String(row.title ?? display.title);
-      const body = String(row.body ?? display.message);
-      const link = String(row.link ?? display.link ?? (payload.href ?? ''));
-      return {
-        id: row.id,
-        userId: row.user_id,
-        type: row.type,
-        notification_type: row.type,
-        title,
-        message: body,
-        body,
-        link,
-        actor_user_id: row.actor_user_id,
-        entity_type: row.entity_type,
-        entity_id: row.entity_id,
-        payload,
-        is_read: isRead,
-        read_at: row.read_at,
-        created_at: row.created_at,
-      };
-    });
+    const items = rows
+      .filter(
+        (row) =>
+          row.type !== "new_message" ||
+          canViewCompanyMessageAt({ message_history_cutoff_at: historyCutoffAt }, row.created_at)
+      )
+      .map((row) => {
+        const payload = row.payload ?? {};
+        const display = formatNotification(row.type, payload);
+        const isRead = Boolean(row.is_read ?? row.read_at);
+        const title = String(row.title ?? display.title);
+        const body = String(row.body ?? display.message);
+        const link = String(row.link ?? display.link ?? payload.href ?? "");
+        return {
+          id: row.id,
+          userId: row.user_id,
+          type: row.type,
+          notification_type: row.type,
+          title,
+          message: body,
+          body,
+          link,
+          actor_user_id: row.actor_user_id,
+          entity_type: row.entity_type,
+          entity_id: row.entity_id,
+          payload,
+          is_read: isRead,
+          read_at: row.read_at,
+          created_at: row.created_at,
+        };
+      });
 
     return NextResponse.json({ items });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    const message = error instanceof Error ? error.message : 'Internal server error';
+    const message = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

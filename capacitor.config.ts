@@ -83,9 +83,11 @@ const config: CapacitorConfig = {
   webDir: "capacitor-shell",
   server: {
     url: liveUrl,
-    // Android has no AppDelegate override like iOS, so make the native entry
-    // route explicit for both shells. iOS already resolves to this same route.
-    appStartPath: "/native?gw_native=1",
+    // Android has no AppDelegate override, so Capacitor must start it on the
+    // native entry route. Do not emit appStartPath for iOS: its AppDelegate
+    // loads the remote URL itself, and Capacitor otherwise treats this path as
+    // a bundled public file before server.url is active.
+    ...(isAndroidSync ? { appStartPath: "/native?gw_native=1" } : {}),
     cleartext: liveUrl.startsWith("http://"),
     androidScheme: liveUrl.startsWith("http://") ? "http" : "https",
     allowNavigation: [liveUrlHost],

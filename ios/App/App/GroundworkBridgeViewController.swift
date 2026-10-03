@@ -1,5 +1,4 @@
 import Capacitor
-import SocialLoginPlugin
 
 /// Registers the app-target Capacitor plugins.
 ///
@@ -15,6 +14,5 @@ final class GroundworkBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(JobsiteGeofencePlugin())
         bridge?.registerPluginInstance(AttendanceQueueStorePlugin())
         bridge?.registerPluginInstance(SecureAttendanceStorePlugin())
-        bridge?.registerPluginInstance(SocialLoginPlugin())
     }
 }

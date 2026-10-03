@@ -26,7 +26,7 @@ test("Android release identity, API level, signing guard, and production start r
   assert.match(appGradle, /ANDROID_VERSION_CODE/);
   assert.match(variables, /targetSdkVersion = 36/);
   assert.match(serverUrl, /https:\/\/ground-workpro\.vercel\.app/);
-  assert.match(capacitor, /appStartPath: "\/native\?gw_native=1"/);
+  assert.match(capacitor, /isAndroidSync \? \{ appStartPath: "\/native\?gw_native=1" \} : \{\}/);
   assert.match(capacitor, /isAndroidSync \? "com\.groundworkpro\.app" : "com\.leviwiederhold\.groundworkpro"/);
   assert.match(capacitor, /apple: !isAndroidSync/);
   assert.match(androidSync, /com\.groundworkpro\.app/);

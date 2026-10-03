@@ -126,6 +126,13 @@ if (generated?.appId !== "com.leviwiederhold.groundworkpro") {
   fail(`${GENERATED_CONFIG} has an unexpected appId: ${JSON.stringify(generated?.appId)}.`);
 }
 
+if (generated?.server?.appStartPath !== undefined) {
+  fail(
+    `${GENERATED_CONFIG} unexpectedly contains server.appStartPath = ${JSON.stringify(generated.server.appStartPath)}.`,
+    "iOS AppDelegate owns remote native-route startup; a Capacitor appStartPath is interpreted as a bundled file path.",
+  );
+}
+
 console.log("");
 console.log(`${GREEN}✔ Verified${RESET} ${GENERATED_CONFIG} -> server.url = ${actualUrl}`);
 

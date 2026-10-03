@@ -1,6 +1,6 @@
 # Android / Google Play release readiness
 
-Last audited: 2026-09-15
+Last audited: 2026-10-03
 
 Repository base: `main` at `55236b4`
 
@@ -27,6 +27,11 @@ and selectively rebuilt on current `main`. The stale branch was not merged.
 - Android sync is forced to the production HTTPS origin and native start route
   `/native?gw_native=1`. It fails if the generated ID, URL, start path, or
   social-provider configuration is wrong.
+- iOS continues to load that remote native route through `AppDelegate`; its
+  generated Capacitor config deliberately omits `appStartPath` so Capacitor
+  cannot mistake the remote route for a bundled file. Swift Package plugins
+  such as Social Login remain auto-registered, while the app-target attendance
+  plugins are registered explicitly.
 - Google and email sign-in remain available on Android. Apple sign-in is
   excluded from Android configuration and UI, but remains enabled on iOS.
 - Kotlin is compiled and `MainActivity` registers the geofencing, attendance
@@ -63,21 +68,26 @@ and selectively rebuilt on current `main`. The stale branch was not merged.
 
 ## Verification record
 
-These checks were run from a clean clone on macOS with Node 22, pnpm 9, Android
-SDK 36, and JDK 21:
+The repository suite was run on macOS with Node 22, pnpm 9, Android SDK 36, and
+JDK 21. Credential-dependent checks were rerun after the ignored local Firebase
+and upload-signing files were installed:
 
 | Check | Result |
 | --- | --- |
 | `pnpm install --frozen-lockfile` | Passed |
 | `pnpm lint` | Passed |
 | `pnpm typecheck` | Passed |
-| `pnpm test:unit` | Passed (683 tests) |
+| `pnpm test:unit` | Passed (687 tests) |
 | `pnpm build` | Passed in production mode with explicit non-secret placeholder build values |
 | `pnpm android:sync` | Passed; generated Android config inspected |
+| `pnpm ios:sync` | Passed; iOS config has the production URL, original bundle ID, and no `appStartPath` |
+| iOS simulator Debug build | Passed without code signing |
 | `./gradlew :app:assembleDebug` | Passed |
 | `./gradlew :app:testDebugUnitTest :app:lintDebug` | Passed |
-| Unsigned `./gradlew :app:bundleRelease` | Failed as designed with the signing guard |
+| `./gradlew :app:processReleaseGoogleServices` | Passed; required Firebase resource keys generated |
+| Signed `./gradlew :app:bundleRelease` | Passed with ignored local Firebase/signing inputs |
 | Debug APK manifest/config/dex inspection | Passed |
+| Release AAB signature/manifest/dex/resource inspection | Passed |
 | `pnpm security:audit` (supplemental) | Reports two pre-existing tables outside this change as missing its `company_id` audit heuristic |
 
 The inspected APK is `android/app/build/outputs/apk/debug/app-debug.apk`.
@@ -86,14 +96,20 @@ Inspection confirmed package `com.groundworkpro.app`, target SDK 36, version
 receivers, Capacitor/Firebase messaging services, and every custom attendance
 Kotlin/Java class in dex.
 
+The signed bundle is `android/app/build/outputs/bundle/release/app-release.aab`
+(SHA-256 `05b51e5995f2f3b73f86391019eebeb89dadef44907e29b3c651f2405bdb45a5`).
+Its signing certificate, final merged bundle manifest, archive entries, generated
+Firebase resources, and release dex inputs were inspected. They confirm package
+`com.groundworkpro.app`, target SDK 36, version `1.1` (`1`), the adaptive icon,
+the native attendance classes/receivers, and Firebase messaging components.
+
 The supplemental security audit names `attendance_scheduler_runs` and
 `employee_join_code_rate_limits`. This branch changes no database migration or
 row-level-security policy; that existing repository-wide finding is not hidden
 or treated as an Android release verification failure.
 
-Not yet verified because external configuration is required:
+Not yet verified because a device or external console is required:
 
-- a signed release `.aab` and its final bundle manifest/dex;
 - FCM registration, background/terminated delivery, and tap routing;
 - Google sign-in with Android OAuth and the production Web client;
 - geofence enter/exit, reboot restoration, and queued upload on a physical
@@ -361,13 +377,14 @@ Test a fresh install and upgrade.
 
 ## Release checklist
 
-- [ ] Firebase app and local `google-services.json` configured.
+- [x] Firebase app and local `google-services.json` configured.
 - [ ] Debug, upload, and Play App Signing OAuth fingerprints registered.
 - [ ] Production Web client ID and Supabase authorized clients verified.
-- [ ] Upload keystore generated, backed up, and configured outside Git.
+- [x] Upload keystore generated and configured outside Git. Confirm encrypted
+  backup storage before the first Play upload.
 - [ ] Production FCM service-account secrets configured server-side.
 - [ ] Final version selected and full repository suite green.
-- [ ] Signed `.aab` built, checksummed, and inspected.
+- [x] Signed `.aab` built, checksummed, and inspected locally.
 - [ ] Public privacy/deletion pages deployed and anonymously reachable.
 - [ ] Data Safety reviewed against production vendors/settings.
 - [ ] Background-location declaration, video, and reviewer account ready.

@@ -100,6 +100,12 @@ test("the iOS bridge explicitly registers every app-target attendance plugin", (
     storyboard.includes('customClass="GroundworkBridgeViewController"'),
     "the registered bridge controller is not the app's startup controller",
   );
+
+  assert.doesNotMatch(
+    bridge,
+    /SocialLoginPlugin/,
+    "Swift Package plugins are auto-registered and must not be registered a second time",
+  );
 });
 
 test("iOS declares the location usage descriptions background monitoring needs", () => {

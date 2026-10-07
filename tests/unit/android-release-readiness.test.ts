@@ -141,8 +141,10 @@ test("Play account deletion is authenticated, explicit, owner-guarded, and linke
 
   assert.match(route, /z\.literal\("DELETE"\)/);
   assert.match(route, /supabase\.auth\.getUser\(\)/);
-  assert.match(route, /eq\("primary_owner_user_id", user\.id\)/);
-  assert.match(route, /code: "primary_company_owner"/);
+  assert.match(route, /getAccountDeletionBlocker\(admin, user\.id\)/);
+  const deletionGuard = read("src/lib/auth/accountDeletion.ts");
+  assert.match(deletionGuard, /eq\("primary_owner_user_id", userId\)/);
+  assert.match(deletionGuard, /from\("memberships"\)[\s\S]*?eq\("user_id", userId\)/);
   assert.match(route, /admin\.auth\.admin\.deleteUser\(user\.id, false\)/);
   assert.match(settings, /fetch\("\/api\/account", \{/);
   assert.match(settings, /Type DELETE to confirm/);

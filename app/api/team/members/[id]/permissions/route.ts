@@ -248,12 +248,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     });
 
     if (parsedBody.data.role) {
+      let insertedMembership = false;
       const roleWrite = canonicalizeRoleWrite(parsedBody.data.role);
       let membershipUpdate = await roleDb
         .from("memberships")
         .update(roleWrite)
         .eq("company_id", companyId)
-        .eq("user_id", targetUserId);
+        .eq("user_id", targetUserId)
+        .select("user_id, role")
+        .maybeSingle();
       if (isMissingLegacyPermissionProfileColumn(membershipUpdate.error)) {
         membershipUpdate = await roleDb
           .from("memberships")
@@ -261,17 +264,42 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             role: legacyCompatibleRoleValue(parsedBody.data.role, "memberships"),
           })
           .eq("company_id", companyId)
-          .eq("user_id", targetUserId);
+          .eq("user_id", targetUserId)
+          .select("user_id, role")
+          .maybeSingle();
       }
       if (membershipUpdate.error) {
         return NextResponse.json({ error: membershipUpdate.error.message }, { status: 400 });
+      }
+      if (!membershipUpdate.data) {
+        let membershipInsert = await roleDb.from("memberships").insert({
+          company_id: companyId,
+          user_id: targetUserId,
+          ...roleWrite,
+        }).select("user_id, role").maybeSingle();
+        if (isMissingLegacyPermissionProfileColumn(membershipInsert.error)) {
+          membershipInsert = await roleDb.from("memberships").insert({
+            company_id: companyId,
+            user_id: targetUserId,
+            role: legacyCompatibleRoleValue(parsedBody.data.role, "memberships"),
+          }).select("user_id, role").maybeSingle();
+        }
+        if (membershipInsert.error || !membershipInsert.data) {
+          return NextResponse.json(
+            { error: membershipInsert.error?.message || "Membership role could not be updated" },
+            { status: 400 }
+          );
+        }
+        insertedMembership = true;
       }
 
       let employeeUpdate = await roleDb
         .from("employees")
         .update(roleWrite)
         .eq("company_id", companyId)
-        .eq("id", parsedParams.data.id);
+        .eq("id", parsedParams.data.id)
+        .select("id, role")
+        .maybeSingle();
       if (isMissingLegacyPermissionProfileColumn(employeeUpdate.error)) {
         employeeUpdate = await roleDb
           .from("employees")
@@ -279,10 +307,23 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
             role: legacyCompatibleRoleValue(parsedBody.data.role, "employees"),
           })
           .eq("company_id", companyId)
-          .eq("id", parsedParams.data.id);
+          .eq("id", parsedParams.data.id)
+          .select("id, role")
+          .maybeSingle();
       }
-      if (employeeUpdate.error) {
-        return NextResponse.json({ error: employeeUpdate.error.message }, { status: 400 });
+      if (employeeUpdate.error || !employeeUpdate.data) {
+        if (insertedMembership) {
+          await roleDb.from("memberships").delete().eq("company_id", companyId).eq("user_id", targetUserId);
+        } else if (membershipResult.data) {
+          await roleDb.from("memberships").update({
+            role: membershipResult.data.role,
+            legacy_permission_profile: membershipResult.data.legacy_permission_profile,
+          }).eq("company_id", companyId).eq("user_id", targetUserId);
+        }
+        return NextResponse.json(
+          { error: employeeUpdate.error?.message || "Employee role could not be updated" },
+          { status: 400 }
+        );
       }
     }
 

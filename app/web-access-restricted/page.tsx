@@ -35,7 +35,14 @@ export default function WebAccessRestrictedPage() {
           disabled={signingOut}
           className="mt-6 w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
         >
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? "Signing out…" : "Sign out and return to sign in"}
+        </button>
+        <button
+          type="button"
+          onClick={() => window.location.assign("/")}
+          className="mt-3 w-full rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-brand-700"
+        >
+          Check access again
         </button>
       </div>
     </main>

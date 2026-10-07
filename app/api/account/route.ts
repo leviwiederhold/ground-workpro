@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
 import { supabaseServer } from "@/lib/supabase/server";
+import { getAccountDeletionBlocker } from "@/lib/auth/accountDeletion";
 
 export const dynamic = "force-dynamic";
 
 const deleteSchema = z.object({ confirmation: z.literal("DELETE") });
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(["active", "trialing"]);
 
 export async function DELETE(request: Request) {
   const parsed = deleteSchema.safeParse(await request.json().catch(() => null));
@@ -26,29 +26,12 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Account deletion is temporarily unavailable." }, { status: 503 });
   }
 
-  // The company row is now the authoritative ownership record. Mirror the
-  // database deletion trigger so users get an actionable response rather than
-  // Supabase Auth's generic database error.
-  const companies = await admin
-    .from("companies")
-    .select("id, name, subscription_status")
-    .eq("primary_owner_user_id", user.id)
-    .limit(1);
-  if (companies.error) {
-    return NextResponse.json({ error: companies.error.message }, { status: 400 });
-  }
-
-  const ownedCompany = companies.data?.[0];
-  if (ownedCompany) {
-    const hasActiveSubscription = ACTIVE_SUBSCRIPTION_STATUSES.has(
-      String(ownedCompany.subscription_status ?? "").toLowerCase(),
-    );
+  const blocker = await getAccountDeletionBlocker(admin, user.id);
+  if (blocker) {
     return NextResponse.json(
       {
-        error: hasActiveSubscription
-          ? `Cancel the active subscription and transfer ownership of ${String(ownedCompany.name ?? "your company")} before deleting this account.`
-          : `Transfer ownership of ${String(ownedCompany.name ?? "your company")} before deleting this account.`,
-        code: "primary_company_owner",
+        error: blocker,
+        code: "account_deletion_blocked",
       },
       { status: 409 },
     );

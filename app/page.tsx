@@ -136,11 +136,7 @@ const safeSessionStorageSet = (key, value) => {
     // Storage can be unavailable in locked-down WebViews or privacy modes.
   }
 };
-const FEEDBACK_TYPE_OPTIONS = [
-  { value: 'bug', label: 'Bug' },
-  { value: 'feature_request', label: 'Feature Request' },
-  { value: 'general_feedback', label: 'General Feedback' },
-];
+
 const loadCachedNavState = () => {
   if (typeof window === 'undefined') {
     return { role: 'executive', displayRole: 'executive', items: [], moduleAccess: {}, loaded: false };
@@ -1000,16 +996,6 @@ const MobileAppShell = ({
       const resolvedCompanyName = String(currentUser?.company ?? '').trim() || 'My Company';
       const resolvedUserAvatar = String(currentUser?.avatarUrl ?? '').trim();
       const headerAvatarSrc = resolvedUserAvatar;
-      const defaultFeedbackName =
-        resolvedUserDisplayName && resolvedUserDisplayName !== 'Team Member' ? resolvedUserDisplayName : '';
-      const [feedbackForm, setFeedbackForm] = useState(() => ({
-        type: 'general_feedback',
-        message: '',
-        name: defaultFeedbackName,
-        email: resolvedUserEmail,
-      }));
-      const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-      const [feedbackStatus, setFeedbackStatus] = useState({ type: 'idle', message: '' });
       const roleBadgeLabel = ({
         owner: 'Owner',
         co_owner: 'Co-Owner',
@@ -1090,77 +1076,6 @@ const MobileAppShell = ({
         setShowUserMenu(false);
         window.location.assign(path);
       }, []);
-
-      const openFeedbackModal = useCallback(() => {
-        setFeedbackStatus({ type: 'idle', message: '' });
-        setFeedbackForm((current) => ({
-          ...current,
-          name: current.name || defaultFeedbackName,
-          email: current.email || resolvedUserEmail,
-        }));
-        setShowModal({ type: 'feedback', data: null });
-      }, [defaultFeedbackName, resolvedUserEmail]);
-
-      const closeFeedbackModal = useCallback(() => {
-        if (feedbackSubmitting) return;
-        setShowModal((current) => (current.type === 'feedback' ? { type: null, data: null } : current));
-      }, [feedbackSubmitting]);
-
-      const handleFeedbackFieldChange = useCallback((field, value) => {
-        setFeedbackForm((current) => ({
-          ...current,
-          [field]: value,
-        }));
-        setFeedbackStatus((current) => (current.type === 'error' ? { type: 'idle', message: '' } : current));
-      }, []);
-
-      const handleFeedbackSubmit = useCallback(async (event) => {
-        event.preventDefault();
-        const trimmedMessage = String(feedbackForm.message ?? '').trim();
-        if (!trimmedMessage) {
-          setFeedbackStatus({ type: 'error', message: 'Please enter a message before sending feedback.' });
-          return;
-        }
-
-        setFeedbackSubmitting(true);
-        setFeedbackStatus({ type: 'idle', message: '' });
-
-        try {
-          const response = await fetch('/api/feedback', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              feedback_type: feedbackForm.type,
-              message: trimmedMessage,
-              name: String(feedbackForm.name ?? '').trim(),
-              email: String(feedbackForm.email ?? '').trim(),
-              page: typeof window !== 'undefined' ? window.location.pathname : '',
-              current_view: currentView,
-            }),
-          });
-
-          const payload = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(String(payload?.error || 'Unable to send feedback right now.'));
-          }
-
-          setFeedbackStatus({
-            type: 'success',
-            message: 'Thanks. Your feedback was sent to the Groundwork Pro team.',
-          });
-          setFeedbackForm((current) => ({
-            ...current,
-            message: '',
-          }));
-        } catch (error) {
-          setFeedbackStatus({
-            type: 'error',
-            message: error instanceof Error ? error.message : 'Unable to send feedback right now.',
-          });
-        } finally {
-          setFeedbackSubmitting(false);
-        }
-      }, [currentView, feedbackForm]);
 
       // Data State
       const [jobs, setJobs] = useState([]);
@@ -2072,6 +1987,36 @@ const MobileAppShell = ({
         };
       }, []);
 
+      // A role change is a membership update made by another company admin.
+      // Realtime makes the permission cache refresh immediately; focus/pageshow
+      // provide recovery if the device was offline when the update occurred.
+      useEffect(() => {
+        let channel = null;
+        let active = true;
+        const supabase = supabaseBrowser();
+        void supabase.auth.getUser().then(({ data }) => {
+          const userId = String(data?.user?.id ?? '').trim();
+          if (!active || !userId) return;
+          channel = supabase
+            .channel(`membership-access-${userId}`)
+            .on('postgres_changes', {
+              event: '*', schema: 'public', table: 'memberships', filter: `user_id=eq.${userId}`,
+            }, () => setAccessRefreshNonce((value) => value + 1))
+            .subscribe();
+        }).catch(() => undefined);
+        const refreshAccess = () => {
+          if (document.visibilityState === 'visible') setAccessRefreshNonce((value) => value + 1);
+        };
+        window.addEventListener('focus', refreshAccess);
+        window.addEventListener('pageshow', refreshAccess);
+        return () => {
+          active = false;
+          window.removeEventListener('focus', refreshAccess);
+          window.removeEventListener('pageshow', refreshAccess);
+          if (channel) void supabase.removeChannel(channel);
+        };
+      }, []);
+
       useEffect(() => {
         setHeaderDateLabel(getUtcDateLabel());
       }, []);
@@ -2693,22 +2638,6 @@ const MobileAppShell = ({
             {subscriptionGate.loaded && subscriptionGate.active && (
               <MobileAppDownloadPrompt />
             )}
-            <div className="mt-6 border-t border-gray-200 pt-4">
-              <div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">How can we improve?</p>
-                  <p className="text-xs text-gray-500">Share product feedback without leaving Groundwork Pro.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={openFeedbackModal}
-                  className="inline-flex items-center justify-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-300 hover:text-brand-600"
-                >
-                  <Icon name="message" className="text-sm text-brand-500" />
-                  Send feedback
-                </button>
-              </div>
-            </div>
           </div>
         </MobileAppShell>
 
@@ -2731,86 +2660,6 @@ const MobileAppShell = ({
           <DailyReportModal isOpen={showModal.type === 'daily-report'} onClose={() => setShowModal({ type: null })} jobs={jobs} employees={employees} dailyReports={dailyReports} setDailyReports={setDailyReports} />
           <WorkOrderModal isOpen={showModal.type === 'work-order'} onClose={() => setShowModal({ type: null })} equipment={equipment} companyMembers={companyMembers} setWorkOrders={setWorkOrders} data={showModal.data} />
           <SafetyModal isOpen={showModal.type === 'safety'} onClose={() => setShowModal({ type: null })} employees={employees} jobs={jobs} onSubmitSafetyLog={handleCreateSafetyLog} submitLoading={safetyCreateLoading} canFinalSafetySignOff={canRoleGiveFinalSafetySignOff(currentRole)} />
-          <Modal isOpen={showModal.type === 'feedback'} onClose={closeFeedbackModal} title="Send feedback" size="sm">
-            <form onSubmit={handleFeedbackSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Feedback type</label>
-                <select
-                  value={feedbackForm.type}
-                  onChange={(event) => handleFeedbackFieldChange('type', event.target.value)}
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
-                >
-                  {FEEDBACK_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Message</label>
-                <textarea
-                  value={feedbackForm.message}
-                  onChange={(event) => handleFeedbackFieldChange('message', event.target.value)}
-                  rows={5}
-                  maxLength={2000}
-                  placeholder="Tell us what’s working, what’s not, or what would make your workflow better."
-                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  required
-                />
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-gray-500">Your feedback goes straight to the Groundwork Pro team.</p>
-                  <p className="text-xs text-gray-400">{String(feedbackForm.message ?? '').length}/2000</p>
-                </div>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">Name <span className="text-gray-400">(optional)</span></label>
-                  <input
-                    type="text"
-                    value={feedbackForm.name}
-                    onChange={(event) => handleFeedbackFieldChange('name', event.target.value)}
-                    maxLength={120}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="Your name"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">Email <span className="text-gray-400">(optional)</span></label>
-                  <input
-                    type="email"
-                    value={feedbackForm.email}
-                    onChange={(event) => handleFeedbackFieldChange('email', event.target.value)}
-                    maxLength={200}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
-                    placeholder="name@company.com"
-                  />
-                </div>
-              </div>
-              {feedbackStatus.message && (
-                <div
-                  className={`rounded-xl border px-3 py-2 text-sm ${
-                    feedbackStatus.type === 'success'
-                      ? 'border-green-200 bg-green-50 text-green-700'
-                      : feedbackStatus.type === 'error'
-                        ? 'border-red-200 bg-red-50 text-red-700'
-                        : 'border-gray-200 bg-gray-50 text-gray-600'
-                  }`}
-                  aria-live="polite"
-                >
-                  {feedbackStatus.message}
-                </div>
-              )}
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                <Button variant="secondary" onClick={closeFeedbackModal} disabled={feedbackSubmitting}>
-                  Cancel
-                </Button>
-                <Button variant="brand" type="submit" disabled={feedbackSubmitting || !String(feedbackForm.message ?? '').trim()}>
-                  {feedbackSubmitting ? 'Sending...' : 'Send feedback'}
-                </Button>
-              </div>
-            </form>
-          </Modal>
         </>
       );
     };
@@ -4365,6 +4214,9 @@ const MobileAppShell = ({
             setEmployeeActionError(payload?.error || 'Failed to delete employee');
             setEmployeeDeleteLoading(false);
             return;
+          }
+          if (payload?.accountDeletion?.deleted === false && payload?.accountDeletion?.reason) {
+            setEmployeeActionError(`Employee removed from this company. The sign-in account remains: ${payload.accountDeletion.reason}`);
           }
           setSelectedEmployeeId(null);
           await refreshEmployees();

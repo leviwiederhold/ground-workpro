@@ -5,6 +5,7 @@ import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { requireModuleAccess } from "@/lib/auth/requireRole";
 import { syncStripeQuantityForCompany } from "@/lib/billing/syncStripeQuantity";
 import { getSupabaseAdmin } from "@/lib/supabase/admin";
+import { getAccountDeletionBlocker } from "@/lib/auth/accountDeletion";
 import { isCompanyOwnerEmployee } from "@/lib/auth/ownerLock";
 import { ASSIGNMENT_CONFLICT_CODE } from "@/lib/jobs/assignmentConflict";
 import { runJobAssignmentSideEffects } from "@/lib/jobs/assignmentSideEffects";
@@ -451,30 +452,50 @@ export async function PATCH(
 
     if (payload.role !== undefined && updatedEmployee?.user_id) {
       const roleWrite = canonicalizeRoleWrite(payload.role);
-      let membershipResult = await supabase
+      // Employee records are request-scoped, but membership writes are protected
+      // by self-only RLS. Use the service client only after the route's role and
+      // primary-owner checks above, and verify that the authoritative row was
+      // actually changed before returning success.
+      const membershipClient = getSupabaseAdmin() ?? supabase;
+      let membershipResult = await membershipClient
         .from("memberships")
         .update(roleWrite)
         .eq("company_id", companyId)
-        .eq("user_id", updatedEmployee.user_id);
+        .eq("user_id", updatedEmployee.user_id)
+        .select("user_id, role")
+        .maybeSingle();
       if (isMissingLegacyPermissionProfileColumn(membershipResult.error)) {
-        membershipResult = await supabase
+        membershipResult = await membershipClient
           .from("memberships")
           .update({ role: legacyCompatibleRoleValue(payload.role, "memberships") })
           .eq("company_id", companyId)
-          .eq("user_id", updatedEmployee.user_id);
+          .eq("user_id", updatedEmployee.user_id)
+          .select("user_id, role")
+          .maybeSingle();
       }
       if (membershipResult.error) {
-        let membershipInsert = await supabase.from("memberships").insert({
+        await supabase.from("employees").update({ role: existingEmployee.role }).eq("company_id", companyId).eq("id", employeeId);
+        return NextResponse.json({ error: membershipResult.error.message }, { status: 400 });
+      }
+      if (!membershipResult.data) {
+        let membershipInsert = await membershipClient.from("memberships").insert({
           company_id: companyId,
           user_id: updatedEmployee.user_id,
           ...roleWrite,
-        });
+        }).select("user_id, role").maybeSingle();
         if (isMissingLegacyPermissionProfileColumn(membershipInsert.error)) {
-          membershipInsert = await supabase.from("memberships").insert({
+          membershipInsert = await membershipClient.from("memberships").insert({
             company_id: companyId,
             user_id: updatedEmployee.user_id,
             role: legacyCompatibleRoleValue(payload.role, "memberships"),
-          });
+          }).select("user_id, role").maybeSingle();
+        }
+        if (membershipInsert.error || !membershipInsert.data) {
+          await supabase.from("employees").update({ role: existingEmployee.role }).eq("company_id", companyId).eq("id", employeeId);
+          return NextResponse.json(
+            { error: membershipInsert.error?.message || "Membership role could not be updated" },
+            { status: 400 }
+          );
         }
       }
     }
@@ -528,8 +549,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    let actorUserId = "";
     try {
-      await requireModuleAccess("team_management", "edit");
+      const actor = await requireModuleAccess("team_management", "edit");
+      actorUserId = String(actor.userId ?? "").trim();
     } catch {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
@@ -564,42 +587,30 @@ export async function DELETE(
       return NextResponse.json({ error: "Primary owner cannot be deleted" }, { status: 400 });
     }
 
-    // Use the service-role client for the destructive writes. The caller is
-    // already authorized (requireModuleAccess team_management:edit), and RLS on
-    // the memberships table only lets a user delete their OWN row — so deleting
-    // another member's membership via the request-scoped client silently
-    // affects 0 rows (no error), leaving an orphaned membership that still
-    // counts toward billable seats. Admin client guarantees the row is removed.
     const admin = adminClient;
-    const writeClient = admin ?? supabase;
-
-    const { error } = await writeClient
-      .from("employees")
-      .delete()
-      .eq("company_id", companyId)
-      .eq("id", employeeId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!admin) {
+      return NextResponse.json({ error: "Employee removal is temporarily unavailable." }, { status: 503 });
     }
+    const removal = await admin.rpc("remove_company_employee", {
+      p_company_id: companyId,
+      p_employee_id: String(employeeId),
+      p_actor_user_id: actorUserId,
+    });
+    if (removal.error) {
+      return NextResponse.json({ error: removal.error.message }, { status: 400 });
+    }
+    const removedUserId = String(removal.data?.[0]?.linked_user_id ?? linkedUserId).trim();
 
-    if (linkedUserId) {
-      const membershipDelete = await writeClient
-        .from("memberships")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("user_id", linkedUserId);
-      if (membershipDelete.error) {
-        return NextResponse.json({ error: membershipDelete.error.message }, { status: 400 });
-      }
-
-      const permissionsDelete = await writeClient
-        .from("module_permissions")
-        .delete()
-        .eq("company_id", companyId)
-        .eq("user_id", linkedUserId);
-      if (permissionsDelete.error && !/column .*user_id.* does not exist|Could not find the 'user_id' column/i.test(permissionsDelete.error.message || "")) {
-        return NextResponse.json({ error: permissionsDelete.error.message }, { status: 400 });
+    let accountDeletion: { deleted: boolean; reason?: string } | undefined;
+    if (removedUserId) {
+      const blocker = await getAccountDeletionBlocker(admin, removedUserId);
+      if (blocker) {
+        accountDeletion = { deleted: false, reason: blocker };
+      } else {
+        const deletion = await admin.auth.admin.deleteUser(removedUserId, false);
+        accountDeletion = deletion.error
+          ? { deleted: false, reason: `Company access was removed, but the Auth account remains: ${deletion.error.message}` }
+          : { deleted: true };
       }
     }
 
@@ -613,7 +624,7 @@ export async function DELETE(
       console.error("[employees/DELETE] stripe quantity sync error:", syncErr instanceof Error ? syncErr.message : syncErr);
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, accountDeletion });
   } catch (error) {
     if (error instanceof TenantResolverError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

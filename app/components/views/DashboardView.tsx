@@ -99,7 +99,9 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const [onboardingResetLoading, setOnboardingResetLoading] = useState(false);
   const [onboardingError, setOnboardingError] = useState('');
 
-  const effectiveRole = dashboardSummary?.role ?? currentRole;
+  // /api/nav is refreshed from the authoritative membership after role changes.
+  // Prefer it over a dashboard summary already held in component state.
+  const effectiveRole = currentRole ?? dashboardSummary?.role;
   const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
 
   const completedCount = useMemo(
@@ -158,7 +160,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
 
   useEffect(() => {
     const normalizedEffectiveRole = String(effectiveRole || '').toLowerCase();
-    if (!['admin', 'ceo', 'executive', 'pm'].includes(normalizedEffectiveRole)) {
+    if (!['admin', 'ceo', 'executive', 'owner', 'co_owner', 'pm'].includes(normalizedEffectiveRole)) {
       setPayrollSummary(null);
       return;
     }
@@ -376,7 +378,7 @@ export function DashboardView({ jobs, jobsLoading, equipment, employees, workOrd
   const alertsSection = dashboardSummary?.sections?.alerts;
   const openWorkOrdersSection = dashboardSummary?.sections?.openWorkOrders ?? primaryItems.find((item) => item.type === 'open_work_orders')?.meta;
   const showGettingStarted = Boolean(gettingStartedSection);
-  const isAdminDashboard = ['admin', 'ceo', 'executive'].includes(normalizedEffectiveRole);
+  const isAdminDashboard = ['admin', 'ceo', 'executive', 'owner', 'co_owner'].includes(normalizedEffectiveRole);
   const isManagerDashboard = isAdminDashboard || normalizedEffectiveRole === 'pm';
   const estimatedPayrollLabel = new Intl.NumberFormat('en-US', {
     style: 'currency',

@@ -7,10 +7,26 @@ this flow exists.
 
 The app calls `supabase.auth.signInWithIdToken(...)` with the token the native
 sheet returns. There is no `/auth/callback`, no deep link, and no redirect.
+The native provider SDK handles its own return from the Google/Apple UI; iOS
+forwards URL and universal-link events through Capacitor's application delegate
+proxy. The returned ID token is exchanged directly for the existing Supabase
+session, then the app uses the same invite and workspace routing as password
+sign-in.
 
-## Bundle identifier
+On the website, Google and Apple use Supabase's supported browser OAuth flow and
+return through `/auth/callback`. The native SocialLogin plugin must only run in a
+real Capacitor iOS or Android container; its web implementation is a stub and
+reports that the plugin is not implemented. Apple sign-in is shown only on iOS
+in the native app, while Google is available on iOS, Android, and the website.
 
-**The production bundle ID is `com.leviwiederhold.groundworkpro`.**
+## Native application identifiers
+
+The permanent native identities are platform-specific:
+
+- iOS bundle ID: `com.leviwiederhold.groundworkpro`
+- Android application ID: `com.groundworkpro.app`
+
+**The production iOS bundle ID is `com.leviwiederhold.groundworkpro`.**
 
 This is the identity of the already-shipped app. It is not a new identifier, and
 it must not be changed — changing it creates an unrelated app that existing users
@@ -30,8 +46,25 @@ It is set in exactly these places, which are asserted to agree by
 | Location | Setting |
 | --- | --- |
 | `ios/App/App.xcodeproj/project.pbxproj` (Debug + Release) | `PRODUCT_BUNDLE_IDENTIFIER` |
-| `capacitor.config.ts` | `appId` |
+| `capacitor.config.ts` | platform-specific `appId` selected during sync |
 | `src/lib/auth/nativeOAuth.ts` | `IOS_BUNDLE_ID` |
+
+`pnpm ios:sync` validates the iOS identity. `pnpm android:sync` selects and
+validates the Android identity without rewriting the Xcode bundle ID.
+
+## Android Google configuration
+
+Android keeps Google and email sign-in enabled and hides Apple sign-in. Create
+Google Android OAuth clients for package `com.groundworkpro.app` and the SHA-1
+of each certificate that can sign an installed build (debug, upload, and Play
+App Signing). Keep `NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID` set to the existing Web
+OAuth client ID in every deployed environment loaded by the native app.
+
+The Android native library requests an ID token for that Web client ID and sends
+it to `supabase.auth.signInWithIdToken(...)`. There is no Android redirect URI,
+custom scheme, or embedded-WebView OAuth callback. See
+`docs/android-play-release-readiness.md` for Firebase, signing, fingerprint,
+and Play release instructions.
 
 ## Apple Developer
 

@@ -1,18 +1,28 @@
 package com.groundworkpro.app
 
 import android.Manifest
+import android.app.ActivityManager
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
+import com.getcapacitor.PermissionState
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import com.getcapacitor.annotation.Permission
+import com.getcapacitor.annotation.PermissionCallback
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.location.Geofence
 import com.google.android.gms.location.GeofencingClient
 import com.google.android.gms.location.GeofencingRequest
@@ -25,12 +35,24 @@ import com.google.android.gms.location.LocationServices
 // transitions to a BroadcastReceiver even when the app is not running; that
 // receiver POSTs a single discrete event to /api/jobsite-time/events.
 
-@CapacitorPlugin(name = "JobsiteGeofence")
+@CapacitorPlugin(
+    name = "JobsiteGeofence",
+    permissions = [Permission(
+        strings = [Manifest.permission.ACCESS_BACKGROUND_LOCATION],
+        alias = JobsiteGeofencePlugin.BACKGROUND_LOCATION_ALIAS
+    )]
+)
 class JobsiteGeofencePlugin : Plugin() {
     private lateinit var geofencingClient: GeofencingClient
+    private var lastAuthorizationStatus: String? = null
+
+    companion object {
+        const val BACKGROUND_LOCATION_ALIAS = "backgroundLocation"
+    }
 
     override fun load() {
         geofencingClient = LocationServices.getGeofencingClient(context)
+        lastAuthorizationStatus = authorizationStatus()
     }
 
     private fun geofencePendingIntent(): PendingIntent {
@@ -54,6 +76,55 @@ class JobsiteGeofencePlugin : Plugin() {
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
         return fine && background
+    }
+
+    private fun hasForegroundLocation(): Boolean {
+        return ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun hasPreciseLocation(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun authorizationStatus(): String = when {
+        hasBackgroundLocation() -> "authorized_always"
+        hasForegroundLocation() -> "authorized_when_in_use"
+        else -> "denied"
+    }
+
+    private fun locationServicesEnabled(): Boolean {
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+            ?: return false
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                manager.isLocationEnabled
+            } else {
+                manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                    manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun backgroundExecutionEnabled(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return true
+        val manager = context.getSystemService(ActivityManager::class.java) ?: return false
+        return !manager.isBackgroundRestricted
+    }
+
+    private fun nativeServiceSupported(): Boolean =
+        GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(context) == ConnectionResult.SUCCESS
+
+    private fun openApplicationSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
     }
 
     @PluginMethod
@@ -158,10 +229,16 @@ class JobsiteGeofencePlugin : Plugin() {
     fun getHealth(call: PluginCall) {
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)
         val result = JSObject()
-        result.put("supported", true)
+        result.put("supported", nativeServiceSupported())
         // The REAL permission state, read from the OS — not a flag we set and
         // hoped stayed true.
         result.put("authorized", hasBackgroundLocation())
+        result.put("authorizationStatus", authorizationStatus())
+        result.put("locationServicesEnabled", locationServicesEnabled())
+        // The shared readiness field is named after the iOS setting. On Android
+        // it represents the equivalent OS-level background execution gate.
+        result.put("backgroundRefreshEnabled", backgroundExecutionEnabled())
+        result.put("preciseLocation", hasPreciseLocation())
         result.put("registeredCount", prefs.getInt("gw_registered_count", 0))
         result.put("lastEventAt", prefs.getString("gw_last_event_at", null))
         result.put("lastEventTransition", prefs.getString("gw_last_event_transition", null))
@@ -170,5 +247,60 @@ class JobsiteGeofencePlugin : Plugin() {
         result.put("pendingQueuedCount", AttendanceNativeQueue.pendingCount(context))
         result.put("hasCredential", SecureAttendanceStorePlugin.hasCredential(context))
         call.resolve(result)
+    }
+
+    @PluginMethod
+    fun requestAlwaysAuthorization(call: PluginCall) {
+        if (!hasForegroundLocation()) {
+            call.reject("Foreground location permission is required first")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || hasBackgroundLocation()) {
+            call.resolve()
+            return
+        }
+
+        // Android 10 can still show the dedicated background runtime prompt.
+        // Android 11+ requires the user to choose "Allow all the time" from the
+        // app's Settings page; apps cannot force or bypass that decision.
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q &&
+            getPermissionState(BACKGROUND_LOCATION_ALIAS) != PermissionState.GRANTED) {
+            requestPermissionForAlias(
+                BACKGROUND_LOCATION_ALIAS,
+                call,
+                "backgroundLocationPermissionCallback"
+            )
+            return
+        }
+
+        openApplicationSettings()
+        call.resolve(JSObject().put("openedSettings", true))
+    }
+
+    @PermissionCallback
+    private fun backgroundLocationPermissionCallback(call: PluginCall) {
+        call.resolve(JSObject().put("authorized", hasBackgroundLocation()))
+    }
+
+    @PluginMethod
+    fun openLocationSettings(call: PluginCall) {
+        openApplicationSettings()
+        call.resolve()
+    }
+
+    override fun handleOnResume() {
+        super.handleOnResume()
+        val current = authorizationStatus()
+        val previous = lastAuthorizationStatus
+        lastAuthorizationStatus = current
+        if (previous != null && previous != current) {
+            notifyListeners(
+                "geofenceAuthorizationChanged",
+                JSObject()
+                    .put("authorized", current == "authorized_always")
+                    .put("authorizationStatus", current)
+            )
+        }
     }
 }

@@ -52,17 +52,19 @@ captures/
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
 
-# Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# Upload signing credentials are local/CI secrets. Google Play keeps the app
+# signing key; this repository must never contain either key or its passwords.
+*.jks
+*.keystore
+keystore.properties
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild
 .cxx/
 
-# Google Services (e.g. APIs or Firebase)
-# google-services.json
+# Firebase's Android app config is supplied by the release operator. Keep the
+# project-specific file out of source control; the template/docs name its path.
+google-services.json
 
 # Freeline
 freeline.py

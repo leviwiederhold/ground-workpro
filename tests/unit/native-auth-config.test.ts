@@ -41,8 +41,8 @@ test("production bundle ID is consistent across pbxproj, capacitor config, and a
   const capacitorConfig = read("capacitor.config.ts");
   assert.match(
     capacitorConfig,
-    new RegExp(`appId:\\s*"${PRODUCTION_BUNDLE_ID.replace(/\./g, "\\.")}"`),
-    "capacitor.config.ts appId must match the production bundle ID",
+    new RegExp(`isAndroidSync \\? "com\\.groundworkpro\\.app" : "${PRODUCTION_BUNDLE_ID.replace(/\./g, "\\.")}"`),
+    "the iOS branch of capacitor.config.ts must keep the production bundle ID",
   );
 
   const pbxproj = read("ios/App/App.xcodeproj/project.pbxproj");
@@ -250,6 +250,22 @@ test("validateGoogleClientConfig accepts a well-formed pair", () => {
     iosClientId: "111-ios.apps.googleusercontent.com",
     webClientId: "111-web.apps.googleusercontent.com",
   });
+});
+
+test("Android Google sign-in needs the Web client ID but not the iOS client ID", () => {
+  const result = validateGoogleClientConfig(
+    { iosClientId: undefined, webClientId: "111-web.apps.googleusercontent.com" },
+    "android",
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    config: { webClientId: "111-web.apps.googleusercontent.com" },
+  });
+
+  const nativeAuth = read("src/lib/auth/nativeOAuth.ts");
+  assert.match(nativeAuth, /platform === "ios"[\s\S]{0,180}apple:/);
+  assert.match(nativeAuth, /Sign in with Apple is only available on iOS/);
+  assert.match(nativeAuth, /platform === "ios"[\s\S]{0,220}iOSClientId/);
 });
 
 test("validateGoogleClientConfig names the exact missing Vercel variables", () => {

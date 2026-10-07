@@ -138,6 +138,7 @@ test("helper scripts exist and the preview script requires the variable", () => 
   assert.match(syncScript, /CAPACITOR_SERVER_URL is required/, "preview mode must require the variable");
   assert.match(syncScript, /capacitor\.config\.json/, "the script must verify the generated config");
   assert.match(syncScript, /expected/, "the script must compare against the expected URL");
+  assert.match(syncScript, /appStartPath !== undefined/, "iOS sync must reject a bundled-file start path");
 });
 
 test("no preview URL is committed as a default", () => {

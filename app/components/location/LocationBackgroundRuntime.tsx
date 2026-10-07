@@ -19,6 +19,7 @@ import {
 } from '@/lib/attendance/offlineQueueClient';
 import { ensureDeviceCredential } from '@/lib/attendance/deviceCredentialClient';
 import { loadAssignedAttendanceRegions } from '@/lib/attendance/assignedRegionsClient';
+import { getCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
 
 const MAX_NATIVE_GEOFENCE_JOBS = 10;
 
@@ -244,7 +245,7 @@ export function LocationBackgroundRuntime() {
       // The gate already enrolled a credential. This verifies the Keychain
       // state and rotates only near expiry; it must not mint on every focus or
       // render.
-      await ensureDeviceCredential('ios');
+      await ensureDeviceCredential(getCapacitorNativePlatform() ?? 'ios');
       const regions = await loadAssignedAttendanceRegions(verifiedJobs);
       await registerGeofences(regions);
 

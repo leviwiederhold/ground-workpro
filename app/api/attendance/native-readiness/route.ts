@@ -64,17 +64,14 @@ export async function POST(request: Request) {
 
     const credential = await verifyAttendanceCredential(db, request);
     if (!credential) {
-      return NextResponse.json(
-        { error: "Invalid or expired attendance credential" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Invalid or expired attendance credential" }, { status: 401 });
     }
 
     const parsed = bodySchema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Validation error", details: parsed.error.flatten() },
-        { status: 422 }
+        { status: 422 },
       );
     }
 
@@ -107,7 +104,7 @@ export async function POST(request: Request) {
     }
     const readinessAccepted = shouldAcceptReadinessReport(
       currentReadiness.data?.native_readiness_reported_at ?? null,
-      readiness.reportedAt
+      readiness.reportedAt,
     );
 
     if (readinessAccepted) {
@@ -131,7 +128,9 @@ export async function POST(request: Request) {
                 ? "prompt"
                 : "denied",
           precise: readiness.preciseLocation,
-          platform: "ios",
+          // The credential was enrolled by the native container, so its stored
+          // platform is authoritative and cannot be spoofed by this payload.
+          platform: credential.platform ?? "unknown",
           background_refresh_enabled: readiness.backgroundRefreshEnabled,
           native_service_supported: readiness.supported,
           native_service_healthy: nativeServiceHealthy,
@@ -143,7 +142,7 @@ export async function POST(request: Request) {
           ...(setupComplete ? { onboarding_completed_at: readiness.reportedAt } : {}),
           updated_at: new Date().toISOString(),
         },
-        { onConflict: "company_id,user_id" }
+        { onConflict: "company_id,user_id" },
       );
       if (permissionWrite.error) {
         return NextResponse.json({ error: permissionWrite.error.message }, { status: 400 });
@@ -166,10 +165,12 @@ export async function POST(request: Request) {
         occurred_at: item.occurredAt,
         details: item.details ?? {},
       }));
-      const diagnosticWrite = await db.from("attendance_native_diagnostics").upsert(rows, {
-        onConflict: "credential_id,diagnostic_id",
-        ignoreDuplicates: true,
-      });
+      const diagnosticWrite = await db
+        .from("attendance_native_diagnostics")
+        .upsert(rows, {
+          onConflict: "credential_id,diagnostic_id",
+          ignoreDuplicates: true,
+        });
       if (diagnosticWrite.error) {
         return NextResponse.json({ error: diagnosticWrite.error.message }, { status: 400 });
       }

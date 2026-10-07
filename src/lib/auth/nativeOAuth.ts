@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// Native (iOS) Sign in with Apple + Google via Supabase's ID-token flow.
+// Native iOS/Android provider sign-in via Supabase's ID-token flow.
 //
 // The Groundwork Pro iOS app is a remote-URL Capacitor WebView. Redirect-based
 // OAuth is blocked by Google inside embedded WebViews, so we use the NATIVE
@@ -198,7 +198,8 @@ export function isUserCancelledError(err: unknown): boolean {
 // Google client configuration + validation
 // ---------------------------------------------------------------------------
 
-export type GoogleClientConfig = { iosClientId: string; webClientId: string };
+export type NativeOAuthPlatform = "ios" | "android";
+export type GoogleClientConfig = { iosClientId?: string; webClientId: string };
 
 export type GoogleClientConfigResult =
   | { ok: true; config: GoogleClientConfig }
@@ -219,12 +220,12 @@ const GOOGLE_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com";
 export function validateGoogleClientConfig(input: {
   iosClientId: string | undefined;
   webClientId: string | undefined;
-}): GoogleClientConfigResult {
+}, platform: NativeOAuthPlatform = "ios"): GoogleClientConfigResult {
   const iosClientId = String(input.iosClientId ?? "").trim();
   const webClientId = String(input.webClientId ?? "").trim();
 
   const missing: string[] = [];
-  if (!iosClientId) missing.push("NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID");
+  if (platform === "ios" && !iosClientId) missing.push("NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID");
   if (!webClientId) missing.push("NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID");
   if (missing.length > 0) {
     return {
@@ -237,10 +238,13 @@ export function validateGoogleClientConfig(input: {
 
   // A client ID that doesn't look like one is almost always a copy/paste of the
   // wrong field (project number, client secret, or the reversed iOS ID).
-  const malformed = [
-    ["NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID", iosClientId],
-    ["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId],
-  ].filter(([, value]) => !value.endsWith(GOOGLE_CLIENT_ID_SUFFIX));
+  const configuredIds = platform === "ios"
+    ? [
+        ["NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID", iosClientId],
+        ["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId],
+      ]
+    : [["NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID", webClientId]];
+  const malformed = configuredIds.filter(([, value]) => !value.endsWith(GOOGLE_CLIENT_ID_SUFFIX));
   if (malformed.length > 0) {
     return {
       ok: false,
@@ -252,7 +256,7 @@ export function validateGoogleClientConfig(input: {
 
   // The iOS and Web client IDs are different OAuth clients. If they match, the
   // iOS one was never created, and Supabase would reject the token's audience.
-  if (iosClientId === webClientId) {
+  if (platform === "ios" && iosClientId === webClientId) {
     return {
       ok: false,
       message:
@@ -260,28 +264,52 @@ export function validateGoogleClientConfig(input: {
     };
   }
 
-  return { ok: true, config: { iosClientId, webClientId } };
+  return {
+    ok: true,
+    config: platform === "ios" ? { iosClientId, webClientId } : { webClientId },
+  };
+}
+
+export function nativeOAuthPlatform(): NativeOAuthPlatform {
+  try {
+    return String((globalThis as any)?.Capacitor?.getPlatform?.() ?? "ios").toLowerCase() === "android"
+      ? "android"
+      : "ios";
+  } catch {
+    return "ios";
+  }
 }
 
 // Read + validate in one step. The env vars are referenced as static literals
 // because Next.js only inlines NEXT_PUBLIC_* on literal member access.
-export function readGoogleClientConfig(): GoogleClientConfigResult {
+export function readGoogleClientConfig(
+  platform: NativeOAuthPlatform = nativeOAuthPlatform(),
+): GoogleClientConfigResult {
   return validateGoogleClientConfig({
     iosClientId: process.env.NEXT_PUBLIC_GOOGLE_IOS_CLIENT_ID,
     webClientId: process.env.NEXT_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-  });
+  }, platform);
 }
 
-export function buildNativeProviderInitializationOptions(): Record<string, unknown> {
-  const google = readGoogleClientConfig();
+export function buildNativeProviderInitializationOptions(
+  platform: NativeOAuthPlatform = nativeOAuthPlatform(),
+): Record<string, unknown> {
+  const google = readGoogleClientConfig(platform);
   return {
-    // On iOS an empty redirect keeps Sign in with Apple in the native sheet.
-    apple: { clientId: IOS_BUNDLE_ID, redirectUrl: "" },
+    // Apple remains iOS-only. Android Credential Manager must never receive an
+    // Apple provider config or expose an unsupported Apple login action.
+    ...(platform === "ios"
+      ? { apple: { clientId: IOS_BUNDLE_ID, redirectUrl: "" } }
+      : {}),
     ...(google.ok
       ? {
           google: {
-            iOSClientId: google.config.iosClientId,
-            iOSServerClientId: google.config.webClientId,
+            ...(platform === "ios"
+              ? {
+                  iOSClientId: google.config.iosClientId,
+                  iOSServerClientId: google.config.webClientId,
+                }
+              : {}),
             webClientId: google.config.webClientId,
             mode: "online",
           },
@@ -342,6 +370,9 @@ export function resetNativeAuthProviderInitializationForTests(): void {
 // ---------------------------------------------------------------------------
 
 export async function signInWithAppleNative(supabase: SupabaseClient): Promise<NativeSignInResult> {
+  if (nativeOAuthPlatform() !== "ios") {
+    return { status: "error", message: "Sign in with Apple is only available on iOS." };
+  }
   try {
     const rawNonce = generateRawNonce();
     const hashedNonce = await sha256Hex(rawNonce);

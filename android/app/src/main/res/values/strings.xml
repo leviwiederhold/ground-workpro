@@ -4,4 +4,7 @@
     <string name="title_activity_main">Groundwork Pro</string>
     <string name="package_name">com.groundworkpro.app</string>
     <string name="custom_url_scheme">com.groundworkpro.app</string>
+    <string name="message_notification_channel_id">groundwork_messages</string>
+    <string name="message_notification_channel_name">Messages</string>
+    <string name="message_notification_channel_description">New Groundwork Pro conversation messages</string>
 </resources>

@@ -5,6 +5,7 @@ import { forbidden, notFound, serverError, validationError } from "@/lib/http/er
 import { getPaginationFromUrl, getPaginationMeta } from "@/lib/http/pagination";
 import {
   listMessagesByThreadIds,
+  getCompanyMessageHistoryCutoff,
   listParticipantRowsForThreads,
   listParticipantRowsForUser,
   listThreadsByIds,
@@ -57,6 +58,7 @@ export async function GET(request: Request) {
     });
 
     const { supabase, companyId, userId } = await getCompanyId();
+    const historyCutoffAt = await getCompanyMessageHistoryCutoff(supabase, companyId, userId);
 
     // Guarantee the permanent Companywide chat exists and that its participants
     // reflect current active members (defensive — also handled by DB triggers/
@@ -70,10 +72,18 @@ export async function GET(request: Request) {
     // Viewer role (to decide whether to prompt naming) + company name (the
     // "Use [Company Name]" default in the naming modal).
     const [membershipRow, companyRow] = await Promise.all([
-      supabase.from("memberships").select("role").eq("company_id", companyId).eq("user_id", userId).limit(1).maybeSingle(),
+      supabase
+        .from("memberships")
+        .select("role")
+        .eq("company_id", companyId)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle(),
       supabase.from("companies").select("name").eq("id", companyId).maybeSingle(),
     ]);
-    const viewerRole = String(membershipRow.data?.role ?? "").trim().toLowerCase();
+    const viewerRole = String(membershipRow.data?.role ?? "")
+      .trim()
+      .toLowerCase();
     const viewerIsAdmin = ["admin", "ceo", "executive", "owner"].includes(viewerRole);
     const companyName = String(companyRow.data?.name ?? "").trim();
 
@@ -91,7 +101,7 @@ export async function GET(request: Request) {
     const [threads, allParticipants, allMessages] = await Promise.all([
       listThreadsByIds(supabase, companyId, threadIds),
       listParticipantRowsForThreads(supabase, companyId, threadIds),
-      listMessagesByThreadIds(supabase, companyId, threadIds),
+      listMessagesByThreadIds(supabase, companyId, threadIds, historyCutoffAt),
     ]);
 
     const otherUserIds = Array.from(
@@ -148,7 +158,9 @@ export async function GET(request: Request) {
         const latest = latestByThread.get(key);
         const kind = String(thread.kind || "direct");
         const isDirect = kind === "direct";
-        const isCompanywide = Boolean((thread as { is_companywide?: boolean | null }).is_companywide);
+        const isCompanywide = Boolean(
+          (thread as { is_companywide?: boolean | null }).is_companywide
+        );
         const explicitGroupName = (thread as { name?: string | null }).name;
         const companywideName = String(explicitGroupName ?? "").trim();
         const companywideNeedsNaming = isCompanywide && companywideName.length === 0;
@@ -160,15 +172,20 @@ export async function GET(request: Request) {
           // word "Companywide"). needs_naming drives the first-open prompt.
           needs_naming: companywideNeedsNaming,
           name: isCompanywide
-            ? (companywideName || companyName || "Team Chat")
+            ? companywideName || companyName || "Team Chat"
             : isDirect
-              ? (otherUserId ? displayNames.get(String(otherUserId)) || "Team Member" : "Team Member")
-              : (explicitGroupName === null || explicitGroupName === undefined ? "Group Chat" : String(explicitGroupName)),
+              ? otherUserId
+                ? displayNames.get(String(otherUserId)) || "Team Member"
+                : "Team Member"
+              : explicitGroupName === null || explicitGroupName === undefined
+                ? "Group Chat"
+                : String(explicitGroupName),
           created_at: thread.created_at,
           updated_at: thread.updated_at,
           message_count: countByThread.get(key) ?? 0,
           unread_count: unreadByThread.get(key) ?? 0,
-          last_message_at: latest?.created_at ?? thread.last_message_at ?? null,
+          last_message_at:
+            latest?.created_at ?? (historyCutoffAt ? null : (thread.last_message_at ?? null)),
           last_message_preview: latest?.body ?? null,
           member_count: participants.length,
           other_user_id: isDirect ? otherUserId : null,

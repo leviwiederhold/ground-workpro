@@ -1,9 +1,11 @@
 package com.groundworkpro.app
 
 import android.content.Context
+import android.util.AtomicFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -47,7 +49,12 @@ object AttendanceNativeQueue {
 
     fun read(context: Context): JSONObject = try {
         val file = queueFile(context)
-        if (file.exists()) JSONObject(file.readText()) else emptyPayload()
+        if (file.exists()) {
+            val contents = AtomicFile(file).openRead().bufferedReader().use { it.readText() }
+            JSONObject(contents)
+        } else {
+            emptyPayload()
+        }
     } catch (e: Exception) {
         // Corrupted (e.g. a kill mid-write). An empty queue beats throwing on
         // every attendance path.
@@ -60,17 +67,17 @@ object AttendanceNativeQueue {
         .put("meta", JSONObject())
 
     private fun write(context: Context, payload: JSONObject) {
+        val target = AtomicFile(queueFile(context))
+        var output: FileOutputStream? = null
         try {
-            // Write-then-rename so a kill mid-write cannot leave a truncated queue.
-            val target = queueFile(context)
-            val temp = File(context.filesDir, "$FILE_NAME.tmp")
-            temp.writeText(payload.toString())
-            if (!temp.renameTo(target)) {
-                target.writeText(payload.toString())
-                temp.delete()
-            }
+            val stream = target.startWrite()
+            output = stream
+            stream.write(payload.toString().toByteArray(Charsets.UTF_8))
+            target.finishWrite(stream)
+            output = null
         } catch (e: Exception) {
-            // Best effort — losing the write is bad, crashing the receiver is worse.
+            if (output != null) target.failWrite(output)
+            // Best effort — losing one write is bad, crashing the receiver is worse.
         }
     }
 

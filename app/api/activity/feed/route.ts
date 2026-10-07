@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getCompanyId, TenantResolverError } from "@/lib/tenant/getCompanyId";
 import { getEffectiveRole } from "@/lib/auth/effectiveRole";
 import { formatNotification } from "@/lib/notifications/format";
+import { getCompanyMessageHistoryCutoff } from "@/lib/messages/mvp";
+import { canViewCompanyMessageAt } from "@/lib/messages/historyAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +28,12 @@ type ActivityItem = {
   created_at: string | null;
 };
 
-function deriveAuditHref(entityType: string, entityId: string | null, action: string, metadata: Record<string, unknown> | null) {
+function deriveAuditHref(
+  entityType: string,
+  entityId: string | null,
+  action: string,
+  metadata: Record<string, unknown> | null
+) {
   const normalizedEntity = String(entityType ?? "").toLowerCase();
   const normalizedAction = String(action ?? "").toLowerCase();
   if (normalizedEntity === "job" && entityId) return `/jobs/${entityId}`;
@@ -52,7 +59,10 @@ function formatAuditMessage(action: string, entityType: string, entityId: string
 
 function isMissingTable(message: string, table: string) {
   const normalized = message.toLowerCase();
-  return normalized.includes(table) && (normalized.includes("does not exist") || normalized.includes("not find"));
+  return (
+    normalized.includes(table) &&
+    (normalized.includes("does not exist") || normalized.includes("not find"))
+  );
 }
 
 export async function GET(request: Request) {
@@ -63,10 +73,12 @@ export async function GET(request: Request) {
       return NextResponse.json(
         {
           error: "Validation error",
-          details: parsed.error.issues.map((issue: { path: (string | number)[]; message: string }) => ({
-            path: issue.path.join("."),
-            message: issue.message,
-          })),
+          details: parsed.error.issues.map(
+            (issue: { path: (string | number)[]; message: string }) => ({
+              path: issue.path.join("."),
+              message: issue.message,
+            })
+          ),
         },
         { status: 422 }
       );
@@ -77,6 +89,7 @@ export async function GET(request: Request) {
     const role = await getEffectiveRole();
     if (!role) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     const companyWide = role === "admin" || role === "pm";
+    const historyCutoffAt = await getCompanyMessageHistoryCutoff(supabase, companyId, userId);
 
     let notificationsQuery = supabase
       .from("notifications")
@@ -103,7 +116,19 @@ export async function GET(request: Request) {
     const items: ActivityItem[] = [];
     const employeeNameByUserId = new Map<string, string>();
     const actorUserIds = new Set<string>();
-    for (const row of notificationsResult.data ?? []) {
+    const visibleNotifications = (notificationsResult.data ?? []).filter((row) => {
+      const notification = row as { type?: string; created_at?: string; user_id?: string };
+      return (
+        companyWide ||
+        notification.type !== "new_message" ||
+        canViewCompanyMessageAt(
+          { message_history_cutoff_at: historyCutoffAt },
+          notification.created_at
+        )
+      );
+    });
+
+    for (const row of visibleNotifications) {
       const id = String((row as { user_id?: string }).user_id ?? "").trim();
       if (id) actorUserIds.add(id);
     }
@@ -120,13 +145,17 @@ export async function GET(request: Request) {
       if (!namesResult.error) {
         for (const row of namesResult.data ?? []) {
           const userIdKey = String((row as { user_id?: string }).user_id ?? "").trim();
-          const name = String((row as { name?: string; full_name?: string }).name ?? (row as { name?: string; full_name?: string }).full_name ?? "").trim();
+          const name = String(
+            (row as { name?: string; full_name?: string }).name ??
+              (row as { name?: string; full_name?: string }).full_name ??
+              ""
+          ).trim();
           if (userIdKey && name) employeeNameByUserId.set(userIdKey, name);
         }
       }
     }
     if (!notificationsResult.error) {
-      for (const row of notificationsResult.data ?? []) {
+      for (const row of visibleNotifications) {
         const payload = (row.payload ?? {}) as Record<string, unknown>;
         const formatted = formatNotification(row.type as never, payload);
         const actorUserId = String((row as { user_id?: string }).user_id ?? "").trim();

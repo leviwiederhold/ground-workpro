@@ -3,6 +3,8 @@ import { z } from "zod";
 import { supabaseServer } from "@/lib/supabase/server";
 import { formatNotification, type NotificationType } from "@/lib/notifications/format";
 import { markFallbackNotificationRead } from "@/lib/notifications/fallbackStore";
+import { getCompanyMessageHistoryCutoff } from "@/lib/messages/mvp";
+import { canViewCompanyMessageAt } from "@/lib/messages/historyAccess";
 
 type NotificationRow = {
   id: string;
@@ -30,7 +32,13 @@ function isMissingNotificationsTable(message: string) {
 
 function isMissingNotificationsColumns(message: string) {
   const normalized = message.toLowerCase();
-  return normalized.includes("column") && (normalized.includes("is_read") || normalized.includes("title") || normalized.includes("body") || normalized.includes("link"));
+  return (
+    normalized.includes("column") &&
+    (normalized.includes("is_read") ||
+      normalized.includes("title") ||
+      normalized.includes("body") ||
+      normalized.includes("link"))
+  );
 }
 
 async function resolveContext() {
@@ -60,25 +68,29 @@ async function resolveContext() {
     supabase,
     companyId: String(membershipResult.data.company_id),
     userId,
+    historyCutoffAt: await getCompanyMessageHistoryCutoff(
+      supabase,
+      String(membershipResult.data.company_id),
+      userId
+    ),
   };
 }
 
 export const dynamic = "force-dynamic";
 
-export async function POST(
-  _request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const parsedParams = paramsSchema.safeParse(await params);
     if (!parsedParams.success) {
       return NextResponse.json(
         {
           error: "Validation error",
-          details: parsedParams.error.issues.map((issue: { path: (string | number)[]; message: string }) => ({
-            path: issue.path.join("."),
-            message: issue.message,
-          })),
+          details: parsedParams.error.issues.map(
+            (issue: { path: (string | number)[]; message: string }) => ({
+              path: issue.path.join("."),
+              message: issue.message,
+            })
+          ),
         },
         { status: 422 }
       );
@@ -114,6 +126,15 @@ export async function POST(
           read_at: string | null;
           created_at: string;
         };
+        if (
+          legacyRow.type === "new_message" &&
+          !canViewCompanyMessageAt(
+            { message_history_cutoff_at: context.historyCutoffAt },
+            legacyRow.created_at
+          )
+        ) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
         const payload = legacyRow.payload ?? {};
         const display = formatNotification(legacyRow.type, payload);
         return NextResponse.json({
@@ -145,6 +166,15 @@ export async function POST(
         if (!fallbackRow) {
           return NextResponse.json({ error: "Not found" }, { status: 404 });
         }
+        if (
+          fallbackRow.type === "new_message" &&
+          !canViewCompanyMessageAt(
+            { message_history_cutoff_at: context.historyCutoffAt },
+            fallbackRow.created_at
+          )
+        ) {
+          return NextResponse.json({ error: "Not found" }, { status: 404 });
+        }
         const fallbackPayload = (fallbackRow.payload ?? {}) as Record<string, unknown>;
         const fallbackDisplay = formatNotification(fallbackRow.type, fallbackPayload);
         return NextResponse.json({
@@ -155,7 +185,7 @@ export async function POST(
             title: fallbackDisplay.title,
             body: fallbackDisplay.message,
             message: fallbackDisplay.message,
-            link: String(fallbackDisplay.link ?? fallbackPayload.href ?? ''),
+            link: String(fallbackDisplay.link ?? fallbackPayload.href ?? ""),
             payload: fallbackPayload,
             is_read: true,
             read_at: fallbackRow.read_at,
@@ -171,11 +201,20 @@ export async function POST(
     }
 
     const row = result.data as NotificationRow;
+    if (
+      row.type === "new_message" &&
+      !canViewCompanyMessageAt(
+        { message_history_cutoff_at: context.historyCutoffAt },
+        row.created_at
+      )
+    ) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
     const payload = row.payload ?? {};
     const display = formatNotification(row.type, payload);
     const title = String(row.title ?? display.title);
     const body = String(row.body ?? display.message);
-    const link = String(row.link ?? display.link ?? (payload.href ?? ''));
+    const link = String(row.link ?? display.link ?? payload.href ?? "");
 
     return NextResponse.json({
       item: {

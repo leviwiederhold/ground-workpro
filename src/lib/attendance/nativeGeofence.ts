@@ -77,6 +77,7 @@ export interface JobsiteGeofencePlugin {
   getRegistered(): Promise<{ regions: GeofenceRegion[] }>;
   getHealth(): Promise<NativeGeofenceHealth>;
   requestAlwaysAuthorization(): Promise<void>;
+  openLocationSettings?(): Promise<void>;
   addListener(
     eventName: "geofenceTransition",
     listener: (event: GeofenceTransitionEvent) => void
@@ -236,6 +237,14 @@ export async function requestNativeAlwaysAuthorization(): Promise<void> {
     throw new Error("native location authorization bridge unavailable");
   }
   await plugin.requestAlwaysAuthorization();
+}
+
+/** Open this app's native location settings when the platform provides it. */
+export async function openNativeLocationSettings(): Promise<boolean> {
+  const plugin = getPlugin();
+  if (!plugin?.openLocationSettings) return false;
+  await plugin.openLocationSettings();
+  return true;
 }
 
 /**

@@ -37,6 +37,16 @@ test("/native/login renders Apple, Google, and Email buttons in order", () => {
   assert.ok(email > google, "Email must come after Google");
 });
 
+test("Apple login is rendered only for iOS while Google and email remain cross-platform", () => {
+  const page = nativePage();
+  assert.match(page, /nativePlatform === "ios" \? \([\s\S]{0,1200}Continue with Apple/);
+  const googleStart = page.indexOf("Continue with Google");
+  const appleCondition = page.indexOf('nativePlatform === "ios"');
+  assert.ok(appleCondition > 0 && googleStart > appleCondition);
+  const googleBlock = page.slice(googleStart - 900, googleStart + 100);
+  assert.doesNotMatch(googleBlock, /nativePlatform === "ios"/);
+});
+
 test("native provider buttons are NOT gated behind runtime detection", () => {
   const page = nativePage();
 
@@ -231,11 +241,11 @@ test("browser access to /native/login is handled without invoking native plugins
   // Tapping a provider in a browser must bail BEFORE touching the plugin.
   assert.match(
     page,
-    /if \(!detectNativeLoginRuntime\(\)\)[\s\S]{0,300}return;/,
+    /if \(!getCapacitorNativePlatform\(\)\)[\s\S]{0,300}return;/,
     "provider handlers must refuse to run outside the native runtime",
   );
   const handlerStart = page.indexOf("async function onProviderSignIn");
-  const guardIndex = page.indexOf("!detectNativeLoginRuntime()", handlerStart);
+  const guardIndex = page.indexOf("!getCapacitorNativePlatform()", handlerStart);
   const pluginIndex = page.indexOf("signInWithAppleNative", handlerStart);
   assert.ok(guardIndex > 0 && guardIndex < pluginIndex, "the guard must precede any plugin call");
 });

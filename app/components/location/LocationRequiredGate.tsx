@@ -24,6 +24,7 @@ import {
   type LocationPermissionState,
 } from '@/lib/jobsite-time/locationPermission';
 import {
+  ANDROID_BACKGROUND_LOCATION_DISCLOSURE,
   LOCATION_GATE_COPY,
   LOCATION_GATE_ERROR_COPY,
   locationSetupErrorKind,
@@ -36,9 +37,13 @@ import {
   type LocationSetupTransition,
 } from '@/lib/jobsite-time/locationGate';
 import { locationSettingsInstructions, openAppLocationSettings } from '@/lib/runtime/openAppSettings';
-import { isCapacitorNativePlatform } from '@/lib/runtime/isNativePlatform';
+import {
+  getCapacitorNativePlatform,
+  isCapacitorNativePlatform,
+} from '@/lib/runtime/isNativePlatform';
 import {
   getRegisteredGeofences,
+  openNativeLocationSettings,
   requestNativeAlwaysAuthorization,
   requireNativeGeofenceHealth,
   requireRegisteredGeofences,
@@ -54,6 +59,8 @@ import {
 } from '@/lib/attendance/deviceCredentialClient';
 
 export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
+  const nativePlatform = getCapacitorNativePlatform();
+  const native = isCapacitorNativePlatform();
   const [permission, setPermission] = useState<LocationPermissionState | 'checking'>('checking');
   const [lastResult, setLastResult] = useState<LocationPermissionResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,10 +69,29 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   // Non-denial failure (timeout / enrollment / unavailable) → a concise message.
   // Denial is communicated by the body + "Open Settings", so it stays null there.
   const [errorKind, setErrorKind] = useState<LocationSetupErrorKind | null>(null);
+  const [androidDisclosureState, setAndroidDisclosureState] = useState<
+    'checking' | 'required' | 'complete'
+  >('checking');
   // React state updates are asynchronous. This ref is the synchronous lock that
   // prevents a second tap from starting another native permission/enrollment
   // attempt before the disabled button has rendered.
   const setupInFlight = useRef(false);
+
+  useEffect(() => {
+    if (nativePlatform !== 'android') {
+      setAndroidDisclosureState('complete');
+      return;
+    }
+    try {
+      setAndroidDisclosureState(
+        window.localStorage.getItem('groundwork.androidBackgroundLocationDisclosure.v1') === '1'
+          ? 'complete'
+          : 'required',
+      );
+    } catch {
+      setAndroidDisclosureState('required');
+    }
+  }, [nativePlatform]);
 
   // Read the current state so the button can offer "Try Again" vs "Open
   // Settings" correctly on first paint. This is the NON-prompting check — the
@@ -96,8 +122,6 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   const action = settingsRequired
     ? 'settings'
     : resolveGateAction({ permission, lastResult });
-  const native = isCapacitorNativePlatform();
-
   const reportTransition = useCallback((transition: LocationSetupTransition) => {
     console.info('[location/setup]', transition.state, transition.stage);
   }, []);
@@ -135,7 +159,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
         requestBackgroundAuthorization: interactive
           ? requestNativeAlwaysAuthorization
           : async () => {},
-        enrollSecureCredential: (signal) => requestDeviceCredential('ios', signal),
+        enrollSecureCredential: (signal) => requestDeviceCredential(nativePlatform ?? undefined, signal),
         writeSecureCredential: writeDeviceCredentialToSecureStore,
         registerAssignedLocations: async () =>
           requireRegisteredGeofences(await loadRequiredRegions()),
@@ -168,7 +192,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
         },
         onTransition: reportTransition,
       }),
-    [loadRequiredRegions, native, reportTransition],
+    [loadRequiredRegions, native, nativePlatform, reportTransition],
   );
 
   const handlePrimary = useCallback(async () => {
@@ -176,7 +200,15 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       // Always show the manual path as well. `window.open` can be accepted by
       // the WebView without proving that iOS displayed Settings.
       setShowInstructions(true);
-      openAppLocationSettings();
+      if (nativePlatform === 'android') {
+        try {
+          if (!(await openNativeLocationSettings())) openAppLocationSettings();
+        } catch {
+          openAppLocationSettings();
+        }
+      } else {
+        openAppLocationSettings();
+      }
       // Do not immediately re-check: the app is only beginning to background
       // and the user has not had a chance to change the setting yet. The
       // bounded foreground listener below finishes setup on return.
@@ -219,7 +251,18 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
       setupInFlight.current = false;
       setBusy(false);
     }
-  }, [action, onGranted, performSetup]);
+  }, [action, nativePlatform, onGranted, performSetup]);
+
+  const handleAndroidDisclosureContinue = useCallback(() => {
+    try {
+      window.localStorage.setItem('groundwork.androidBackgroundLocationDisclosure.v1', '1');
+    } catch {
+      // The disclosure still appeared in this session; storage is only used to
+      // avoid presenting it again after the permission decision.
+    }
+    setAndroidDisclosureState('complete');
+    void handlePrimary();
+  }, [handlePrimary]);
 
   // Re-check when the app returns to the foreground: the user may have enabled
   // location in Settings and come back. Bounded, and silent on failure (this is
@@ -253,6 +296,39 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
   const body = settingsRequired
     ? LOCATION_GATE_COPY.deniedBody
     : resolveGateBody(lastResult);
+
+  if (nativePlatform === 'android' && androidDisclosureState === 'checking') return null;
+
+  if (nativePlatform === 'android' && androidDisclosureState === 'required') {
+    return (
+      <main
+        className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-50 p-6 dark:bg-[#050505]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="android-location-disclosure-title"
+        data-testid="android-background-location-disclosure"
+      >
+        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm dark:border-zinc-800 dark:bg-[#0b0b0b]">
+          <h1
+            id="android-location-disclosure-title"
+            className="text-xl font-semibold text-gray-900 dark:text-zinc-100"
+          >
+            {ANDROID_BACKGROUND_LOCATION_DISCLOSURE.title}
+          </h1>
+          <p className="mt-3 text-sm leading-relaxed text-gray-600 dark:text-zinc-400">
+            {ANDROID_BACKGROUND_LOCATION_DISCLOSURE.body}
+          </p>
+          <button
+            type="button"
+            onClick={handleAndroidDisclosureContinue}
+            className="mt-6 inline-flex w-full items-center justify-center rounded-xl bg-brand-600 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-700"
+          >
+            {ANDROID_BACKGROUND_LOCATION_DISCLOSURE.continue}
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main
@@ -294,7 +370,7 @@ export function LocationRequiredGate({ onGranted }: { onGranted: () => void }) {
             className="mt-4 rounded-xl bg-amber-50 p-3 text-left text-xs leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
             data-testid="location-gate-instructions"
           >
-            {locationSettingsInstructions(native)}
+            {locationSettingsInstructions(nativePlatform ?? (native ? 'ios' : 'web'))}
           </p>
         ) : null}
 

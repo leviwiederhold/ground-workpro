@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildMessagePushContent,
   classifyApnsResponse,
+  classifyFcmResponse,
   enqueueMessagePushSafely,
   selectEligiblePushDevices,
   type PushDeviceCandidate,
@@ -147,6 +148,38 @@ test("stale APNs tokens are revoked while provider failures retry", () => {
     invalidToken: false,
     retryable: true,
   });
+});
+
+test("stale FCM tokens are revoked while provider failures retry", () => {
+  assert.deepEqual(classifyFcmResponse(404, "UNREGISTERED"), {
+    invalidToken: true,
+    retryable: false,
+  });
+  assert.deepEqual(classifyFcmResponse(503, "UNAVAILABLE"), {
+    invalidToken: false,
+    retryable: true,
+  });
+  assert.deepEqual(classifyFcmResponse(400, null), {
+    invalidToken: false,
+    retryable: false,
+  });
+});
+
+test("Android push uses the existing worker/provider boundary and a metadata-safe FCM payload", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
+  const provider = readFileSync(join(repoRoot, "src/lib/push/provider.ts"), "utf8");
+  const fcm = readFileSync(join(repoRoot, "src/lib/push/fcm.ts"), "utf8");
+  const client = readFileSync(join(repoRoot, "app/components/native/NativePushNotifications.tsx"), "utf8");
+
+  assert.match(provider, /device\.platform === "ios"/);
+  assert.match(provider, /return sendFcmNotification\(/);
+  assert.match(fcm, /firebase\.messaging/);
+  assert.match(fcm, /type: "new_message"/);
+  assert.match(fcm, /threadId: input\.threadId/);
+  assert.match(fcm, /messageId: input\.messageId/);
+  assert.doesNotMatch(fcm, /attachmentUrl|mediaUrl|signedUrl|authToken/);
+  assert.match(client, /\["ios", "android"\]\.includes\(platform\)/);
+  assert.match(client, /id: "groundwork_messages"/);
 });
 
 test("notification tap data routes to the exact conversation", () => {

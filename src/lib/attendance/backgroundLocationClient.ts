@@ -79,8 +79,7 @@ export async function readLocationPermissionSnapshot(): Promise<LocationPermissi
       foreground = status.state;
     }
   } catch {
-    foreground =
-      typeof navigator !== "undefined" && navigator.geolocation ? "prompt" : "unavailable";
+    foreground = typeof navigator !== "undefined" && navigator.geolocation ? "prompt" : "unavailable";
   }
   return {
     locationServicesEnabled: null,
@@ -144,12 +143,11 @@ export async function persistLocationPermission(
 ): Promise<void> {
   const prior = loadStoredLocationPermission();
   const completed = opts.setupComplete ?? opts.onboardingCompleted;
-  const onboardingCompletedAt =
-    completed === true
-      ? new Date().toISOString()
-      : completed === false
-        ? null
-        : (prior?.onboardingCompletedAt ?? null);
+  const onboardingCompletedAt = completed === true
+    ? new Date().toISOString()
+    : completed === false
+      ? null
+    : prior?.onboardingCompletedAt ?? null;
   cacheLocally({ onboardingCompletedAt, snapshot });
 
   try {
@@ -184,7 +182,8 @@ export function nativeHealthToPermissionSnapshot(
     NativeGeofenceHealth,
     "authorizationStatus" | "locationServicesEnabled" | "preciseLocation"
   >,
-  capturedAt: string = new Date().toISOString()
+  platform: "ios" | "android" = "ios",
+  capturedAt: string = new Date().toISOString(),
 ): LocationPermissionSnapshot {
   const foreground =
     health.authorizationStatus === "authorized_always" ||
@@ -192,7 +191,8 @@ export function nativeHealthToPermissionSnapshot(
       ? "granted"
       : health.authorizationStatus === "not_determined"
         ? "prompt"
-        : health.authorizationStatus === "denied" || health.authorizationStatus === "restricted"
+        : health.authorizationStatus === "denied" ||
+            health.authorizationStatus === "restricted"
           ? "denied"
           : "unknown";
   const background =
@@ -201,7 +201,8 @@ export function nativeHealthToPermissionSnapshot(
       : health.authorizationStatus === "not_determined" ||
           health.authorizationStatus === "authorized_when_in_use"
         ? "prompt"
-        : health.authorizationStatus === "denied" || health.authorizationStatus === "restricted"
+        : health.authorizationStatus === "denied" ||
+            health.authorizationStatus === "restricted"
           ? "denied"
           : "unknown";
   return {
@@ -209,7 +210,7 @@ export function nativeHealthToPermissionSnapshot(
     foreground,
     background,
     precise: health.preciseLocation,
-    platform: "ios",
+    platform,
     capturedAt,
   };
 }
@@ -230,9 +231,11 @@ export async function persistNativeAttendanceReadiness(
     | "hasCredential"
   >,
   setupComplete: boolean,
-  regions: { requiredRegionIds: string[]; registeredRegionIds: string[] }
+  regions: { requiredRegionIds: string[]; registeredRegionIds: string[] },
 ): Promise<void> {
-  await persistLocationPermission(nativeHealthToPermissionSnapshot(health), {
+  const detected = detectPlatform();
+  const platform = detected === "android" ? "android" : "ios";
+  await persistLocationPermission(nativeHealthToPermissionSnapshot(health, platform), {
     setupComplete,
     nativeReadiness: {
       supported: health.supported,
